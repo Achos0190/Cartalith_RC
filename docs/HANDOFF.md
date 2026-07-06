@@ -9,22 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.63.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.64.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.64 next). Older `v0.57`/`v0.6`/`v0.61`/`v0.62` are kept and never edited.
-- **v0.63 — UI/UX upgrade (engine-safe stages of `docs/research/ui-ux-upgrade.md`).** Engine
-  bit-identical to v0.62 (checksums byte-equal; headless **852 green** = 848 + 4 preset asserts;
-  new `tests/perf/smoke_gen1.js` Playwright UI harness = 12/12). Shipped: **Map-style presets**
-  (Default/Antique/Ink/Watercolor/Print — pure `state.viz` bundles, Default bit-identical) +
-  **progressive disclosure** (Map style → two `<details.adv>`; Tectonics coupling dials → Advanced);
-  **Layers popover** (the 30-button `#debugSeg` re-housed as a grouped canvas FAB, proxying to the
-  now-hidden buttons — zero wiring rewrite); **phase signal** (finalized ⇒ shell tint + "✓ Atlas"
-  header chip, on v0.62's `state.finalized`); **onboarding** first-run card; small fixes (stale
-  Export hint, 360px sidebar ≥1440px). **Deferred** (own follow-up, high-risk IA surgery): Stage 2
-  full IA re-homing (retire Edit tab, phase-based panel moves), §4.5 tool-first Explore palette,
-  §4.7 pinned inspector — see `docs/research/ui-ux-upgrade.md` §Status. Browser pass owed: preset
-  aesthetics, Layers popover touch feel, onboarding copy.
+  (v0.65 next). Older `v0.57`/`v0.6`/`v0.61`/`v0.62`/`v0.63` are kept and never edited.
+- **v0.64 — UI/UX overhaul completed** (the stages v0.63 deferred). Engine bit-identical to
+  v0.63 (checksums byte-equal all the way back to v0.62; headless **852 green** throughout);
+  `tests/perf/smoke_gen1.js` grew **12 → 27** Playwright assertions. Every item in
+  `docs/research/ui-ux-upgrade.md` is now done — see its §Status for the full ledger. Highlights:
+  **Edit tab + Generate sub-tab bar retired** (Generate is World-only; Tiles & LOD moved into
+  Generate → World; Undo moved to the header; Civilization + Cartography moved wholesale into
+  Explore); **"Places & roads (terrain)" retired outright** (engine functions kept, UI gone — it
+  shared `state.places` with civ settlements, so its "Clear places" could silently wipe them, a
+  real landmine now closed); a **unified 9-button tool palette** (Inspect/Info/Settlement/POI/
+  Label/Icon/Territory/Way/Route) replaces every scattered `data-civtool` control, with Label +
+  Icon newly folded into `_civTool` (were a separate, not-fully-exclusive system) and Icon's
+  gallery now a contextual panel shown only while Icon is active; a **lightweight pinned
+  selection inspector** atop Explore (summary only — the edit form stays inline in the lists, a
+  deliberate scope cut, see §Status); **danger accents** on 8 destructive Clear buttons, with a
+  confirm-when-non-empty guard added to the three the proposal named (territory/ways/places —
+  none had any confirmation before). Browser pass owed: the whole reorganized Explore flow, the
+  tool palette in practice, the pinned inspector, Undo/Tiles&LOD in their new home.
 - **v0.62 — civ-layer UX batch + finalize milestone (user request).** Engine bit-identical to
   v0.61 at defaults (checksums byte-equal; 848/848 green). (1) Economy+Politics merged into one
   **Polity** section + an **∅ Unclaimed** faction pill (paint to erase territory). (2) Timeline

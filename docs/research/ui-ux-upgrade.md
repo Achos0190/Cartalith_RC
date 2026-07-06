@@ -1,9 +1,10 @@
 # UI/UX Upgrade Proposal — Cartalith Gen1
 
-## Status (v0.63)
+## Status (v0.64)
 
-Implemented the engine-safe, independently-shippable stages (all DOM/CSS/handler chrome over
-existing state — engine bit-identical to v0.62, headless 852 green, Playwright UI smoke 12/12):
+Every stage in the proposal is now implemented. All DOM/CSS/handler chrome over existing state —
+engine bit-identical from v0.62 through v0.64, headless 852 green throughout, Playwright UI smoke
+grew from 12 → 27 assertions covering every stage below.
 
 | Item | Status |
 |---|---|
@@ -16,15 +17,16 @@ existing state — engine bit-identical to v0.62, headless 852 green, Playwright
 | §3 Phase signal (tint + chip) | **Done v0.63** (on `state.finalized`; Unity play-mode tint + header chip) |
 | §4.9 Onboarding empty-state | **Done v0.63** (first-run card, localStorage-dismissed) |
 | §4.10 Small fixes | **Done v0.63** (stale Export hint; 360px sidebar ≥1440px) |
-| §4.8 Global header undo / danger accents | **Deferred** |
-| **Stage 2 — full IA re-homing** (retire Edit tab; Civ/Carto under an Explore *phase*; Tiles+Undo under Generate; retire Places&roads) | **Deferred** — large cross-block civ rewiring; wants its own PR + browser pass |
-| §4.5 Tool-first Explore palette (merge scattered `data-civtool` segs) | **Deferred** |
-| §4.7 Pinned selection inspector at top of Explore | **Deferred** |
+| **Stage 2 — full IA re-homing** | **Done v0.64** — Edit tab retired (Tiles&LOD → Generate→World, Undo → header); Generate sub-tab bar retired (Generate is World-only); Civilization + Cartography moved wholesale into Explore; "Places & roads (terrain)" retired outright (engine functions kept, UI gone, closing a real landmine — it shared `state.places` with civ settlements, so its "Clear places" could silently wipe them) |
+| §4.5 Tool-first Explore palette | **Done v0.64** — one 9-button palette (Inspect/Info/Settlement/POI/Label/Icon/Territory/Way/Route) replaces the scattered originals; Label + Icon are *newly* folded into the `_civTool` concept (were a separate checkbox/gallery system, `_carDisarmOtherTools`), closing a pre-existing gap where civtools and label/icon/paint weren't mutually exclusive. Icon's family-picker + gallery become the tool's contextual options block (Dungeondraft pattern), hidden until Icon is active. |
+| §4.7 Pinned selection inspector | **Done v0.64, scoped "lite"** — a pinned summary card at the top of Explore shows the selected place/label's name/type/pop; the actual edit form (name/history/population/traits) stays inline in the settlement/POI/label lists (v0.62's expand-in-place design), not relocated here. Relocating the full form is a separate, larger refactor of `_civRenderSettlementList`/`_civRenderPoiList`/`_civRenderLabelList` — deferred. |
+| §4.8 Global header undo / danger accents | **Done v0.64** — Undo (with live step-count text) moved to the header, always visible; `.al-danger` accent applied consistently to 8 destructive one-click Clear buttons; the three the proposal named by name (Clear territory/ways/places) additionally gained a confirm-when-non-empty guard (none had any confirmation before). |
 
-The deferred items are the higher-risk information-architecture surgery: they move large blocks of
-markup whose handlers span all three script blocks, and can't be verified headlessly. They are best
-done as a dedicated follow-up (Stage 2 first, then §4.5/§4.7/§4.8 on top of the new IA). Everything
-below is the original proposal, unchanged.
+**Remaining, deliberately out of scope**: Assets/Export were not promoted to header-level utilities
+(§2's "Assets/Export become header-level" from the Stage-2 write-up) — they stay as tabs; moving
+them touches how the Asset Library takes over the canvas viewport, a separable concern from the
+"phase journey" confusion this pass fixed. The 29 debug views remain ungrouped only inside the
+Layers popover's per-item list (grouping already landed in v0.63); no further reduction planned.
 
 ---
 

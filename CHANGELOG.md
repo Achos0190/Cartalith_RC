@@ -12,6 +12,71 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.64 (2026-07-06)
+UI/UX overhaul completed — implements every remaining stage of `docs/research/ui-ux-upgrade.md`
+that v0.63 deferred as "higher-risk IA surgery". **Engine bit-identical to v0.63** (FIELD/TEMP/
+RAIN/FLOW FNV checksums byte-equal at seed 12345/256px, unbroken back through v0.62); headless
+suite **852 green** (unchanged — this batch is UI-only, no new engine assertions); the Playwright
+UI-smoke harness (`tests/perf/smoke_gen1.js`) grew **12 → 27** assertions, all green.
+
+- **Stage 2 — full information-architecture re-homing.** The Edit tab is retired: its "Tiles &
+  LOD" section moved into Generate → World (new cat-acc, same ids); "Undo" moved into the header
+  (§4.8, below); "Places & roads (terrain)" — `#placeChk`/`#roadsBtn`/`#clearRoadsBtn`/
+  `#clearPlacesBtn` — is retired outright per the proposal ("keep the engine functions, remove
+  the duplicate UI"). This closes a real landmine: that section's `state.places` array was
+  **shared** with Civilization's settlements/POIs (kind-less entries render as small dots,
+  `_civDropPlace`/`_civDropPOI` entries always carry a `kind`), so its silent, unconfirmed "Clear
+  places" could wipe user-placed settlements as a side effect. The Generate sub-tab bar
+  (World/Civilization/Cartography) is also retired — Generate is World-only now — and
+  Civilization + Cartography move wholesale into Explore (all ids/content unchanged, pure
+  container move). Consequential fixes threaded through the tab-switch handler: the
+  freehand-sculpt cancel-on-leave now keys off `_activeTab!=='generate'` (was the retired Edit
+  tab); the Cartography paint-brush pointer gate keys off `_activeTab==='explore'` (was the
+  retired `_genSubTab==='carto'`, which would otherwise have permanently blocked painting — no
+  code path sets `_genSubTab` away from `'world'` anymore); `_gpuApplyTabOverride`'s GPU-suspend
+  heuristic changed from "which sub-tab is open" to "is the paint/icon tool actually armed"
+  (`_paintMode||_iconPlaceMode`) — arguably tighter than before, since GPU now stays available
+  while a user is just managing settlements in Explore.
+- **§4.5 — unified tool palette.** One 9-button `.seg` at the top of Explore — Inspect, Info,
+  Settlement, POI, Label, Icon, Territory, Way, Route — replaces the formerly-scattered
+  originals (Settlements' `#civToolSeg`, Polity's "Paint territory", Infrastructure's "Draw way",
+  the old Explore Tools row's Route/Info). Every button reuses the existing `[data-civtool]`
+  auto-wiring (`document.querySelectorAll('[data-civtool]').forEach(...)`), so adding Label/Icon
+  required no new click-wiring — only `_civSetTool`'s body grew to fold them in. Label and Icon
+  were previously a **separate, not-fully-exclusive** checkbox/gallery system
+  (`_labelMode`/`_iconPlaceMode`/`_carIconArmed` via `_carDisarmOtherTools`) that never disarmed,
+  or got disarmed by, the `_civTool` system — picking "Route" while "Add labels" was checked
+  left both active. `_civSetTool` now also disarms Paint (Cartography's separate brush) on any
+  civtool pick, and arming Paint disarms `_civTool` in turn (careful ordering: the paint checkbox
+  handler must call `_civSetTool('inspect')` *before* setting `_paintMode=true`, since
+  `_civSetTool` unconditionally disarms paint — reversed order was a self-defeating loop caught
+  by the browser smoke test). Icon's family-picker + gallery become the tool's **contextual
+  options** (`#carIconContextSec`, Dungeondraft/Wonderdraft pattern) — hidden until Icon is the
+  active tool, with an idle hint shown otherwise. `_carDisarmOtherTools` simplified to just
+  icon/paint (place and label no longer need branches there).
+- **§4.7 — pinned selection inspector (scoped "lite").** A `#inspector` card pinned atop Explore
+  (`_civRenderInspector`, hooked into the existing `_civRenderPlaceEditor`/`_civRenderLabelEditor`
+  refresh points) shows a live name/type/population summary of the selected settlement, POI or
+  label. The full edit form (name/history/population/traits) deliberately stays inline in the
+  settlement/POI/label lists — v0.62's expand-in-place design — rather than being relocated here;
+  that's a separate, larger refactor of `_civRenderSettlementList`/`_civRenderPoiList`/
+  `_civRenderLabelList`, deferred (see the proposal's updated §Status).
+- **§4.8 — header undo + danger accents.** `#undoBtn`/`#undoMem` moved from the retired Edit tab
+  into the header, always visible, same ids so `pushUndo()`/`undoLast()`/`updateUndoUI()` wiring
+  is untouched. The existing `.al-danger` class (previously Asset-Library-only) is now applied
+  consistently to 8 one-click destructive Clear buttons; the three the proposal named by name
+  (Clear territory / Clear ways & journeys / Clear places) additionally gained a
+  confirm-when-non-empty guard — **none had any confirmation before**, unlike `#reseedBtn`'s
+  existing `confirmRegenerate()`. Skipped when the corresponding data is already empty, so a
+  fresh map's Clear buttons stay instant.
+- Not in scope (documented in the proposal's §Status): promoting Assets/Export to header-level
+  utilities (separable from the phase-journey confusion this pass targeted); further reduction
+  of the Layers popover's 29 debug views (grouping already shipped in v0.63).
+
+Browser pass owed: the whole reorganized Explore flow end-to-end, the tool palette's feel in
+practice (especially Icon's contextual gallery and Way/Route's always-visible commit rows), the
+pinned inspector, and Undo/Tiles & LOD in their new locations.
+
 ### v0.63 (2026-07-06)
 UI/UX upgrade — implements the shippable, engine-safe stages of `docs/research/ui-ux-upgrade.md`.
 **Engine bit-identical to v0.62 at defaults** (FIELD/TEMP/RAIN/FLOW FNV checksums byte-equal at

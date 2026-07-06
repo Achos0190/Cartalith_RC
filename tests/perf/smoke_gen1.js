@@ -1,13 +1,16 @@
-/* Gen1 UI smoke test — real headless Chromium (Playwright). Verifies the v0.63 UI/UX chrome:
-   onboarding card, Layers popover (grouped, proxies to #debugSeg), style presets (state.viz writes),
-   progressive-disclosure <details>, phase signal on finalize. Not a pixel test — DOM + behavior.
-   Usage: node tests/perf/smoke_gen1.js "Cartalith Gen1 v0.63.html"
+/* Gen1 UI smoke test — real headless Chromium (Playwright). Verifies the UI/UX chrome added in
+   v0.63 (onboarding card, Layers popover proxying to #debugSeg, style presets, progressive-
+   disclosure <details>, phase signal on finalize) and v0.64 (retired Edit tab / Generate sub-tabs,
+   Civilization+Cartography re-homed to Explore, the unified tool palette incl. Label/Icon folded
+   into _civTool, the lightweight pinned inspector, header Undo, confirm-gated Clear buttons).
+   Not a pixel test — DOM + behavior.
+   Usage: node tests/perf/smoke_gen1.js "Cartalith Gen1 v0.64.html"
    Env overrides: PLAYWRIGHT_DIR, CHROME_BIN. */
 const path = require('path');
 const PW = process.env.PLAYWRIGHT_DIR || '/opt/node22/lib/node_modules/playwright';
 const CHROME = process.env.CHROME_BIN || '/opt/pw-browsers/chromium';
 const { chromium } = require(PW);
-const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.63.html');
+const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.64.html');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox','--use-gl=swiftshader'] });
@@ -48,6 +51,55 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.63.h
   await page.evaluate(() => { state.finalized = false; applyFinalizedUI(); });
   R.phaseOff = await page.evaluate(() => document.body.classList.contains('phase-explore'));
 
+  // ---- v0.64: IA re-homing (no Edit tab / Generate sub-tabs; Civ+Carto live in Explore) ----
+  R.tabs = await page.$$eval('.tab', els => els.map(e => e.dataset.tab));
+  R.undoInHeader = await page.$eval('header #undoBtn', el => !!el);
+  R.hasFactionPickerInGenerate = await page.evaluate(() => !!document.getElementById('generatePanel').querySelector('#civFactionPicker'));
+  await page.click('[data-tab="explore"]');
+  await page.waitForTimeout(150);
+  R.factionPickerInExplore = await page.evaluate(() => !!document.getElementById('explorePanel').querySelector('#civFactionPicker'));
+  R.mapStyleInExplore = await page.evaluate(() => !!document.getElementById('explorePanel').querySelector('#stylePresetSeg'));
+
+  // ---- v0.64 (§4.5): unified tool palette — one button per tool, label/icon folded into _civTool ----
+  R.paletteButtons = await page.$$eval('#explToolPalette [data-civtool]', els => els.map(e => e.dataset.civtool));
+  R.duplicateToolButtons = await page.evaluate(() => {
+    const seen = {};
+    document.querySelectorAll('[data-civtool]').forEach(b => { seen[b.dataset.civtool] = (seen[b.dataset.civtool]||0)+1; });
+    return Object.entries(seen).filter(([,v]) => v > 1);
+  });
+  await page.click('#explToolPalette [data-civtool="icon"]');
+  await page.waitForTimeout(150);
+  R.iconCtxVisible = await page.$eval('#carIconContextSec', el => getComputedStyle(el).display !== 'none');
+  await page.click('#explToolPalette [data-civtool="label"]');
+  await page.waitForTimeout(150);
+  R.labelMode = await page.evaluate(() => _labelMode === true);
+  R.iconCtxHiddenAfterLabel = await page.$eval('#carIconContextSec', el => getComputedStyle(el).display === 'none');
+  await page.click('#explToolPalette [data-civtool="label"]');   // toggle back off
+  await page.waitForTimeout(100);
+
+  // ---- v0.64 (§4.7, lite): pinned selection inspector ----
+  R.inspectorEmptyState = await page.$eval('#inspectorBody', el => el.textContent.includes('Select a settlement'));
+
+  // ---- v0.64 (§4.8): header Undo + confirm-gated destructive Clear buttons ----
+  R.undoDisabledInitially = await page.$eval('#undoBtn', el => el.disabled === true);
+  R.dangerButtons = await page.$$eval('.al-danger', els => els.map(e => e.id));
+  let dialogFired = false;
+  const hEmpty = async d => { dialogFired = true; await d.dismiss(); };
+  page.on('dialog', hEmpty);
+  await page.evaluate(() => document.getElementById('civClearPlacesBtn').click());
+  await page.waitForTimeout(150);
+  page.off('dialog', hEmpty);
+  R.noConfirmWhenEmpty = !dialogFired;
+  await page.evaluate(() => { state.places.push({x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}); });
+  let dialogMsg = null;
+  const hNonEmpty = async d => { dialogMsg = d.message(); await d.dismiss(); };
+  page.on('dialog', hNonEmpty);
+  await page.evaluate(() => document.getElementById('civClearPlacesBtn').click());
+  await page.waitForTimeout(150);
+  page.off('dialog', hNonEmpty);
+  R.confirmedWhenNonEmpty = dialogMsg !== null;
+  R.placesSurviveDismiss = await page.evaluate(() => state.places.length === 1);
+
   await browser.close();
 
   // ---- assertions ----
@@ -66,6 +118,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.63.h
   A('progressive-disclosure <details.adv> present + collapsed', R.advDetails.count >= 3 && R.advDetails.anyOpen === false);
   A('finalize → phase-explore tint + chip + genBtn locked', R.phaseOn.body && R.phaseOn.chip && R.phaseOn.genBtnDisabled);
   A('un-finalize clears phase-explore', R.phaseOff === false);
+  A('tabs are generate/explore/assets/export (no edit)', JSON.stringify(R.tabs) === JSON.stringify(['generate','explore','assets','export']));
+  A('Undo button lives in header', R.undoInHeader === true);
+  A('faction picker NOT in Generate (moved to Explore)', R.hasFactionPickerInGenerate === false);
+  A('faction picker IS in Explore', R.factionPickerInExplore === true);
+  A('Map style IS in Explore', R.mapStyleInExplore === true);
+  A('unified tool palette has all 9 tools, no duplicates', JSON.stringify(R.paletteButtons) === JSON.stringify(['inspect','info','place','place_poi','label','icon','territory','draw_way','route']) && R.duplicateToolButtons.length === 0);
+  A('Icon tool reveals its contextual gallery section', R.iconCtxVisible === true);
+  A('Label tool sets _labelMode', R.labelMode === true);
+  A('switching to Label hides the Icon gallery again', R.iconCtxHiddenAfterLabel === true);
+  A('pinned inspector shows the empty state initially', R.inspectorEmptyState === true);
+  A('header Undo starts disabled', R.undoDisabledInitially === true);
+  A('destructive buttons carry .al-danger (>=8)', R.dangerButtons.length >= 8);
+  A('Clear places does not prompt when empty', R.noConfirmWhenEmpty === true);
+  A('Clear places prompts when non-empty', R.confirmedWhenNonEmpty === true);
+  A('dismissing the confirm preserves the place', R.placesSurviveDismiss === true);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
