@@ -12,6 +12,36 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.62 (2026-07-06)
+Civilization-layer UX batch + the finalize milestone (user request). **Engine bit-identical to
+v0.61 at defaults** (FIELD/TEMP/RAIN/FLOW FNV checksums byte-equal at seed 12345/256px; suite
+848/848 green). (1) **Polity section**: the Generate → Civilization *Economy* and *Politics*
+sections merged into one **Polity** section (territory painting + politics timeline together;
+every element id unchanged), and the faction picker now includes an **∅ Unclaimed** pill (index
+0) — paint with it to erase territory. (2) **Timeline slider fixed + twinned**: `civAddYear` no
+longer conjures a phantom "0 AD" era when the timeline is empty (the live state is captured
+under the year actually being added); a new **year slider in Polity** (`#civTlSlider`) mirrors
+the Explore → Timeline slider through shared `_civWireYearSlider` wiring, and a `_civTlDragSrc`
+guard stops the mid-drag rebuild from resetting the thumb (the broken-drag bug — every `oninput`
+rebuilt the slider's own value/max). (3) **Settlement/POI editing**: places gain a persistent
+free-text **History** field (settlements *and* POIs, saved via `state.places`); POIs get their
+own **"All POIs" collapsible list** (`#civPoiList`, the settlement list's twin with the same
+expand-in-place editor); and a **right-click context menu** on the viewport (edit/move-to/delete
+nearest place, drop settlement/POI at the cursor, info readout) — right button now belongs
+exclusively to the menu (`e.button` guards on the sculpt/civ handlers). (4) **Bake ALL levels &
+finalize**: `bakeAllTiles(maxZ)` bakes the entire LOD pyramid 0..depth (depth select 2–5, 21–1365
+tiles, skip-if-baked so re-runs fill gaps) into the IndexedDB atlas, then **finalizes the world**
+— `state.finalized` (persisted; legacy saves merge false) locks every Generate → World control
+(3D-view dials exempt), banners the panel, and guards `generate()` / `confirmRegenerate()` /
+`_manualTerrainActive()` so nothing regenerates under the baked atlas; the app drops into the
+tiled-LOD view and behaves as a cartographic viewer/editor (settlements/labels/icons/territory/
+routes/timeline stay live). Un-finalize reverses the lock. Headless-proven: finalized
+`generate()` leaves the field byte-identical; un-finalize regenerates. Also shipped:
+`docs/research/ui-ux-upgrade.md` — the researched UI/UX upgrade proposal (phase-based IA,
+layers popover, progressive disclosure, inspector/context-menu patterns; staged rollout).
+Browser pass owed: Polity section flow, both timeline sliders + drag feel, POI list + history
+editor, context menu, the full bake + finalize→viewer flow.
+
 ### v0.61 (2026-07-06)
 Restores the v0.135 sync-`generate()` contract that v0.6 broke. v0.6 extracted the tectonic
 prefix of `generate()` into `async buildTectonicSubstrate()` (a good refactor — `loadZip` replays

@@ -9,10 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.61.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.62.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.62 next). Older `v0.57`/`v0.6` are kept and never edited.
+  (v0.63 next). Older `v0.57`/`v0.6`/`v0.61` are kept and never edited.
+- **v0.62 — civ-layer UX batch + finalize milestone (user request).** Engine bit-identical to
+  v0.61 at defaults (checksums byte-equal; 848/848 green). (1) Economy+Politics merged into one
+  **Polity** section + an **∅ Unclaimed** faction pill (paint to erase territory). (2) Timeline
+  slider fixed (phantom "0 AD" era on first Add-year killed; mid-drag rebuild no longer resets
+  the thumb via `_civTlDragSrc`) and **twinned** — `#civTlSlider` in Polity + the Explore slider
+  share `_civWireYearSlider`. (3) Places gain a persistent **History** field; POIs get their own
+  collapsible list (`#civPoiList`, expand-in-place editor like settlements); **right-click
+  context menu** on the viewport (edit/move/delete nearest, drop settlement/POI, info) with
+  `e.button` guards so the right button never sculpts/drops. (4) **Bake ALL levels & finalize**:
+  `bakeAllTiles(depth)` bakes the whole LOD pyramid (select 2–5) into the atlas, then
+  `state.finalized` locks Generate → World (3D dials exempt), banners the panel, and guards
+  `generate()`/`confirmRegenerate()`/`_manualTerrainActive()` — the project becomes a
+  cartographic LOD viewer/editor; un-finalize reverses. Headless-proven: finalized `generate()`
+  is a byte-exact no-op. Also: `docs/research/ui-ux-upgrade.md` (researched UI/UX proposal,
+  phase-based IA / layers popover / disclosure / inspector patterns, staged rollout).
+  **Browser pass owed**: Polity flow, slider drag feel in both places, POI list + History
+  editor, context menu, full bake → finalize → viewer flow.
 - **v0.61 — sync-`generate()` contract restored (repo review fix).** v0.6's
   `async buildTectonicSubstrate()` refactor made `generate()` await unconditionally, breaking
   the v0.135 invariant that `generate()` completes synchronously when no worker pool is engaged.
