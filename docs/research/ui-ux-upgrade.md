@@ -1,5 +1,35 @@
 # UI/UX Upgrade Proposal — Cartalith Gen1
 
+## Status (v0.63)
+
+Implemented the engine-safe, independently-shippable stages (all DOM/CSS/handler chrome over
+existing state — engine bit-identical to v0.62, headless 852 green, Playwright UI smoke 12/12):
+
+| Item | Status |
+|---|---|
+| §4.1 Finalize flow | **Done in v0.62** (`state.finalized`, bake-all, lock, un-finalize) |
+| §4.6 Right-click context menu | **Done in v0.62** |
+| Editable settlement/POI inspectors (name/history/pop) | **Done in v0.62** |
+| §4.4 Map-style presets | **Done v0.63** (Default/Antique/Ink/Watercolor/Print; Default bit-identical) |
+| §4.3 Progressive disclosure | **Done v0.63** (Map style → 2 Advanced accordions; Tectonics coupling → Advanced) |
+| §4.2 Layers popover | **Done v0.63** (grouped canvas FAB, proxies to hidden `#debugSeg`, MRU pins, curated Explore subset) |
+| §3 Phase signal (tint + chip) | **Done v0.63** (on `state.finalized`; Unity play-mode tint + header chip) |
+| §4.9 Onboarding empty-state | **Done v0.63** (first-run card, localStorage-dismissed) |
+| §4.10 Small fixes | **Done v0.63** (stale Export hint; 360px sidebar ≥1440px) |
+| §4.8 Global header undo / danger accents | **Deferred** |
+| **Stage 2 — full IA re-homing** (retire Edit tab; Civ/Carto under an Explore *phase*; Tiles+Undo under Generate; retire Places&roads) | **Deferred** — large cross-block civ rewiring; wants its own PR + browser pass |
+| §4.5 Tool-first Explore palette (merge scattered `data-civtool` segs) | **Deferred** |
+| §4.7 Pinned selection inspector at top of Explore | **Deferred** |
+
+The deferred items are the higher-risk information-architecture surgery: they move large blocks of
+markup whose handlers span all three script blocks, and can't be verified headlessly. They are best
+done as a dedicated follow-up (Stage 2 first, then §4.5/§4.7/§4.8 on top of the new IA). Everything
+below is the original proposal, unchanged.
+
+---
+
+# UI/UX Upgrade Proposal — Cartalith Gen1
+
 *July 2026. Grounded in the `<body>` markup of `Cartalith Gen1 v0.61.html` (lines 263–1165) and web research
 on comparable tools. Companion to `docs/research/ui-unified-tool.md` (2026-06 merge-era research) and
 `docs/research/map-painting-ux.md`. UI/UX chrome and workflow only — no engine or canvas-render changes.*

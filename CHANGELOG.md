@@ -12,6 +12,42 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.63 (2026-07-06)
+UI/UX upgrade — implements the shippable, engine-safe stages of `docs/research/ui-ux-upgrade.md`.
+**Engine bit-identical to v0.62 at defaults** (FIELD/TEMP/RAIN/FLOW FNV checksums byte-equal at
+seed 12345/256px); every change is DOM/CSS/handler chrome over existing `state`/`state.viz` keys —
+no engine or renderer touch. Headless suite **852 green** (848 + 4 preset assertions); a new
+Playwright UI smoke harness (`tests/perf/smoke_gen1.js`) proves the chrome in a real browser
+(12/12). Shipped:
+- **§4.4 Map-style presets** — a preset `.seg` (Default · Antique · Ink · Watercolor · Print) at the
+  top of Map style; each preset is an *absolute* bundle of `state.viz` writes (managed render keys
+  reset to 0/false, then overrides applied), so **Default reproduces the base look bit-identically**.
+  Editing any Map-style control flips the row to "Custom". Headless-asserted pure + key-scoped.
+- **§4.3 Progressive disclosure** — the ~29-control Map style folds into two `<details class="adv">`
+  accordions (Rendering / Painter NPR) under the preset row; Tectonics' physical-coupling dials
+  (flexure/heterogeneity/resistance) likewise fold into Advanced. Collapsed by default; defaults
+  unchanged.
+- **§4.2 Layers popover** — the 30-button `#debugSeg` picker is re-housed into a canvas FAB popover
+  (◇, top-left) with a **grouped, full-name** radio list (Base/Climate/Tectonics/Hydrology/Surface/
+  Civilization), a 3-item most-recently-used pin row, and an opacity slider. It's a pure re-housing:
+  the popover is *built from* the (now hidden) `#debugSeg` buttons and proxies clicks to them, so
+  every existing `seg('debugSeg',…)` handler + `syncUI()` reflection is reused. In the finalized
+  (Atlas) phase it shows only a curated user-facing subset.
+- **§3 phase signal** — building on v0.62's `state.finalized`: finalizing now also tints the shell
+  chrome (Unity play-mode convention) and shows a header "✓ Atlas — world finalized" chip, so the
+  frozen-simulation state is unmissable. `applyFinalizedUI` drives it; no new serialized field.
+- **§4.9 onboarding** — a first-run empty-state card (Generate / Load / Import + a Forge▸Finalize▸
+  Atlas diagram), dismissed forever via a `localStorage` flag. Never shown headlessly.
+- **§4.10 small fixes** — corrected the stale Export hint ("Explore → Atlas tab" → "Edit tab"),
+  widened the sidebar to 360px at ≥1440px viewports (canvas stays first).
+
+**Deferred to a follow-up** (higher-risk IA surgery, better isolated): Stage 2 full information-
+architecture re-homing (retire the Edit tab, move Civilization/Cartography under an Explore phase,
+Tiles+Undo under Generate), §4.5 the merged tool-first Explore palette, and §4.7 the pinned
+selection inspector. These touch large amounts of cross-block civ wiring and want their own pass;
+tracked in `docs/research/ui-ux-upgrade.md` §Status. Browser pass owed: preset aesthetics, Layers
+popover feel on touch, onboarding copy.
+
 ### v0.62 (2026-07-06)
 Civilization-layer UX batch + the finalize milestone (user request). **Engine bit-identical to
 v0.61 at defaults** (FIELD/TEMP/RAIN/FLOW FNV checksums byte-equal at seed 12345/256px; suite

@@ -3332,6 +3332,20 @@ if (typeof carveRiverValleys === 'function') {
     check('_seasonK stays 0 by default (annual fields untouched)', _seasonK === 0);
   }
 
+  /* ---------- v0.63 (§4.4): Map-style presets are pure, key-scoped state.viz writes ---------- */
+  if (typeof STYLE_PRESETS !== 'undefined') {
+    check('style preset: Default is a no-op bundle (bit-identical base look)', Object.keys(STYLE_PRESETS.default).length === 0);
+    const managed = new Set([...STYLE_MANAGED_NUM, ...STYLE_MANAGED_BOOL]);
+    check('style presets: every override targets a managed viz key', Object.values(STYLE_PRESETS).every(p => Object.keys(p).every(k => managed.has(k))));
+    // apply "antique" purely (no DOM), assert, then restore the managed keys we touched
+    const snap = {}; for (const k of managed) snap[k] = state.viz[k];
+    for (const k of STYLE_MANAGED_NUM) state.viz[k] = 0; for (const k of STYLE_MANAGED_BOOL) state.viz[k] = false;
+    for (const k in STYLE_PRESETS.antique) state.viz[k] = STYLE_PRESETS.antique[k];
+    check('style preset: Antique sets parchment+sepia+icons only', state.viz.parchment === 0.6 && state.viz.sepia === 0.35 && state.viz.icons === true && state.viz.ink === 0 && state.viz.watercolor === 0);
+    for (const k of managed) state.viz[k] = snap[k];   // restore so nothing downstream sees the probe
+    check('style preset probe restored managed viz keys', STYLE_MANAGED_NUM.every(k => state.viz[k] === 0) && STYLE_MANAGED_BOOL.every(k => state.viz[k] === false));
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();
