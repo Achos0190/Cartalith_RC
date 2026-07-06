@@ -12,6 +12,52 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.65 (2026-07-06)
+UI/UX overhaul — closes out the scope cuts v0.64 made deliberately ("lite" inspector, no
+Assets/Export header move). **Engine bit-identical to v0.64** (FIELD/TEMP/RAIN/FLOW FNV checksums
+byte-equal at seed 12345/256px, unbroken back through v0.62); headless suite **852 green**
+(UI-only batch); `tests/perf/smoke_gen1.js` grew **27 → 41** assertions, all green.
+`docs/research/ui-ux-upgrade.md` §Status now shows every stage genuinely complete.
+
+- **§4.7 — the pinned inspector now hosts the FULL edit form.** `_civRenderSettlementList`/
+  `_civRenderPoiList`/`_civRenderLabelList` no longer build a per-row `editHost` div; they only
+  render the row + selection highlight and, if the row is selected, hand its `{nameSpan,popSpan}`
+  to a new module-level `_civSelectedRowRefs`. `_civRenderInspector` (in `#inspectorBody`) reads
+  `_civSelectedPlace`/`_civSelectedLabel`/`_iconSelected` and calls the SAME `_civPopulatePlaceEditor`/
+  `_civPopulateLabelEditor`/`_carPopulateIconEditor` functions the inline editors used to call —
+  pointed at the one stable inspector host instead of a per-row div — so the live-row-summary-patch
+  optimization survives the move (no full list rebuild per keystroke). Extended to a **third**
+  selection group: the Placed-Icons list's per-instance editor (`_iconSelected`) now also lives in
+  the inspector, with `_civRenderPlaceEditor`/`_civRenderLabelEditor`/`_carRenderIconEditor` each
+  enforcing that selecting their own kind clears the other two — single selection across all three
+  groups. Caught mid-refactor: the label list's delete button only called `_civRenderLabelList()`,
+  never the full `_civRenderLabelEditor()` refresh, so deleting the selected label used to leave a
+  stale editor on screen — fixed as part of the same pass. Every "expand its editor directly
+  underneath" hint string (3 sections) updated to point at the pinned Selection panel.
+- **§4.10 — per-layer hotkeys.** `LAYER_HOTKEYS` maps 7 of the most-reached-for Layers-popover
+  views to bare-key shortcuts (`0`=Off, `B`=Biomes, `T`=Terrain, `F`=Flow, `S`=Settlement,
+  `W`=Wildlife, `R`=Resources) — deliberately scoped to the curated Explore subset rather than all
+  29 debug views, since forcing collision-free mnemonics onto rarely-used diagnostics (Flow vs
+  Flood both wanting "F") wasn't worth the awkward picks. Badge shown per item in the popover;
+  global `keydown` listener guarded against typing focus and modifier keys, active whenever the
+  Layers FAB itself is reachable (Generate/Explore), mirroring the existing Shift+D resource-overlay
+  shortcut's reach.
+- **Assets/Export promoted to header-level utilities** — the tab bar is now a genuine
+  **two-position phase switch** (Generate ⇄ Explore only), matching §3's Forge/Atlas description
+  directly instead of mixing phases with utilities. Export moved into a header dropdown
+  (`#exportWrap`/`#exportMenu`, same ids as the old sidebar panel so `exportZip()`'s wiring is
+  untouched) that — unlike Import ▾'s one-shot action list — stays open across internal clicks
+  (it's a form: image size + 3 checkboxes), closing on outside-click, Escape, or pressing Export
+  itself. Assets became a plain header button (`_carEnterAssetsMode`) that directly performs the
+  same full-viewport Asset-Library takeover the old `tp==='assets'` tab branch did; exiting needed
+  no new code at all — the existing tab-click handler's canvas-wrap/assetLibrary swap already
+  recomputed `on=(tp==='assets')` on every Generate/Explore click, which is now permanently false,
+  so clicking either phase tab unconditionally restores the canvas. Verified `_activeTab` is never
+  compared against `'assets'`/`'export'` anywhere else in the file before making this change.
+
+Browser pass owed: the relocated inspector's feel end-to-end (especially the icon-instance
+editor sharing the panel), the hotkeys in daily use, and the header Export/Assets controls.
+
 ### v0.64 (2026-07-06)
 UI/UX overhaul completed — implements every remaining stage of `docs/research/ui-ux-upgrade.md`
 that v0.63 deferred as "higher-risk IA surgery". **Engine bit-identical to v0.63** (FIELD/TEMP/

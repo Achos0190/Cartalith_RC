@@ -9,27 +9,44 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.64.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.65.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.65 next). Older `v0.57`/`v0.6`/`v0.61`/`v0.62`/`v0.63` are kept and never edited.
+  (v0.66 next). Older `v0.57`/`v0.6`/`v0.61`/`v0.62`/`v0.63`/`v0.64` are kept and never edited.
+- **v0.65 — UI/UX overhaul, the remaining scope cuts closed out.** Engine bit-identical to v0.64
+  (checksums byte-equal all the way back to v0.62; headless **852 green** throughout);
+  `tests/perf/smoke_gen1.js` grew **27 → 41** Playwright assertions. `docs/research/ui-ux-upgrade.md`
+  §Status now shows every stage genuinely complete, not just scoped-down. (1) **Full pinned
+  inspector**: the settlement/POI/label edit forms (name/kind/pop/history/…) now render IN the
+  pinned inspector itself, not inline in the lists — `_civRenderSettlementList`/`_civRenderPoiList`/
+  `_civRenderLabelList` only render rows + selection highlight now; `_civSelectedRowRefs` preserves
+  the old inline version's live-row-patching optimization (no full list rebuild per keystroke) by
+  handing the currently-selected row's DOM refs to whichever editor the inspector renders. Extended
+  to a third group, the Placed-Icons list's own per-instance editor, so selection is single across
+  all three (place/label/icon instance) — picking one clears the others. Caught and fixed a stale
+  bug along the way: the label list's delete handler only refreshed the label list itself, leaving
+  a deleted label's editor stuck on screen. (2) **Per-layer hotkeys** (§4.10): bare-key shortcuts
+  (B/T/F/S/W/R/0) for the Layers popover's most-reached-for views, badge shown in the popover,
+  guarded against firing while typing in any input. (3) **Assets/Export promoted to header
+  utilities**: the tab bar is now a genuine two-position Forge/Atlas phase switch (just Generate +
+  Explore) — Export became a header dropdown (`#exportWrap`, mirrors Import ▾ but stays open across
+  internal clicks since it's a form, not a one-shot action list) and Assets became a plain header
+  button (`_carEnterAssetsMode`) that enters the same full-viewport Asset Library takeover as
+  before; exiting is automatic (clicking Generate/Explore always restores the canvas — no `_activeTab`
+  changes were needed since Assets/Export never touched that variable's only two remaining
+  consumers). Browser pass owed: the relocated inspector's feel end-to-end, the hotkeys in daily
+  use, and the header Export/Assets controls.
 - **v0.64 — UI/UX overhaul completed** (the stages v0.63 deferred). Engine bit-identical to
   v0.63 (checksums byte-equal all the way back to v0.62; headless **852 green** throughout);
-  `tests/perf/smoke_gen1.js` grew **12 → 27** Playwright assertions. Every item in
-  `docs/research/ui-ux-upgrade.md` is now done — see its §Status for the full ledger. Highlights:
-  **Edit tab + Generate sub-tab bar retired** (Generate is World-only; Tiles & LOD moved into
-  Generate → World; Undo moved to the header; Civilization + Cartography moved wholesale into
-  Explore); **"Places & roads (terrain)" retired outright** (engine functions kept, UI gone — it
-  shared `state.places` with civ settlements, so its "Clear places" could silently wipe them, a
-  real landmine now closed); a **unified 9-button tool palette** (Inspect/Info/Settlement/POI/
-  Label/Icon/Territory/Way/Route) replaces every scattered `data-civtool` control, with Label +
-  Icon newly folded into `_civTool` (were a separate, not-fully-exclusive system) and Icon's
-  gallery now a contextual panel shown only while Icon is active; a **lightweight pinned
-  selection inspector** atop Explore (summary only — the edit form stays inline in the lists, a
-  deliberate scope cut, see §Status); **danger accents** on 8 destructive Clear buttons, with a
-  confirm-when-non-empty guard added to the three the proposal named (territory/ways/places —
-  none had any confirmation before). Browser pass owed: the whole reorganized Explore flow, the
-  tool palette in practice, the pinned inspector, Undo/Tiles&LOD in their new home.
+  `tests/perf/smoke_gen1.js` grew **12 → 27** Playwright assertions. Highlights: **Edit tab +
+  Generate sub-tab bar retired** (Generate is World-only; Tiles & LOD moved into Generate →
+  World; Undo moved to the header; Civilization + Cartography moved wholesale into Explore);
+  **"Places & roads (terrain)" retired outright** (engine functions kept, UI gone — it shared
+  `state.places` with civ settlements, so its "Clear places" could silently wipe them, a real
+  landmine now closed); a unified 9-button tool palette replaces every scattered `data-civtool`
+  control, with Label + Icon newly folded into `_civTool`; a lightweight pinned selection
+  inspector (later made "full" in v0.65); danger accents + confirm-when-non-empty on 3 destructive
+  Clear buttons that had none before.
 - **v0.62 — civ-layer UX batch + finalize milestone (user request).** Engine bit-identical to
   v0.61 at defaults (checksums byte-equal; 848/848 green). (1) Economy+Politics merged into one
   **Polity** section + an **∅ Unclaimed** faction pill (paint to erase territory). (2) Timeline

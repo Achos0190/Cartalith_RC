@@ -1,10 +1,11 @@
 # UI/UX Upgrade Proposal — Cartalith Gen1
 
-## Status (v0.64)
+## Status (v0.65)
 
-Every stage in the proposal is now implemented. All DOM/CSS/handler chrome over existing state —
-engine bit-identical from v0.62 through v0.64, headless 852 green throughout, Playwright UI smoke
-grew from 12 → 27 assertions covering every stage below.
+Every stage in the proposal is now implemented, including the scope cuts v0.64 had deliberately
+deferred. All DOM/CSS/handler chrome over existing state — engine bit-identical from v0.62 through
+v0.65, headless 852 green throughout, Playwright UI smoke grew from 12 → 27 → 41 assertions
+covering every stage below.
 
 | Item | Status |
 |---|---|
@@ -16,17 +17,17 @@ grew from 12 → 27 assertions covering every stage below.
 | §4.2 Layers popover | **Done v0.63** (grouped canvas FAB, proxies to hidden `#debugSeg`, MRU pins, curated Explore subset) |
 | §3 Phase signal (tint + chip) | **Done v0.63** (on `state.finalized`; Unity play-mode tint + header chip) |
 | §4.9 Onboarding empty-state | **Done v0.63** (first-run card, localStorage-dismissed) |
-| §4.10 Small fixes | **Done v0.63** (stale Export hint; 360px sidebar ≥1440px) |
+| §4.10 Small fixes | **Done v0.63** (stale Export hint; 360px sidebar ≥1440px); **extended v0.65** (per-layer hotkeys — B/T/F/S/W/R/0 bare-key shortcuts for the Layers popover's curated Explore subset, badge shown per item, guarded against firing while typing in any input) |
 | **Stage 2 — full IA re-homing** | **Done v0.64** — Edit tab retired (Tiles&LOD → Generate→World, Undo → header); Generate sub-tab bar retired (Generate is World-only); Civilization + Cartography moved wholesale into Explore; "Places & roads (terrain)" retired outright (engine functions kept, UI gone, closing a real landmine — it shared `state.places` with civ settlements, so its "Clear places" could silently wipe them) |
 | §4.5 Tool-first Explore palette | **Done v0.64** — one 9-button palette (Inspect/Info/Settlement/POI/Label/Icon/Territory/Way/Route) replaces the scattered originals; Label + Icon are *newly* folded into the `_civTool` concept (were a separate checkbox/gallery system, `_carDisarmOtherTools`), closing a pre-existing gap where civtools and label/icon/paint weren't mutually exclusive. Icon's family-picker + gallery become the tool's contextual options block (Dungeondraft pattern), hidden until Icon is active. |
-| §4.7 Pinned selection inspector | **Done v0.64, scoped "lite"** — a pinned summary card at the top of Explore shows the selected place/label's name/type/pop; the actual edit form (name/history/population/traits) stays inline in the settlement/POI/label lists (v0.62's expand-in-place design), not relocated here. Relocating the full form is a separate, larger refactor of `_civRenderSettlementList`/`_civRenderPoiList`/`_civRenderLabelList` — deferred. |
+| §4.7 Pinned selection inspector | **Done v0.64 "lite", completed v0.65** — v0.64 shipped a pinned summary card only, with the actual edit form still inline in the settlement/POI/label lists. v0.65 relocated the full edit forms (name/kind/pop/history/…) into the pinned inspector itself; `_civRenderSettlementList`/`_civRenderPoiList`/`_civRenderLabelList` now render rows + selection highlight only. `_civSelectedRowRefs` preserves the old inline version's live-row-patching optimization by handing the selected row's DOM refs to whichever editor the inspector renders. Extended to a third group — the Placed-Icons list's per-instance editor — so selection is single across all three (place/label/icon instance); picking one clears the others. A stale bug was caught and fixed along the way: the label list's delete handler only refreshed the label list itself, leaving a deleted label's editor stuck on screen. |
 | §4.8 Global header undo / danger accents | **Done v0.64** — Undo (with live step-count text) moved to the header, always visible; `.al-danger` accent applied consistently to 8 destructive one-click Clear buttons; the three the proposal named by name (Clear territory/ways/places) additionally gained a confirm-when-non-empty guard (none had any confirmation before). |
+| Assets/Export promoted to header-level utilities | **Done v0.65** — the tab bar is now a genuine two-position Forge/Atlas phase switch (just Generate + Explore). Export became a header dropdown (`#exportWrap`, mirrors Import ▾ but stays open across internal clicks since it's a form, not a one-shot action list); Assets became a plain header button (`_carEnterAssetsMode`) entering the same full-viewport Asset Library takeover as before. Exiting is automatic — clicking Generate/Explore always restores the canvas. |
 
-**Remaining, deliberately out of scope**: Assets/Export were not promoted to header-level utilities
-(§2's "Assets/Export become header-level" from the Stage-2 write-up) — they stay as tabs; moving
-them touches how the Asset Library takes over the canvas viewport, a separable concern from the
-"phase journey" confusion this pass fixed. The 29 debug views remain ungrouped only inside the
-Layers popover's per-item list (grouping already landed in v0.63); no further reduction planned.
+**Remaining, deliberately out of scope**: the 29 debug views remain ungrouped only inside the
+Layers popover's per-item list (grouping already landed in v0.63; hotkeys cover a curated 7-item
+subset, not all 29) — no further reduction planned. Everything else the original proposal and its
+Stage-2 write-up called for is now shipped.
 
 ---
 

@@ -1,16 +1,19 @@
 /* Gen1 UI smoke test — real headless Chromium (Playwright). Verifies the UI/UX chrome added in
    v0.63 (onboarding card, Layers popover proxying to #debugSeg, style presets, progressive-
-   disclosure <details>, phase signal on finalize) and v0.64 (retired Edit tab / Generate sub-tabs,
+   disclosure <details>, phase signal on finalize), v0.64 (retired Edit tab / Generate sub-tabs,
    Civilization+Cartography re-homed to Explore, the unified tool palette incl. Label/Icon folded
-   into _civTool, the lightweight pinned inspector, header Undo, confirm-gated Clear buttons).
-   Not a pixel test — DOM + behavior.
-   Usage: node tests/perf/smoke_gen1.js "Cartalith Gen1 v0.64.html"
+   into _civTool, header Undo, confirm-gated Clear buttons), and v0.65 (the pinned inspector now
+   hosts the FULL settlement/POI/label/icon edit form with single selection across all three
+   groups; per-layer hotkeys on the Layers popover; Assets/Export promoted to header utilities,
+   leaving the tab bar a genuine 2-position Forge/Atlas phase switch). Not a pixel test — DOM +
+   behavior.
+   Usage: node tests/perf/smoke_gen1.js "Cartalith Gen1 v0.65.html"
    Env overrides: PLAYWRIGHT_DIR, CHROME_BIN. */
 const path = require('path');
 const PW = process.env.PLAYWRIGHT_DIR || '/opt/node22/lib/node_modules/playwright';
 const CHROME = process.env.CHROME_BIN || '/opt/pw-browsers/chromium';
 const { chromium } = require(PW);
-const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.64.html');
+const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.65.html');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox','--use-gl=swiftshader'] });
@@ -52,7 +55,6 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.64.h
   R.phaseOff = await page.evaluate(() => document.body.classList.contains('phase-explore'));
 
   // ---- v0.64: IA re-homing (no Edit tab / Generate sub-tabs; Civ+Carto live in Explore) ----
-  R.tabs = await page.$$eval('.tab', els => els.map(e => e.dataset.tab));
   R.undoInHeader = await page.$eval('header #undoBtn', el => !!el);
   R.hasFactionPickerInGenerate = await page.evaluate(() => !!document.getElementById('generatePanel').querySelector('#civFactionPicker'));
   await page.click('[data-tab="explore"]');
@@ -100,6 +102,57 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.64.h
   R.confirmedWhenNonEmpty = dialogMsg !== null;
   R.placesSurviveDismiss = await page.evaluate(() => state.places.length === 1);
 
+  // ---- v0.65 (§4.7, complete): pinned inspector hosts the FULL edit form; single selection ----
+  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  await page.waitForTimeout(100);
+  R.editorInInspector = await page.$eval('#inspectorBody', el => !!el.querySelector('#_civPeName'));
+  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('civSettlementList').querySelector('#_civPeName') === null);
+  await page.fill('#_civPeName', 'Renamed');
+  await page.dispatchEvent('#_civPeName', 'input');
+  await page.waitForTimeout(100);
+  R.liveModelUpdate = await page.evaluate(() => state.places[0].name === 'Renamed');
+  R.liveRowPatch = await page.evaluate(() => document.getElementById('civSettlementList').textContent.includes('Renamed'));
+  await page.evaluate(() => {
+    state.labels.push({x:5,y:5,name:'ALabel'});
+    _civSelectLabel(state.labels[0]);
+  });
+  await page.waitForTimeout(100);
+  R.labelEditorSwapsIn = await page.$eval('#inspectorBody', el => !!el.querySelector('#_carLeName'));
+  R.selectingLabelDeselectsPlace = await page.evaluate(() => _civSelectedPlace === null);
+  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  await page.waitForTimeout(100);
+  R.selectingPlaceDeselectsLabel = await page.evaluate(() => _civSelectedLabel === null);
+
+  // ---- v0.65 (§4.10): per-layer hotkeys ----
+  await page.click('#layersBtn');
+  await page.waitForTimeout(100);
+  R.keyBadges = await page.$$eval('#layersList .lp-key', els => els.map(e => e.textContent));
+  await page.keyboard.press('KeyB');
+  await page.waitForTimeout(100);
+  R.debugAfterB = await page.evaluate(() => state.debug);
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(100);
+  R.debugAfterF = await page.evaluate(() => state.debug);
+  await page.click('#_civPeName');
+  await page.keyboard.type('B');   // typing "B" while focused in a text input must not trigger the hotkey
+  await page.waitForTimeout(100);
+  R.debugUnchangedWhileTyping = await page.evaluate(() => state.debug) === 'flow';
+
+  // ---- v0.65 (§Stage 2 follow-up): Assets/Export moved to header utilities; tab bar is a genuine
+  //      2-position phase switch ----
+  R.tabCount = await page.$$eval('.tab', els => els.length);
+  R.tabsOnly2 = await page.$$eval('.tab', els => JSON.stringify(els.map(e => e.dataset.tab)) === JSON.stringify(['generate','explore']));
+  await page.click('#exportMenuBtn');
+  await page.waitForTimeout(150);
+  R.exportMenuOpen = await page.$eval('#exportMenu', el => el.classList.contains('open'));
+  await page.click('#assetsHeaderBtn');
+  await page.waitForTimeout(250);
+  R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
+  R.assetsLibraryShown = await page.$eval('#assetLibrary', el => getComputedStyle(el).display !== 'none');
+  await page.click('[data-tab="generate"]');
+  await page.waitForTimeout(200);
+  R.assetsExitedViaGenerate = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display !== 'none');
+
   await browser.close();
 
   // ---- assertions ----
@@ -118,7 +171,6 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.64.h
   A('progressive-disclosure <details.adv> present + collapsed', R.advDetails.count >= 3 && R.advDetails.anyOpen === false);
   A('finalize → phase-explore tint + chip + genBtn locked', R.phaseOn.body && R.phaseOn.chip && R.phaseOn.genBtnDisabled);
   A('un-finalize clears phase-explore', R.phaseOff === false);
-  A('tabs are generate/explore/assets/export (no edit)', JSON.stringify(R.tabs) === JSON.stringify(['generate','explore','assets','export']));
   A('Undo button lives in header', R.undoInHeader === true);
   A('faction picker NOT in Generate (moved to Explore)', R.hasFactionPickerInGenerate === false);
   A('faction picker IS in Explore', R.factionPickerInExplore === true);
@@ -133,6 +185,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.64.h
   A('Clear places does not prompt when empty', R.noConfirmWhenEmpty === true);
   A('Clear places prompts when non-empty', R.confirmedWhenNonEmpty === true);
   A('dismissing the confirm preserves the place', R.placesSurviveDismiss === true);
+  A('pinned inspector hosts the FULL place editor', R.editorInInspector === true);
+  A('settlement list no longer has an inline editor', R.noInlineEditorInList === true);
+  A('editing the inspector name field updates the model', R.liveModelUpdate === true);
+  A('the row summary patches live from the inspector edit', R.liveRowPatch === true);
+  A('selecting a label swaps the inspector to the label editor', R.labelEditorSwapsIn === true);
+  A('selecting a label deselects the place (single selection)', R.selectingLabelDeselectsPlace === true);
+  A('selecting the place again deselects the label', R.selectingPlaceDeselectsLabel === true);
+  A('Layers popover shows hotkey badges (>=6)', R.keyBadges.length >= 6);
+  A('pressing B sets the Biomes layer', R.debugAfterB === 'bclass');
+  A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
+  A('typing "B" in a text field does not trigger the hotkey', R.debugUnchangedWhileTyping === true);
+  A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
+  A('Export ▾ header dropdown opens', R.exportMenuOpen === true);
+  A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
+  A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
