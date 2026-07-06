@@ -1,19 +1,21 @@
 /* Gen1 UI smoke test — real headless Chromium (Playwright). Verifies the UI/UX chrome added in
    v0.63 (onboarding card, Layers popover proxying to #debugSeg, style presets, progressive-
-   disclosure <details>, phase signal on finalize), v0.64 (retired Edit tab / Generate sub-tabs,
-   Civilization+Cartography re-homed to Explore, the unified tool palette incl. Label/Icon folded
-   into _civTool, header Undo, confirm-gated Clear buttons), and v0.65 (the pinned inspector now
+   disclosure <details>, phase signal on finalize), v0.64 (retired Edit tab, header Undo,
+   confirm-gated Clear buttons, Label/Icon folded into _civTool), v0.65 (the pinned inspector
    hosts the FULL settlement/POI/label/icon edit form with single selection across all three
    groups; per-layer hotkeys on the Layers popover; Assets/Export promoted to header utilities,
-   leaving the tab bar a genuine 2-position Forge/Atlas phase switch). Not a pixel test — DOM +
-   behavior.
-   Usage: node tests/perf/smoke_gen1.js "Cartalith Gen1 v0.65.html"
+   leaving the tab bar a genuine 2-position Forge/Atlas phase switch), and v0.66 (the corrected
+   IA: the Generate sub-tab bar is RESTORED — World | Civilization | Cartography as Generate's
+   categorical branches, with the tool palette split per branch and the pinned inspector shared
+   by Civ+Carto; Explore is the planning phase: Info/Route tools, journeys, planner). Not a
+   pixel test — DOM + behavior.
+   Usage: node tests/perf/smoke_gen1.js "Cartalith Gen1 v0.66.html"
    Env overrides: PLAYWRIGHT_DIR, CHROME_BIN. */
 const path = require('path');
 const PW = process.env.PLAYWRIGHT_DIR || '/opt/node22/lib/node_modules/playwright';
 const CHROME = process.env.CHROME_BIN || '/opt/pw-browsers/chromium';
 const { chromium } = require(PW);
-const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.65.html');
+const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.66.html');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox','--use-gl=swiftshader'] });
@@ -50,36 +52,62 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.65.h
   R.advDetails = await page.$$eval('details.adv', els => ({ count: els.length, anyOpen: els.some(e => e.open) }));
   // 5. phase signal: set finalized → body gets phase-explore + chip visible
   await page.evaluate(() => { state.finalized = true; applyFinalizedUI(); });
-  R.phaseOn = await page.evaluate(() => ({ body: document.body.classList.contains('phase-explore'), chip: getComputedStyle(document.getElementById('phaseChip')).display !== 'none', genBtnDisabled: document.getElementById('genBtn').disabled }));
+  R.phaseOn = await page.evaluate(() => ({ body: document.body.classList.contains('phase-explore'), chip: getComputedStyle(document.getElementById('phaseChip')).display !== 'none', genBtnDisabled: document.getElementById('genBtn').disabled, unfinalizeEnabled: !document.getElementById('unfinalizeBtn').disabled }));
   await page.evaluate(() => { state.finalized = false; applyFinalizedUI(); });
   R.phaseOff = await page.evaluate(() => document.body.classList.contains('phase-explore'));
 
-  // ---- v0.64: IA re-homing (no Edit tab / Generate sub-tabs; Civ+Carto live in Explore) ----
+  // ---- v0.66: corrected IA — Generate branches restored (World | Civilization | Cartography);
+  //      Explore is the planning phase ----
   R.undoInHeader = await page.$eval('header #undoBtn', el => !!el);
-  R.hasFactionPickerInGenerate = await page.evaluate(() => !!document.getElementById('generatePanel').querySelector('#civFactionPicker'));
-  await page.click('[data-tab="explore"]');
+  R.subTabs = await page.$$eval('#genSubBar .subtab', els => els.map(e => e.dataset.gsub));
+  R.worldDefault = await page.evaluate(() => ({
+    world: getComputedStyle(document.getElementById('genWorld')).display !== 'none',
+    civ: getComputedStyle(document.getElementById('genCiv')).display === 'none',
+    carto: getComputedStyle(document.getElementById('genCarto')).display === 'none',
+    inspectorHidden: getComputedStyle(document.getElementById('inspector')).display === 'none'
+  }));
+  R.factionPickerInGenCiv = await page.evaluate(() => !!document.getElementById('genCiv').querySelector('#civFactionPicker'));
+  R.mapStyleInGenCarto = await page.evaluate(() => !!document.getElementById('genCarto').querySelector('#stylePresetSeg'));
+  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="civ"]').click());
   await page.waitForTimeout(150);
-  R.factionPickerInExplore = await page.evaluate(() => !!document.getElementById('explorePanel').querySelector('#civFactionPicker'));
-  R.mapStyleInExplore = await page.evaluate(() => !!document.getElementById('explorePanel').querySelector('#stylePresetSeg'));
+  R.civBranch = await page.evaluate(() => ({
+    civShown: getComputedStyle(document.getElementById('genCiv')).display !== 'none',
+    worldHidden: getComputedStyle(document.getElementById('genWorld')).display === 'none',
+    inspectorShown: getComputedStyle(document.getElementById('inspector')).display !== 'none'
+  }));
 
-  // ---- v0.64 (§4.5): unified tool palette — one button per tool, label/icon folded into _civTool ----
-  R.paletteButtons = await page.$$eval('#explToolPalette [data-civtool]', els => els.map(e => e.dataset.civtool));
+  // ---- v0.66: the unified _civTool state machine, palette split per branch ----
+  R.civPalette = await page.$$eval('#civToolPalette [data-civtool]', els => els.map(e => e.dataset.civtool));
+  R.cartoPalette = await page.$$eval('#cartoToolPalette [data-civtool]', els => els.map(e => e.dataset.civtool));
+  R.explPalette = await page.$$eval('#explToolPalette [data-civtool]', els => els.map(e => e.dataset.civtool));
   R.duplicateToolButtons = await page.evaluate(() => {
     const seen = {};
     document.querySelectorAll('[data-civtool]').forEach(b => { seen[b.dataset.civtool] = (seen[b.dataset.civtool]||0)+1; });
-    return Object.entries(seen).filter(([,v]) => v > 1);
+    return Object.entries(seen).filter(([,v]) => v > 1).map(([k]) => k);
   });
-  await page.click('#explToolPalette [data-civtool="icon"]');
+  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="carto"]').click());
+  await page.waitForTimeout(150);
+  await page.evaluate(() => document.querySelector('#cartoToolPalette [data-civtool="icon"]').click());
   await page.waitForTimeout(150);
   R.iconCtxVisible = await page.$eval('#carIconContextSec', el => getComputedStyle(el).display !== 'none');
-  await page.click('#explToolPalette [data-civtool="label"]');
+  await page.evaluate(() => document.querySelector('#cartoToolPalette [data-civtool="label"]').click());
   await page.waitForTimeout(150);
   R.labelMode = await page.evaluate(() => _labelMode === true);
   R.iconCtxHiddenAfterLabel = await page.$eval('#carIconContextSec', el => getComputedStyle(el).display === 'none');
-  await page.click('#explToolPalette [data-civtool="label"]');   // toggle back off
+  await page.evaluate(() => document.querySelector('#cartoToolPalette [data-civtool="label"]').click());   // toggle back off
   await page.waitForTimeout(100);
 
-  // ---- v0.64 (§4.7, lite): pinned selection inspector ----
+  // ---- v0.66: paint arms on the Cartography branch and disarms on leaving it ----
+  await page.evaluate(() => { const pc = document.getElementById('carPaintChk'); pc.checked = true; pc.dispatchEvent(new Event('change')); });
+  await page.waitForTimeout(100);
+  R.paintArmsOnCarto = await page.evaluate(() => _paintMode === true);
+  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="world"]').click());
+  await page.waitForTimeout(100);
+  R.paintDisarmsLeavingCarto = await page.evaluate(() => _paintMode === false && document.getElementById('carPaintChk').checked === false);
+  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="civ"]').click());
+  await page.waitForTimeout(100);
+
+  // ---- v0.64 (§4.7): pinned selection inspector (shared by the Civ + Carto branches) ----
   R.inspectorEmptyState = await page.$eval('#inspectorBody', el => el.textContent.includes('Select a settlement'));
 
   // ---- v0.64 (§4.8): header Undo + confirm-gated destructive Clear buttons ----
@@ -138,6 +166,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.65.h
   await page.waitForTimeout(100);
   R.debugUnchangedWhileTyping = await page.evaluate(() => state.debug) === 'flow';
 
+  // ---- v0.66: Explore = the planning/reading phase (Info/Route, journeys, planner) ----
+  await page.click('[data-tab="explore"]');
+  await page.waitForTimeout(150);
+  R.exploreShape = await page.evaluate(() => ({
+    journeys: !!document.getElementById('explorePanel').querySelector('#civJourneyList'),
+    planner: !!document.getElementById('explorePanel').querySelector('#civPlannerSec'),
+    infoToolAuto: _civTool === 'info',
+    infoSecShown: getComputedStyle(document.getElementById('civInfoSec')).display !== 'none',
+    noCivSectionsInExplore: !document.getElementById('explorePanel').querySelector('#civFactionPicker') && !document.getElementById('explorePanel').querySelector('#stylePresetSeg')
+  }));
+
   // ---- v0.65 (§Stage 2 follow-up): Assets/Export moved to header utilities; tab bar is a genuine
   //      2-position phase switch ----
   R.tabCount = await page.$$eval('.tab', els => els.length);
@@ -169,16 +208,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.65.h
   A('Antique preset marks its seg button active', R.antiqueSegOn === true);
   A('Default preset resets look to base (all off)', R.vizDefault.parchment === 0 && R.vizDefault.sepia === 0 && R.vizDefault.icons === false);
   A('progressive-disclosure <details.adv> present + collapsed', R.advDetails.count >= 3 && R.advDetails.anyOpen === false);
-  A('finalize → phase-explore tint + chip + genBtn locked', R.phaseOn.body && R.phaseOn.chip && R.phaseOn.genBtnDisabled);
+  A('finalize → phase tint + chip + genBtn locked + Un-finalize stays clickable', R.phaseOn.body && R.phaseOn.chip && R.phaseOn.genBtnDisabled && R.phaseOn.unfinalizeEnabled);
   A('un-finalize clears phase-explore', R.phaseOff === false);
   A('Undo button lives in header', R.undoInHeader === true);
-  A('faction picker NOT in Generate (moved to Explore)', R.hasFactionPickerInGenerate === false);
-  A('faction picker IS in Explore', R.factionPickerInExplore === true);
-  A('Map style IS in Explore', R.mapStyleInExplore === true);
-  A('unified tool palette has all 9 tools, no duplicates', JSON.stringify(R.paletteButtons) === JSON.stringify(['inspect','info','place','place_poi','label','icon','territory','draw_way','route']) && R.duplicateToolButtons.length === 0);
+  A('Generate sub-tab bar restored (world/civ/carto)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto']));
+  A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);
+  A('faction picker lives in Generate → Civilization', R.factionPickerInGenCiv === true);
+  A('Map style lives in Generate → Cartography', R.mapStyleInGenCarto === true);
+  A('Civilization branch shows genCiv + pinned inspector', R.civBranch.civShown && R.civBranch.worldHidden && R.civBranch.inspectorShown);
+  A('Civ palette = Inspect/Settlement/POI/Territory/Way', JSON.stringify(R.civPalette) === JSON.stringify(['inspect','place','place_poi','territory','draw_way']));
+  A('Carto palette = Inspect/Label/Icon', JSON.stringify(R.cartoPalette) === JSON.stringify(['inspect','label','icon']));
+  A('Explore palette = Info/Route', JSON.stringify(R.explPalette) === JSON.stringify(['info','route']));
+  A('only Inspect appears in two palettes (shared select tool)', JSON.stringify(R.duplicateToolButtons) === JSON.stringify(['inspect']));
   A('Icon tool reveals its contextual gallery section', R.iconCtxVisible === true);
   A('Label tool sets _labelMode', R.labelMode === true);
   A('switching to Label hides the Icon gallery again', R.iconCtxHiddenAfterLabel === true);
+  A('paint arms on the Cartography branch', R.paintArmsOnCarto === true);
+  A('paint disarms on leaving Cartography', R.paintDisarmsLeavingCarto === true);
+  A('Explore keeps Journeys + planner, no civ/carto sections', R.exploreShape.journeys && R.exploreShape.planner && R.exploreShape.noCivSectionsInExplore);
+  A('entering Explore auto-arms the Info tool + its readout', R.exploreShape.infoToolAuto && R.exploreShape.infoSecShown);
   A('pinned inspector shows the empty state initially', R.inspectorEmptyState === true);
   A('header Undo starts disabled', R.undoDisabledInitially === true);
   A('destructive buttons carry .al-danger (>=8)', R.dangerButtons.length >= 8);

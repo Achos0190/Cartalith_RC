@@ -9,10 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.65.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.66.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.66 next). Older `v0.57`/`v0.6`/`v0.61`/`v0.62`/`v0.63`/`v0.64` are kept and never edited.
+  (v0.67 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.65` are kept and never edited.
+- **v0.66 — IA CORRECTION (owner-directed): the Generate branch menu is restored.** v0.64 had
+  retired the Generate sub-tab bar and moved Civilization + Cartography into Explore, following
+  the research proposal's §3 — but contradicting the owner's intended IA. The shipped structure
+  is now: **Generate** (authoring) = sub-tabs **World | Civilization | Cartography**, with the
+  pinned Selection inspector under the sub-tab bar shared by Civ+Carto, and the tool palette
+  split per branch (Civ: Inspect·Settlement·POI·Territory·Way; Carto: Inspect·Label·Icon) —
+  all buttons drive the one `_civSetTool` machine; **Explore** (planning) = Info·Route tools,
+  Journeys, Journey planner, canvas filter funnel + timeline. Entering Explore auto-arms Info.
+  Paint re-gated to Generate→Cartography. Bundled fixes: Un-finalize button no longer disabled
+  by the finalize lock (bug since v0.62); active sub-tab label no longer amber-on-amber; stale
+  "Edit →" path strings updated. Engine bit-identical to v0.65 (checksums unbroken to v0.62);
+  headless **852 green**; smoke suite rewritten for the corrected IA, **41 → 50** green.
+  **`docs/research/ui-ux-upgrade.md` §Status carries a correction note superseding §3's
+  re-homing — do NOT re-apply "Civilization and Cartography live in Explore".**
 - **v0.65 — UI/UX overhaul, the remaining scope cuts closed out.** Engine bit-identical to v0.64
   (checksums byte-equal all the way back to v0.62; headless **852 green** throughout);
   `tests/perf/smoke_gen1.js` grew **27 → 41** Playwright assertions. `docs/research/ui-ux-upgrade.md`

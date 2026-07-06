@@ -12,6 +12,53 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.66 (2026-07-06)
+**IA correction — the Generate branch menu is restored.** v0.64's Stage-2 re-homing (retiring the
+Generate sub-tab bar and moving Civilization + Cartography into Explore) followed the research
+proposal's §3 but contradicted the owner's intended information architecture ("Under Generate -
+Civilization: …", "Explore - Timeline"); the owner flagged the loss of the startup menu and
+directed the correction. **Engine bit-identical to v0.65** (render battery ALL IDENTICAL,
+checksums unbroken back through v0.62); headless **852 green**; `tests/perf/smoke_gen1.js`
+rewritten for the corrected IA, **41 → 50** assertions, all green.
+`docs/research/ui-ux-upgrade.md` §Status now carries a prominent correction note superseding §3's
+re-homing so future sessions don't re-apply it.
+
+- **Generate = authoring, three categorical branches.** `#genSubBar` (World | Civilization |
+  Cartography) is back at the top of the Generate panel; `#genCiv` (Tools, Peoples/Factions,
+  Settlements, Polity, Infrastructure) and `#genCarto` (Tools, Region names, Manual icons, Paint
+  brush, Map view, Map style) re-wrap the sections that v0.64 had moved into Explore — pure DOM
+  moves, every element id unchanged, so all handler/syncUI wiring held without edits. The restored
+  gsub handler toggles the three sub-panels, resets the tool to Inspect (which since v0.64 also
+  commits in-progress ways/routes and disarms label/icon/paint), and explicitly disarms the Paint
+  brush when leaving Cartography (paint arms without changing `_civTool`, so the tool reset alone
+  can be skipped by its equality guard — the one non-obvious bit).
+- **Explore = planning/reading.** The Explore panel returns to its v0.63 shape plus the unified
+  tooling: an Info · Route palette (entering Explore auto-arms Info — Inspect is an authoring tool
+  and lives in the Generate branches), ✓ Commit route, the Info readout, Journeys and the Journey
+  planner; the filter funnel + twinned timeline stay on the canvas.
+- **Tool palette split per branch, one state machine.** Civ: Inspect·Settlement·POI·Territory·Way;
+  Carto: Inspect·Label·Icon; Explore: Info·Route. All buttons keep `[data-civtool]`, so the
+  existing auto-wiring and `_civSetTool`'s all-buttons highlight sweep handle the duplicate
+  Inspect buttons for free; mutual exclusion holds across branches and tabs. The tab handler now
+  arms `info` on entering Explore / `inspect` on entering Generate, with an equality guard because
+  `_civSetTool` treats a repeated same-tool call as toggle-off (a double tab-click would have
+  flipped Info→Inspect).
+- **Pinned Selection inspector re-homed** under the sub-tab bar, shared by the Civilization and
+  Cartography branches (hidden on World — and, sitting outside `#genWorld`, exempt from the
+  finalize lock by construction). The viewport right-click "✎ Edit" now first reveals the owning
+  branch via `_civRevealBranch('civ')` — clicking the real tab/sub-tab buttons so every side
+  effect runs — then selects, since editing must land somewhere visible from any tab.
+- **Paint brush re-gated to Generate → Cartography** (`_activeTab==='generate' && _genSubTab==='carto'`),
+  matching where its arming checkbox lives (was gated on the Explore tab in v0.64/v0.65).
+- **Fixes bundled:** the finalize lock's blanket disable had locked the **Un-finalize button
+  itself** since v0.62 (`#unfinalizeBtn` is inside `#genWorld`) — now exempted alongside
+  `#genV3dSec`; the active phase sub-tab label was invisible (v0.64's generic `button.on` accent
+  fill painted amber-on-amber — `.subtab.on` now forces `background:transparent`); three stale
+  "Edit → Tiles & LOD" path strings updated to "Generate → World → Tiles & LOD"; the stale
+  "Places & roads (Edit tab)" sentence dropped from the Infrastructure hint.
+- Browser pass owed: the restored branch flow end-to-end (sub-tab switching mid-draw, paint
+  disarm feel, ctx-menu branch reveal), plus the passes already listed under v0.65.
+
 ### v0.65 (2026-07-06)
 UI/UX overhaul — closes out the scope cuts v0.64 made deliberately ("lite" inspector, no
 Assets/Export header move). **Engine bit-identical to v0.64** (FIELD/TEMP/RAIN/FLOW FNV checksums
