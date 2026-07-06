@@ -2537,6 +2537,9 @@ if (typeof settlementSeedInfo === 'function') {
   // settlementSeedInfo: structured breakdown at a settlement seed
   const seeds = findSettlementSeeds(currentSettlementSuitability(), GW, GH);
   check('findSettlementSeeds returns advisory seeds', Array.isArray(seeds) && seeds.length > 0);
+  /* guard: on a broken/empty world seeds can be empty — record the FAIL above but don't crash the
+     suite (an unguarded seeds[0].x TypeError here used to abort ~200 later assertions). */
+  if (Array.isArray(seeds) && seeds.length > 0) {
   const info = settlementSeedInfo(seeds[0].x, seeds[0].y);
   check('settlementSeedInfo: core fields present & finite', info && Number.isFinite(info.score) && Number.isFinite(info.soil) && Number.isFinite(info.waterAccess) && Number.isFinite(info.carryingCapacity));
   check('settlementSeedInfo: score in [0,1]', info.score >= 0 && info.score <= 1);
@@ -2562,6 +2565,7 @@ if (typeof settlementSeedInfo === 'function') {
     const payloadSeeds = seeds.map(s => settlementSeedInfo(s.x, s.y));
     check('settlement_seeds export: every seed carries x/y/score/resources/summary', payloadSeeds.every(o => Number.isFinite(o.x) && Number.isFinite(o.y) && Number.isFinite(o.score) && Array.isArray(o.resources) && typeof o.summary === 'string'));
   }
+  }   /* end seeds.length guard */
 }
 
 /* ---------- v0.111 Pillar 1: Strahler stream order + Rosgen river network ---------- */

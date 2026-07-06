@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Headless verification for elevation_foundation:
-#   1. extract the <script> body from the HTML
+# Headless verification for the Cartalith Gen1 engine (script block 1 of the merged file):
+#   1. extract the FIRST <script> body from the HTML (the generator engine)
 #   2. node --check (syntax)
 #   3. smoke-test suite (stub DOM + CPU-only pipeline)
-# Usage: tests/run.sh [path/to/elevation_foundation.html]
+# Usage: tests/run.sh [path/to/Cartalith Gen1 vX.XX.html]
+# Default: the newest "Cartalith Gen1 v*.html" by version sort. NOTE the version-naming convention:
+# minor versions are two digits from v0.61 on (v0.61, v0.62, ... v0.70) — sort -V compares the minor
+# numerically, so a hypothetical "v0.7" would sort BEFORE "v0.61" and this default would pick the
+# wrong file. Keep two digits.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-HTML="${1:-$(ls elevation_foundation_v*.html | sort -V | tail -1)}"
+HTML="${1:-$(ls "Cartalith Gen1 v"*.html | sort -V | tail -1)}"
 OUT=/tmp/cartalith_test
 mkdir -p "$OUT"
 
