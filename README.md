@@ -1,3 +1,7 @@
+# Disclaimer
+
+I'm gonna be straight-up with all of you. This has been created entirely with the aid of Claude and other LLM's. I've tried my best to direct the whole thing in academically grounded information and tried to make sure that where it used work from others it would credit where credit is due. 
+
 # Cartalith Gen1
 
 A single-file HTML worldbuilding tool: procedural planet generation (tectonics → climate →
