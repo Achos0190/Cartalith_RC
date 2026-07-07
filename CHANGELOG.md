@@ -12,6 +12,42 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.67 (2026-07-07)
+**Setup gate + scale/height calibration.** The app no longer auto-generates a world on load and then
+overlays a once-per-browser card (the `cartalith_onboarded` flag suppressed that card forever after the
+first click — why it "didn't load on opening"). Instead a **hard setup gate** blocks the canvas until the
+user commits base settings. **Engine bit-identical to v0.66** (render battery ALL IDENTICAL; a default
+commit reproduces peakM=4000/width=800; checksums unbroken back to v0.62); headless **852 green** (the
+gate is browser-only — see below); `tests/perf/smoke_gen1.js` rewritten to drive the gate, **50 → 57**
+assertions.
+
+- **Boot gating.** Browser boot allocates buffers, renders the empty field, and opens the gate — no
+  `generate()` until commit. Headless (no `indexedDB` — the stub harness) keeps the old
+  `withBusy('generating…',generate)` path verbatim, so the 852-suite environment and FNV bit-identity are
+  byte-unchanged. `generate()` stays the sole generation path either way.
+- **Setup gate** (`_setupOpen(mode)`, three modes over the old `#onboard` modal): **intro** (Generate /
+  Load project / Import — no Skip, mandatory); **generate** (working resolution, map extent,
+  center-landmasses, scale & calibration with a km/mi toggle + distance legend, peak altitude, then
+  **Generate/Commit**); **calibrate** (shown after a heightmap loads — scale + peak, then **Commit** which
+  auto-runs the existing `inferTectonics()` so climate/biomes/lithology/resources get a substrate). Forms
+  share one canonical working object (km + m); commit mirrors the sidebar segs + `syncUI()` then runs
+  `generate()` once (center-landmasses runs right after, awaited).
+- **Units** (`_units` km|mi, localStorage pref — not serialized, invariant 6). Display-only conversions
+  (km↔mi, m↔ft) on the setup forms, the scale bar, and a new sidebar **Scale & calibration** parity block
+  (units toggle + legend). Canonical storage stays km + metres ⇒ default 'km' is byte-identical.
+- **Peak auto-suggest** `suggestPeakM(w)=round(8849·(1−e^(−w/1330)))` — real max relief grows sub-linearly
+  and saturates near Everest, so a 100 km region tops ~640 m while a whole planet caps at ~8 849 m (not
+  40 000× taller). Passes through 800 km → 4000 m (default preserved). Fills the peak field as width
+  changes; user override sticks.
+- **Scale-aware 3D** (`_v3dEffExag()`): the drape's vertical exaggeration is now
+  `view3d.exag · (reliefRatio / RATIO0)` where `reliefRatio = metresPerUnit / mapWidthMetres` and RATIO0 is
+  the default's ratio — so the default look is bit-identical, whole-world maps auto-flatten (~20× less
+  spiky) and small maps show a touch more relief. Used for both the shader uniform and 3D label anchoring.
+  2D render (separate `state.exag`) untouched.
+- Fixes: the header version chip read **v0.65** in v0.66 (missed bump) — corrected to v0.67 here.
+- Browser pass owed: the scale-aware 3D feel region↔whole-world, the live units toggle, and the
+  import→calibrate→infer flow with a real DEM file.
+
 ### v0.66 (2026-07-06)
 **IA correction — the Generate branch menu is restored.** v0.64's Stage-2 re-homing (retiring the
 Generate sub-tab bar and moving Civilization + Cartography into Explore) followed the research

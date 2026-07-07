@@ -9,10 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.66.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.67.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.67 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.65` are kept and never edited.
+  (v0.68 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.66` are kept and never edited.
+- **v0.67 — setup gate + scale/height calibration.** The app no longer auto-generates on load;
+  a **hard setup gate** blocks the canvas until the user commits base settings (the old
+  once-per-browser `cartalith_onboarded` flag — why the card "didn't load on opening" for
+  returning users — is retired). Boot: browser allocates + renders empty + opens the gate;
+  **headless (no indexedDB) keeps the old auto-generate path verbatim**, so 852 + bit-identity
+  are byte-unchanged. Gate (`_setupOpen`): intro (Generate/Load/Import, no Skip) → generate form
+  (resolution, extent, center, scale & calibration with **km/mi** toggle + distance legend, peak)
+  → **Commit** runs `generate()` once; heightmap Import → calibrate form → **Commit** auto-runs
+  `inferTectonics()`. **Peak auto-suggest** `suggestPeakM(w)=round(8849·(1−e^(−w/1330)))` (800→4000
+  preserved, caps ~Everest). **Scale-aware 3D** `_v3dEffExag()` normalizes the drape exaggeration
+  by the true relief:width ratio (default look bit-identical; whole-world auto-flattens). Units are
+  a localStorage pref (km + m canonical). Engine bit-identical to v0.66; headless **852**; smoke
+  **50 → 57**. Also fixed the header chip that read v0.65 in v0.66. Browser pass owed: 3D feel
+  across scales, live units toggle, import→infer with a real DEM.
 - **v0.66 — IA CORRECTION (owner-directed): the Generate branch menu is restored.** v0.64 had
   retired the Generate sub-tab bar and moved Civilization + Cartography into Explore, following
   the research proposal's §3 — but contradicting the owner's intended IA. The shipped structure

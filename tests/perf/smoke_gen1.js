@@ -15,7 +15,7 @@ const path = require('path');
 const PW = process.env.PLAYWRIGHT_DIR || '/opt/node22/lib/node_modules/playwright';
 const CHROME = process.env.CHROME_BIN || '/opt/pw-browsers/chromium';
 const { chromium } = require(PW);
-const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.66.html');
+const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.67.html');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox','--use-gl=swiftshader'] });
@@ -24,14 +24,72 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.66.h
   page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.text()); });
   await page.goto(FILE, { waitUntil: 'load' });
-  await page.waitForTimeout(2500);   // let the deferred initial generate() + wiring settle
+  await page.waitForTimeout(2500);   // let wiring settle (v0.67: NO auto-generate in browser — hard gate)
 
   const R = {};
-  // 1. onboarding card shows on first run (modal — intercepts canvas) + is wired, then dismiss it
-  R.onboard = await page.$eval('#onboard', el => ({ shown: getComputedStyle(el).display !== 'none', btns: el.querySelectorAll('.ob-btns button').length }));
-  await page.click('#obDismiss');
-  await page.waitForTimeout(100);
-  R.onboardDismissed = await page.$eval('#onboard', el => getComputedStyle(el).display === 'none');
+  // ── v0.67: the hard setup gate ──────────────────────────────────────────────
+  // 1a. gate is shown on load, intro step active, 3 action buttons, NO Skip, and nothing generated yet
+  R.gate = await page.evaluate(() => ({
+    shown: getComputedStyle(document.getElementById('onboard')).display !== 'none',
+    introOn: document.getElementById('obStepIntro').classList.contains('on'),
+    actionBtns: document.querySelectorAll('#obStepIntro .ob-btns button').length,
+    noSkip: !document.getElementById('obDismiss')
+  }));
+  // no auto-generate: the field should still be all-zero (empty world) behind the modal
+  R.noAutoGen = await page.evaluate(() => { let s = 0; for (let i = 0; i < field.length; i += 997) s += field[i]; return s === 0; });
+  // 1b. suggestPeakM curve: 800km→4000m (default-preserving), saturates near Everest at planetary scale
+  R.peakCurve = await page.evaluate(() => ({ at800: suggestPeakM(800), at40000: suggestPeakM(40000), at100: suggestPeakM(100) }));
+  // 1c. Generate → setup form: resolution/extent segs, units toggle, legend rows, peak auto-fill
+  await page.evaluate(() => document.getElementById('obGenerate').click());
+  await page.waitForTimeout(150);
+  R.setupForm = await page.evaluate(() => ({
+    generateStepOn: document.getElementById('obStepGenerate').classList.contains('on'),
+    resButtons: document.querySelectorAll('#suResSeg button').length,
+    extentButtons: document.querySelectorAll('#suExtentSeg button').length,
+    unitButtons: document.querySelectorAll('#suUnitSeg button').length,
+    legendRows: document.querySelectorAll('#suLegend .lg-row').length,
+    hasCenter: !!document.getElementById('suCenter')
+  }));
+  // peak auto-fills from width: type a whole-world width → peak jumps toward Everest
+  R.peakAutofill = await page.evaluate(() => {
+    const w = document.getElementById('suWidth'), p = document.getElementById('suPeak');
+    w.value = 40000; w.dispatchEvent(new Event('input'));
+    return +p.value;   // ~8849 (km/m units)
+  });
+  // units toggle: km → mi rewrites the width value + pill
+  R.unitToggle = await page.evaluate(() => {
+    document.querySelector('#suUnitSeg [data-unit="mi"]').click();
+    const w = document.getElementById('suWidth'), pill = document.getElementById('suWidthPill');
+    return { pill: pill.textContent, widthIsMiles: Math.abs(+w.value - 40000 / 1.609344) < 2 };
+  });
+  await page.evaluate(() => document.querySelector('#suUnitSeg [data-unit="km"]').click());   // back to km for the rest
+  // 1d. commit a default world (reset width→800 first so the committed world matches the rest of the suite)
+  await page.evaluate(() => {
+    const w = document.getElementById('suWidth'); w.value = 800; w.dispatchEvent(new Event('input'));
+    document.querySelector('#suResSeg [data-w="512"]').click();   // small = fast commit
+    document.getElementById('suGenCommit').click();
+  });
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('onboard')).display === 'none', null, { timeout: 60000 });
+  await page.waitForFunction(() => { for (let i = 0; i < field.length; i += 997) { if (field[i] !== 0) return true; } return false; }, null, { timeout: 60000 });   // world committed
+  R.committed = true;
+  R.gateHidden = await page.evaluate(() => getComputedStyle(document.getElementById('onboard')).display === 'none');
+  // 1e. import-calibration step exists and auto-infers on commit (drive it directly; a real file picker
+  //     can't be scripted). withBusy→showBusy sets #busyLabel synchronously, so the "inferring tectonics…"
+  //     label right after the click proves the infer path fired.
+  R.calStep = await page.evaluate(() => {
+    _setupOpen('calibrate');
+    const on = document.getElementById('obStepCalibrate').classList.contains('on');
+    const legend = document.querySelectorAll('#suLegend2 .lg-row').length;
+    document.getElementById('suCalCommit').click();
+    const busyLabel = (document.getElementById('busyLabel').textContent || '');
+    return { on, legend, infersOnCommit: /infer/i.test(busyLabel), hidden: getComputedStyle(document.getElementById('onboard')).display === 'none' };
+  });
+  await page.waitForTimeout(400);   // let the inferTectonics withBusy op finish before the rest of the suite
+  // sidebar Scale & calibration parity: units toggle + legend present
+  R.sidebarScale = await page.evaluate(() => ({
+    unitSeg: document.querySelectorAll('#calUnitSeg button').length,
+    legendRows: document.querySelectorAll('#calLegend .lg-row').length
+  }));
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
   await page.click('#layersBtn');
@@ -199,8 +257,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.66.h
   const A = (name, cond) => { if (cond) { ok++; console.log('ok   - ' + name); } else { fail++; console.log('FAIL - ' + name); } };
   A('no page/console errors on load', errors.length === 0);
   if (errors.length) errors.forEach(e => console.log('      ' + e));
-  A('onboarding card shows on first run with 3 action buttons', R.onboard.shown && R.onboard.btns === 3);
-  A('onboarding dismiss hides the card', R.onboardDismissed === true);
+  // ── v0.67: hard setup gate + scale/height calibration ──
+  A('setup gate shows on load: intro step, 3 actions, no Skip', R.gate.shown && R.gate.introOn && R.gate.actionBtns === 3 && R.gate.noSkip);
+  A('nothing is simulated until commit (empty field behind the gate)', R.noAutoGen === true);
+  A('suggestPeakM saturates: 800→4000, 40000→~8849, 100 small', R.peakCurve.at800 === 4000 && Math.abs(R.peakCurve.at40000 - 8849) < 5 && R.peakCurve.at100 < 1000);
+  A('Generate opens the setup form (res/extent/units/center + legend)', R.setupForm.generateStepOn && R.setupForm.resButtons === 5 && R.setupForm.extentButtons === 2 && R.setupForm.unitButtons === 2 && R.setupForm.legendRows === 7 && R.setupForm.hasCenter);
+  A('peak auto-fills from map width (40000km → ~8849m)', Math.abs(R.peakAutofill - 8849) < 5);
+  A('km→mi toggle rewrites width value + pill', R.unitToggle.pill === 'mi' && R.unitToggle.widthIsMiles);
+  A('committing the setup builds a world and hides the gate', R.committed && R.gateHidden);
+  A('import calibration step + auto-infer on commit', R.calStep.on && R.calStep.legend === 7 && R.calStep.infersOnCommit && R.calStep.hidden);
+  A('sidebar Scale & calibration gains units toggle + legend', R.sidebarScale.unitSeg === 2 && R.sidebarScale.legendRows === 7);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);
   A('Layers popover builds grouped list (>=5 groups, >=25 items)', R.layers.groups >= 5 && R.layers.items >= 25);
   A('Layers item click proxies to #debugSeg (state.debug=bclass)', R.debugAfterClick === 'bclass');
