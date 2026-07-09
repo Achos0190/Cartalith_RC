@@ -2230,6 +2230,44 @@ if (typeof applyTidalSedimentation === 'function') {
   const carry2 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea);
   check('carryingCapacity deterministic', carryLand.every((v, i) => v === carry2[i]));
 
+  /* ---------- v0.69: sourced settlement density (docs/research/settlement-density.md) ---------- */
+  if (typeof foragerFloorKm2 === 'function') {
+    /* forager floor calibration — the ×0.45 dry-matter→carbon conversion is load-bearing (doc §1) */
+    check('foragerFloorKm2: NPP 0 ≈ 0.030/km² (Binford-scale forage floor)', Math.abs(foragerFloorKm2(0) - 0.0295) < 0.003);
+    check('foragerFloorKm2: NPP 3000 g DM ≈ 0.58/km² (Tallavaara richest biomes)', Math.abs(foragerFloorKm2(3000) - 0.58) < 0.05);
+    check('foragerFloorKm2: monotonic in NPP', foragerFloorKm2(3000) > foragerFloorKm2(1000) && foragerFloorKm2(1000) > foragerFloorKm2(0));
+  }
+  if (typeof biomeDensityResidual === 'function') {
+    check('biomeDensityResidual: all land biomes in [0.55,1.0], lake=0', (() => {
+      for (let bi = 1; bi <= 12; bi++) { const r = biomeDensityResidual(bi); if (r < 0.55 || r > 1.0) return false; }
+      return biomeDensityResidual(13) === 0 && biomeDensityResidual(0) === 0;
+    })());
+    check('biomeDensityResidual: tropWet(12) is the rainforest-paradox low', biomeDensityResidual(12) <= biomeDensityResidual(5));
+  }
+  if (typeof buildCarryingCapacity === 'function') {
+    /* the whole bit-identity promise: biomeK omitted / 0 must byte-match the pre-v0.69 output */
+    const cDefault = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea);
+    const cK0 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 0 });
+    check('buildCarryingCapacity: biomeK:0 byte-identical to default (bit-identity)', cDefault.every((v, i) => v === cK0[i]));
+    const cK1 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 1 });
+    check('buildCarryingCapacity: biomeK:1 ≤ default everywhere (residual ≤ 1)', cK1.every((v, i) => v <= cDefault[i] + 1e-7));
+  }
+  if (typeof estimateRegionalDensityKm2 === 'function') {
+    /* anchor: a prime cell (K=1, temperate-forest, full water) ≈ 81/km²; Maya floodplain (K=0.6, tropWet, water=1) ≈ 92 (doc §3) */
+    const K1 = new Float32Array(n).fill(1), K06 = new Float32Array(n).fill(0.6), w1 = new Float32Array(n).fill(1);
+    const bTemp = new Uint8Array(n).fill(5), bMaya = new Uint8Array(n).fill(12), npp0 = new Float32Array(n).fill(0);
+    const dTemp = estimateRegionalDensityKm2(K1, w1, bTemp, npp0, fld, W, H, sea);
+    const dMaya = estimateRegionalDensityKm2(K06, w1, bMaya, npp0, fld, W, H, sea);
+    check('estimateRegionalDensityKm2: temperate prime cell ≈ 81/km²', Math.abs(dTemp[10 * W + 6] - 81) < 3);
+    check('estimateRegionalDensityKm2: Maya floodplain cell ≈ 92/km²', Math.abs(dMaya[10 * W + 6] - 92) < 4);
+    check('estimateRegionalDensityKm2: ocean = 0', estimateRegionalDensityKm2(K1, w1, bTemp, npp0, noFld, W, H, sea).every(v => v === 0));
+  }
+  if (typeof suppressionRadiusCells === 'function') {
+    /* 10 km village spacing at 800 km / 2048 px ⇒ cellKm≈0.39 ⇒ ~26 cells (doc §6) */
+    check('suppressionRadiusCells: 10 km @ 800 km/2048 ≈ 26 cells', suppressionRadiusCells(10, 2048, 800) === Math.max(4, Math.round(10 / (800 / 2048))));
+    check('suppressionRadiusCells: floors at 4', suppressionRadiusCells(0.01, 2048, 800) === 4);
+  }
+
   /* buildSettlementSuitability */
   const slopeFlat = new Float32Array(n).fill(0.5), slopeCliff = new Float32Array(n).fill(6.0);
   const carry = buildCarryingCapacity(soil, water, null, temp, fld, W, H, sea);

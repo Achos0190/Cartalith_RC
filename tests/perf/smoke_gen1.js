@@ -92,6 +92,26 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     unitSeg: document.querySelectorAll('#calUnitSeg button').length,
     legendRows: document.querySelectorAll('#calLegend .lg-row').length
   }));
+
+  // ── v0.69: settlement density — Pop-density debug view + biome-K toggle ──
+  R.popDensity = await page.evaluate(() => {
+    _debugBtn('popdensity').click();                       // proxy through the same seg the popover uses
+    const set = state.debug === 'popdensity';
+    const d = currentPopulationDensity();
+    let mx = 0; for (let i = 0; i < d.length; i += 97) if (d[i] > mx) mx = d[i];   // some land cell has real persons/km²
+    _debugBtn('off').click();
+    return { set, hasSignal: mx > 1 };
+  });
+  R.biomeK = await page.evaluate(() => {
+    const before = _biomeK;
+    const K0 = currentCarryingCapacity().slice(0);
+    const chk = document.getElementById('civBiomeKChk'); chk.checked = true; chk.dispatchEvent(new Event('change'));
+    const on = _biomeK === 1;
+    const K1 = currentCarryingCapacity();
+    let changed = false; for (let i = 0; i < K1.length; i += 97) if (Math.abs(K1[i] - K0[i]) > 1e-6) { changed = true; break; }
+    chk.checked = false; chk.dispatchEvent(new Event('change'));   // restore
+    return { startsOff: before === 0, togglesOn: on, changesK: changed, restored: _biomeK === 0 };
+  });
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
   await page.click('#layersBtn');
@@ -271,6 +291,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('committing the setup builds a world and hides the gate', R.committed && R.gateHidden);
   A('import calibration step + auto-infer on commit', R.calStep.on && R.calStep.legend === 7 && R.calStep.infersOnCommit && R.calStep.hidden);
   A('sidebar Scale & calibration gains units toggle + legend', R.sidebarScale.unitSeg === 2 && R.sidebarScale.legendRows === 7);
+  A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
+  A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);
   A('Layers popover builds grouped list (>=5 groups, >=25 items)', R.layers.groups >= 5 && R.layers.items >= 25);
   A('Layers item click proxies to #debugSeg (state.debug=bclass)', R.debugAfterClick === 'bclass');

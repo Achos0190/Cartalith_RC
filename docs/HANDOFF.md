@@ -9,10 +9,22 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.68.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.69.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.69 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.67` are kept and never edited.
+  (v0.70 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.68` are kept and never edited.
+  (Note: there is no v0.68→v0.69 gap in features — v0.69 simply follows v0.68; no v0.68.5.)
+- **v0.69 — settlement density (sourced).** First of the three research-doc tracks the owner
+  supplied (`docs/research/settlement-density.md`; river-lod + rust-wasm briefs also committed for
+  later tracks, JS-first, Rust deferred). Pure/CPU-path additions, **engine bit-identical to v0.68**
+  (biome term defaults off; density field additive, never in `generate()`); headless **864** (+12
+  calibration), smoke **61**. Added: `foragerFloorKm2` (NPP→forager density), biome-residual
+  `buildCarryingCapacity` behind `opts.biomeK` (default 0 = byte-identical; opt-in checkbox flips
+  `_biomeK`), `estimateRegionalDensityKm2` (persons/km², water-gated agrarian ceiling) surfaced as
+  the **"Pop density"** debug view + `population_density.f32` export, and `suppressionRadiusCells`
+  spacing helper (not yet wired into placement). Deferred v0.70 candidates: metropolis tier,
+  village-density placement mode, Wetlands carrying-capacity, Mediterranean-scrub calibration.
+  Roadmap after density: JS LOD/renderer perf refactor → river-as-feature LOD → (later) Rust/WASM.
 - **v0.68 — fix: sidebar was live during the v0.67 setup gate.** The gate modal lives inside
   `.canvas-wrap` so it only covered the canvas; the sidebar (a sibling `aside`) stayed clickable,
   and its Generate→World sliders (sea/climate/weather) acted on the empty pre-commit field — the

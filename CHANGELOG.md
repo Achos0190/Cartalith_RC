@@ -12,6 +12,33 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.69 (2026-07-07)
+**Settlement density — sourced carrying-capacity + regional population** (`docs/research/settlement-density.md`,
+a fully-cited audit that replaced invented civ numbers with calibrated ones). All pure/CPU-path additions;
+**engine bit-identical to v0.68** (render battery ALL IDENTICAL — the biome term defaults off, the density
+field is additive and never runs in `generate()`); headless **852 → 864** (12 calibration assertions);
+`tests/perf/smoke_gen1.js` **59 → 61**.
+
+- **Forager floor** — `foragerFloorKm2(nppDryMatter)` (Zhu et al. 2021 regression after Tallavaara 2018 [A]).
+  Converts `buildNPP`'s g-dry-matter to the gC basis the regression assumes (×0.45 — load-bearing; omitting it
+  is 10× high). Calibrated: NPP 0 → ~0.030/km², 3000 g DM → ~0.58/km² (both asserted headlessly).
+- **Biome-residual carrying capacity** — `BIOME_DENSITY_RESIDUAL[13]` (indexed to `BIOME_KEYS`) folded into
+  `buildCarryingCapacity` behind `opts.biomeK` (**default 0 ⇒ byte-identical**; asserted). Captures only the
+  residual soil/temp/water miss: the rainforest paradox (tropWet 0.55 — pathogen suppression [A]) and
+  arid/cold survival friction. An opt-in "Biome carrying-capacity" checkbox (Civilization) flips it and
+  re-derives K / suitability / density.
+- **Regional population density** — `estimateRegionalDensityKm2` + `BIOME_INTENSIFY_ELIGIBLE[13]` + ceilings
+  `RAINFED_CEILING_KM2=45` [B, Low Countries c.1500] / `INTENSIVE_CEILING_KM2=165` [A, Classic Maya lidar].
+  Forager floor + a water-gated agrarian ceiling. Anchors reproduced (temperate prime cell ~81/km², Maya
+  floodplain ~92/km²; asserted). Surfaced as the new **"Pop density"** debug view (log heat ramp + sourced
+  legend) and a `population_density.f32` export entry. Never feeds K (kept a pure [0,1] affordance).
+- **Scale-anchored spacing helper** — `suppressionRadiusCells(spacingKm,GW,mapWidthKm)` + `VILLAGE_SPACING_KM=10`
+  [A, Vita-Finzi & Higgs] / `MARKET_TOWN_SPACING_KM=25`. Helper only — `_civIterativeAutoWorld` keeps its
+  current ~market-town default so auto-populate stays bit-identical; a village-density mode is a v0.70 candidate.
+- Source briefs committed to `docs/research/` (settlement-density, river-lod-brief, rust-wasm-lod-brief) for
+  the roadmap. Deferred (flagged): metropolis/imperial tier, village-density placement mode, Wetlands/Marshes
+  carrying capacity, Mediterranean-scrub calibration.
+
 ### v0.68 (2026-07-07)
 **Fix: sidebar was live during the setup gate (looked like broken sea/climate/weather).** v0.67's hard
 gate modal (`#onboard`) lives inside `.canvas-wrap`, so it only covers the canvas — the sidebar (`aside`,
