@@ -12,6 +12,18 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.68 (2026-07-07)
+**Fix: sidebar was live during the setup gate (looked like broken sea/climate/weather).** v0.67's hard
+gate modal (`#onboard`) lives inside `.canvas-wrap`, so it only covers the canvas — the sidebar (`aside`,
+a sibling) stayed interactive. Before committing a world there is no field, so the Generate→World sliders
+(sea level, climate, weather) acted on an empty grid and appeared broken (they worked fine post-commit —
+verified: sea 0.42→0.60, equator-temp moved tempField, weather sim moved rainField). Fix: a
+`body.setup-gated` class (added in `_setupOpen`, removed in `_setupHide`) applies
+`aside{pointer-events:none;opacity:.4}` so the sidebar is visibly locked until a world is committed or a
+project/heightmap is loaded. Engine untouched — **bit-identical to v0.67** (render battery ALL IDENTICAL);
+headless **852**; smoke **57 → 59** (added: sidebar locked while gated, unlocked after commit). Also
+corrected the header chip that read v0.65 in v0.66 (v0.67 already fixed it; noted here for the record).
+
 ### v0.67 (2026-07-07)
 **Setup gate + scale/height calibration.** The app no longer auto-generates a world on load and then
 overlays a once-per-browser card (the `cartalith_onboarded` flag suppressed that card forever after the

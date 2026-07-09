@@ -15,7 +15,7 @@ const path = require('path');
 const PW = process.env.PLAYWRIGHT_DIR || '/opt/node22/lib/node_modules/playwright';
 const CHROME = process.env.CHROME_BIN || '/opt/pw-browsers/chromium';
 const { chromium } = require(PW);
-const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.67.html');
+const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.html');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox','--use-gl=swiftshader'] });
@@ -33,7 +33,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.67.h
     shown: getComputedStyle(document.getElementById('onboard')).display !== 'none',
     introOn: document.getElementById('obStepIntro').classList.contains('on'),
     actionBtns: document.querySelectorAll('#obStepIntro .ob-btns button').length,
-    noSkip: !document.getElementById('obDismiss')
+    noSkip: !document.getElementById('obDismiss'),
+    sidebarLocked: document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents === 'none'   // v0.68: sidebar inert while gated
   }));
   // no auto-generate: the field should still be all-zero (empty world) behind the modal
   R.noAutoGen = await page.evaluate(() => { let s = 0; for (let i = 0; i < field.length; i += 997) s += field[i]; return s === 0; });
@@ -73,6 +74,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.67.h
   await page.waitForFunction(() => { for (let i = 0; i < field.length; i += 997) { if (field[i] !== 0) return true; } return false; }, null, { timeout: 60000 });   // world committed
   R.committed = true;
   R.gateHidden = await page.evaluate(() => getComputedStyle(document.getElementById('onboard')).display === 'none');
+  R.sidebarUnlocked = await page.evaluate(() => !document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents !== 'none');   // v0.68: sidebar live after commit
   // 1e. import-calibration step exists and auto-infers on commit (drive it directly; a real file picker
   //     can't be scripted). withBusy→showBusy sets #busyLabel synchronously, so the "inferring tectonics…"
   //     label right after the click proves the infer path fired.
@@ -259,6 +261,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.67.h
   if (errors.length) errors.forEach(e => console.log('      ' + e));
   // ── v0.67: hard setup gate + scale/height calibration ──
   A('setup gate shows on load: intro step, 3 actions, no Skip', R.gate.shown && R.gate.introOn && R.gate.actionBtns === 3 && R.gate.noSkip);
+  A('sidebar is locked (inert) while the gate is open', R.gate.sidebarLocked === true);
+  A('sidebar unlocks after committing a world', R.sidebarUnlocked === true);
   A('nothing is simulated until commit (empty field behind the gate)', R.noAutoGen === true);
   A('suggestPeakM saturates: 800→4000, 40000→~8849, 100 small', R.peakCurve.at800 === 4000 && Math.abs(R.peakCurve.at40000 - 8849) < 5 && R.peakCurve.at100 < 1000);
   A('Generate opens the setup form (res/extent/units/center + legend)', R.setupForm.generateStepOn && R.setupForm.resButtons === 5 && R.setupForm.extentButtons === 2 && R.setupForm.unitButtons === 2 && R.setupForm.legendRows === 7 && R.setupForm.hasCenter);

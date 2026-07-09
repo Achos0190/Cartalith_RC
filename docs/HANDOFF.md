@@ -9,10 +9,16 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.67.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.68.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.68 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.66` are kept and never edited.
+  (v0.69 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.67` are kept and never edited.
+- **v0.68 — fix: sidebar was live during the v0.67 setup gate.** The gate modal lives inside
+  `.canvas-wrap` so it only covered the canvas; the sidebar (a sibling `aside`) stayed clickable,
+  and its Generate→World sliders (sea/climate/weather) acted on the empty pre-commit field — the
+  "sea level/climate/weather seem broken" report. The committed sim was verified fine. Fix:
+  `body.setup-gated` (toggled in `_setupOpen`/`_setupHide`) dims + `pointer-events:none` the
+  sidebar until a world is committed/loaded. Engine bit-identical; headless **852**; smoke **59**.
 - **v0.67 — setup gate + scale/height calibration.** The app no longer auto-generates on load;
   a **hard setup gate** blocks the canvas until the user commits base settings (the old
   once-per-browser `cartalith_onboarded` flag — why the card "didn't load on opening" for
