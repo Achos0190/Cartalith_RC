@@ -12,6 +12,50 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.85 (2026-07-10)
+**Mechanistic collapse/recovery timeline simulator** (owner: "I think it should be possible to model how such
+a collapse would play out. What settlements fall first how people migrate etc… research the mathematics in
+regards to population mechanics… how to use this new function in regards to the timeline"). Builds on v0.81's
+capacity-grounded populations and v0.82's phase-scaled recovery: instead of an instant before/after snapshot,
+this runs a **year-stepped simulation** — per-settlement stress → excess mortality + out-migration (or logistic
+regrowth), gravity-model redistribution of migrants, tier demotion/abandonment — and writes ONE `civTimeline`
+entry per step, so the result scrubs through the *existing* timeline slider exactly like manually-authored
+history. New research doc `docs/research/collapse-timeline-dynamics.md` (Albert/Jeong/Barabási 2000 network
+robustness, Zipf 1946/Ravenstein 1885 gravity migration, Benedictow 2004 Black Death mortality calibration,
+Cline 2014/Wickham 2005 collapse-character sourcing). Civ layer (block 2) only — no engine (block 1) changes;
+render battery ALL IDENTICAL to v0.84, headless **909** unchanged, smoke **86 → 98**.
+
+- **Pure simulation core**, all new, all deterministic (no RNG consumed anywhere in the model):
+  `_civProximityAdjacency`/`_civBetweennessFromAdjacency` (a standalone Brandes-betweenness proximity graph,
+  rebuilt fresh each step so it never goes stale across settlement removals, unlike the rendered `ways`);
+  `_civSettlementStress` (per-settlement stress in [0,1] from trade-dependency loss vs. a t=0 baseline,
+  density/connectivity exposure, and undefended-violence exposure, weighted by a **character**: trade/disease/
+  conflict/mixed — each fails settlements in a different order, sourced per doc §2); `_civMortalityMigrationRates`
+  (stress×severity → excess-mortality and out-migration fractions, capped at doc-derived ceilings — 15%/yr
+  mortality ceiling backs out of the Black Death's ~45% toll over ~4 years); `_civGravityMigrate` (Zipf/
+  Ravenstein gravity model: survivors redistribute to reachable settlements ∝ attractiveness/distance^1.5,
+  headroom-capped, system-wide overflow becomes unplaced transit/diaspora loss — mass-conserving);
+  `_civCollapseStep`/`_civRecoveryGrowthStep` (one `stepYears`-long jump: collapse applies mortality+migration
+  then re-derives each survivor's tier, demoting a shrunken city into a fortified ruin-village or abandoning it
+  outright below the v0.82 floor; recovery compounds Verhulst logistic regrowth toward each settlement's own
+  local catchment ceiling, clearing `ruins` on promotion back into an exchange tier); `_civSimulateTimeline`
+  (orchestrator — runs `steps` collapse-or-recovery steps from a starting `places` array, returns one
+  `{places, stats}` snapshot per step; tracks the t=0 baseline betweenness by each place's stable `tid`).
+- **UI**: new "Simulate collapse / recovery" section under Civilization → Polity, right below the existing
+  timeline (mode select, character select, severity/regrowth-rate sliders, start year + duration/step-years
+  fields, a Simulate button, and a result summary reporting deaths/migrants/failed settlements). Wired by the
+  new impure `_civRunCollapseSimulation()`, which reads `state.places`, runs the pure orchestrator, and writes
+  the resulting snapshots into `civTimeline` — **never touching `state.places`/`civWays`**, the same rule every
+  other timeline write already follows (territory/ways carry forward unchanged from the nearest prior entry;
+  collapse doesn't redraw political borders, that stays an authored layer).
+- Verify: browser-confirmed end to end on a real auto-populated world — Simulate wrote the expected number of
+  timeline entries, the year pills/slider picked them up with no new rendering code, and the settlement/ways
+  editors were untouched throughout. Smoke suite grew 86 → 98 (pure-function correctness: hub betweenness,
+  character-dependent stress ordering, mortality/migration monotonicity+ceilings, gravity-migration mass
+  conservation + distance decay, collapse-step determinism + population reduction, recovery logistic growth,
+  multi-step trajectory monotonicity; UI: mode-toggle row visibility, live slider labels, civTimeline writes,
+  and the state.places/civWays-untouched invariant).
+
 ### v0.84 (2026-07-10)
 **Fix: restore the "Vertical" sublabel above Sea level/Peak altitude** (owner report: "the option for sea
 level should have stayed where it was"). v0.83 removed the Map width row from the sidebar's Scale &

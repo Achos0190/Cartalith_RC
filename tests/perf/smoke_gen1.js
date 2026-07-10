@@ -542,6 +542,114 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.waitForTimeout(200);
   R.assetsExitedViaGenerate = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display !== 'none');
 
+  // ---- v0.85: collapse-timeline simulator (docs/research/collapse-timeline-dynamics.md) ----
+  // Pure-function correctness on a small synthetic settlement graph, independent of the world's own
+  // layout (mirrors the v0.75/v0.82 pattern above — deterministic local arrays, no state.places).
+  R.collapseSim = await page.evaluate(() => {
+    const synth = () => ([
+      { tid: 1, x: 60, y: 60, pop: 20000, category: 'settlement', kind: 'city', klass: 'city', traits: [] },
+      { tid: 2, x: 55, y: 60, pop: 3000, category: 'settlement', kind: 'town', klass: 'town', traits: [] },
+      { tid: 3, x: 65, y: 60, pop: 3000, category: 'settlement', kind: 'town', klass: 'town', traits: [] },
+      { tid: 4, x: 60, y: 55, pop: 800, category: 'settlement', kind: 'village', klass: 'village', traits: [] },
+      { tid: 5, x: 60, y: 65, pop: 800, category: 'settlement', kind: 'village', klass: 'village', traits: [] },
+      { tid: 6, x: 5, y: 5, pop: 200, category: 'settlement', kind: 'hamlet', klass: 'hamlet', traits: [] },
+    ]);
+    const cellKm = (state.mapWidthKm || 800) / GW;
+    const places85 = synth();
+    const adj85 = _civProximityAdjacency(places85, 4, cellKm * GW * 0.5, cellKm);
+    const btw85 = _civBetweennessFromAdjacency(places85.length, adj85);
+    const hubMaxBtw = btw85[0] === Math.max(...btw85) && btw85[0] > 0;
+
+    const maxPop85 = Math.max(...places85.map(p => p.pop));
+    const stressHamletConflict = _civSettlementStress(places85[5], 0.05, null, maxPop85, 'conflict');
+    const stressCityConflict = _civSettlementStress(places85[0], 0.9, null, maxPop85, 'conflict');
+    const conflictHitsUndefended = stressHamletConflict > stressCityConflict;
+
+    const lo = _civMortalityMigrationRates(0.2, 0.3, 'mixed'), hi = _civMortalityMigrationRates(0.9, 0.9, 'mixed');
+    const ratesMonotonic = hi.m > lo.m && hi.g > lo.g;
+    const capped = _civMortalityMigrationRates(1, 1, 'conflict');
+    const ratesCapped = capped.m <= _CIV_COLLAPSE_MAX_MORTALITY + 1e-9 && capped.g <= _CIV_COLLAPSE_MAX_MIGRATION * _CIV_COLLAPSE_MIGRATION_BIAS.conflict + 1e-9;
+
+    const migPlaces = [{ x: 0, y: 0, pop: 0, kind: 'hamlet', traits: [] }, { x: 2, y: 0, pop: 0, kind: 'town', traits: [] }, { x: 20, y: 0, pop: 0, kind: 'town', traits: [] }];
+    const pool85 = 1000, cap85 = [0, 5000, 5000];
+    const gm = _civGravityMigrate(migPlaces, i => (i === 0 ? pool85 : 0), cap85, 1);
+    const massConserved = Math.abs((gm.received[1] + gm.received[2] + gm.unplaced) - pool85) < 1e-6;
+    const distanceDecay = gm.received[1] > gm.received[2];
+
+    const stepA = _civCollapseStep(synth(), { character: 'conflict', severity: 0.95, stepYears: 10 });
+    const stepB = _civCollapseStep(synth(), { character: 'conflict', severity: 0.95, stepYears: 10 });
+    const deterministic = JSON.stringify(stepA.places) === JSON.stringify(stepB.places);
+    const popBefore = synth().filter(p => p.category === 'settlement').reduce((s, p) => s + p.pop, 0);
+    const popAfter = stepA.places.filter(p => p.category === 'settlement').reduce((s, p) => s + p.pop, 0);
+    const collapseReducesPop = popAfter < popBefore;
+
+    // Recovery ceiling is geography-derived (currentCarryingCapacity() at the place's real x,y), so a
+    // fixed synthetic coordinate could legitimately sit on near-zero-capacity terrain depending on the
+    // world's random seed. Use a REAL auto-populated settlement's coordinates instead (guaranteed valid,
+    // food-producing land by construction of the placement algorithm), starting it at 10% of its own
+    // (normB:0) local ceiling so growth toward that same ceiling is unambiguous.
+    _civAutoWorld();
+    const realSettlement = state.places.find(p => p && p.category === 'settlement');
+    const K85 = currentCarryingCapacity();
+    const recoverProbe = { ...realSettlement, pop: Math.max(1, Math.round(_civSettlementPopulation(realSettlement, K85, { normB: 0 }) * 0.1)) };
+    const recoverOut = _civRecoveryGrowthStep([recoverProbe], { rate: 0.05, stepYears: 10 });
+    const recoveryGrows = recoverOut.places[0].pop > recoverProbe.pop;
+
+    const traj = _civSimulateTimeline(synth(), { mode: 'collapse', character: 'disease', severity: 0.9, steps: 5, stepYears: 10 });
+    const popSeries = traj.map(s => s.places.filter(p => p.category === 'settlement').reduce((sum, p) => sum + (p.pop || 0), 0));
+    let monotonic = true; for (let i = 1; i < popSeries.length; i++) if (popSeries[i] > popSeries[i - 1] + 1e-6) monotonic = false;
+
+    return { hubMaxBtw, conflictHitsUndefended, ratesMonotonic, ratesCapped, massConserved, distanceDecay, deterministic, collapseReducesPop, recoveryGrows, monotonicDecline: monotonic, trajLen: traj.length };
+  });
+
+  // UI wiring: mode toggle swaps rows, slider updates its live label, and clicking Simulate writes
+  // civTimeline entries WITHOUT touching state.places/civWays (the architectural invariant every other
+  // timeline write already follows).
+  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="civ"]').click());
+  await page.waitForTimeout(150);
+  R.collapseSimUI = await page.evaluate(() => {
+    _civAutoWorld();
+    // pre-assign tids so the equality check below isn't noise from civSnapshotSave's own
+    // _civAssignTid pass (which civAddYear does too, on every place AND every way — pre-existing).
+    for (const p of state.places) _civAssignTid(p);
+    for (const w of civWays) _civAssignTid(w);
+    civYear = 0; civTimeline.length = 0;
+    const placesBefore = JSON.stringify(state.places), waysBefore = JSON.stringify(civWays);
+
+    const modeSel = document.getElementById('civSimMode'), charRow = document.getElementById('civSimCharRow'), rateRow = document.getElementById('civSimRateRow');
+    const collapseCharRowShown = getComputedStyle(charRow).display !== 'none';
+    const collapseRateRowHidden = getComputedStyle(rateRow).display === 'none';
+    modeSel.value = 'recovery'; modeSel.dispatchEvent(new Event('change'));
+    const recoveryCharRowHidden = getComputedStyle(charRow).display === 'none';
+    const recoveryRateRowShown = getComputedStyle(rateRow).display !== 'none';
+    modeSel.value = 'collapse'; modeSel.dispatchEvent(new Event('change'));
+
+    const sev = document.getElementById('civSimSeverity'), sevV = document.getElementById('civSimSeverityV');
+    sev.value = 80; sev.dispatchEvent(new Event('input'));
+    const severityLabelUpdates = sevV.textContent === '80%';
+
+    document.getElementById('civSimStartYear').value = 0;
+    document.getElementById('civSimDuration').value = 50;
+    document.getElementById('civSimStepYears').value = 10;
+    document.getElementById('civSimCharacter').value = 'conflict';
+
+    document.getElementById('civSimulateBtn').click();
+
+    const newEntries = civTimeline.filter(e => e.year > 0 && e.year <= 50);
+    const timelineGotFiveSteps = newEntries.length === 5;
+    const stepsHaveSettlements = newEntries.every(e => Array.isArray(e.places) && e.places.length > 0);
+    const placesUntouched = JSON.stringify(state.places) === placesBefore;
+    const waysUntouched = JSON.stringify(civWays) === waysBefore;
+    const outHasStats = /died|migrated|failed/i.test(document.getElementById('civSimOut').textContent);
+
+    // clean up: this is the last civ-state-dependent block in the suite, but restore anyway for hygiene
+    civTimeline.length = 0; state.places = []; civWays = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof renderNow === 'function') renderNow();
+
+    return { collapseCharRowShown, collapseRateRowHidden, recoveryCharRowHidden, recoveryRateRowShown, severityLabelUpdates, timelineGotFiveSteps, stepsHaveSettlements, placesUntouched, waysUntouched, outHasStats };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -635,6 +743,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('Export ▾ header dropdown opens', R.exportMenuOpen === true);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
+  A('v0.85 collapse: proximity graph + betweenness identify the hub as most central', R.collapseSim.hubMaxBtw);
+  A('v0.85 collapse: conflict character stresses an undefended hamlet more than a fortified/exchange city', R.collapseSim.conflictHitsUndefended);
+  A('v0.85 collapse: mortality/migration rates rise monotonically with stress×severity, capped at doc ceilings', R.collapseSim.ratesMonotonic && R.collapseSim.ratesCapped);
+  A('v0.85 collapse: gravity migration conserves mass and prefers the nearer destination', R.collapseSim.massConserved && R.collapseSim.distanceDecay);
+  A('v0.85 collapse: one step is deterministic and reduces total population under high severity', R.collapseSim.deterministic && R.collapseSim.collapseReducesPop);
+  A('v0.85 recovery: logistic regrowth increases total population', R.collapseSim.recoveryGrows);
+  A('v0.85 collapse: a 5-step trajectory returns 5 snapshots with non-increasing population', R.collapseSim.trajLen === 5 && R.collapseSim.monotonicDecline);
+  A('v0.85 UI: mode toggle shows/hides Character+Severity vs. Regrowth-rate rows', R.collapseSimUI.collapseCharRowShown && R.collapseSimUI.collapseRateRowHidden && R.collapseSimUI.recoveryCharRowHidden && R.collapseSimUI.recoveryRateRowShown);
+  A('v0.85 UI: severity slider updates its live label', R.collapseSimUI.severityLabelUpdates);
+  A('v0.85 UI: Simulate writes one civTimeline entry per step, each carrying settlements', R.collapseSimUI.timelineGotFiveSteps && R.collapseSimUI.stepsHaveSettlements);
+  A('v0.85 UI: simulating never touches state.places/civWays (writes history, not the live world)', R.collapseSimUI.placesUntouched && R.collapseSimUI.waysUntouched);
+  A('v0.85 UI: result summary reports mortality/migration/failure stats', R.collapseSimUI.outHasStats);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

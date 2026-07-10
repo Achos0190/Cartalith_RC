@@ -9,10 +9,34 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.84.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.85.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.85 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.83` are kept and never edited.
+  (v0.86 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.84` are kept and never edited.
+- **v0.85 — mechanistic collapse/recovery timeline simulator** (owner: "research the mathematics in regards
+  to population mechanics (survival and migration rates…) and how to use this new function in regards to the
+  timeline"). New `docs/research/collapse-timeline-dynamics.md` (network-robustness/gravity-migration/
+  Black-Death-mortality-calibration sourcing) backs a year-stepped simulation: per-settlement stress (trade-
+  dependency loss / density-connectivity exposure / undefended-violence exposure, weighted by a **character**
+  — trade/disease/conflict/mixed, each fails settlements in a different order) drives mortality + out-migration
+  each step; a Zipf/Ravenstein **gravity model** redistributes survivors to reachable settlements (headroom-
+  capped, overflow = unplaced diaspora loss); shrunken nuclei demote/abandon past the v0.82 tier floors; a
+  **recovery** mode instead compounds logistic regrowth toward each settlement's own catchment ceiling. All
+  new functions are pure and deterministic (`_civProximityAdjacency`/`_civBetweennessFromAdjacency`/
+  `_civSettlementStress`/`_civMortalityMigrationRates`/`_civGravityMigrate`/`_civCollapseStep`/
+  `_civRecoveryGrowthStep`/`_civSimulateTimeline`); the impure `_civRunCollapseSimulation()` wiring reads
+  `state.places`, runs the simulation, and writes **one `civTimeline` entry per step** — the *existing*
+  timeline slider/pills scrub through simulated history with no new rendering code, since the entries are
+  shaped exactly like `civAddYear`'s. New "Simulate collapse / recovery" UI under Civilization → Polity (mode/
+  character/severity or regrowth-rate/start-year/duration-per-step + a Simulate button + a stats summary).
+  **Never touches `state.places`/`civWays`** — same rule every other timeline write follows. Civ layer (block
+  2) only; render battery ALL IDENTICAL to v0.84, headless **909** unchanged, smoke **86 → 98** (pure-function
+  correctness + UI wiring, all via Playwright since these are block-2 functions the headless suite can't see).
+  Browser-verified end to end on a real auto-populated world (screenshots: panel, configured run, post-
+  simulate timeline pills/slider, Explore tab) — 0 console errors, correct entry count and stats. **Deferred**
+  (doc §8): new-settlement founding from refugee overflow, true travel-cost distance (currently straight-line
+  ×cellKm), regrowth-phase migration (recovery mode is currently single-settlement logistic only, no
+  redistribution).
 - **v0.84 — fix: restored the "Vertical" sublabel over Sea level/Peak** (owner report). v0.83's Map-width
   removal over-deleted a section heading unrelated to the ask. Pure markup restore; render battery ALL
   IDENTICAL, headless 909, smoke 86 unchanged.
@@ -301,7 +325,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (903 as of v0.77), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (909 as of v0.79), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
