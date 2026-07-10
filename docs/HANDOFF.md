@@ -9,10 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.80.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.81.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.81 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.79` are kept and never edited.
+  (v0.82 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.80` are kept and never edited.
+- **v0.81 — capacity-grounded, map-size-dependent, automatic settlement populations** (owner design doc →
+  `docs/research/settlement-emergence.md`). Auto-populate now derives population from the **energy-system
+  model**: a settlement's population is what its catchment land sustains (carrying capacity K × the agrarian
+  ceiling `AGRARIAN_MAX_KM2=200`, over per-tier real-km² catchments → **depends on map size**) plus, for
+  exchange tiers (town/city/capital/metropolis), a centrality-weighted share of a regional urban pool
+  (`_CIV_URBAN_SHARE=0.09`) — the option-1-vs-2 **synthesis** (capacity-first base + exchange-node
+  concentration; the doc's §3 "a city is the exchange node"). Per-tier `_CIV_CATCHMENT_KM2` /
+  `_CIV_SURPLUS_FRACTION` / `_CIV_TRADE_K` / `_CIV_POP_CAP`. The regional total is a **base calculation** run
+  at the end of auto-populate (the v0.76 "Estimate" button is retired; the readout auto-updates). Civ layer
+  only, render battery ALL IDENTICAL, headless **909**, smoke **83 → 84**. Browser-calibrated at 400/800/2000
+  km (tiers in-band, scale with map size). **Next: v0.82 post-collapse recovery model** (Phase I–IV,
+  ruin-reuse, labour caps, surplus-gated growth) — owner asked to start it; foundation is these
+  capacity-grounded populations.
 - **v0.80 — quality-default + persistence fixes + mobile header fix** (owner: "apply all fixes and
   optimisation; check the UX/UI on mobile"). Headless **909**, smoke **83**. (1) **Ocean currents ON by
   default** (`climate.currents` false→true) — cheap, integrated, adds warm/cold coastal-climate realism.

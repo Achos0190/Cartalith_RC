@@ -12,6 +12,37 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.81 (2026-07-10)
+**Capacity-grounded, map-size-dependent, automatic settlement populations** (owner design doc +
+`docs/research/settlement-emergence.md`). Auto-populate no longer assigns population from a fixed per-tier base
+× suitability — a settlement's population is now the **energy-system model**: what its catchment land can
+sustain and what the transport network lets it concentrate. Civ layer (block 2) only; render battery ALL
+IDENTICAL to v0.80, headless **909**, smoke **83 → 84**.
+
+- **Research decision (option 1 vs 2).** The owner asked which of "catchment × centrality" vs "capacity-first,
+  derive tier" is more realistic. Neither pure form is: the doc's §9 prescribes capacity-first, but §3 is
+  explicit that a town/city "is not the productive unit — it is the exchange node," so a pure capacity model
+  misplaces cities. **Applied the synthesis:** capacity-grounded populations as the base, split by economic
+  role — **productive tiers (hamlet/village)** from local catchment carrying capacity; **exchange tiers
+  (town/city/capital/metropolis)** additionally draw a centrality-weighted share of a regional urban pool.
+- **Grounded in the land + map scale.** A cell's agrarian density = `carryingCapacity(K) × AGRARIAN_MAX_KM2`
+  (200/km² fertile-valley ceiling; prime land ≈120/km², marginal ≈30/km² — the doc's environment table). A
+  settlement's population integrates that over its per-tier catchment (real km², `_CIV_CATCHMENT_KM2`) × a
+  surplus/nucleation fraction × trade concentration, so it **depends on the set map size** and the actual land.
+  New pure `_civSettlementPopulation` / `_civCatchmentDensityMean` / `_civAgrarianRegionalTotal`; constants
+  `_CIV_SURPLUS_FRACTION` / `_CIV_TRADE_K` / `_CIV_URBAN_SHARE=0.09` / `_CIV_POP_CAP` (per-tier ceilings keep
+  the hierarchy on huge maps). Browser-calibrated: at 400/800/2000 km the tiers land in the doc's bands and
+  scale strongly with map size (capital ≈5.5k→9.7k→imperial cities 60–140k; villages/hamlets stable).
+- **Automatic, not a button.** The regional-population estimate is now a **base calculation** run at the end of
+  auto-populate (map-size-dependent), replacing the v0.76 user-triggered "Estimate" button. The Civilization
+  panel readout auto-updates: e.g. *"Land sustains ≈ 1.66 M over 191 k km² (agrarian carrying capacity).
+  Placed settlements hold ≈ 130 k (7.8% nucleated)."*
+- **Foundation for the post-collapse recovery model** (owner: "start it too") committed in the research doc
+  (Phase I–IV, ruin-reuse settlement value, labour-shortage caps, surplus-gated growth) — implementation is the
+  v0.82+ workstream, resting on these capacity-grounded populations.
+- Verify: block-2, render battery ALL IDENTICAL; two new smoke assertions (readout auto-fills on populate with
+  no button; capacity-grounded pops all positive). Browser-calibrated across three map sizes.
+
 ### v0.80 (2026-07-10)
 **Quality-default + persistence fixes, and a mobile header fix** (owner: "apply all fixes and optimisation;
 check the UX/UI on mobile"). Three independent changes; headless **909**, smoke **83** (both unchanged).

@@ -279,11 +279,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillageDensity;
     return { on, off };
   });
-  R.popBtn = await page.evaluate(() => {
-    const btn = document.getElementById('civPopEstimateBtn'), out = document.getElementById('civPopEstimateOut');
-    if (!btn || !out) return null;
-    btn.click();
-    return { hasNumber: /population/i.test(out.textContent) && /\d/.test(out.textContent) };
+  // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
+  //        populate, confirm the readout shows a number, then restore clean civ state.
+  R.popAuto = await page.evaluate(() => {
+    const out = document.getElementById('civPopEstimateOut'); if (!out) return null;
+    const noButton = !document.getElementById('civPopEstimateBtn');
+    if (typeof _civAutoWorld === 'function') _civAutoWorld();
+    const filled = /sustain|settle/i.test(out.textContent) && /\d/.test(out.textContent);
+    // capacity-grounded, map-size-dependent per-settlement pops (all positive, tier hierarchy sane)
+    const settles = state.places.filter(p => p && p.category === 'settlement');
+    const allPos = settles.length > 0 && settles.every(p => p.pop > 0);
+    state.places = []; if (typeof civWays !== 'undefined') civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+    return { autoFilled: filled, noButton, allPos };
   });
   // v0.77: wetland/marsh carrying capacity — the KEY integration check is that buildWetlandMask agrees
   //        exactly with buildCartBiome's Wetlands/Marshes class (index 4), i.e. the two pipelines finally
@@ -534,7 +544,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.76 village mode: dense grid places more settlements than the default, bounded at the 200-pin cap', R.village.denser && R.village.capBounded && R.village.nDefault >= 2);
   A('v0.76 village mode: off by default, checkbox toggles the flag', R.village.defaultOff && R.villageToggle && R.villageToggle.on === true && R.villageToggle.off === false);
   A('v0.76 regional population: integrates a positive total over a positive land area', R.village.popTotal > 0 && R.village.popLand > 0);
-  A('v0.76 population estimate button fills the readout with a number', R.popBtn && R.popBtn.hasNumber);
+  A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
+  A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
   A('v0.77 wetland mask agrees exactly with buildCartBiome Wetlands class (two pipelines unified)', R.wetland && R.wetland.agree);
   A('v0.77 wetland residual lowers carrying capacity on wetland cells under biomeK (or no wetlands on this world)', R.wetland && R.wetland.kEffect === true);
   A('v0.78 transshipments: counts land↔water mode-changes (0/1/2/4)', R.transfer && R.transfer.landOnly === 0 && R.transfer.oneCross === 1 && R.transfer.landSeaLand === 2 && R.transfer.multi === 4);
