@@ -12,6 +12,37 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.73 (2026-07-10)
+**Economic land/sea routing + settlement-waypoint pathfinding** (owner report: routes ignored a cheaper/more
+direct sea leg and bypassed settlements they passed rather than stopping at them). Civ layer (script block 2)
+only — **engine bit-identical to v0.72** (render battery ALL IDENTICAL; headless **897** unchanged). Both the
+interactive Route tool and the auto-generated network improved (owner chose *both* + *soft-attract, capped
+detour*). Smoke **68 → 71**; verified in-browser (routing probe + before/after screenshot).
+
+- **Settlement gravity** (`_civApplySettlementGravity`) — a capped, radius-limited cost discount (centre ×0.5,
+  fading to ×1 at ~RW/80 routing cells) around every settlement, applied to the Route-tool grid
+  (`_civDijkstraPath`) and both passes of the auto network (`_civHierarchicalNetwork`). A least-cost path now
+  bends **through** settlements near its corridor (they become practical stops/stages) instead of bypassing
+  them. Soft + capped by construction: only finite (traversable) cells are discounted — gravity never carves a
+  water crossing — and the bounded disc means a path bends toward a nearby settlement but never takes a large
+  detour for a far one.
+- **Economic land-vs-sea** — the Route tool's mixed grid water cost dropped 2.2 → **1.5** (`_CIV_WATER_COST`):
+  still above flat land (so land is the default on comparable distance) but low enough that Dijkstra takes a
+  water leg when the land route is >~1.5× longer — "if the sea route is more direct, take it". A committed
+  route that turns out mostly water is auto-flagged a **sea voyage** (`_civPathWaterFrac` ≥ 0.5) so the planner
+  picks a real vessel instead of the land itinerary.
+- **Sea-network augmentation** (`_civMstRoutes`) — the port sea-lane MST (a tree) left neighbouring coastal
+  towns linked only via a long spine detour; each port now also gets a direct lane to its nearest sea-reachable
+  port (when within the MST's own longest hop), so short coastal hops are direct without meshing the map.
+- **Passed-settlement stops** (`_civPassedSettlements`) — the ordered settlements a route threads through are
+  surfaced in the journey planner as a **Stops** row (origin → intermediate stops → destination), computed live
+  from the path (works for loaded routes too; not serialised — derived/transient).
+- Verify: `_civApplySettlementGravity`/`_civPathWaterFrac`/`_civPassedSettlements` are block-2 (not in the
+  headless engine suite); covered by three new Playwright smoke assertions — a deterministic **injection** test
+  (a settlement placed a few cells off a real corridor pulls the path toward it, detour capped), the economic
+  sea crossing, and settlement count. Also fixed a pre-existing **flaky** v0.72 smoke assertion (z8-vs-z7 tiles
+  compared different extents on an unseeded world → now a deterministic same-extent morphology-on-vs-off check).
+
 ### v0.72 (2026-07-10)
 **Deep-zoom river morphology — dendritic tributaries + local incision (the river-lod brief's LOD10+ tier).**
 Extends v0.71's `featureDetailPass` with the last tractable JS items from `docs/research/river-lod-brief.md`

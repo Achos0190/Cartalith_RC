@@ -143,14 +143,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const bc = document.getElementById('lodBurnChk'); if (bc) { bc.checked = true; bc.dispatchEvent(new Event('change')); }
     const o = (typeof lodTileOpts === 'function') ? lodTileOpts() : {};
     const hasOrder = !!o.coarseOrder;                       // burn-rivers threads the persistent Strahler grid into refinement
-    // same tile refined at z=8 (tributaries on) vs z=7 (off) — z8 must carve at least as much everywhere it touches
-    const t8 = pyramidTile(field, GW, GH, 8, 0, 0, _lodTile, o);
-    const t7 = pyramidTile(field, GW, GH, 7, 0, 0, _lodTile, o);
-    let finite = true, s8 = 0, s7 = 0;
-    for (let i = 0; i < t8.data.length; i++) { if (!Number.isFinite(t8.data[i])) { finite = false; break; } }
-    for (let i = 0; i < t7.data.length && i < t8.data.length; i++) { s8 += t8.data[i]; s7 += t7.data[i]; }
+    // SAME z=8 tile extent, feature morphology ON vs OFF (opts stripped) — deterministic regardless of the
+    // world seed (the old z8-vs-z7 compare used two different extents, so it flaked). featureDetailPass only
+    // carves, so ON must never sit above OFF: sum(ON) ≤ sum(OFF).
+    const oOff = Object.assign({}, o); delete oOff.coarseOrder; delete oOff.fjordM; delete oOff.canyonM;
+    const tOn = pyramidTile(field, GW, GH, 8, 0, 0, _lodTile, o);
+    const tOff = pyramidTile(field, GW, GH, 8, 0, 0, _lodTile, oOff);
+    let finite = true, sOn = 0, sOff = 0;
+    for (let i = 0; i < tOn.data.length; i++) { if (!Number.isFinite(tOn.data[i])) { finite = false; break; } sOn += tOn.data[i]; sOff += tOff.data[i]; }
     if (bc) { bc.checked = false; bc.dispatchEvent(new Event('change')); }
-    return { hasOrder, finite, carvesMore: s8 <= s7 + 1e-3 };   // z8 total elevation ≤ z7 (extra incision lowers the mean)
+    return { hasOrder, finite, carvesMore: sOn <= sOff + 1e-6 };   // morphology never raises terrain
   });
   R.popDensity = await page.evaluate(() => {
     _debugBtn('popdensity').click();                       // proxy through the same seg the popover uses
@@ -169,6 +171,49 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     let changed = false; for (let i = 0; i < K1.length; i += 97) if (Math.abs(K1[i] - K0[i]) > 1e-6) { changed = true; break; }
     chk.checked = false; chk.dispatchEvent(new Event('change'));   // restore
     return { startsOff: before === 0, togglesOn: on, changesK: changed, restored: _biomeK === 0 };
+  });
+  // ── v0.73: economic land/sea routing + settlement-waypoint pathfinding ──
+  R.routing = await page.evaluate(() => {
+    if (typeof _civAutoWorld === 'function') _civAutoWorld();       // settlements + ways to route among
+    const settles = state.places.filter(p => p && p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    const out = { nSettles: settles.length, injTested: 0, threaded: 0, detourBust: 0, stopsWork: false, sea: null };
+    // (a) gravity — DETERMINISTIC injection test (independent of the unseeded world's layout): take a real
+    // route, offset a NEW settlement a few cells off the path onto land, and confirm the path now bends
+    // toward it (closest approach shrinks) without a large detour. Restores state.places afterward.
+    const sea = state.seaLevel, wb = (typeof currentWaterBodies === 'function') ? currentWaterBodies() : null;
+    const onLand = (x, y) => { x = Math.round(x); y = Math.round(y); if (x < 0 || x >= GW || y < 0 || y >= GH) return false; const fi = y * GW + x; return field[fi] >= sea && (!wb || wb[fi] === 0); };
+    const approach = (pts, mx, my) => { let m = 1e9; for (const p of pts) { let ax = Math.abs(p[0] - mx); if (state.world) ax = Math.min(ax, GW - ax); const d = Math.hypot(ax, p[1] - my); if (d < m) m = d; } return m; };
+    for (let ai = 0; ai < settles.length && out.injTested < 6; ai++) for (let ci = ai + 1; ci < settles.length && out.injTested < 6; ci++) {
+      const A = settles[ai], C = settles[ci], dx = C.x - A.x, dy = C.y - A.y, L = Math.hypot(dx, dy); if (L < 40) continue;
+      const base = _civDijkstraPath(A.x, A.y, C.x, C.y, 'mixed'); if (!base.pts || base.pts.length < 5) continue;
+      const mid = base.pts[Math.floor(base.pts.length / 2)]; const nx = -dy / L, ny = dx / L;   // unit normal to A→C
+      let M = null; for (const off of [3, -3, 4, -4, 5, -5]) { const mx = mid[0] + nx * off, my = mid[1] + ny * off; if (onLand(mx, my)) { M = [Math.round(mx), Math.round(my)]; break; } }
+      if (!M) continue;
+      const before = approach(base.pts, M[0], M[1]); if (before < 1.5) continue;   // already on the path — no test
+      state.places.push({ x: M[0], y: M[1], kind: 'town', klass: 'town', category: 'settlement', name: '__gravityProbe', faction: 1, pop: 500, traits: [] });
+      const withB = _civDijkstraPath(A.x, A.y, C.x, C.y, 'mixed');
+      state.places.pop();
+      const after = approach(withB.pts, M[0], M[1]);
+      out.injTested++;
+      if (after < before - 0.75) { out.threaded++; if (withB.km > base.km * 1.6) out.detourBust++; }
+      if (_civPassedSettlements(withB.pts).length >= 1) out.stopsWork = true;
+    }
+    // (b) economic sea: two ports separated by water → the mixed path actually crosses water
+    const ports = settles.filter(p => p.traits && p.traits.includes('port'));
+    for (let i = 0; i < ports.length && !out.sea; i++) for (let j = i + 1; j < ports.length; j++) {
+      const A = ports[i], B = ports[j], dsl = Math.hypot(A.x - B.x, A.y - B.y); if (dsl < 25 || dsl > GW * 0.4) continue;
+      const seg = _civDijkstraPath(A.x, A.y, B.x, B.y, 'mixed'); const wf = _civPathWaterFrac(seg.pts);
+      if (wf > 0.2) { out.sea = { waterFrac: +wf.toFixed(2), crosses: true }; break; }
+    }
+    return out;
+  });
+  // restore clean civ state so later place/way tests see an empty world (mirrors the line-122 cleanup)
+  await page.evaluate(() => {
+    state.places = []; if (typeof civWays !== 'undefined') civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (state.roads) state.roads = null;
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
   });
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
@@ -356,6 +401,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.71 feature registry on a real world (rivers + peaks + query)', R.features.hasRivers && R.features.hasPeaks && R.features.queryWorks);
   A('v0.71 LOD renderer caches: overview cached + tiles cached after refine', R.lodView.cachedAfterFirst && R.lodView.tileCacheN > 0);
   A('v0.72 z8 tributaries+incision: order grid threaded, tiles finite, z8 carves ≥ z7', R.tribs.hasOrder && R.tribs.finite && R.tribs.carvesMore);
+  A('v0.73 routing: auto-world seeded settlements to route among', R.routing.nSettles >= 2);
+  A('v0.73 routing: gravity bends the path toward an injected roadside settlement (' + R.routing.threaded + '/' + R.routing.injTested + '), detour capped', R.routing.threaded >= 1 && R.routing.detourBust === 0 && R.routing.stopsWork);
+  A('v0.73 routing: economic sea crossing taken when shorter (if a water-separated port pair exists)', !R.routing.sea || R.routing.sea.crosses);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

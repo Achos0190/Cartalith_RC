@@ -9,10 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.72.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.73.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.73 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.71` are kept and never edited.
+  (v0.74 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.72` are kept and never edited.
+- **v0.73 — economic land/sea routing + settlement-waypoint pathfinding** (owner report: routes
+  ignored a cheaper/more-direct sea leg and bypassed settlements they passed instead of stopping).
+  Civ layer (block 2) only, **engine bit-identical to v0.72** (headless **897** unchanged), smoke
+  **68 → 71**. Owner chose *both* systems + *soft-attract, capped detour*. (1) **Settlement gravity**
+  (`_civApplySettlementGravity`) — a capped, radius-limited (~RW/80) cost discount around every
+  settlement, applied to the Route-tool grid (`_civDijkstraPath`) and both auto-network passes
+  (`_civHierarchicalNetwork`); a least-cost path now bends *through* settlements near its corridor
+  (they become stops) but never detours far, and — only finite cells discounted — never carves water.
+  (2) **Economic sea** — mixed-grid water cost 2.2 → **1.5** (`_CIV_WATER_COST`) so a >~1.5× land
+  detour loses to the sea leg; a mostly-water committed route auto-flags a sea voyage
+  (`_civPathWaterFrac`≥0.5) so the planner picks a vessel. (3) **Sea-net augmentation** — each port
+  also gets a direct lane to its nearest sea-reachable port (not just the MST spine). (4) **Stops**
+  row in the journey planner (`_civPassedSettlements`, derived/transient, not serialised).
+  Verified in-browser (routing probe + before/after screenshot); smoke uses a deterministic
+  settlement-*injection* gravity test. **Browser pass owed**: feel of the auto-network on varied
+  worlds (are the coastal roads vs sea lanes sensible?), and tuning of `_CIV_WATER_COST`/gravity
+  strength to taste.
 - **v0.72 — deep-zoom river morphology (tributaries + local incision).** Finishes the river-lod
   brief's LOD10+ tier by extending `featureDetailPass` (z≥8, behind the Burn-rivers toggle): the trunk
   thalweg locally incises deeper with zoom, and a **dendritic tributary creek network** (ridged
