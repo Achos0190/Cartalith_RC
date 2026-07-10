@@ -9,10 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.70.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.71.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.71 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.69` are kept and never edited.
+  (v0.72 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.70` are kept and never edited.
+- **v0.71 — zoom-dependent feature rendering** (owner goal + the river-lod / rust-lod render briefs),
+  three stages in one version, engine bit-identical to v0.70, headless **888** (+24), smoke **67**:
+  (1) **persistent feature registry** — rivers as objects (Strahler polylines, discharge, hydrology
+  width, length), fjord/canyon components, peaks; `featuresNear`/`riversInRect`/`featureSummary`
+  query API; `features.json` export (features survive baking); cached as `_featureReg`, invalidated
+  with `_riverNet`. (2) **LOD render caches** — per-tile canvas LRU keyed on `_lodRenderKey` +
+  pan-reuse of the coarse overview; `_lodEditGen` guards edits; pixels identical, computed once.
+  (3) **`featureDetailPass`** — zoom-revealed morphology on refined tiles behind the Burn-rivers
+  toggle: river valley cross-sections ∝ Strahler order (z≥4), fjord wall steepening (z≥3), canyon
+  incision (z≥4); seam-safe, opt-in (no grids ⇒ byte-identical), floor never raises terrain.
+  Deferred (briefs): meander/oxbow refinement, micro-tributaries, Rust port (JS-first per owner).
+  **Browser pass owed**: LOD pan/zoom feel with the caches, the revealed valleys/fjords/canyons at
+  deep zoom on a real world, cache memory pressure on 8K worlds.
 - **v0.70 — bug-fix batch + map-scale locked at creation.** Four owner-reported bugs, each reproduced
   in a real browser before fixing (see `tests/perf/` probes), engine bit-identical to v0.69, headless
   **864**, smoke **61 → 65**: (1) **`roadDijkstra` crash on imported heightmaps** — `dist` was Float32 but
@@ -139,7 +152,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — 848 assertions, CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (888 as of v0.71), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at

@@ -121,7 +121,23 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   });
   await page.evaluate(() => { state.places = []; if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList(); });
 
-  // ── v0.69: settlement density — Pop-density debug view + biome-K toggle ──
+  // ── v0.71: persistent feature registry + zoom-dependent LOD rendering ──
+  R.features = await page.evaluate(() => {
+    const s = featureSummary();
+    const near = s.rivers ? featuresNear(currentFeatures().rivers[0].mouth.x, currentFeatures().rivers[0].mouth.y, 6) : [];
+    return { summary: s, hasRivers: s.rivers > 0, hasPeaks: s.peaks > 0, queryWorks: !s.rivers || near.length > 0 };
+  });
+  R.lodView = await page.evaluate(() => new Promise(res => {
+    const lc = document.getElementById('lodChk'); lc.checked = true; lc.dispatchEvent(new Event('change'));
+    _lodZoom = 4; renderNow();                       // overview render → caches an overview canvas
+    const cachedAfterFirst = !!_lodOverviewPrev && !!_lodOverviewPrev.key;
+    const t0 = performance.now(); renderNow();       // second draw at the same view: overview reuse path
+    const secondMs = performance.now() - t0;
+    refineVisibleTiles(); renderNow();               // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
+    const tileCacheN = _lodTileCanvasCache.size;
+    lc.checked = false; lc.dispatchEvent(new Event('change'));
+    res({ cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true });
+  }));
   R.popDensity = await page.evaluate(() => {
     _debugBtn('popdensity').click();                       // proxy through the same seg the popover uses
     const set = state.debug === 'popdensity';
@@ -323,6 +339,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.70 map scale (#mapw) is locked at creation', R.scaleLocked === true);
   A('v0.70 roadDijkstra terminates on a uniform cost grid (no 2^32 overflow)', R.dijkstraUniform.ok === true);
   A('v0.70 auto-populate completes without throwing', R.autoPopulate.ok === true);
+  A('v0.71 feature registry on a real world (rivers + peaks + query)', R.features.hasRivers && R.features.hasPeaks && R.features.queryWorks);
+  A('v0.71 LOD renderer caches: overview cached + tiles cached after refine', R.lodView.cachedAfterFirst && R.lodView.tileCacheN > 0);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

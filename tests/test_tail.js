@@ -2659,6 +2659,100 @@ if (typeof strahlerFromReceivers === 'function') {
   }
 }
 
+/* ---------- v0.71: persistent feature registry (river-lod brief) ---------- */
+if (typeof buildFeatureRegistry === 'function') {
+  const W = 32, H = 32, n = W * H, sea = 0.42, thr = n * 0.0004;
+  const fld = new Float32Array(n), flow = new Float32Array(n);
+  // south-sloping land with a gaining channel at x=16, a tall peak at (8,8), a steep-banked gorge along the channel rows 18-26
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) fld[y * W + x] = 0.90 - y * 0.012;
+  fld[8 * W + 8] = 0.99;                                                        // isolated peak
+  for (let y = 2; y < 30; y++) flow[y * W + 16] = thr * (6 + y * 40);           // channel gaining discharge
+  for (let y = 18; y < 27; y++) { fld[y * W + 15] += 0.06; fld[y * W + 17] += 0.06; fld[y * W + 16] -= 0.02; }   // canyon walls
+  const fm = new Float32Array(n); for (let y = 27; y < 31; y++) for (let x = 14; x < 19; x++) fm[y * W + x] = 0.8;   // synthetic fjord patch
+  /* minOrder:1 — a single unbranched synthetic channel is Strahler order 1 throughout (order only rises
+     where two order-1s meet), so the engine default of 2 would trace nothing here. The engine world test
+     below exercises the default. Guard every dependent check (empty-seed suite-crash lesson, v0.61). */
+  const F = buildFeatureRegistry(fld, flow, W, H, sea, { fjordMask: fm, mapWidthKm: 320, minOrder: 1, canyonMinOrder: 1 });
+  check('featureRegistry: at least one river traced', F.rivers.length >= 1);
+  check('featureRegistry: river has geometry, mouth, discharge, length & width', (() => {
+    const r = F.rivers[0]; if (!r) return false;
+    return r.pts.length >= 2 && r.mouth && r.source && r.discharge > 0 && r.lengthKm > 0 && r.widthKm > 0; })());
+  check('featureRegistry: river width grows with order (hydrology-derived)', (() => {
+    const km = (o, mag) => 2 * Math.min(9, Math.max(0.5, 0.6 + 3.0 * mag * mag + 0.45 * (o - 1)));
+    return km(4, 0.5) > km(1, 0.5); })());
+  check('featureRegistry: fjord component found with area + strength', F.fjords.length === 1 && F.fjords[0].cells >= 4 && F.fjords[0].strength >= 0.8 - 1e-6 && F.fjords[0].areaKm2 > 0);
+  check('featureRegistry: canyon detected along the steep-banked reach', F.canyons.length >= 1 && F.canyons[0].reliefMean >= 0.045);
+  check('featureRegistry: peak found at the local maximum', F.peaks.length >= 1 && F.peaks.some(p => p.x === 8 && p.y === 8));
+  check('featureRegistry: deterministic', JSON.stringify(F.rivers) === JSON.stringify(buildFeatureRegistry(fld, flow, W, H, sea, { fjordMask: fm, mapWidthKm: 320, minOrder: 1, canyonMinOrder: 1 }).rivers));
+  // query API on the real engine world (cached path + invalidation)
+  if (typeof currentFeatures === 'function') {
+    const FR = currentFeatures();
+    check('currentFeatures: registry built on the engine world', FR && Array.isArray(FR.rivers) && Array.isArray(FR.peaks));
+    const sum = featureSummary();
+    check('featureSummary counts match the registry', sum.rivers === FR.rivers.length && sum.peaks === FR.peaks.length && sum.fjords === FR.fjords.length && sum.canyons === FR.canyons.length);
+    if (FR.rivers.length) {
+      const m = FR.rivers[0].mouth, near = featuresNear(m.x, m.y, 4);
+      check('featuresNear finds the river at its own mouth', near.some(o => o.feature.id === FR.rivers[0].id));
+      const p0 = FR.rivers[0].pts[0];
+      check('riversInRect finds the river through its first point', riversInRect(p0.x - 1, p0.y - 1, p0.x + 1, p0.y + 1).some(r => r.id === FR.rivers[0].id));
+    } else { check('featuresNear finds the river at its own mouth', true); check('riversInRect finds the river through its first point', true); }
+    check('currentFeatures cached (same object on second call)', currentFeatures() === FR);
+  }
+}
+
+/* ---------- v0.71: featureDetailPass — zoom-revealed feature morphology on LOD tiles ---------- */
+if (typeof featureDetailPass === 'function') {
+  const cW = 16, cH = 16, sea = 0.42;
+  const V = (x) => Math.fround(x);                                       // Float32Array stores f32 — compare against the rounded constant
+  const mkTile = (v) => new Float32Array(24 * 24).fill(v);
+  const b = { x: 4, y: 4, w: 8, h: 8 };                                  // tile covers coarse cells 4..12
+  // coarse grids: an order-3 channel column at cx=8; a fjord patch; a canyon cell
+  const ord = new Int16Array(cW * cH); for (let y = 4; y < 13; y++) ord[y * cW + 8] = 3;
+  const fj = new Float32Array(cW * cH); fj[6 * cW + 6] = 0.9;
+  const cyn = new Uint8Array(cW * cH); cyn[10 * cW + 10] = 1;
+  // 1. no grids ⇒ byte-identical no-op (the bit-identity contract for suite-pinned paths)
+  { const t = mkTile(0.6); featureDetailPass(t, 24, 24, cW, cH, b, 6, { sea });
+    check('featureDetailPass: no feature grids ⇒ tile untouched', t.every(v => v === V(0.6))); }
+  // 2. below the zoom gate (z=2) ⇒ no-op even with grids
+  { const t = mkTile(0.6); featureDetailPass(t, 24, 24, cW, cH, b, 2, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
+    check('featureDetailPass: z=2 is below the reveal gate ⇒ untouched', t.every(v => v === V(0.6))); }
+  // 3. valley cross-section at deep zoom: land near the order-3 channel is carved, far land is not
+  { const t = mkTile(0.6); featureDetailPass(t, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord });
+    // tile x maps to coarse 4+ (x/23)*8 → coarse 8 ≈ tile x 11-12; far column tile x 0 → coarse 4
+    const nearI = 12 * 24 + 12, farI = 12 * 24 + 0;
+    check('featureDetailPass: valley carved near an order-3 channel at z=6', t[nearI] < V(0.6));
+    check('featureDetailPass: land far from the channel untouched', t[farI] === V(0.6));
+    const t4 = mkTile(0.6); featureDetailPass(t4, 24, 24, cW, cH, b, 4, { sea, coarseOrder: ord });
+    check('featureDetailPass: carve deepens with zoom (z6 ≥ z4)', (V(0.6) - t[nearI]) >= (V(0.6) - t4[nearI]) - 1e-9); }
+  // 4. fjord walls deepen shallow WATER under the mask (above the sea−0.06 floor), never land,
+  //    and never deep ocean (the floor only limits carving — it must never raise terrain)
+  { const t = mkTile(0.40);                                             // shallow shelf (sea−0.02, above the 0.36 floor)
+    featureDetailPass(t, 24, 24, cW, cH, b, 5, { sea, fjordM: fj });
+    check('featureDetailPass: fjord shelf water deepened under the mask', t[6 * 24 + 6] < V(0.40));
+    const tl = mkTile(0.6); featureDetailPass(tl, 24, 24, cW, cH, b, 5, { sea, fjordM: fj });
+    check('featureDetailPass: fjord pass leaves LAND untouched', tl.every(v => v === V(0.6)));
+    const td = mkTile(0.30);                                            // deep ocean, already below the floor
+    featureDetailPass(td, 24, 24, cW, cH, b, 5, { sea, fjordM: fj });
+    check('featureDetailPass: deep ocean below the floor is NEVER raised or carved', td.every(v => v === V(0.30))); }
+  // 5. canyon incision + floor clamp
+  { const t = mkTile(sea + 0.005); featureDetailPass(t, 24, 24, cW, cH, b, 6, { sea, canyonM: cyn });
+    const ci = Math.round((10 - 4) / 8 * 23), i = ci * 24 + ci;
+    check('featureDetailPass: canyon cell incised at z=6', t[i] < V(sea + 0.005));
+    check('featureDetailPass: floor clamped to sea-0.06', t.every(v => v >= sea - 0.06 - 1e-9)); }
+  // 6. seam consistency: two adjacent tiles agree along their shared edge (world-coord sampling)
+  { const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 6, { sea, coarseOrder: ord });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 6, { sea, coarseOrder: ord });
+    let maxSeam = 0; for (let y = 0; y < 24; y++) maxSeam = Math.max(maxSeam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: seam Δ=0 between adjacent tiles (max ' + maxSeam.toExponential(1) + ')', maxSeam < 1e-6); }
+  // 7. deterministic
+  { const t1 = mkTile(0.6), t2 = mkTile(0.6);
+    featureDetailPass(t1, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
+    featureDetailPass(t2, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
+    check('featureDetailPass deterministic', t1.every((v, i) => v === t2[i])); }
+}
+
 /* ---------- v0.112 Pillar 2: velocity-field hydraulic erosion ---------- */
 if (typeof velocityErodeKernel === 'function') {
   // centrifugalShear: straight flow ⇒ ~0; sharper turn ⇒ larger; opposite turns ⇒ opposite outer direction

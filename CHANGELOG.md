@@ -12,6 +12,38 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.71 (2026-07-10)
+**Zoom-dependent feature rendering** (the owner's "features render according to zoom/scale" goal +
+`docs/research/river-lod-brief.md` / the render half of `rust-wasm-lod-brief.md`) — three stages in one
+version. **Engine bit-identical to v0.70** (render battery ALL IDENTICAL; every new path is opt-in/additive);
+headless **864 → 888** (24 new assertions); smoke **65 → 67**.
+
+- **Persistent feature registry** (`buildFeatureRegistry` + cached `currentFeatures`, invalidated with
+  `_riverNet`): rivers become objects — Strahler polyline geometry, source/mouth, discharge, hydrology-derived
+  width, length-km — plus fjord components (mask ≥0.35, area/strength), canyon components (order≥2 channels
+  with ≥0.045 bank relief in a 5×5), and suppressed-maxima peaks. Query API per the brief: `featuresNear`,
+  `riversInRect`, `featureSummary`. Exported as `features.json` (features survive baking). "A river is not a
+  pixel" — every zoom now has the same persistent objects to render from.
+- **GIS-style LOD render caches** (`drawLODView`): the LOD view used to re-run the per-pixel tile renderer for
+  every visible tile on every pointermove. Now (a) a per-tile canvas LRU (`_lodTileCanvasCache`, keyed on
+  tile + `_lodRenderKey` = fieldGen/paintGen/lodGen/editGen/mode/debug/sea/style) makes pan/zoom a set of
+  `drawImage()`s, and (b) the fullscreen coarse overview — the most expensive per-frame render — is reused
+  shifted during same-zoom pans and re-rendered exactly on the debounced settle. `_lodEditGen` bumps on every
+  tile-edit mutation so caches never serve stale edits. Rendering functions untouched ⇒ identical pixels,
+  just computed once.
+- **Per-zoom feature morphology** (`featureDetailPass`, threaded through `lodTileOpts` → `pyramidTile` behind
+  the existing Burn-rivers toggle): deeper zoom reveals STRUCTURED detail generated from the feature data, not
+  amplified noise — river valley cross-sections from z≥4 (parabolic shoulder, width/depth ∝ Strahler order,
+  deepening with zoom), fjord wall steepening from z≥3 (shallow shelf under the fjord mask carves toward the
+  sea−0.06 floor; land and deep ocean untouched), canyon floor incision from z≥4. Seam-safe (all carves are
+  coarse-grid lookups at world coords, the burnChannels idiom — seam Δ=0 asserted); strictly opt-in (no grids
+  in opts ⇒ tile byte-identical, so every suite-pinned refine path is unchanged). Caught during testing: the
+  first floor-clamp implementation RAISED deep ocean to sea−0.06 — rewritten so the floor only limits carving,
+  never lifts terrain (asserted: deep ocean below the floor is never raised or carved).
+- Deferred from the brief (documented): meander/oxbow geometry refinement at very deep zoom, micro-tributary
+  synthesis beyond the existing `addZoomDetail`/`tileErode`, and the full Rust/WASM engine port (owner
+  decision: JS-first).
+
 ### v0.70 (2026-07-10)
 **Bug-fix batch (imported heightmaps, sea-level render, plate count) + map-scale locked at creation.**
 Engine generation path untouched — **bit-identical to v0.69** (render battery ALL IDENTICAL); headless **864**;
