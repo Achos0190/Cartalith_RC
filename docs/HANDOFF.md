@@ -9,10 +9,25 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.74.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.75.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.75 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.73` are kept and never edited.
+  (v0.76 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.74` are kept and never edited.
+- **Working through the settlement-density research deferrals** (`docs/research/settlement-density.md`
+  §§2b/5/6 + the routing transfer-overhead in §5c). v0.75 is the first; v0.76 (village-density placement
+  mode), v0.77 (wetlands carrying-capacity), v0.78 (transport transfer-overhead + Med-scrub calibration)
+  planned. Each opt-in, default bit-identical.
+- **v0.75 — imperial-seat (metropolis) tier** (settlement-density §5). Civ layer (block 2) only,
+  **engine bit-identical to v0.74** (headless **897**, render battery ALL IDENTICAL), smoke **72 → 75**.
+  Adds a rare **Metropolis ★** class above Capital, placed by the sourced ceiling-breaking rule (Lawrence
+  et al. 2016: post-2000 BC growth = administrative/taxation capacity, proxied by betweenness centrality ×
+  polity size). New pure `_civSelectMetropolises()` promotes a capital with normalised betweenness ≥ 0.85
+  that is also the seat of a ≥6-settlement faction; ≤1/faction, ≤3 total; base pop 45,000, scaled by the
+  existing centrality multipliers (browser probe: ~133k on a dominant hub). Gated behind the
+  "Imperial-seat tier" checkbox (`_civMetropolis`, default off ⇒ auto-populate byte-identical; skipped when
+  tier counts are fixed). Frozen pack-slot vocabs untouched (procedural ★ fallback). **Browser pass owed**:
+  metropolis feel across seed variety — is one imperial seat per large polity the right rate, and is base
+  pop 45,000 / the betweenness threshold 0.85 tuned to taste?
 - **v0.74 — "Bake all levels & finalize world" promoted to the top of Generate → World** (owner
   request). The finalize button was buried two collapsed disclosures deep (*Tiles & LOD → Atlas*),
   so committing a world to the Atlas phase meant hunting for it. A new **Finalize world** section

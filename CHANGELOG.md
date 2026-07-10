@@ -12,6 +12,34 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.75 (2026-07-10)
+**Imperial-seat (metropolis) tier** — the first of the settlement-density research deferrals
+(`docs/research/settlement-density.md` §5). Civ layer (script block 2) only, **engine bit-identical to
+v0.74** (render battery ALL IDENTICAL; headless **897** unchanged). Opt-in ⇒ **auto-populate output
+byte-identical when off**. Smoke **72 → 75**.
+
+- The current five tiers (hamlet…capital) cap out at Early-Bronze-Age urbanism (~100–130 ha ≈ 15,000
+  people at 150/ha, validated against the Lawrence et al. 2016 era-ceilings in v0.69). There was no tier
+  for genuinely imperial capitals — Nineveh (750 ha), Baghdad/Samarra (≥280,000). v0.75 adds a rare
+  **Metropolis ★** class above Capital (`CIV_SETTLEMENT_CLASSES` rank 5; also in `CIV_LOD_PLACE`,
+  `tierRankDraw`, `minDeg`, the map-filter list, and the editor kind dropdown).
+- **Placement follows the sourced ceiling-breaking rule, not raw population.** Lawrence et al.'s thesis is
+  that post-2000 BC growth is driven by administrative/taxation capacity, not local farmland — exactly what
+  betweenness centrality (trade-through) and polity size proxy for. New pure `_civSelectMetropolises(places,
+  metricByPlace, maxBtwF, opts)` promotes a **capital** that is both a dominant trade hub (normalised
+  betweenness ≥ 0.85) *and* the seat of a large polity (its faction holds ≥ 6 settlements). Rare by
+  construction: ranked by centrality, ≤ 1 per faction, ≤ 3 total. Metropolis base population 45,000 (≈300 ha,
+  territorial-kingdom scale), scaled by the existing centrality/component multipliers — reaching the
+  Nineveh/Baghdad register on dominant hubs (browser probe: a whole-world seed placed one at ~133k).
+- **Gated** behind a "Imperial-seat tier (metropolis ★)" checkbox under Civilization (`_civMetropolis`,
+  default off). Skipped when the user fixes tier counts (explicit quotas hold). Off ⇒ the promotion pass
+  never runs ⇒ auto-populate is byte-identical to v0.74. Frozen pack-slot vocabularies untouched (a
+  metropolis with no pack sprite falls back to the procedural ★ pin — no save-format surface added).
+- Verify: block-2, so covered by three new Playwright smoke assertions — a deterministic synthetic-polity
+  test of `_civSelectMetropolises` (promotes the dominant large-polity capital; rejects low-betweenness and
+  small-polity capitals; respects the per-faction/global caps), the class definition, and the default-off +
+  checkbox-toggle wiring. Browser-verified end-to-end (metropolis placed + rendered on a whole-world seed).
+
 ### v0.74 (2026-07-10)
 **Finalize control promoted to the top of Generate → World** (owner request: the "Bake ALL levels & finalize
 world" button was buried two disclosures deep — inside *Tiles & LOD → Atlas*, both collapsed by default — so

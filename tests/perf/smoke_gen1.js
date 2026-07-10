@@ -215,6 +215,44 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (typeof _civRenderWayList === 'function') _civRenderWayList();
     if (typeof renderNow === 'function') renderNow();
   });
+  // v0.75: imperial-seat (metropolis) tier — DETERMINISTIC test of the pure selection helper
+  //        (independent of the unseeded world's layout) + class/toggle wiring. Uses only synthetic
+  //        local arrays, so it doesn't touch state.places.
+  R.metro = await page.evaluate(() => {
+    const cls = CIV_SETTLEMENT_CLASSES.find(c => c.key === 'metropolis');
+    const mk = (kind, faction, x, y) => ({ kind, klass: kind, category: 'settlement', faction, x, y, traits: [] });
+    // faction 1 is a large polity (7 settlements, two capitals); faction 2 is tiny (2).
+    const places = [
+      mk('capital', 1, 10, 10),   // dominant hub of a large polity → SHOULD be promoted
+      mk('capital', 1, 20, 20),   // large polity but low betweenness → NOT promoted
+      mk('city', 1, 30, 30), mk('town', 1, 40, 40), mk('village', 1, 50, 50),
+      mk('hamlet', 1, 60, 60), mk('hamlet', 1, 70, 70),
+      mk('capital', 2, 100, 100), mk('city', 2, 110, 110),   // small polity: high-betweenness capital still rejected
+    ];
+    const btw = new Map();
+    btw.set(places[0], { betweenness: 1.0 });
+    btw.set(places[1], { betweenness: 0.1 });
+    btw.set(places[7], { betweenness: 1.0 });
+    const chosen = _civSelectMetropolises(places, btw, 1.0, {});
+    // per-faction cap: a second qualifying capital in faction 1 must not add a second metropolis
+    const places2 = places.concat([mk('capital', 1, 15, 15)]);
+    const btw2 = new Map(btw); btw2.set(places2[places2.length - 1], { betweenness: 0.95 });
+    const chosen2 = _civSelectMetropolises(places2, btw2, 1.0, {});
+    let perFac1 = 0; for (const p of chosen2) if (p.faction === 1) perFac1++;
+    return {
+      classRank: cls ? cls.rank : -1, classGlyph: cls ? cls.glyph : '',
+      bigChosen: chosen.has(places[0]), lowNotChosen: !chosen.has(places[1]),
+      smallFactionNotChosen: !chosen.has(places[7]), chosenCount: chosen.size, perFac1,
+      defaultOff: (typeof _civMetropolis !== 'undefined') && _civMetropolis === false,
+    };
+  });
+  R.metroToggle = await page.evaluate(() => {
+    const cb = document.getElementById('civMetropolisChk'); if (!cb) return null;
+    const was = _civMetropolis;
+    cb.checked = true; cb.dispatchEvent(new Event('change')); const on = _civMetropolis;
+    cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civMetropolis;
+    _civMetropolis = was; return { on, off };
+  });
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
   await page.click('#layersBtn');
@@ -418,6 +456,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.73 routing: auto-world seeded settlements to route among', R.routing.nSettles >= 2);
   A('v0.73 routing: gravity bends the path toward an injected roadside settlement (' + R.routing.threaded + '/' + R.routing.injTested + '), detour capped', R.routing.threaded >= 1 && R.routing.detourBust === 0 && R.routing.stopsWork);
   A('v0.73 routing: economic sea crossing taken when shorter (if a water-separated port pair exists)', !R.routing.sea || R.routing.sea.crosses);
+  A('v0.75 metropolis: class present (rank 5, ★)', R.metro.classRank === 5 && R.metro.classGlyph === '★');
+  A('v0.75 metropolis: promotes the dominant capital of a large polity, rejects low-betweenness + small-polity capitals', R.metro.bigChosen && R.metro.lowNotChosen && R.metro.smallFactionNotChosen && R.metro.chosenCount === 1 && R.metro.perFac1 <= 1);
+  A('v0.75 metropolis: off by default, checkbox toggles the flag', R.metro.defaultOff && R.metroToggle && R.metroToggle.on === true && R.metroToggle.off === false);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);
