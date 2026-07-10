@@ -9,10 +9,25 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.79.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.80.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.80 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.78` are kept and never edited.
+  (v0.81 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.79` are kept and never edited.
+- **v0.80 — quality-default + persistence fixes + mobile header fix** (owner: "apply all fixes and
+  optimisation; check the UX/UI on mobile"). Headless **909**, smoke **83**. (1) **Ocean currents ON by
+  default** (`climate.currents` false→true) — cheap, integrated, adds warm/cold coastal-climate realism.
+  Like `carveRivers` (v0.145) this is an intentional default flip: **default render no longer bit-identical
+  to v0.79** (currents-off reproduces it); `loadZip`'s `==null?false` guard keeps pre-v0.80 saves exact.
+  Albedo/seasons stay opt-in (albedo forces the CPU temp path; seasons is heaviest + changes annual→seasonal
+  field meaning) — deliberately NOT flipped, to avoid a perf regression. (2) **LOD sculpt-edit persistence** —
+  `_lodEdits` now save as sparse (index,value) deltas over the deterministic procedural base (reconstructed
+  via `pyramidTile` on load); closes the "un-baked tile edits lost on save" gap. Nothing written when there
+  are no edits. (3) **Mobile header fix** (≤860px): header was ~123px tall with **Export ▾ off-screen** on a
+  ~390px phone — fixed with `flex-wrap` (buttons wrap to a reachable second row), `#undoMem` hidden, compact
+  one-line `h1`; header **123→80px**, no clipped buttons/overflow. Rest of the mobile UX audited sound
+  (slide-in drawer, no `aside` overflow, enlarged touch targets, 16px inputs). Browser-verified all three;
+  the one rare headless flake is a pre-existing `Math.random()` noise test (test_tail.js:1707), not currents
+  (deterministic per seed).
 - **v0.79 — deep-zoom oxbow-lake pockets** — closes the last flagged river-morphology deferral (v0.72's
   "oxbow cut-off geometry, needs centerline curvature tracking"). Engine (block 1), opt-in (Burn-rivers
   toggle), never in `generate()`/default render ⇒ **render battery ALL IDENTICAL to v0.78**, headless

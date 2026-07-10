@@ -12,6 +12,36 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.80 (2026-07-10)
+**Quality-default + persistence fixes, and a mobile header fix** (owner: "apply all fixes and optimisation;
+check the UX/UI on mobile"). Three independent changes; headless **909**, smoke **83** (both unchanged).
+
+- **Ocean currents ON by default** (`state.climate.currents` false → **true**). Currents are cheap
+  (integrated into the weather sim's SST before `buildWind`) and add real coastal-climate realism —
+  warm/wet western-boundary coasts (Gulf Stream), cool/dry eastern-boundary coasts (Benguela→Atacama).
+  Browser-verified the flip has effect (rain differs on ~61k cells vs off) and the checkbox reflects the new
+  default. Like `carveRivers` in v0.145 this is an intentional default flip: **the default render is no longer
+  bit-identical to v0.79** — turning currents off reproduces the prior output. `loadZip` keeps its
+  `currents==null ? false` guard, so **pre-v0.80 saves load exactly as saved** (only brand-new worlds get
+  currents on). Deliberately did **not** default-on **albedo** (forces the CPU temperature path — a perf
+  regression, counter to "optimisation") or **seasons** (heaviest pass + changes annual→seasonal field
+  meaning); both stay one-click opt-in.
+- **LOD per-tile sculpt-edit persistence** (fixes the analysis gap: un-baked `_lodEdits` were lost on
+  save unless baked into the atlas first). New `_lodEditsSyncToState`/`FromState` serialise each edit as the
+  **sparse (index,value) cells that differ from the deterministic procedural base** (+ z/col/row/ts); on load
+  the field regenerates identically from the seed, so `pyramidTile` reconstructs the same base and the deltas
+  re-apply — no bulky Float32 arrays in the ZIP, and **nothing written when there are no edits** (save-format
+  unchanged for the common case). Chained onto the already civ/paint-wrapped `exportZip`/`loadZip`;
+  try/catch skips any tile that can't reconstruct (edit lost gracefully, never a crash). Browser-verified a
+  single-cell edit round-trips exactly.
+- **Mobile header fix** (≤860px). The header was ~123px tall and pushed **Export ▾ off-screen (unreachable)**
+  on a ~390px phone: the `#undoMem` step-count status wasn't hidden (it wrapped to 5 lines) and the action
+  buttons couldn't wrap. Fixed in the mobile media query: `header{flex-wrap:wrap}` so Import/Export/Assets
+  wrap to a second reachable row, `header #undoMem{display:none}` (id-scoped, beats the base `.tag` rule),
+  and `header h1{white-space:nowrap;font-size:12px}`. Header **123px → 80px**, no clipped buttons, no
+  horizontal overflow. The rest of the mobile UX audited sound at true device-width: slide-in sidebar drawer,
+  no `aside` overflow (338/338 at 390px), enlarged touch targets, 16px inputs (no iOS zoom-on-focus).
+
 ### v0.79 (2026-07-10)
 **Deep-zoom oxbow-lake pockets** — closes the last flagged river-morphology deferral (the v0.72 note:
 "oxbow cut-off geometry, deferred — needs true centerline curvature tracking"). Engine (script block 1),
