@@ -21,12 +21,14 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   carved to a shallow water pocket. Seam Δ=0 (pure world-coord noise + shared LUT), carve-only, floor-bounded.
   True cut-off geometry (vector centerline tracking) still out of scope per LOD tile; this is the seam-safe
   LOD approximation. **Browser pass owed**: the pockets at z9–z10 on a real floodplain; noise-sample perf.
-- **Settlement-density research deferrals — essentially complete** (`docs/research/settlement-density.md`).
+- **Settlement-density research deferrals — COMPLETE** (`docs/research/settlement-density.md`).
   v0.75 (metropolis §5) · v0.76 (village density §6 + regional-pop estimate §3) · v0.77 (wetlands
   carrying-capacity §2b) · v0.78 (transport transfer-overhead §5c) all shipped, each opt-in / default
-  bit-identical. **One item remains open, blocked on sourcing:** the Mediterranean-scrub residual
-  calibration (§9 Q5) — `shrub` stays at 0.95 rather than take an unsourced number; it needs a
-  Roman-demography source pass (Scheidel/Frier), and the web search was rate-limited this session.
+  bit-identical. The last item — the **Mediterranean-scrub residual calibration** (§9 Q5) — is now resolved
+  by a sourced follow-up: the Roman-Italy anchor (Beloch ~15–20/km²; Frier Latin West ~17/km²; Hin 2013)
+  **confirms** `shrub`'s existing residual 0.95 + intensify 0.40 (dense but rain-fed Mediterranean dry-farming),
+  so no code change was warranted — the doc's §9/§2a/References were updated with the citation instead of
+  changing a well-calibrated number. All five §9 open questions are closed.
 - **v0.78 — transport transfer/handling overhead** (settlement-density §5c, the "pathfinding for routes"
   strand). Civ layer (block 2) only, **engine bit-identical to v0.77** (headless **903**, render battery ALL
   IDENTICAL — journeys are transient, never in the battery), smoke **81 → 83**. Wiseman et al. 2024:

@@ -72,6 +72,7 @@ This is the number your "settlement distribution by region" and "sustainability 
 | Carpathian Basin, 1100 → 1440 | **3.6 → 10.3/km²** | via medieval-demography synthesis | [B] |
 | France, c.1000 → 1300 (peak) | **~14 → ~26/km²** | derived from Russell 1972 | [B] |
 | Italy, c.1300 | **~23–37/km²** | derived from Russell 1972 | [B] |
+| Roman Italy (classical Mediterranean dry-farming), Augustan | **~15–24/km²** (rural ~15–20; Latin West ~17) | Beloch 1886 via Scheidel 2001; Frier 2000; Hin 2013 | [B] |
 | England & Wales, c.1300 | **~4–12/km²** | derived from Russell 1972 | [B] |
 | Scotland, c.1300 | **~1.5–3/km²** | derived from Russell 1972 | [B] |
 | Scandinavia, c.1300 | **~0.4–1.5/km²** | derived from Russell 1972 | [B] |
@@ -253,6 +254,10 @@ Full citations grouped by topic. Peer-reviewed and standard-reference works are 
 - Herlihy, D. (1989). Demography. In *Dictionary of the Middle Ages*, vol. 4.
 - Klein Goldewijk, K., et al. (2017). Anthropogenic land use estimates for the Holocene — HYDE 3.2. *Earth System Science Data*, 9: 927–953. *(HYDE 3.3 update, 2023; hosted with processing by Our World in Data.)*
 - Stone, L. (2017). Notes on Medieval Population Geography. *(secondary/derived recalculation from Russell-type totals; per-km² breakdowns are derived, marked [B] in-text.)*
+- Beloch, K. J. (1886). *Die Bevölkerung der griechisch-römischen Welt*. Leipzig: Duncker & Humblot. *(the foundational Roman-Italy rural density estimate ~15–20/km²; discussed in Scheidel 2001 below.)*
+- Frier, B. W. (2000). Demography. In *The Cambridge Ancient History*, vol. XI (2nd ed.), pp. 787–816. Cambridge University Press. *(Latin West ~17/km², Greek East ~24/km².)*
+- Scheidel, W. (2001). *Debating Roman Demography*. Leiden: Brill. *(the Beloch/Frier debate; §5 Mediterranean-scrub calibration anchor.)*
+- Hin, S. (2013). *The Demography of Roman Italy: Population Dynamics in an Ancient Conquest Society, 201 BCE–14 CE*. Cambridge University Press.
 
 **Carrying capacity & biome**
 - Tallavaara, M., et al. (2018). Productivity, biodiversity, and pathogens influence the global hunter-gatherer population density. *PNAS*, 115(6). doi:10.1073/pnas.1715638115.
@@ -531,8 +536,12 @@ Not a new formula, just a usable default if you ever want the five count fields 
 
 ## 9. Open questions for you, not answered here
 
-1. **`buildCarryingCapacity`'s `bK` default** — 0 (bit-identical, matches this codebase's pervasive convention for new terms) or 1 (this reads more like a correctness fix than a style choice, so defaulting on is defensible too). Your call given how the rest of the affordance-field code stages new terms.
-2. **Wetlands/Marshes carrying-capacity** (§2b) — needs the `buildCartBiome` moisture+flatness detector exposed to the carrying-capacity pipeline, or accept that Wetlands only affects rendering/labeling for now.
-3. **Settlement spacing** (§6) — sparse "notable places only" (current default, probably fine for a map-scale tool) vs. genuine village density (needs a ~3–4× denser default and almost certainly a different UI for it, since 3,800 individually-editable settlements isn't a UI you'd want).
-4. **Metropolis tier** (§5) — worth it for imperial-scale worlds, or is Early-Bronze-Age-scale urbanism (the current honest ceiling) the intended register for Cartalith worlds?
-5. **Mediterranean Scrub calibration** — reference doc has no classical-Mediterranean regional-density anchor (Roman Italy specifically), and I didn't want to hand you an unverified number for `shrub`'s residual after the rest of this document's search budget went to Maya/NPP. Worth a dedicated follow-up search (Scheidel's Roman demography work is the obvious target) if you want tighter calibration on that one biome specifically.
+*Resolution status (2026-07-10): all five have now been actioned in the Gen1 tool — 1 → v0.69, 4 → v0.75,
+3 → v0.76, 2 → v0.77, and 5 is resolved below with a sourced calibration. Each carrying-capacity change is
+opt-in (rides the "Biome carrying-capacity" toggle) so default output stays bit-identical.*
+
+1. **`buildCarryingCapacity`'s `bK` default** — *resolved (v0.69): defaults to 0 (bit-identical), one-click opt-in.* 0 (bit-identical, matches this codebase's pervasive convention for new terms) or 1 (this reads more like a correctness fix than a style choice, so defaulting on is defensible too). Your call given how the rest of the affordance-field code stages new terms.
+2. **Wetlands/Marshes carrying-capacity** (§2b) — *resolved (v0.77): `buildWetlandMask()` exposes the exact `buildCartBiome` moisture+flatness detector to the K pipeline; wetland residual 0.70 + intensify 0.95.* needs the `buildCartBiome` moisture+flatness detector exposed to the carrying-capacity pipeline, or accept that Wetlands only affects rendering/labeling for now.
+3. **Settlement spacing** (§6) — *resolved (v0.76): opt-in "Dense village grid" mode via `suppressionRadiusCells(VILLAGE_SPACING_KM)`, capped at 200 pins; plus a density-only regional-population estimate for totals without a pin per hamlet.* sparse "notable places only" (current default, probably fine for a map-scale tool) vs. genuine village density (needs a ~3–4× denser default and almost certainly a different UI for it, since 3,800 individually-editable settlements isn't a UI you'd want).
+4. **Metropolis tier** (§5) — *resolved (v0.75): opt-in imperial-seat tier gated on betweenness × polity size, rare (≤1/faction).* worth it for imperial-scale worlds, or is Early-Bronze-Age-scale urbanism (the current honest ceiling) the intended register for Cartalith worlds?
+5. **Mediterranean Scrub calibration** — *resolved (2026-07-10, follow-up search): the Roman-Italy anchor **confirms** `shrub`'s existing residual (0.95) and moderate intensify eligibility (0.40); no change needed.* Beloch put rural Italy at ~15–20/km²; Frier's reconstruction gives the Latin West ~17/km² (Greek East ~24/km²), with Italy/Sicily above the western average — i.e. **classical Mediterranean dry-farming country sat among the densest pre-industrial rain-fed regions, in the "prosperous agrarian core (15–40/km²)" tier of §2b.** That warrants a **high** residual (well-adapted, minimal disease/climate friction — a hair below 1.0 only for real Mediterranean summer-drought risk the mean-rainfall soil term underweights) → **0.95 stands, now sourced rather than assumed.** And because that density was rain-fed (cereals/olives/vines), *not* irrigation-driven like Egypt/Maya, its **intensify eligibility stays moderate (0.40)** — Mediterranean scrub was already near its rain-fed ceiling without a water-management story. **[B]** (Beloch 1886 via Scheidel 2001; Frier 2000; Hin 2013).
