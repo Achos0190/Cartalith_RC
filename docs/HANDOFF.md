@@ -9,10 +9,20 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.81.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.82.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.82 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.80` are kept and never edited.
+  (v0.83 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.81` are kept and never edited.
+- **v0.82 — post-collapse recovery model** (owner: "start it too"; `docs/research/settlement-emergence.md`
+  §5–6). Auto-populate can model a world rebuilding after a demographic collapse, below the ecological ceiling.
+  Recovery-phase selector under Civilization (`_civRecoveryPhase`: Stable · I Survival · II Subsistence · III
+  Regional · IV Mature). Pure `_civApplyRecovery` scales populations by a phase fraction and applies the doc's
+  **labour-shortage demotion** — a nucleus scaled below its tier floor drops to the tier its people support
+  (former city → village), and a demoted urban site becomes a **fortified settlement in its ruins** (`p.ruins`
+  + `fortified` trait); Survival/Subsistence abandon tiny unanchored nodes. Default Stable ⇒ auto-populate
+  byte-identical; render battery ALL IDENTICAL, headless **909**, smoke **84 → 86**. Browser-verified the full
+  Phase I–IV trajectory (Stable 93k → Survival 6% + ruins → … → Mature 81%). **Deferred follow-ups**: ruin-reuse
+  *placement* bias (not just re-scoring the placed set) and surplus-gated *growth over time*.
 - **v0.81 — capacity-grounded, map-size-dependent, automatic settlement populations** (owner design doc →
   `docs/research/settlement-emergence.md`). Auto-populate now derives population from the **energy-system
   model**: a settlement's population is what its catchment land sustains (carrying capacity K × the agrarian

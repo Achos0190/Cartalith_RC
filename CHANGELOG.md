@@ -12,6 +12,29 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.82 (2026-07-10)
+**Post-collapse recovery model** (owner: "start it too" — `docs/research/settlement-emergence.md` §5–6). Builds
+on v0.81's capacity-grounded populations: auto-populate can now model a world rebuilding **after a demographic
+collapse**, running *below* the ecological ceiling. Civ layer (block 2) only; render battery ALL IDENTICAL to
+v0.81, headless **909**, smoke **84 → 86**. Default = **Stable** ⇒ auto-populate byte-identical.
+
+- **Recovery-phase selector** under Civilization (`_civRecoveryPhase`, transient): Stable · I Survival ·
+  II Subsistence · III Regional · IV Mature. Each scales settlement populations by a phase fraction
+  (`_CIV_RECOVERY_FRAC`: <10% · 10–30% · 30–70% · 70%+).
+- **Labour-shortage tier demotion** — the doc's key mechanic. New pure `_civApplyRecovery(places, phase, rng)`
+  + `_civTierForPopulation(pop)` (population→tier by the doc's §3.1 bands, floors in `_CIV_TIER_FLOOR`). When a
+  nucleus is scaled below the labour its tier needs, it **demotes to the tier its surviving population
+  supports** — a former city surviving only as a village. A demoted **urban** site keeps its people clustered
+  in the defensible ruins → gains a `fortified` trait + `p.ruins` (a fortified settlement inside the ruins).
+- **Sparse survival nodes** — in Survival/Subsistence, tiny inland nodes with no water/ruin anchor are
+  abandoned; survivors cluster on water (ports) and ruins.
+- Browser-verified across all five phases on one fixed world: Stable 93k pop / full hierarchy / 0 ruins →
+  Survival 5.8k (6%, cities gone, 13 fortified ruins, 41→22 settlements) → Subsistence 17% → Regional 45%
+  (cities returning) → Mature 81%. Exactly the doc's Phase I–IV trajectory. Two new smoke assertions (pure
+  demotion + integration: Survival total ≪ Stable, with ruins).
+- **Deferred (documented follow-ups):** ruin-reuse *placement value* (biasing new settlements toward existing
+  ruins/water/infrastructure, not just re-scoring the placed set), and surplus-gated *growth* over time.
+
 ### v0.81 (2026-07-10)
 **Capacity-grounded, map-size-dependent, automatic settlement populations** (owner design doc +
 `docs/research/settlement-emergence.md`). Auto-populate no longer assigns population from a fixed per-tier base

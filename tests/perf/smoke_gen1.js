@@ -295,6 +295,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (typeof renderNow === 'function') renderNow();
     return { autoFilled: filled, noButton, allPos };
   });
+  // v0.82: post-collapse recovery — Survival phase (I) scales population far below Stable and collapses
+  //        over-large nuclei into fortified ruins. Deterministic test of the pure helper + the populate pass.
+  R.recovery = await page.evaluate(() => {
+    if (typeof _civApplyRecovery !== 'function' || typeof _civTierForPopulation !== 'function') return null;
+    // pure helper: an 8000-pop city, scaled by Survival (~4–10%), demotes below the city floor and gains ruins
+    const rng = () => 0.5;
+    const city = { category: 'settlement', kind: 'city', klass: 'city', pop: 8000, traits: [] };
+    const out = _civApplyRecovery([city], 1, rng, { dropThresh: 0 });
+    const demoted = out[0] && out[0].kind !== 'city' && out[0].pop < 8000 && out[0].ruins === true;
+    const tierFn = _civTierForPopulation(300) === 'village' && _civTierForPopulation(20000) === 'city';
+    // integration: Survival total « Stable total on the committed world
+    _civRecoveryPhase = 0; _civAutoWorld();
+    const stable = state.places.filter(p => p.category === 'settlement').reduce((t, p) => t + p.pop, 0);
+    _civRecoveryPhase = 1; _civAutoWorld();
+    const survS = state.places.filter(p => p.category === 'settlement');
+    const surv = survS.reduce((t, p) => t + p.pop, 0);
+    const someRuins = survS.some(p => p.ruins);
+    _civRecoveryPhase = 0;
+    state.places = []; if (typeof civWays !== 'undefined') civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof renderNow === 'function') renderNow();
+    return { demoted, tierFn, collapses: surv < stable * 0.5, someRuins, stable, surv };
+  });
   // v0.77: wetland/marsh carrying capacity — the KEY integration check is that buildWetlandMask agrees
   //        exactly with buildCartBiome's Wetlands/Marshes class (index 4), i.e. the two pipelines finally
   //        share one definition. Plus: the wetland residual actually bites under biomeK. Restores _biomeK.
@@ -546,6 +569,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.76 regional population: integrates a positive total over a positive land area', R.village.popTotal > 0 && R.village.popLand > 0);
   A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
   A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
+  A('v0.82 recovery: a city collapses into a fortified ruin under Survival + tier-from-population is sane', R.recovery && R.recovery.demoted && R.recovery.tierFn);
+  A('v0.82 recovery: Survival phase drops total population far below Stable, with ruins', R.recovery && R.recovery.collapses && R.recovery.someRuins);
   A('v0.77 wetland mask agrees exactly with buildCartBiome Wetlands class (two pipelines unified)', R.wetland && R.wetland.agree);
   A('v0.77 wetland residual lowers carrying capacity on wetland cells under biomeK (or no wetlands on this world)', R.wetland && R.wetland.kEffect === true);
   A('v0.78 transshipments: counts land↔water mode-changes (0/1/2/4)', R.transfer && R.transfer.landOnly === 0 && R.transfer.oneCross === 1 && R.transfer.landSeaLand === 2 && R.transfer.multi === 4);
