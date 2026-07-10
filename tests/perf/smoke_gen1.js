@@ -253,6 +253,38 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civMetropolis;
     _civMetropolis = was; return { on, off };
   });
+  // v0.76: dense village-grid placement mode + regional-population estimate. Auto-populates twice
+  //        (default vs dense) on the committed world, then restores clean civ state.
+  R.village = await page.evaluate(() => {
+    _civVillageDensity = false; _civMetropolis = false;
+    _civAutoWorld(); const nDefault = state.places.length;
+    _civVillageDensity = true;
+    _civAutoWorld(); const nDense = state.places.length;
+    _civVillageDensity = false;
+    const pop = (typeof _civRegionalPopulation === 'function') ? _civRegionalPopulation() : null;
+    // restore clean civ state so later place/way tests see an empty world
+    state.places = []; if (typeof civWays !== 'undefined') civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+    return {
+      nDefault, nDense, denser: nDense > nDefault, capBounded: nDense <= 200,
+      defaultOff: _civVillageDensity === false,
+      popTotal: pop ? pop.total : -1, popLand: pop ? pop.landKm2 : -1,
+    };
+  });
+  R.villageToggle = await page.evaluate(() => {
+    const cb = document.getElementById('civVillageDensityChk'); if (!cb) return null;
+    cb.checked = true; cb.dispatchEvent(new Event('change')); const on = _civVillageDensity;
+    cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillageDensity;
+    return { on, off };
+  });
+  R.popBtn = await page.evaluate(() => {
+    const btn = document.getElementById('civPopEstimateBtn'), out = document.getElementById('civPopEstimateOut');
+    if (!btn || !out) return null;
+    btn.click();
+    return { hasNumber: /population/i.test(out.textContent) && /\d/.test(out.textContent) };
+  });
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
   await page.click('#layersBtn');
@@ -459,6 +491,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.75 metropolis: class present (rank 5, ★)', R.metro.classRank === 5 && R.metro.classGlyph === '★');
   A('v0.75 metropolis: promotes the dominant capital of a large polity, rejects low-betweenness + small-polity capitals', R.metro.bigChosen && R.metro.lowNotChosen && R.metro.smallFactionNotChosen && R.metro.chosenCount === 1 && R.metro.perFac1 <= 1);
   A('v0.75 metropolis: off by default, checkbox toggles the flag', R.metro.defaultOff && R.metroToggle && R.metroToggle.on === true && R.metroToggle.off === false);
+  A('v0.76 village mode: dense grid places more settlements than the default, bounded at the 200-pin cap', R.village.denser && R.village.capBounded && R.village.nDefault >= 2);
+  A('v0.76 village mode: off by default, checkbox toggles the flag', R.village.defaultOff && R.villageToggle && R.villageToggle.on === true && R.villageToggle.off === false);
+  A('v0.76 regional population: integrates a positive total over a positive land area', R.village.popTotal > 0 && R.village.popLand > 0);
+  A('v0.76 population estimate button fills the readout with a number', R.popBtn && R.popBtn.hasNumber);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

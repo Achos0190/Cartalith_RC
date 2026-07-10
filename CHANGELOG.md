@@ -12,6 +12,32 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.76 (2026-07-10)
+**Dense village-grid placement mode + regional-population estimate** — the settlement-density §6/§3
+deferral. Civ layer (script block 2) only, **engine bit-identical to v0.75** (render battery ALL
+IDENTICAL; headless **897** unchanged). Both additions opt-in/read-only ⇒ **auto-populate byte-identical
+when off**. Smoke **75 → 79**.
+
+- **Dense village grid** (`_civVillageDensity`, default off). v0.69 landed the `suppressionRadiusCells`
+  helper but left it unwired; §6 flagged that `_civIterativeAutoWorld`'s default suppression (~market-town
+  ~36 km spacing) places nothing at the true ~10 km village catchment (Vita-Finzi & Higgs 1970). This mode
+  (checkbox under Civilization, applied only when the tier-count fields are blank) tightens the seed
+  suppression radius to `suppressionRadiusCells(VILLAGE_SPACING_KM, GW, state.mapWidthKm)` and raises the
+  cap to `_CIV_VILLAGE_CAP=200` — a ~3–4× denser hamlet/village scatter (browser: 40 → 200 pins on a 1024
+  region). Bounded at 200 because §6 notes an unbounded 10 km grid implies ~3,800 pins, which the
+  per-settlement editor list can't stay usable at.
+- **Regional-population estimate** (`_civRegionalPopulation()` + "Estimate regional population" button).
+  The density doc's recommended alternative to placing thousands of hamlets: integrate the persons/km²
+  field (`estimateRegionalDensityKm2` via `currentPopulationDensity`, already the **Pop density** layer)
+  over all land for a real total, plus per-faction totals over the painted territory raster. Reflects the
+  Biome carrying-capacity toggle. Uniform cellKm² (the engine-wide cellKm idiom; world-mode polar
+  foreshortening approximated as elsewhere). Read-only — never touches `generate()`/render. Browser: a
+  1200 km region modeled ~254k people over ~190k km² (~1.33/km², a plausible low-agrarian average).
+- Verify: block-2, four new Playwright smoke assertions — dense mode places strictly more than the default
+  and stays ≤ the 200 cap; default-off + checkbox toggle; `_civRegionalPopulation` returns a positive total
+  over positive land area; the estimate button fills its readout. Browser-verified (dense grid renders +
+  connects without breakage).
+
 ### v0.75 (2026-07-10)
 **Imperial-seat (metropolis) tier** — the first of the settlement-density research deferrals
 (`docs/research/settlement-density.md` §5). Civ layer (script block 2) only, **engine bit-identical to

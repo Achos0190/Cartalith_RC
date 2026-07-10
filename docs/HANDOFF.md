@@ -9,14 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.75.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.76.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.76 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.74` are kept and never edited.
+  (v0.77 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.75` are kept and never edited.
 - **Working through the settlement-density research deferrals** (`docs/research/settlement-density.md`
-  §§2b/5/6 + the routing transfer-overhead in §5c). v0.75 is the first; v0.76 (village-density placement
-  mode), v0.77 (wetlands carrying-capacity), v0.78 (transport transfer-overhead + Med-scrub calibration)
-  planned. Each opt-in, default bit-identical.
+  §§2b/5/6 + the routing transfer-overhead in §5c). v0.75 (metropolis) + v0.76 (village density) done;
+  v0.77 (wetlands carrying-capacity), v0.78 (transport transfer-overhead + Med-scrub calibration) planned.
+  Each opt-in, default bit-identical.
+- **v0.76 — dense village-grid placement mode + regional-population estimate** (settlement-density §6/§3).
+  Civ layer (block 2) only, **engine bit-identical to v0.75** (headless **897**, render battery ALL
+  IDENTICAL), smoke **75 → 79**. (1) **Dense village grid** (`_civVillageDensity`, checkbox, default off):
+  wires the v0.69 `suppressionRadiusCells(VILLAGE_SPACING_KM,…)` helper into `_civIterativeAutoWorld` (when
+  tier counts are blank) — seeds at the ~10 km site-catchment spacing instead of ~market-town, ~3–4× denser,
+  capped at `_CIV_VILLAGE_CAP=200` pins (browser: 40 → 200). (2) **Regional-population estimate**
+  (`_civRegionalPopulation()` + button): integrates the persons/km² field over land (+ per-faction over
+  painted territory) for real totals without a pin per hamlet (browser: ~254k over ~190k km², ~1.33/km²).
+  Both opt-in/read-only ⇒ auto-populate byte-identical when off. **Browser pass owed**: does the 200-pin cap
+  feel right, and are the estimate's absolute numbers sensible across biome-K on/off?
 - **v0.75 — imperial-seat (metropolis) tier** (settlement-density §5). Civ layer (block 2) only,
   **engine bit-identical to v0.74** (headless **897**, render battery ALL IDENTICAL), smoke **72 → 75**.
   Adds a rare **Metropolis ★** class above Capital, placed by the sourced ceiling-breaking rule (Lawrence

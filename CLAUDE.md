@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.75**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.76**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.75.html` | **Current** unified tool (~15.6k lines, 3 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.74.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.76.html` | **Current** unified tool (~15.6k lines, 3 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.75.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports |
@@ -40,7 +40,7 @@ execute in order; cross-block initialization must not assume a later block has r
 `#carIconGallery` comment in the file for the established pattern — a later block performs the
 init, not `setTimeout(...,0)`).
 
-1. **Generator engine + app shell** (~8.0k lines, `const VERSION='0.75'`). The full
+1. **Generator engine + app shell** (~8.0k lines, `const VERSION='0.76'`). The full
    `elevation_foundation` lineage: procedural heightmap/tectonics/climate/erosion pipeline,
    renderer, LOD/atlas, exports, UI wiring. Everything `tests/run.sh` exercises.
 2. **Civ/politics layer** (~4.2k lines): factions (`CIV_FACTIONS`, deterministic golden-angle
