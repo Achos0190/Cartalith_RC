@@ -9,10 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.73.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.74.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.74 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.72` are kept and never edited.
+  (v0.75 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.73` are kept and never edited.
+- **v0.74 — "Bake all levels & finalize world" promoted to the top of Generate → World** (owner
+  request). The finalize button was buried two collapsed disclosures deep (*Tiles & LOD → Atlas*),
+  so committing a world to the Atlas phase meant hunting for it. A new **Finalize world** section
+  (`#finalizeSec`) is now the first block of Generate → World (above Geology), hosting the bake-depth
+  picker + **🔒 Bake ALL levels & finalize world** / **🔓 Un-finalize** buttons. Pure DOM-position
+  relocation: the moved elements keep their v0.62 ids (`bakeAllDepthRow`/`bakeAllDepth`/`bakeAllBtn`/
+  `unfinalizeBtn`) so `applyFinalizedUI()` and every handler are unchanged; per-view bake / clear /
+  export stay under *Tiles & LOD → Atlas*. Banner/chip/alert text re-pointed to "the top of Generate →
+  World". **Engine bit-identical to v0.73** (render battery ALL IDENTICAL; headless **897** unchanged),
+  smoke **71 → 72** (+1 asserting the bake button is the first `<button>` in `#genWorld`, in
+  `#finalizeSec`, not behind a `<details>`). Verified in-browser (screenshot).
 - **v0.73 — economic land/sea routing + settlement-waypoint pathfinding** (owner report: routes
   ignored a cheaper/more-direct sea leg and bypassed settlements they passed instead of stopping).
   Civ layer (block 2) only, **engine bit-identical to v0.72** (headless **897** unchanged), smoke
@@ -181,7 +192,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (897 as of v0.72), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (897 as of v0.74), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at

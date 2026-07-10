@@ -238,6 +238,20 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   R.phaseOn = await page.evaluate(() => ({ body: document.body.classList.contains('phase-explore'), chip: getComputedStyle(document.getElementById('phaseChip')).display !== 'none', genBtnDisabled: document.getElementById('genBtn').disabled, unfinalizeEnabled: !document.getElementById('unfinalizeBtn').disabled }));
   await page.evaluate(() => { state.finalized = false; applyFinalizedUI(); });
   R.phaseOff = await page.evaluate(() => document.body.classList.contains('phase-explore'));
+  // v0.74: finalize control promoted to the FIRST block of Generate → World (id=finalizeSec),
+  //        out of the collapsed Tiles & LOD → Atlas accordion. Checked while not finalized so the
+  //        bake button is visible (applyFinalizedUI hides it once finalized).
+  R.finalizeTop = await page.evaluate(() => {
+    const gw = document.getElementById('genWorld');
+    const bab = document.getElementById('bakeAllBtn');
+    const sec = document.getElementById('finalizeSec');
+    return {
+      inFinalizeSec: !!(bab && sec && sec.contains(bab)),
+      notInDetails: !!(sec && !sec.closest('details')),          // always visible, not behind a disclosure
+      isFirstButton: !!(gw && gw.querySelector('button') === bab), // the first <button> in Generate → World
+      depthInSec: !!(sec && sec.querySelector('#bakeAllDepth'))    // the bake-depth picker travelled with it
+    };
+  });
 
   // ---- v0.66: corrected IA — Generate branches restored (World | Civilization | Cartography);
   //      Explore is the planning phase ----
@@ -415,6 +429,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('progressive-disclosure <details.adv> present + collapsed', R.advDetails.count >= 3 && R.advDetails.anyOpen === false);
   A('finalize → phase tint + chip + genBtn locked + Un-finalize stays clickable', R.phaseOn.body && R.phaseOn.chip && R.phaseOn.genBtnDisabled && R.phaseOn.unfinalizeEnabled);
   A('un-finalize clears phase-explore', R.phaseOff === false);
+  A('v0.74 finalize button is the first button in Generate → World, not behind a disclosure', R.finalizeTop.inFinalizeSec && R.finalizeTop.notInDetails && R.finalizeTop.isFirstButton && R.finalizeTop.depthInSec);
   A('Undo button lives in header', R.undoInHeader === true);
   A('Generate sub-tab bar restored (world/civ/carto)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto']));
   A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);

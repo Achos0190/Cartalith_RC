@@ -12,6 +12,27 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.74 (2026-07-10)
+**Finalize control promoted to the top of Generate → World** (owner request: the "Bake ALL levels & finalize
+world" button was buried two disclosures deep — inside *Tiles & LOD → Atlas*, both collapsed by default — so
+committing a world to the cartographic Atlas phase meant hunting for it). Pure UI markup relocation, **engine
+bit-identical to v0.73** (render battery ALL IDENTICAL; headless **897** unchanged). Smoke **71 → 72**.
+
+- A new **Finalize world** section (`#finalizeSec`) is now the **first block** of Generate → World, directly
+  under the (hidden-until-finalized) banner and above Geology. It hosts the bake-depth picker and the
+  **🔒 Bake ALL levels & finalize world** / **🔓 Un-finalize** buttons — the finalize button is the first
+  button you meet in the sub-tab, no longer behind a collapsed accordion.
+- The moved elements keep their v0.62 ids (`bakeAllDepthRow` / `bakeAllDepth` / `bakeAllBtn` / `unfinalizeBtn`),
+  so all handler wiring and the `applyFinalizedUI()` show/hide/disable logic are unchanged — the relocation is
+  DOM-position only.
+- Per-view baking stays where it belongs: **Bake visible tiles**, **Clear atlas**, **Export atlas…** and the
+  chunk-debug overlay remain under *Tiles & LOD → Atlas*; that section's hint now points up to the promoted
+  finalize control. The finalized-world banner, the header phase chip tooltip, and the "generation is locked"
+  alert were re-worded to say *"the top of Generate → World"* instead of the old *"Tiles & LOD → Atlas"* path.
+- Verify: markup-only, so headless **897** and the A/B render battery (ALL IDENTICAL vs v0.73) are unaffected;
+  one new Playwright smoke assertion confirms the bake button is the first `<button>` in `#genWorld`, sits in
+  `#finalizeSec`, is not nested in any `<details>`, and that the depth picker travelled with it.
+
 ### v0.73 (2026-07-10)
 **Economic land/sea routing + settlement-waypoint pathfinding** (owner report: routes ignored a cheaper/more
 direct sea leg and bypassed settlements they passed rather than stopping at them). Civ layer (script block 2)
