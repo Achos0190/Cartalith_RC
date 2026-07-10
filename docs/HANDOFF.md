@@ -9,10 +9,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.82.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.83.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.83 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.81` are kept and never edited.
+  (v0.84 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.82` are kept and never edited.
+- **v0.83 — map width removed from the Generate → World sidebar; setup-gate-only** (owner request). Since
+  v0.70 the sidebar carried a disabled, read-only `#mapw` copy ("shown for reference") duplicating the real
+  editable width input in the setup gate. Removed the duplicate row + its reference legend entirely — map
+  scale is now set in exactly one place (New-world/Import gate). Pure UI + dead-handler cleanup (removed the
+  unreachable `bind('mapw',…)` that would have thrown, and the now-moot finalize-lock exemption); render
+  battery ALL IDENTICAL to v0.82, headless **909**, smoke **86** (2 assertions updated for the removed
+  elements). `state.mapWidthKm` semantics/usage sites unchanged — only where it can be entered changed.
 - **v0.82 — post-collapse recovery model** (owner: "start it too"; `docs/research/settlement-emergence.md`
   §5–6). Auto-populate can model a world rebuilding after a demographic collapse, below the ecological ceiling.
   Recovery-phase selector under Civilization (`_civRecoveryPhase`: Stable · I Survival · II Subsistence · III

@@ -12,6 +12,31 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.83 (2026-07-10)
+**Map width input removed from the Generate → World sidebar — creation-time only** (owner request). Since
+v0.70, the sidebar carried a *disabled, read-only* copy of the map width (`#mapw`, "shown for reference"
+alongside a distance-reference legend) next to the real, editable input in the setup gate (`#suWidth`/
+`#suWidth2`). The owner asked to drop the duplicate entirely: map scale is now visible/settable in exactly
+one place — the New-world/Import setup gate — never in the sidebar. Pure UI markup + dead-handler removal;
+**render battery ALL IDENTICAL to v0.82**, headless **909** unchanged, smoke **86** (2 assertions updated for
+the removed elements, none added — no new behavior, just less UI).
+
+- Removed the "Horizontal · fixed at creation" sublabel, the `#mapw` row, and its `#calLegend` reference
+  legend from the sidebar's **Scale & calibration** section; kept the km/mi unit toggle (still governs the
+  Peak-altitude field's display unit and the on-canvas scale bar) and Sea level / Peak altitude. Rewrote the
+  section hint to drop the now-nonexistent row.
+- Removed the now-unreachable `bind('mapw', …)` handler (would have thrown on load — `bind()` doesn't
+  null-check, unlike `v()`/`lab()`) and the `if(el.id==='mapw') return` exemption in the finalize-lock loop
+  (dead once the id no longer exists). Trimmed `_sidebarScaleSync()` to peak-only; `renderDistLegend()` is
+  still used by the setup gate's own legend, untouched.
+- `state.mapWidthKm` is unchanged in meaning — still set once by `_suGenCommit`/`_suCalCommit` at creation/
+  import and read everywhere the engine already read it (cellKm scaling, routing, settlement catchments,
+  the v0.81/v0.82 population model, exports). Nothing about *how* the value is used changed, only *where*
+  it can be entered.
+- Verify: browser-confirmed the sidebar section renders cleanly with no orphaned controls; smoke updated —
+  `#mapw` no longer exists, `#suWidth`/`#suWidth2` still do, and `state.mapWidthKm` survives a `generate()`
+  call unchanged (no live sidebar control can write it).
+
 ### v0.82 (2026-07-10)
 **Post-collapse recovery model** (owner: "start it too" — `docs/research/settlement-emergence.md` §5–6). Builds
 on v0.81's capacity-grounded populations: auto-populate can now model a world rebuilding **after a demographic

@@ -87,10 +87,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { on, legend, infersOnCommit: /infer/i.test(busyLabel), hidden: getComputedStyle(document.getElementById('onboard')).display === 'none' };
   });
   await page.waitForTimeout(400);   // let the inferTectonics withBusy op finish before the rest of the suite
-  // sidebar Scale & calibration parity: units toggle + legend present
+  // sidebar Scale & calibration: units toggle present (v0.83: the map-width reference legend was retired
+  // along with the width row itself — width lives only in the setup gate now).
   R.sidebarScale = await page.evaluate(() => ({
     unitSeg: document.querySelectorAll('#calUnitSeg button').length,
-    legendRows: document.querySelectorAll('#calLegend .lg-row').length
+    noMapwLegend: !document.getElementById('calLegend')
   }));
 
   // ── v0.70: bug-fix batch ──
@@ -105,8 +106,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     s.value = 42; s.dispatchEvent(new Event('input')); renderNow();
     return hi > lo + 20;   // much more water at sea 0.72
   });
-  // (b) map scale locked at creation (sidebar #mapw disabled; legend reference-only)
-  R.scaleLocked = await page.evaluate(() => document.getElementById('mapw').disabled === true);
+  // (b) map scale is a creation-time-only decision: v0.70 kept a disabled read-only #mapw copy in the
+  //     sidebar; v0.83 removed that duplicate entirely (the width input now lives only in the setup gate,
+  //     #suWidth/#suWidth2), and state.mapWidthKm still can't be changed from the sidebar (no live control
+  //     writes it — a full generate() leaves it untouched).
+  R.scaleLocked = await page.evaluate(() => {
+    const beforeKm = state.mapWidthKm;
+    const noSidebarInput = !document.getElementById('mapw');
+    const gateInputsExist = !!document.getElementById('suWidth') && !!document.getElementById('suWidth2');
+    generate();
+    return noSidebarInput && gateInputsExist && state.mapWidthKm === beforeKm;
+  });
   // (c) roadDijkstra terminates on a fully-uniform cost grid (the imported-world crash: 2^32 heap overflow)
   R.dijkstraUniform = await page.evaluate(() => {
     const W = 120, H = 120, cost = new Float32Array(W * H).fill(1.0003);   // uniform, like an imported heightmap
@@ -550,9 +560,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('km→mi toggle rewrites width value + pill', R.unitToggle.pill === 'mi' && R.unitToggle.widthIsMiles);
   A('committing the setup builds a world and hides the gate', R.committed && R.gateHidden);
   A('import calibration step + auto-infer on commit', R.calStep.on && R.calStep.legend === 7 && R.calStep.infersOnCommit && R.calStep.hidden);
-  A('sidebar Scale & calibration gains units toggle + legend', R.sidebarScale.unitSeg === 2 && R.sidebarScale.legendRows === 7);
+  A('sidebar Scale & calibration keeps the units toggle; v0.83 dropped the map-width reference legend', R.sidebarScale.unitSeg === 2 && R.sidebarScale.noMapwLegend);
   A('v0.70 sea level moves the coastline in the base view', R.seaMovesCoast === true);
-  A('v0.70 map scale (#mapw) is locked at creation', R.scaleLocked === true);
+  A('v0.83 map width has no sidebar control (setup-gate-only, unchanged by generate())', R.scaleLocked === true);
   A('v0.70 roadDijkstra terminates on a uniform cost grid (no 2^32 overflow)', R.dijkstraUniform.ok === true);
   A('v0.70 auto-populate completes without throwing', R.autoPopulate.ok === true);
   A('v0.71 feature registry on a real world (rivers + peaks + query)', R.features.hasRivers && R.features.hasPeaks && R.features.queryWorks);
