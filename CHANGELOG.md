@@ -12,6 +12,15 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.84 (2026-07-10)
+**Fix: restore the "Vertical" sublabel above Sea level/Peak altitude** (owner report: "the option for sea
+level should have stayed where it was"). v0.83 removed the Map width row from the sidebar's Scale &
+calibration section as requested, but its edit also deleted the **"Vertical" sublabel-grp heading** that sat
+above Sea level/Peak altitude — an overreach: only the "Horizontal" heading (which introduced the now-removed
+Map width row) should have gone. Sea level's control itself never moved position; only its section label was
+briefly missing. Pure markup restore; render battery ALL IDENTICAL to v0.83, headless **909**, smoke **86**
+unchanged.
+
 ### v0.83 (2026-07-10)
 **Map width input removed from the Generate → World sidebar — creation-time only** (owner request). Since
 v0.70, the sidebar carried a *disabled, read-only* copy of the map width (`#mapw`, "shown for reference"

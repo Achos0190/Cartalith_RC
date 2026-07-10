@@ -9,10 +9,20 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.83.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.84.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.84 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.82` are kept and never edited.
+  (v0.85 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.83` are kept and never edited.
+- **v0.84 — fix: restored the "Vertical" sublabel over Sea level/Peak** (owner report). v0.83's Map-width
+  removal over-deleted a section heading unrelated to the ask. Pure markup restore; render battery ALL
+  IDENTICAL, headless 909, smoke 86 unchanged.
+- **Settlement-editor "disappeared" report — investigated, not reproduced.** Tested four realistic flows on
+  v0.84 (direct `_civSelectedPlace` API, simulated canvas click via the Inspect tool, right-click "Edit"
+  context-menu item from both the Civilization and Explore tabs) — all correctly open the pinned inspector
+  editor with 0 console/page errors. Full smoke suite (86/86, including inspector-visibility assertions)
+  green. **Next session: get exact repro steps from the owner** (which tab/tool, what preceded it — e.g. did
+  it follow running Auto-populate with Recovery phase set, or a save/load, or a specific settlement count)
+  before changing anything — no fix was applied since no failure could be triggered.
 - **v0.83 — map width removed from the Generate → World sidebar; setup-gate-only** (owner request). Since
   v0.70 the sidebar carried a disabled, read-only `#mapw` copy ("shown for reference") duplicating the real
   editable width input in the setup gate. Removed the duplicate row + its reference legend entirely — map
