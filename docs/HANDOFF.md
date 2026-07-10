@@ -9,10 +9,18 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.78.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.79.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.79 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.77` are kept and never edited.
+  (v0.80 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.78` are kept and never edited.
+- **v0.79 — deep-zoom oxbow-lake pockets** — closes the last flagged river-morphology deferral (v0.72's
+  "oxbow cut-off geometry, needs centerline curvature tracking"). Engine (block 1), opt-in (Burn-rivers
+  toggle), never in `generate()`/default render ⇒ **render battery ALL IDENTICAL to v0.78**, headless
+  **903 → 909**. `featureDetailPass` gains an oxbow term revealed only at **z≥9** (`zo` ramps across z9..z10;
+  z≤8 byte-identical): a rare ridged-noise blob field gated to the floodplain band beside order≥3 channels,
+  carved to a shallow water pocket. Seam Δ=0 (pure world-coord noise + shared LUT), carve-only, floor-bounded.
+  True cut-off geometry (vector centerline tracking) still out of scope per LOD tile; this is the seam-safe
+  LOD approximation. **Browser pass owed**: the pockets at z9–z10 on a real floodplain; noise-sample perf.
 - **Settlement-density research deferrals — essentially complete** (`docs/research/settlement-density.md`).
   v0.75 (metropolis §5) · v0.76 (village density §6 + regional-pop estimate §3) · v0.77 (wetlands
   carrying-capacity §2b) · v0.78 (transport transfer-overhead §5c) all shipped, each opt-in / default

@@ -12,6 +12,27 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.79 (2026-07-10)
+**Deep-zoom oxbow-lake pockets** — closes the last flagged river-morphology deferral (the v0.72 note:
+"oxbow cut-off geometry, deferred — needs true centerline curvature tracking"). Engine (script block 1),
+opt-in (rides the Burn-rivers toggle, like the rest of `featureDetailPass`), **never in `generate()`/the
+default render** ⇒ render battery ALL IDENTICAL to v0.78. Headless **903 → 909** (+6).
+
+- An abandoned meander loop leaves a crescent water pocket *beside* — not in — the active trunk channel.
+  True cut-off geometry needs vector centerline-curvature tracking, which isn't available per LOD tile; v0.79
+  ships the seam-safe LOD approximation. `featureDetailPass` gains an oxbow term, revealed only at **z≥9**
+  (`zo` ramps 0→1 across z9..z10) so **z≤8 output is byte-identical to v0.78** even at absurd depths: a rare
+  ridged-noise blob field (`oxbowDepth`/`oxbowFreq`/`oxbowThr`), gated to the floodplain **band** beside
+  order≥3 channels (`band=fp·(1−fp)·4` — peaks mid-floodplain, zero at the channel edge and the valley rim),
+  carved to a shallow water pocket.
+- Seam-safe by construction: a pure function of WORLD coordinates (+seed) reading the same coarse
+  order/distance LUT as the valley/tributary passes, so adjacent tiles agree on shared edges (**seam Δ=0**,
+  asserted exactly). Carve-only, bounded by the shared sea−0.06 floor; deep ocean is never raised.
+- Verify: six headless assertions — z≤8 byte-identical (oxbows gated off at z=8), z9 adds floodplain carving
+  beyond the rest of the pass (isolated by toggling `oxbowDepth`), seam Δ=0 at z9, deterministic,
+  floor-respecting, deep-ocean-safe. **Browser pass owed** (like v0.71/v0.72 deep-zoom morphology): the
+  oxbow pockets at z9–z10 on a real floodplain, and perf of the extra noise sample on 1024² tiles.
+
 ### v0.78 (2026-07-10)
 **Transport transfer/handling overhead in the journey planner** — the settlement-density §5c deferral (the
 "pathfinding for routes" strand). Civ layer (script block 2) only, **engine bit-identical to v0.77** (render

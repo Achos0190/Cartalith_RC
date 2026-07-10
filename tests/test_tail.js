@@ -2830,6 +2830,33 @@ if (typeof featureDetailPass === 'function') {
     check('featureDetailPass: z8 deep ocean below the floor is never raised', td.every(v => v === V(0.30)));
     const tf = mkTile(sea + 0.005); featureDetailPass(tf, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 7 });
     check('featureDetailPass: z8 carving respects the sea-0.06 floor', tf.every(v => v >= sea - 0.06 - 1e-9)); }
+  // 10. v0.79 oxbow pockets: relict floodplain water pockets, revealed only at z≥9, seam-safe, floor-bounded
+  // 10a. z≤8 byte-identical — oxbows contribute nothing at z=8 even at absurd depth (zo=0 ⇒ gated off)
+  { const ta = mkTile(0.6), tb = mkTile(0.6);
+    featureDetailPass(ta, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tb, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123, oxbowDepth: 0.5, oxbowThr: 0 });
+    check('featureDetailPass: oxbows gated off at z=8 (z≤8 byte-identical)', ta.every((v, i) => v === tb[i])); }
+  // 10b. z=9 oxbows add floodplain carving beyond the rest of the pass (isolated by toggling oxbowDepth)
+  { const t9a = mkTile(0.6), t9b = mkTile(0.6);
+    featureDetailPass(t9a, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 123, oxbowDepth: 0 });
+    featureDetailPass(t9b, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 123, oxbowDepth: 0.4, oxbowThr: 0 });
+    let s = 0, extra = false; for (let i = 0; i < t9a.length; i++) { const dd = t9a[i] - t9b[i]; s += dd; if (dd > 1e-6) extra = true; }
+    check('featureDetailPass: z9 oxbows add floodplain carving beyond the rest of the pass', s > 1e-6 && extra); }
+  // 10c. seam Δ=0 at z=9 with oxbows (world-coord noise + shared coarse LUT)
+  { const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 9, { sea, coarseOrder: ord, seed: 123, oxbowThr: 0 });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 9, { sea, coarseOrder: ord, seed: 123, oxbowThr: 0 });
+    let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: z9 oxbows seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
+  // 10d. z9 oxbows: deterministic, floor-respecting, never raise deep ocean
+  { const t1 = mkTile(0.6), t2 = mkTile(0.6);
+    featureDetailPass(t1, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 9, oxbowThr: 0 });
+    featureDetailPass(t2, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 9, oxbowThr: 0 });
+    check('featureDetailPass: z9 oxbows deterministic', t1.every((v, i) => v === t2[i]));
+    check('featureDetailPass: z9 oxbows respect the sea-0.06 floor', t1.every(v => v >= sea - 0.06 - 1e-9));
+    const td = mkTile(0.30); featureDetailPass(td, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 9, oxbowThr: 0 });
+    check('featureDetailPass: z9 oxbows never raise deep ocean', td.every(v => v === V(0.30))); }
 }
 
 /* ---------- v0.112 Pillar 2: velocity-field hydraulic erosion ---------- */
