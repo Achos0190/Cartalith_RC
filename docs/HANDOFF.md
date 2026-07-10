@@ -9,10 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.71.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.72.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.72 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.70` are kept and never edited.
+  (v0.73 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.71` are kept and never edited.
+- **v0.72 — deep-zoom river morphology (tributaries + local incision).** Finishes the river-lod
+  brief's LOD10+ tier by extending `featureDetailPass` (z≥8, behind the Burn-rivers toggle): the trunk
+  thalweg locally incises deeper with zoom, and a **dendritic tributary creek network** (ridged
+  value-noise, catchment-gated to a trunk channel's valley influence `Rt=2.5+order`, land-only) reveals
+  itself. The noise is a pure function of world coords + the coarse Strahler LUT, so **seam Δ=0** (even
+  with the z≥7 meander wobble on); carve-only under the sea−0.06 floor (deep ocean never raised).
+  Strictly gated above z=7 (`zt=clamp((z−7)/3)`) — z≤7 output is byte-identical to v0.71 even with the
+  depths forced high. Engine bit-identical to v0.71 (opt-in; never in `generate()`), headless **890 →
+  897** (+7), smoke **67 → 68**. Deferred: oxbow cut-off geometry (needs true centerline curvature
+  tracking) and the Rust/WASM port (JS-first per owner). **Browser pass owed**: the tributary network
+  and incision at z8–z10 on a real world; perf of the ridged-noise pass on 1024² tiles at deep zoom.
 - **v0.71 — zoom-dependent feature rendering** (owner goal + the river-lod / rust-lod render briefs),
   three stages in one version, engine bit-identical to v0.70, headless **890** (+26), smoke **67**:
   (1) **persistent feature registry** — rivers as objects (Strahler polylines, discharge, hydrology
@@ -23,8 +34,8 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   (3) **`featureDetailPass`** — zoom-revealed morphology on refined tiles behind the Burn-rivers
   toggle: river valley cross-sections ∝ Strahler order (z≥4), fjord wall steepening (z≥3), canyon
   incision (z≥4), meander wobble (z≥7, deterministic world-coord wave); seam-safe, opt-in (no
-  grids ⇒ byte-identical), floor never raises terrain. Deferred (briefs): oxbows,
-  micro-tributaries, Rust port (JS-first per owner).
+  grids ⇒ byte-identical), floor never raises terrain. Tributaries + local incision landed in v0.72;
+  still deferred (briefs): oxbows, Rust port (JS-first per owner).
   **Browser pass owed**: LOD pan/zoom feel with the caches, the revealed valleys/fjords/canyons at
   deep zoom on a real world, cache memory pressure on 8K worlds.
 - **v0.70 — bug-fix batch + map-scale locked at creation.** Four owner-reported bugs, each reproduced
@@ -153,7 +164,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (890 as of v0.71), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (897 as of v0.72), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -180,3 +191,10 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 - The queued work tracked at the end of the pre-merge era (browser passes above) plus whatever
   the user asks next. Check `docs/ROADMAP.md` for the long arcs; recent `CHANGELOG.md` entries
   state per-feature follow-ups (e.g. cross-tile seam editing is the one genuinely open LOD item).
+- **Zoom/scale feature-rendering track (owner goal) is now JS-complete** through v0.72: registry
+  (v0.71) → LOD render caches (v0.71) → per-zoom morphology valleys/fjords/canyons/meanders (v0.71) →
+  tributaries + local incision (v0.72). What remains is explicitly deferred and needs a decision:
+  **oxbow cut-offs** (a scalar-field carve can't do them — needs true centerline curvature tracking on
+  the river polylines) and the **Rust/WASM engine port** (owner chose JS-first). A full browser pass on
+  the deep-zoom morphology (does it read as rivers/fjords/canyons to the eye, and is the ridged-noise
+  tributary pass fast enough on 1024² tiles at z8–z10) is owed before calling the visual side done.

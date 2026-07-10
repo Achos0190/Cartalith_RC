@@ -2765,6 +2765,40 @@ if (typeof featureDetailPass === 'function') {
     featureDetailPass(tB, 24, 24, cW, cH, bB, 7, { sea, coarseOrder: ord, seed: 123 });
     let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
     check('featureDetailPass: meandered tiles still seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
+  // 9. v0.72 LOD10+ tier: local incision + dendritic tributaries, revealed only at z≥8
+  // 9a. strictly gated above z=7 — even absurd depths do nothing until zt>0 (z=7 output is byte-identical)
+  { const ta = mkTile(0.6), tb = mkTile(0.6);
+    featureDetailPass(ta, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tb, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123, tribDepth: 0.5, incisionK: 0.5 });
+    check('featureDetailPass: tributaries/incision gated off at z=7 (zt=0)', ta.every((v, i) => v === tb[i])); }
+  // 9b. z=8 adds net carving beyond z=7 (both meander; z8 additionally incises the bed + cuts tributaries)
+  { const t8 = mkTile(0.6), t7 = mkTile(0.6);
+    featureDetailPass(t8, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(t7, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123 });
+    let s8 = 0, s7 = 0; for (let i = 0; i < t8.length; i++) { s8 += V(0.6) - t8[i]; s7 += V(0.6) - t7[i]; }
+    check('featureDetailPass: z8 incision+tributaries add carving beyond z7', s8 > s7 + 1e-6); }
+  // 9c. tributaries reach beyond the trunk valley footprint (a cell the z6 narrow valley never touched)
+  { const t8 = mkTile(0.6), t6 = mkTile(0.6);
+    featureDetailPass(t8, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123, tribThr: 0 });  // thr=0 ⇒ every catchment cell drains, deterministically
+    featureDetailPass(t6, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, seed: 123 });
+    let extended = false; for (let i = 0; i < t8.length; i++) { if (t8[i] < V(0.6) - 1e-7 && t6[i] === V(0.6)) { extended = true; break; } }
+    check('featureDetailPass: z8 tributaries carve beyond the z6 valley footprint', extended); }
+  // 9d. seam Δ=0 at z=8 (noise sampled at world coords; catchment LUT agrees across the shared edge)
+  { const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 8, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 8, { sea, coarseOrder: ord, seed: 123 });
+    let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: z8 tributaries seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
+  // 9e. deterministic, and still floor-respecting / never raising deep ocean at z=8
+  { const t1 = mkTile(0.6), t2 = mkTile(0.6);
+    featureDetailPass(t1, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn, seed: 7 });
+    featureDetailPass(t2, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn, seed: 7 });
+    check('featureDetailPass: z8 deterministic', t1.every((v, i) => v === t2[i]));
+    const td = mkTile(0.30); featureDetailPass(td, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 7 });
+    check('featureDetailPass: z8 deep ocean below the floor is never raised', td.every(v => v === V(0.30)));
+    const tf = mkTile(sea + 0.005); featureDetailPass(tf, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 7 });
+    check('featureDetailPass: z8 carving respects the sea-0.06 floor', tf.every(v => v >= sea - 0.06 - 1e-9)); }
 }
 
 /* ---------- v0.112 Pillar 2: velocity-field hydraulic erosion ---------- */

@@ -138,6 +138,20 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     lc.checked = false; lc.dispatchEvent(new Event('change'));
     res({ cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true });
   }));
+  // ── v0.72: deep-zoom (z≥8) tributary + local-incision morphology on a live tile ──
+  R.tribs = await page.evaluate(() => {
+    const bc = document.getElementById('lodBurnChk'); if (bc) { bc.checked = true; bc.dispatchEvent(new Event('change')); }
+    const o = (typeof lodTileOpts === 'function') ? lodTileOpts() : {};
+    const hasOrder = !!o.coarseOrder;                       // burn-rivers threads the persistent Strahler grid into refinement
+    // same tile refined at z=8 (tributaries on) vs z=7 (off) — z8 must carve at least as much everywhere it touches
+    const t8 = pyramidTile(field, GW, GH, 8, 0, 0, _lodTile, o);
+    const t7 = pyramidTile(field, GW, GH, 7, 0, 0, _lodTile, o);
+    let finite = true, s8 = 0, s7 = 0;
+    for (let i = 0; i < t8.data.length; i++) { if (!Number.isFinite(t8.data[i])) { finite = false; break; } }
+    for (let i = 0; i < t7.data.length && i < t8.data.length; i++) { s8 += t8.data[i]; s7 += t7.data[i]; }
+    if (bc) { bc.checked = false; bc.dispatchEvent(new Event('change')); }
+    return { hasOrder, finite, carvesMore: s8 <= s7 + 1e-3 };   // z8 total elevation ≤ z7 (extra incision lowers the mean)
+  });
   R.popDensity = await page.evaluate(() => {
     _debugBtn('popdensity').click();                       // proxy through the same seg the popover uses
     const set = state.debug === 'popdensity';
@@ -341,6 +355,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.70 auto-populate completes without throwing', R.autoPopulate.ok === true);
   A('v0.71 feature registry on a real world (rivers + peaks + query)', R.features.hasRivers && R.features.hasPeaks && R.features.queryWorks);
   A('v0.71 LOD renderer caches: overview cached + tiles cached after refine', R.lodView.cachedAfterFirst && R.lodView.tileCacheN > 0);
+  A('v0.72 z8 tributaries+incision: order grid threaded, tiles finite, z8 carves ≥ z7', R.tribs.hasOrder && R.tribs.finite && R.tribs.carvesMore);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

@@ -12,6 +12,31 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.72 (2026-07-10)
+**Deep-zoom river morphology — dendritic tributaries + local incision (the river-lod brief's LOD10+ tier).**
+Extends v0.71's `featureDetailPass` with the last tractable JS items from `docs/research/river-lod-brief.md`
+("LOD10+ … floodplains, meanders, tributaries, local incision"; meanders shipped in v0.71). **Engine
+bit-identical to v0.71** (render battery ALL IDENTICAL — the whole pass is opt-in behind the Burn-rivers
+toggle and never runs in `generate()`/default render); headless **890 → 897** (7 new assertions); smoke
+**67 → 68**.
+
+- **Local incision** (z≥8): the trunk thalweg cuts deeper into its own bed as zoom deepens — a small extra
+  deepening (`incisionK` default 0.004) applied where the valley cross-section is strong (`t>0.45`), ramped by
+  `zt = clamp((z−7)/3)` (0 at z7 → 1 at z10+).
+- **Dendritic tributaries** (z≥8): a ridged value-noise creek network (`ridge = 1−|2·fbm−1|`, thresholded),
+  **catchment-gated** to (and only within) a trunk channel's valley influence (`Rt = 2.5 + order`, wider than
+  the channel itself) and **land-only** (`v>sea`). The noise is a pure function of WORLD coords (+seed) and the
+  catchment gate reads the same coarse Strahler LUT, so adjacent tiles agree along shared edges — **seam Δ=0
+  asserted** (including with the z≥7 meander wobble active). Carve-only; the shared sea−0.06 floor clamp bounds
+  every cut, so deep ocean is never raised and no cell is over-carved (asserted).
+- Strictly gated above the pinned tier: at z≤7 the outputs are byte-identical to v0.71 even when
+  `tribDepth`/`incisionK` are forced absurdly high (`zt=0` kills the pass) — asserted, so the z≤7 refine paths
+  are provably untouched. New opt knobs (`incisionK`, `tribDepth`, `tribFreq`, `tribThr`, all defaulted) thread
+  through `lodTileOpts`.
+- Still deferred (documented): oxbow cut-off geometry (needs true centerline curvature tracking, not a scalar
+  field carve) and the full Rust/WASM engine port (owner decision: JS-first). With tributaries + local incision
+  in, the brief's JS-side render tiers (LOD4→LOD10+) are complete.
+
 ### v0.71 (2026-07-10)
 **Zoom-dependent feature rendering** (the owner's "features render according to zoom/scale" goal +
 `docs/research/river-lod-brief.md` / the render half of `rust-wasm-lod-brief.md`) — three stages in one
