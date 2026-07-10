@@ -2751,6 +2751,20 @@ if (typeof featureDetailPass === 'function') {
     featureDetailPass(t1, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
     featureDetailPass(t2, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
     check('featureDetailPass deterministic', t1.every((v, i) => v === t2[i])); }
+  // 8. meander wobble at z≥7: the valley centerline wanders (differs from the straight z-6 carve pattern),
+  //    stays seam-safe (pure function of world coords), and is off below the gate
+  { const t7 = mkTile(0.6), t6 = mkTile(0.6);
+    featureDetailPass(t7, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(t6, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, seed: 123 });
+    // both carve (zk capped at 1 from z=6), but the z=7 pattern is displaced by the wobble somewhere
+    let differs = false; for (let i = 0; i < t7.length; i++) { const c7 = t7[i] < V(0.6), c6 = t6[i] < V(0.6); if (c7 !== c6) { differs = true; break; } }
+    check('featureDetailPass: meander wobble displaces the carve pattern at z=7', differs);
+    const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 7, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 7, { sea, coarseOrder: ord, seed: 123 });
+    let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: meandered tiles still seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
 }
 
 /* ---------- v0.112 Pillar 2: velocity-field hydraulic erosion ---------- */

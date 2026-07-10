@@ -40,9 +40,10 @@ headless **864 → 888** (24 new assertions); smoke **65 → 67**.
   in opts ⇒ tile byte-identical, so every suite-pinned refine path is unchanged). Caught during testing: the
   first floor-clamp implementation RAISED deep ocean to sea−0.06 — rewritten so the floor only limits carving,
   never lifts terrain (asserted: deep ocean below the floor is never raised or carved).
-- Deferred from the brief (documented): meander/oxbow geometry refinement at very deep zoom, micro-tributary
-  synthesis beyond the existing `addZoomDetail`/`tileErode`, and the full Rust/WASM engine port (owner
-  decision: JS-first).
+- Also: a first-cut **meander wobble** at z≥7 — the valley centerline wanders via a deterministic wave that
+  is a pure function of world coords (seam Δ=0 asserted), amplitude <1 coarse cell. Deferred from the brief
+  (documented): oxbow geometry, micro-tributary synthesis beyond the existing `addZoomDetail`/`tileErode`,
+  and the full Rust/WASM engine port (owner decision: JS-first).
 
 ### v0.70 (2026-07-10)
 **Bug-fix batch (imported heightmaps, sea-level render, plate count) + map-scale locked at creation.**
