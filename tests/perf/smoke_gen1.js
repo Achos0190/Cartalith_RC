@@ -310,6 +310,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     }
     return { agree, wetCount, kEffect };
   });
+  // v0.78: transport transfer/handling overhead (§5c) — deterministic test of the pure helpers.
+  R.transfer = await page.evaluate(() => {
+    const T = (typeof _civTransshipments === 'function') ? _civTransshipments : null;
+    const O = (typeof _civTransferOverhead === 'function') ? _civTransferOverhead : null;
+    if (!T || !O) return null;
+    return {
+      landOnly: T([{ cat: 'land' }, { cat: 'land' }]),                                             // 0 mode-changes
+      oneCross: T([{ cat: 'land' }, { cat: 'sea' }]),                                               // 1
+      landSeaLand: T([{ cat: 'land' }, { cat: 'sea' }, { cat: 'land' }]),                           // 2
+      multi: T([{ cat: 'land' }, { cat: 'sea' }, { cat: 'land' }, { cat: 'river' }, { cat: 'land' }]), // 4
+      ov0: O(0),
+      ovCompound: Math.abs(O(2) - (Math.pow(1.05, 2) - 1)) < 1e-9,
+      ovMonotone: O(4) > O(2) && O(2) > O(1) && O(1) > O(0),
+    };
+  });
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
   await page.click('#layersBtn');
@@ -522,6 +537,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.76 population estimate button fills the readout with a number', R.popBtn && R.popBtn.hasNumber);
   A('v0.77 wetland mask agrees exactly with buildCartBiome Wetlands class (two pipelines unified)', R.wetland && R.wetland.agree);
   A('v0.77 wetland residual lowers carrying capacity on wetland cells under biomeK (or no wetlands on this world)', R.wetland && R.wetland.kEffect === true);
+  A('v0.78 transshipments: counts land↔water mode-changes (0/1/2/4)', R.transfer && R.transfer.landOnly === 0 && R.transfer.oneCross === 1 && R.transfer.landSeaLand === 2 && R.transfer.multi === 4);
+  A('v0.78 transfer overhead: compounding (1.05^n − 1), monotone, 0 at n=0', R.transfer && R.transfer.ov0 === 0 && R.transfer.ovCompound && R.transfer.ovMonotone);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

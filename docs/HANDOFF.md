@@ -9,14 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.77.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.78.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.78 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.76` are kept and never edited.
-- **Working through the settlement-density research deferrals** (`docs/research/settlement-density.md`
-  §§2b/5/6 + the routing transfer-overhead in §5c). v0.75 (metropolis) + v0.76 (village density) +
-  v0.77 (wetlands carrying-capacity) done; v0.78 (transport transfer-overhead + Med-scrub calibration)
-  planned. Each opt-in, default bit-identical.
+  (v0.79 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.77` are kept and never edited.
+- **Settlement-density research deferrals — essentially complete** (`docs/research/settlement-density.md`).
+  v0.75 (metropolis §5) · v0.76 (village density §6 + regional-pop estimate §3) · v0.77 (wetlands
+  carrying-capacity §2b) · v0.78 (transport transfer-overhead §5c) all shipped, each opt-in / default
+  bit-identical. **One item remains open, blocked on sourcing:** the Mediterranean-scrub residual
+  calibration (§9 Q5) — `shrub` stays at 0.95 rather than take an unsourced number; it needs a
+  Roman-demography source pass (Scheidel/Frier), and the web search was rate-limited this session.
+- **v0.78 — transport transfer/handling overhead** (settlement-density §5c, the "pathfinding for routes"
+  strand). Civ layer (block 2) only, **engine bit-identical to v0.77** (headless **903**, render battery ALL
+  IDENTICAL — journeys are transient, never in the battery), smoke **81 → 83**. Wiseman et al. 2024:
+  transshipments (land↔water mode-changes) add ~5% cost each, compounding, independent of distance. New pure
+  `_civTransshipments()` / `_civTransferOverhead()`; `_jpPlan` carries `transshipments` / `transferOverhead`
+  / `handlingDays` (additive — travel `days` unchanged), and the journey inspector shows a **Transfers** row
+  when the route changes mode (browser: a 95%-water port route → 1 transshipment, +5%, +0.5 d). **Browser
+  pass owed**: the Transfers row on multi-leg land↔sea itineraries; whether 0.5 d/transfer feels right.
 - **v0.77 — wetlands/marshes carrying capacity** (settlement-density §2b) — first density track to touch
   the **engine** (block 1, headless-testable). `buildBiomeRaster` (fed to K) had no wetlands class; Wetlands
   lived only in `buildCartBiome`'s `CART_BIOMES`. New pure `buildWetlandMask()` uses the exact same

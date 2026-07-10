@@ -12,6 +12,30 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.78 (2026-07-10)
+**Transport transfer/handling overhead in the journey planner** — the settlement-density §5c deferral (the
+"pathfinding for routes" strand). Civ layer (script block 2) only, **engine bit-identical to v0.77** (render
+battery ALL IDENTICAL; headless **903** unchanged; journeys are transient, never in the render battery).
+Smoke **81 → 83**.
+
+- Wiseman, Ortman & Bulik 2024 [A] show that **transshipments** ("cost points" — every land↔water
+  mode-change forces a load/unload) add cost *independent of distance*: ~5% each, **compounding**, so a dozen
+  transfers ≈ 80% overhead before any distance cost. A route with many way-transitions should cost more than
+  its length implies.
+- New pure `_civTransshipments(stages)` (counts land↔water mode-changes) + `_civTransferOverhead(n, per)`
+  (`(1+per)^n − 1`, `CIV_TRANSSHIP_COST=0.05` [A]). `_jpPlan` now carries `transshipments`,
+  `transferOverhead` (fractional cost), and `handlingDays` (`JP_TRANSSHIP_DAYS=0.5` per transfer) — additive
+  fields; the distance-based travel `days` is **unchanged** (a time model isn't conflated with a cost model).
+  The journey inspector shows a **Transfers** row ("N transshipments · +X% handling cost · +Y d") only when
+  the route actually changes mode. Browser: a 95%-water port-to-port route → 1 transshipment (+5%, +0.5 d);
+  multi-leg routes compound.
+- Verify: two deterministic Playwright smoke assertions on the pure helpers (mode-change counting 0/1/2/4;
+  overhead compounding `1.05^n − 1`, monotone, 0 at n=0). Browser-verified end-to-end on a real
+  water-crossing journey.
+- **Still deferred (search-blocked this session):** the Mediterranean-scrub residual calibration
+  (settlement-density §9 Q5) — `shrub` stays at 0.95 (already reasoned) rather than take an unsourced number;
+  it needs a Roman-demography source pass (Scheidel/Frier), which the web search couldn't reach this session.
+
 ### v0.77 (2026-07-10)
 **Wetlands/marshes carrying capacity** — the settlement-density §2b deferral, and the first density track
 that touches the **engine** (script block 1, headless-testable). Two vocabularies never agreed on wetlands:
