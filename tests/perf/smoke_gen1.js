@@ -93,6 +93,34 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     legendRows: document.querySelectorAll('#calLegend .lg-row').length
   }));
 
+  // ── v0.70: bug-fix batch ──
+  // (a) sea level moves the coastline in the base biome view (was cached by _civBakeKey without seaLevel)
+  R.seaMovesCoast = await page.evaluate(() => {
+    state.debug = 'off'; state.mode = 'biome';
+    const s = document.getElementById('sea'); s.value = 42; s.dispatchEvent(new Event('input')); renderNow();
+    const wpx = () => { const d = img.data; let w = 0; for (let i = 0; i < d.length; i += 4 * 91) if (d[i] < 90 && d[i + 2] > 100) w++; return w; };
+    const lo = wpx();
+    s.value = 72; s.dispatchEvent(new Event('input')); renderNow();
+    const hi = wpx();
+    s.value = 42; s.dispatchEvent(new Event('input')); renderNow();
+    return hi > lo + 20;   // much more water at sea 0.72
+  });
+  // (b) map scale locked at creation (sidebar #mapw disabled; legend reference-only)
+  R.scaleLocked = await page.evaluate(() => document.getElementById('mapw').disabled === true);
+  // (c) roadDijkstra terminates on a fully-uniform cost grid (the imported-world crash: 2^32 heap overflow)
+  R.dijkstraUniform = await page.evaluate(() => {
+    const W = 120, H = 120, cost = new Float32Array(W * H).fill(1.0003);   // uniform, like an imported heightmap
+    const r = roadDijkstra(cost, W, H, 0, 0, false);
+    let reached = 0; for (let i = 0; i < r.dist.length; i++) if (r.dist[i] < Infinity) reached++;
+    return { reached, ok: reached === W * H && r.dist[W * H - 1] < Infinity };
+  });
+  // (d) auto-populate completes on this world without throwing
+  R.autoPopulate = await page.evaluate(() => {
+    try { _civAutoWorld(); return { ok: true, places: (state.places || []).length }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  await page.evaluate(() => { state.places = []; if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList(); });
+
   // ── v0.69: settlement density — Pop-density debug view + biome-K toggle ──
   R.popDensity = await page.evaluate(() => {
     _debugBtn('popdensity').click();                       // proxy through the same seg the popover uses
@@ -291,6 +319,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('committing the setup builds a world and hides the gate', R.committed && R.gateHidden);
   A('import calibration step + auto-infer on commit', R.calStep.on && R.calStep.legend === 7 && R.calStep.infersOnCommit && R.calStep.hidden);
   A('sidebar Scale & calibration gains units toggle + legend', R.sidebarScale.unitSeg === 2 && R.sidebarScale.legendRows === 7);
+  A('v0.70 sea level moves the coastline in the base view', R.seaMovesCoast === true);
+  A('v0.70 map scale (#mapw) is locked at creation', R.scaleLocked === true);
+  A('v0.70 roadDijkstra terminates on a uniform cost grid (no 2^32 overflow)', R.dijkstraUniform.ok === true);
+  A('v0.70 auto-populate completes without throwing', R.autoPopulate.ok === true);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

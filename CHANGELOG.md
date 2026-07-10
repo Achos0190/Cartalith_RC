@@ -12,6 +12,36 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.70 (2026-07-10)
+**Bug-fix batch (imported heightmaps, sea-level render, plate count) + map-scale locked at creation.**
+Engine generation path untouched — **bit-identical to v0.69** (render battery ALL IDENTICAL); headless **864**;
+smoke **61 → 65**. All four bugs were reproduced in a real browser (Playwright) before fixing and re-verified.
+
+- **`roadDijkstra` crash on imported worlds (`RangeError: Invalid array length`).** The pathfinder is a lazy
+  min-heap but `dist` was **Float32** while priorities/`nd` were **Float64** — on the very uniform cost grid an
+  imported heightmap produces (no rivers to break symmetry; costs all ≈1.0003) many Float64 `nd` fall just
+  below the Float32 `dist[j]` yet round to the *same* Float32, so `nd<dist[j]` stays true, the distance never
+  actually changes, and the cell is re-pushed until the heap array overflows 2³² (measured 50M+ pushes on a
+  92 160-cell grid). Fix: a precision-independent `visited` (source-finalization) array — each cell relaxes out
+  exactly once ⇒ pushes ≤ 8·V. The shortest-path tree is unchanged, so all road/route output is bit-identical.
+  (Auto-populate on an imported world went from crashing after ~127 s to succeeding in ~4 s.)
+- **Imported worlds had no rivers/discharge.** `inferTectonics` reconstructed the tectonic substrate but never
+  ran `computeFlow`, so `flowField` stayed all-zero — no river network, no discharge, degenerate settlement
+  suitability, and the uniform cost grid that tripped the crash above. Fix: `inferTectonics` now ends with
+  `refreshClimate(); enforceRiverChannels(); computeFlow(true)` (generate()'s climate → flow(discharge) order),
+  so an imported world behaves like a generated one for every downstream layer.
+- **~900 Voronoi plates on import.** `pickPlateSeeds` defaulted to `W·H/3000` (≈895 at 2K). Capped at 40
+  (matching the procedural Plates slider max) — faster infer, readable plate map.
+- **Sea level didn't update the coastline.** The rendered-bitmap cache key (`_civBakeKey`) omitted
+  `state.seaLevel`, so dragging the sea slider (which moves `isWater = v<seaLevel`) reused the stale bitmap;
+  the shoreline only moved when LOD tiles re-baked on zoom. Fix: `state.seaLevel` added to the key (+ the
+  water-body/biome-raster caches cleared on the slider). Same output at a given sea level ⇒ bit-identical.
+- **Map scale locked at creation.** Map width is a creation-time decision (set in the setup gate) — rescaling
+  it mid-project would silently change every distance, grade, route length and settlement spacing. `#mapw` is
+  now disabled in the sidebar (exempt from the finalize-lock's blanket re-enable) with the legend reference-only;
+  the km/mi toggle stays (display-only). Zoom/scale-dependent *feature* rendering (fjords/rivers/canyons at
+  different zooms) is the separate LOD track, queued next.
+
 ### v0.69 (2026-07-07)
 **Settlement density — sourced carrying-capacity + regional population** (`docs/research/settlement-density.md`,
 a fully-cited audit that replaced invented civ numbers with calibrated ones). All pure/CPU-path additions;

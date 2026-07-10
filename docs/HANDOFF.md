@@ -9,11 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.69.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.70.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.70 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.68` are kept and never edited.
-  (Note: there is no v0.68→v0.69 gap in features — v0.69 simply follows v0.68; no v0.68.5.)
+  (v0.71 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.69` are kept and never edited.
+- **v0.70 — bug-fix batch + map-scale locked at creation.** Four owner-reported bugs, each reproduced
+  in a real browser before fixing (see `tests/perf/` probes), engine bit-identical to v0.69, headless
+  **864**, smoke **61 → 65**: (1) **`roadDijkstra` crash on imported heightmaps** — `dist` was Float32 but
+  priorities Float64, so the uniform imported cost grid re-pushed cells until the heap overflowed 2³²; fixed
+  with a `visited` source-finalization array (output-identical, auto-populate 127 s→4 s). (2) **imported
+  worlds had no rivers** — `inferTectonics` never ran `computeFlow`; now does climate→flow so `flowField`
+  populates. (3) **~900 plates on import** — `pickPlateSeeds` capped at 40. (4) **sea level didn't move the
+  coastline** — `_civBakeKey` omitted `state.seaLevel`, so the cached bitmap was reused; added it. Plus **map
+  width locked** in the sidebar (`#mapw` disabled, exempt from the finalize re-enable) — set at creation in
+  the gate. **Next track: zoom/scale-dependent feature rendering** (fjords/rivers/canyons/mountains by zoom)
+  — the owner's larger ask, overlapping the river-LOD + LOD-perf roadmap; research/plan queued (task).
 - **v0.69 — settlement density (sourced).** First of the three research-doc tracks the owner
   supplied (`docs/research/settlement-density.md`; river-lod + rust-wasm briefs also committed for
   later tracks, JS-first, Rust deferred). Pure/CPU-path additions, **engine bit-identical to v0.68**
