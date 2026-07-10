@@ -285,6 +285,31 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     btn.click();
     return { hasNumber: /population/i.test(out.textContent) && /\d/.test(out.textContent) };
   });
+  // v0.77: wetland/marsh carrying capacity — the KEY integration check is that buildWetlandMask agrees
+  //        exactly with buildCartBiome's Wetlands/Marshes class (index 4), i.e. the two pipelines finally
+  //        share one definition. Plus: the wetland residual actually bites under biomeK. Restores _biomeK.
+  R.wetland = await page.evaluate(() => {
+    if (typeof buildWetlandMask !== 'function' || typeof currentCartBiome !== 'function') return null;
+    const mask = buildWetlandMask(), cart = currentCartBiome();
+    let wetCount = 0, agree = mask.length === GW * GH;
+    for (let i = 0; agree && i < mask.length; i++) {
+      if (mask[i] !== 0 && mask[i] !== 1) { agree = false; break; }
+      if ((mask[i] === 1) !== (cart[i] === 4)) { agree = false; break; }
+      if (mask[i] === 1) wetCount++;
+    }
+    let kEffect = true;
+    if (agree && wetCount > 0) {
+      _biomeK = 0; _carryCapField = null; _settleSuitField = null; _popDensityField = null; _wetlandMask = null;
+      const kOff = currentCarryingCapacity().slice();
+      _biomeK = 1; _carryCapField = null; _settleSuitField = null; _popDensityField = null; _wetlandMask = null;
+      const kOn = currentCarryingCapacity();
+      let idx = -1; for (let i = 0; i < mask.length; i++) if (mask[i] === 1 && kOff[i] > 1e-6) { idx = i; break; }
+      kEffect = idx < 0 ? true : (kOn[idx] < kOff[idx] - 1e-9);   // residual 0.70 < 1 ⇒ K drops on a wetland cell
+      _biomeK = 0; _carryCapField = null; _settleSuitField = null; _popDensityField = null; _wetlandMask = null;
+      if (typeof renderNow === 'function') renderNow();
+    }
+    return { agree, wetCount, kEffect };
+  });
   // 2. Layers FAB → open popover → grouped list builds from #debugSeg
   R.debugSegHidden = await page.$eval('#debugOverlaySec', el => getComputedStyle(el).display === 'none');
   await page.click('#layersBtn');
@@ -495,6 +520,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.76 village mode: off by default, checkbox toggles the flag', R.village.defaultOff && R.villageToggle && R.villageToggle.on === true && R.villageToggle.off === false);
   A('v0.76 regional population: integrates a positive total over a positive land area', R.village.popTotal > 0 && R.village.popLand > 0);
   A('v0.76 population estimate button fills the readout with a number', R.popBtn && R.popBtn.hasNumber);
+  A('v0.77 wetland mask agrees exactly with buildCartBiome Wetlands class (two pipelines unified)', R.wetland && R.wetland.agree);
+  A('v0.77 wetland residual lowers carrying capacity on wetland cells under biomeK (or no wetlands on this world)', R.wetland && R.wetland.kEffect === true);
   A('v0.69 Pop-density debug view sets state.debug + has real persons/km²', R.popDensity.set && R.popDensity.hasSignal);
   A('v0.69 biome-K toggle: off by default, flips on, changes K, restores', R.biomeK.startsOff && R.biomeK.togglesOn && R.biomeK.changesK && R.biomeK.restored);
   A('sidebar debug picker hidden (re-housed)', R.debugSegHidden === true);

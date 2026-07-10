@@ -2268,6 +2268,37 @@ if (typeof applyTidalSedimentation === 'function') {
     check('suppressionRadiusCells: floors at 4', suppressionRadiusCells(0.01, 2048, 800) === 4);
   }
 
+  /* ---------- v0.77: wetland/marsh carrying capacity (settlement-density §2b) ---------- */
+  if (typeof WETLAND_DENSITY_RESIDUAL !== 'undefined') {
+    check('WETLAND_DENSITY_RESIDUAL in the residual band [0.55,1.0]', WETLAND_DENSITY_RESIDUAL >= 0.55 && WETLAND_DENSITY_RESIDUAL <= 1.0);
+    check('WETLAND_INTENSIFY_ELIGIBLE high (water-managed intensification story)', WETLAND_INTENSIFY_ELIGIBLE >= 0.8 && WETLAND_INTENSIFY_ELIGIBLE <= 1.0);
+  }
+  if (typeof buildCarryingCapacity === 'function') {
+    /* wetMask only bites when biomeK>0 ⇒ default (and biomeK:0) stay byte-identical even WITH a mask supplied */
+    const wetAll = new Uint8Array(n).fill(1);
+    const cNoWet0 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 0 });
+    const cWet0 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 0, wetMask: wetAll });
+    check('buildCarryingCapacity: wetMask with biomeK:0 byte-identical (bit-identity)', cNoWet0.every((v, i) => v === cWet0[i]));
+    /* with biomeK:1, a wetland cell uses the wetland residual, not its climate biome's — here biome=tempForest(5, residual 1.0),
+       so the wetland override (0.70) must LOWER K vs. no mask on that cell */
+    const bTF = new Uint8Array(n).fill(5);
+    const cWetK1 = buildCarryingCapacity(soil, water, bTF, temp, fld, W, H, sea, { biomeK: 1, wetMask: wetAll });
+    const cNoWetK1 = buildCarryingCapacity(soil, water, bTF, temp, fld, W, H, sea, { biomeK: 1 });
+    check('buildCarryingCapacity: wetland residual (0.70) overrides tempForest (1.0) under biomeK:1', cWetK1[10 * W + 6] < cNoWetK1[10 * W + 6] - 1e-6);
+  }
+  if (typeof estimateRegionalDensityKm2 === 'function') {
+    /* wetland intensify eligibility (0.95) raises the water-gated ceiling — a wet cell with full water
+       out-densifies the same cell with no mask (whose grass biome eligibility is 0.50) */
+    const K1 = new Float32Array(n).fill(1), w1 = new Float32Array(n).fill(1), npp0 = new Float32Array(n).fill(0);
+    const bGrass = new Uint8Array(n).fill(7), wetAll = new Uint8Array(n).fill(1);
+    const dNoWet = estimateRegionalDensityKm2(K1, w1, bGrass, npp0, fld, W, H, sea);
+    const dWet = estimateRegionalDensityKm2(K1, w1, bGrass, npp0, fld, W, H, sea, wetAll);
+    check('estimateRegionalDensityKm2: wetland raises the water-gated ceiling', dWet[10 * W + 6] > dNoWet[10 * W + 6] + 1e-6);
+    /* omitting the wetMask arg is byte-identical to passing null (bit-identity of the existing call sites) */
+    const dNull = estimateRegionalDensityKm2(K1, w1, bGrass, npp0, fld, W, H, sea, null);
+    check('estimateRegionalDensityKm2: no-wetMask arg byte-identical to null', dNoWet.every((v, i) => v === dNull[i]));
+  }
+
   /* buildSettlementSuitability */
   const slopeFlat = new Float32Array(n).fill(0.5), slopeCliff = new Float32Array(n).fill(6.0);
   const carry = buildCarryingCapacity(soil, water, null, temp, fld, W, H, sea);

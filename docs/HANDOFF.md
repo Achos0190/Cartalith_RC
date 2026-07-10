@@ -9,14 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.76.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.77.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.77 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.75` are kept and never edited.
+  (v0.78 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.76` are kept and never edited.
 - **Working through the settlement-density research deferrals** (`docs/research/settlement-density.md`
-  §§2b/5/6 + the routing transfer-overhead in §5c). v0.75 (metropolis) + v0.76 (village density) done;
-  v0.77 (wetlands carrying-capacity), v0.78 (transport transfer-overhead + Med-scrub calibration) planned.
-  Each opt-in, default bit-identical.
+  §§2b/5/6 + the routing transfer-overhead in §5c). v0.75 (metropolis) + v0.76 (village density) +
+  v0.77 (wetlands carrying-capacity) done; v0.78 (transport transfer-overhead + Med-scrub calibration)
+  planned. Each opt-in, default bit-identical.
+- **v0.77 — wetlands/marshes carrying capacity** (settlement-density §2b) — first density track to touch
+  the **engine** (block 1, headless-testable). `buildBiomeRaster` (fed to K) had no wetlands class; Wetlands
+  lived only in `buildCartBiome`'s `CART_BIOMES`. New pure `buildWetlandMask()` uses the exact same
+  moisture+flatness+low condition, so the two pipelines finally agree (smoke asserts cell-for-cell match).
+  `buildCarryingCapacity(opts.wetMask)` overrides a wetland cell's residual with `WETLAND_DENSITY_RESIDUAL=0.70`
+  (productive but malaria/flood friction); `estimateRegionalDensityKm2(wetMask)` uses
+  `WETLAND_INTENSIFY_ELIGIBLE=0.95` (managed-wetland/raised-field intensification). Rides the **Biome
+  carrying-capacity** toggle (`_biomeK`, default off) ⇒ **default field + render bit-identical to v0.76**;
+  headless **897 → 903**, smoke **79 → 81**. `_wetlandMask` invalidated in lockstep with `_carryCapField`.
 - **v0.76 — dense village-grid placement mode + regional-population estimate** (settlement-density §6/§3).
   Civ layer (block 2) only, **engine bit-identical to v0.75** (headless **897**, render battery ALL
   IDENTICAL), smoke **75 → 79**. (1) **Dense village grid** (`_civVillageDensity`, checkbox, default off):
@@ -217,7 +226,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (897 as of v0.74), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (903 as of v0.77), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at

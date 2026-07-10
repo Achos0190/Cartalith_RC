@@ -12,6 +12,32 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.77 (2026-07-10)
+**Wetlands/marshes carrying capacity** — the settlement-density §2b deferral, and the first density track
+that touches the **engine** (script block 1, headless-testable). Two vocabularies never agreed on wetlands:
+`buildBiomeRaster` (the 13-entry climate raster fed to `buildCarryingCapacity`) has no wetlands class, while
+Wetlands/Marshes lives only in `buildCartBiome`'s 15-entry `CART_BIOMES`, from a moisture+flatness override.
+v0.77 exposes that same detector to the K pipeline so a wet, flat, low cell finally carries its own density
+story. Opt-in (rides the existing **Biome carrying-capacity** toggle) ⇒ **default field + render bit-identical
+to v0.76** (render battery ALL IDENTICAL). Headless **897 → 903** (+6), smoke **79 → 81** (+2).
+
+- New pure `buildWetlandMask()` (+ cached `currentWetlandMask()`) uses the **exact** condition
+  `buildCartBiome` uses for its Wetlands class (`M>0.62 && r<0.18 && sn<1.0`, on land) — smoke asserts the
+  mask agrees cell-for-cell with `buildCartBiome()===Wetlands`, so the two pipelines share one definition.
+- `buildCarryingCapacity(…,opts)` gains `opts.wetMask`: a wetland cell overrides its underlying climate
+  biome's residual with `WETLAND_DENSITY_RESIDUAL=0.70` [D] (between grass 0.90 and tropWet 0.55 — productive
+  fish/rice/waterfowl land, but malaria/flood friction, rainforest-paradox logic via a different disease
+  vector). `estimateRegionalDensityKm2(…,wetMask)` uses `WETLAND_INTENSIFY_ELIGIBLE=0.95` [D] (managed
+  wetlands / raised fields / chinampas / rice = the historical water-managed intensification story, ≈ Maya's
+  tropWet 0.90 / Nile's desert 1.0) to raise the water-gated ceiling.
+- **Bit-identity preserved**: `wetMask` is passed only when the biome-K correction is on (`_biomeK`, default
+  off); omitting it, or `biomeK:0`, is byte-identical (headless asserts both). `_wetlandMask` is invalidated
+  in lockstep with `_carryCapField` at every field/flow-change cache-clear site.
+- Verify: headless calibration — `WETLAND_*` constants in band, wetMask+`biomeK:0` byte-identical, wetland
+  residual (0.70) lowers K vs. a tempForest (1.0) cell under `biomeK:1`, wetland intensification raises the
+  ceiling in `estimateRegionalDensityKm2`, and no-`wetMask`-arg ≡ null. Browser smoke: mask agreement + the
+  residual biting under biomeK.
+
 ### v0.76 (2026-07-10)
 **Dense village-grid placement mode + regional-population estimate** — the settlement-density §6/§3
 deferral. Civ layer (script block 2) only, **engine bit-identical to v0.75** (render battery ALL
