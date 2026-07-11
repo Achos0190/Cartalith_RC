@@ -72,6 +72,24 @@ const { chromium } = require(PLAYWRIGHT_DIR);
   await page.screenshot({ path: path.join(outDir, 'town-panel.png'),
     clip: { x: 0, y: 0, width: 320, height: 1050 } });
 
+  // harbour site variants: bay + open coast
+  for (const kind of ['bay', 'coast']) {
+    await page.evaluate((k) => {
+      document.getElementById('siteKind').value = k;
+      document.getElementById('gen').click();
+    }, kind);
+    await page.waitForFunction((k) => window.__UM_MODEL && window.__UM_MODEL.site.kind === k, kind, { timeout: 60000 });
+    const hs = await page.evaluate(() => {
+      const m = window.__UM_MODEL;
+      return { kind: m.site.kind, parcels: m.parcels.length,
+        harbourParcels: m.parcels.filter(p => p.district === 'harbour').length,
+        warehouses: m.buildings.filter(b => b.kind === 'warehouse').length,
+        piers: m.harbour ? m.harbour.piers.length : 0, mole: !!(m.harbour && m.harbour.mole) };
+    });
+    console.log('VARIANT ' + JSON.stringify(hs));
+    await page.screenshot({ path: path.join(outDir, `town-${kind}.png`) });
+  }
+
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);
   if (errors.length) { console.error('PAGE ERRORS:\n' + errors.join('\n')); process.exit(1); }

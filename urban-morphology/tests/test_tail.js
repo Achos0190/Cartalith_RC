@@ -216,6 +216,65 @@ for (const seed of SEEDS) {
   }
 }
 
+/* ---------- harbours: river port present on river sites ---------- */
+{
+  const m = UME.generate(12345, GENOPTS);
+  ok(!!m.harbour && m.harbour.quay.length >= 2, 'river site: harbour quay exists');
+  ok(m.graph.edges.some(e => e.cls === 'quay'), 'river site: quay streets are in the graph');
+  ok(m.harbour.piers.length >= 1, 'river site: piers into the river');
+  ok(!m.harbour.mole, 'river site: no breakwater needed');
+  const nHarbourParcels = m.parcels.filter(p => p.district === 'harbour').length;
+  ok(nHarbourParcels >= 2, `river site: harbour quarter parcels (${nHarbourParcels})`);
+}
+
+/* ---------- harbours: bay and open-coast sites ---------- */
+for (const kind of ['bay', 'coast']) {
+  const tag = `[${kind}] `;
+  const m = UME.generate(31337, { epochs: 8, pop: 4000, site: kind });
+  const m2 = UME.generate(31337, { epochs: 8, pop: 4000, site: kind });
+  ok(UME.hashModel(m) === UME.hashModel(m2), tag + 'deterministic');
+  ok(m.site.kind === kind, tag + 'site kind recorded');
+  ok(!m.site.bridgePt, tag + 'no bridge on a sea site');
+  ok(!!m.harbour && m.harbour.quay.length >= 2, tag + 'harbour quay exists');
+  ok(m.graph.edges.some(e => e.cls === 'quay'), tag + 'quay streets in graph');
+  ok(m.harbour.piers.length >= 2, tag + `piers (${m.harbour.piers.length})`);
+  if (kind === 'coast') ok(m.harbour.mole && m.harbour.mole.length >= 3, 'coast: breakwater mole built');
+  if (kind === 'bay') ok(!m.harbour.mole, 'bay: naturally sheltered, no mole');
+  ok(m.parcels.length > 200, tag + `substantial town (${m.parcels.length} parcels)`);
+  ok(m.parcels.some(p => p.district === 'harbour'), tag + 'harbour quarter present');
+  ok(m.buildings.some(b => b.kind === 'warehouse'), tag + 'warehouses on the quay');
+  ok(m.churches.length >= 1, tag + 'religious sites present');
+
+  // no street in the sea: reconstruct the coastline y(x) (x-monotonic polyline)
+  const c = m.site.river;
+  const yAt = (x) => {
+    if (x <= c[0].x) return c[0].y;
+    for (let i = 0; i < c.length - 1; i++)
+      if (x <= c[i + 1].x) { const t = (x - c[i].x) / ((c[i + 1].x - c[i].x) || 1); return c[i].y + t * (c[i + 1].y - c[i].y); }
+    return c[c.length - 1].y;
+  };
+  let wet = 0;
+  for (const e of m.graph.edges) {
+    const a = m.graph.nodes[e.a], b = m.graph.nodes[e.b];
+    for (let t = 0.1; t < 1; t += 0.2) {
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (p.y > yAt(p.x) + 3) { wet++; break; }
+    }
+  }
+  ok(wet === 0, tag + `no streets in the sea (${wet} wet edges)`);
+
+  // network still connected
+  const adj = new Map();
+  for (const e of m.graph.edges) {
+    if (!adj.has(e.a)) adj.set(e.a, []); if (!adj.has(e.b)) adj.set(e.b, []);
+    adj.get(e.a).push(e.b); adj.get(e.b).push(e.a);
+  }
+  const seen = new Set([m.graph.edges[0].a]); const q = [m.graph.edges[0].a];
+  while (q.length) { const n = q.pop(); for (const o of adj.get(n) || []) if (!seen.has(o)) { seen.add(o); q.push(o); } }
+  const sn = new Set(); m.graph.edges.forEach(e => { sn.add(e.a); sn.add(e.b); });
+  ok(seen.size === sn.size, tag + `network connected (${seen.size}/${sn.size})`);
+}
+
 /* ---------- user controls: population size, optional walls, religious scaling ---------- */
 {
   const small = UME.generate(777, { epochs: 8, pop: 1200 });
