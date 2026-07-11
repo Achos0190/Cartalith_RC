@@ -1,0 +1,80 @@
+/* Browser verification for the Urban Morphology PoC.
+ * Loads the app in headless Chromium (repo-standard Playwright paths), waits for
+ * generation, exercises the inspector (click a parcel / road / building), reads the
+ * morphometrics panel, and writes screenshots.
+ *
+ * Usage: node tests/browser_check.js [target.html] [outDir]
+ */
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const PLAYWRIGHT_DIR = process.env.PLAYWRIGHT_DIR || '/opt/node22/lib/node_modules/playwright';
+const CHROME_BIN = process.env.CHROME_BIN || '/opt/pw-browsers/chromium';
+const { chromium } = require(PLAYWRIGHT_DIR);
+
+(async () => {
+  const target = path.resolve(process.argv[2] || 'Urban Morphology v0.1.html');
+  const outDir = path.resolve(process.argv[3] || '/tmp/um-shots');
+  fs.mkdirSync(outDir, { recursive: true });
+  const browser = await chromium.launch({ executablePath: CHROME_BIN,
+    args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const page = await browser.newPage({ viewport: { width: 1680, height: 1050 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+
+  await page.goto('file://' + target);
+  await page.waitForFunction(() => window.__UM_MODEL && document.querySelectorAll('[data-um]').length > 500, { timeout: 60000 });
+
+  const stats = await page.evaluate(() => {
+    const m = window.__UM_MODEL;
+    return { seed: m.seed, pop: m.pop, edges: m.graph.edges.length, blocks: m.blocks.length,
+      parcels: m.parcels.length, buildings: m.buildings.length, details: m.details.length,
+      gates: m.wall.gates.length, metrics: m.metrics,
+      status: document.getElementById('status').textContent,
+      layers: [...document.querySelectorAll('[data-um-layer]')].map(g => g.getAttribute('data-um-layer') + ':' + g.children.length) };
+  });
+  console.log(JSON.stringify(stats, null, 1));
+
+  await page.screenshot({ path: path.join(outDir, 'town-full.png'), fullPage: false });
+
+  // inspector click-tests: parcel, street, building, wall
+  const clicks = [
+    ['path.parcel', 'Parcel'],
+    ['path.roadfill', 'road|Street|lane|Lane'],
+    ['path.bld', 'House|wing|range|Outbuilding|Church'],
+    ['path.wall', 'wall']
+  ];
+  const inspResults = [];
+  for (const [sel, expect] of clicks) {
+    const r = await page.evaluate(([sel, expect]) => {
+      const els = [...document.querySelectorAll(sel)];
+      const el = els[Math.floor(els.length / 2)];
+      if (!el) return { sel, ok: false, text: '(no element)' };
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const text = document.getElementById('insp').innerText.replace(/\s+/g, ' ').slice(0, 300);
+      return { sel, ok: new RegExp(expect, 'i').test(text), text };
+    }, [sel, expect]);
+    inspResults.push(r);
+    console.log((r.ok ? 'INSPECT OK  ' : 'INSPECT FAIL') + ' ' + r.sel + ' -> ' + r.text.slice(0, 140));
+  }
+
+  // zoomed screenshot on the market for detail inspection
+  await page.evaluate(() => {
+    const m = window.__UM_MODEL;
+    const c = m.plaza ? m.plaza.center : m.anchors.market;
+    const svg = document.querySelector('svg');
+    svg.setAttribute('viewBox', `${c.x - 260} ${c.y - 190} 520 380`);
+  });
+  await page.screenshot({ path: path.join(outDir, 'town-market.png') });
+
+  // metrics panel screenshot region: full sidebar
+  await page.screenshot({ path: path.join(outDir, 'town-panel.png'),
+    clip: { x: 0, y: 0, width: 320, height: 1050 } });
+
+  await browser.close();
+  const failedInsp = inspResults.filter(r => !r.ok);
+  if (errors.length) { console.error('PAGE ERRORS:\n' + errors.join('\n')); process.exit(1); }
+  if (failedInsp.length) { console.error('INSPECTOR FAILURES: ' + failedInsp.length); process.exit(1); }
+  console.log('browser check: OK — screenshots in ' + outDir);
+})().catch(e => { console.error(e); process.exit(1); });

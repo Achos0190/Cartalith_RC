@@ -9,7 +9,27 @@ harness, keyed assumption register) are reused.
 
 ## Status
 
-**Phase 0 complete — research only, no implementation** (as the charter mandates).
+**Phase 0 complete (research) + working proof of concept (Phases 1–4 in v0.1).**
+
+| Artifact | File |
+|---|---|
+| **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
+| Headless suite (determinism, road validity, topology, statistical bands) | `tests/run.sh` (110 assertions) |
+| Browser driver (screenshots + inspector click-tests) | `tests/browser_check.js` |
+
+The v0.1 app generates a deterministic medieval-pack town from a seed: site & river →
+anchors → least-cost primary routes over a slope/water cost field → epoch-looped street
+growth (densification + exploration, T-junction attachment, spacing rules) → planar-face
+blocks → series-platted strip parcels → grammar buildings (main range / rear wings /
+courtyards, straight-ridge roofs) → derived districts → optional wall with gates →
+churches (parish count scales with population, M-DEN-8) → wells/trees/fences/strip-fields.
+Controls: **seed, target population (M-DEN-1/2), growth epochs, optional city wall**.
+Every object is selectable; the inspector shows what it is, its measurements, and the rule +
+register entry that produced it. A live morphometrics panel checks the grown fabric against
+the historical bands of the assumptions register.
+
+Verify: `cd urban-morphology && tests/run.sh` (Node only), then
+`node tests/browser_check.js` (headless Chromium, writes screenshots).
 
 | Deliverable | File |
 |---|---|
