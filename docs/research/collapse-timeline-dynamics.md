@@ -139,14 +139,21 @@ calibrated against real historical crisis mortality **[A]**:
   migration in economic/security push factors — Ravenstein, *The Laws of Migration*, **J. Royal Statistical
   Society** 48, 1885, **[A]**).
 
-Per step, per settlement:
+Per year, per settlement (both rates are **annual** — that's what the calibration above anchors):
 ```
-m_i = maxMortality · severity · stress_i                         (excess deaths this step)
-survivors_i = pop_i · (1 − m_i)
-g_i = maxMigration · severity · stress_i · characterMigrationBias  (fraction of SURVIVORS who leave)
-stayers_i = survivors_i · (1 − g_i)
-migrants_i = survivors_i · g_i
+m_i = maxMortality · severity · stress_i                         (annual excess-death rate)
+g_i = maxMigration · severity · stress_i · characterMigrationBias  (annual out-migration rate, of SURVIVORS)
 ```
+A simulation **step** spans `stepYears` (UI default 10), so the step compounds the annual rates —
+mirroring the recovery stepper, which compounds logistic growth the same way:
+```
+survivors_i = pop_i · (1 − m_i)^stepYears
+migrants_i  = survivors_i · (1 − (1 − g_i)^stepYears)
+stayers_i   = survivors_i − migrants_i
+```
+(Separable approximation: mortality is applied for the whole step before the migration split, so people
+who would have left mid-step still face home-settlement mortality for the full step — a slight
+overcount of deaths / undercount of migrants, acceptable at these rate magnitudes.)
 `characterMigrationBias`: Conflict = 1.4× (flight-dominated), Disease = 0.6× (in-place, historically lower
 flight — quarantine/immobility during plague is itself documented, though not universal), Trade
 collapse/Mixed = 1.0×.

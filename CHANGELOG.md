@@ -55,6 +55,21 @@ render battery ALL IDENTICAL to v0.84, headless **909** unchanged, smoke **86 �
   conservation + distance decay, collapse-step determinism + population reduction, recovery logistic growth,
   multi-step trajectory monotonicity; UI: mode-toggle row visibility, live slider labels, civTimeline writes,
   and the state.places/civWays-untouched invariant).
+- **Post-ship audit pass (same day)** — a skeptical re-review of the simulator found and fixed five defects:
+  (1) the t=0 baseline-centrality map was built by pairing the *failure-filtered* settlement array against
+  *unfiltered* betweenness indices — any step-0 failure silently misattributed every later settlement's
+  baseline; `_civCollapseStep` now returns `normBByTid` keyed over the INPUT settlements. (2) mortality/
+  migration rates are **annual** (doc §4's Black Death calibration) but were applied once per step regardless
+  of step length — a 10-year step ran an order of magnitude milder than documented; the step now compounds
+  `(1−m)^stepYears`, mirroring the recovery stepper (doc §4 updated with the compounding form). (3) gravity
+  overflow at a saturated destination was dropped as diaspora loss even while other destinations had headroom,
+  deviating from doc §5's "system-wide overflow" definition — allocation now re-offers the clipped remainder
+  over bounded passes. (4) simulating onto an EMPTY timeline conjured a phantom year-0 era via
+  `civSnapshotSave(civYear)` — the exact bug civAddYear's v0.62 guard fixed; same guard applied. (5) simulated
+  years landing on existing (authored) timeline entries were overwritten silently — now confirm()-gated like
+  every other destructive action. Plus comment-honesty fixes (the "pure" claims now state the GW/state.world
+  reads). Smoke **98 → 103** (compounding, baseline-map contract, overflow re-flow, phantom-year guard,
+  overwrite confirm); render battery still ALL IDENTICAL to v0.84, headless 909 unchanged.
 
 ### v0.84 (2026-07-10)
 **Fix: restore the "Vertical" sublabel above Sea level/Peak altitude** (owner report: "the option for sea

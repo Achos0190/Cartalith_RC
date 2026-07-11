@@ -37,6 +37,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   (doc §8): new-settlement founding from refugee overflow, true travel-cost distance (currently straight-line
   ×cellKm), regrowth-phase migration (recovery mode is currently single-settlement logistic only, no
   redistribution).
+- **v0.85 audit pass (same day)** — five defects found and fixed in a post-ship review of the simulator:
+  baseline-centrality map misaligned after any step-0 settlement failure (now `normBByTid` over INPUT
+  settlements); annual rates applied once per multi-year step (now compounded `(1−m)^stepYears`, matching the
+  recovery stepper and doc §4's Black Death calibration — collapses at default 10-yr steps are now an order of
+  magnitude stronger and correctly calibrated); gravity overflow dropped at saturated destinations instead of
+  re-flowing to open headroom (doc §5 semantics restored via bounded multi-pass allocation); phantom year-0
+  era when simulating onto an empty timeline (civAddYear's v0.62 guard applied); silent overwrite of authored
+  timeline years (now confirm()-gated). Smoke **98 → 103**; render battery still ALL IDENTICAL to v0.84,
+  headless 909 unchanged. CHANGELOG has the full per-defect detail. NOTE for future sessions: block-2 (civ
+  layer) functions are **not reachable from `tests/run.sh`** (it extracts script block 1 only) — put their
+  assertions in `tests/perf/smoke_gen1.js`, and don't trust a green 909 to say anything about civ-layer code.
 - **v0.84 — fix: restored the "Vertical" sublabel over Sea level/Peak** (owner report). v0.83's Map-width
   removal over-deleted a section heading unrelated to the ask. Pure markup restore; render battery ALL
   IDENTICAL, headless 909, smoke 86 unchanged.

@@ -599,7 +599,23 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const popSeries = traj.map(s => s.places.filter(p => p.category === 'settlement').reduce((sum, p) => sum + (p.pop || 0), 0));
     let monotonic = true; for (let i = 1; i < popSeries.length; i++) if (popSeries[i] > popSeries[i - 1] + 1e-6) monotonic = false;
 
-    return { hubMaxBtw, conflictHitsUndefended, ratesMonotonic, ratesCapped, massConserved, distanceDecay, deterministic, collapseReducesPop, recoveryGrows, monotonicDecline: monotonic, trajLen: traj.length };
+    // audit fix: rates are ANNUAL and compound over the step — a 10-year step must kill more than a
+    // 1-year step at identical severity (previously both applied the rate exactly once)
+    const step1y = _civCollapseStep(synth(), { character: 'conflict', severity: 0.95, stepYears: 1 });
+    const compounding = stepA.stats.died > step1y.stats.died;
+    // audit fix: the returned baseline map is keyed by tid over the INPUT settlements — every input tid
+    // present (failed ones included) and the hub's normalised betweenness pinned at the 1.0 maximum
+    // (previously the map was built by pairing the FILTERED output array against unfiltered normB indices)
+    const synth7 = synth().concat([{ tid: 7, x: 40, y: 40, pop: 25, category: 'settlement', kind: 'hamlet', klass: 'hamlet', traits: [] }]);
+    const step7 = _civCollapseStep(synth7, { character: 'conflict', severity: 0.95, stepYears: 10 });
+    const baselineContract = step7.normBByTid.size === 7 && step7.normBByTid.has(7) && Math.abs(step7.normBByTid.get(1) - 1) < 1e-9;
+    // audit fix (doc §5): overflow at a saturated destination re-flows to remaining open headroom;
+    // unplaced counts only what exceeds the system's TOTAL remaining headroom
+    const gmSat = _civGravityMigrate(migPlaces, i => (i === 0 ? pool85 : 0), [0, 300, 5000], 1);
+    const overflowReflows = Math.abs(gmSat.received[1] - 300) < 1e-6 && gmSat.unplaced < 1
+      && Math.abs((gmSat.received[1] + gmSat.received[2] + gmSat.unplaced) - pool85) < 1e-6;
+
+    return { hubMaxBtw, conflictHitsUndefended, ratesMonotonic, ratesCapped, massConserved, distanceDecay, deterministic, collapseReducesPop, recoveryGrows, monotonicDecline: monotonic, trajLen: traj.length, compounding, baselineContract, overflowReflows };
   });
 
   // UI wiring: mode toggle swaps rows, slider updates its live label, and clicking Simulate writes
@@ -648,6 +664,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (typeof renderNow === 'function') renderNow();
 
     return { collapseCharRowShown, collapseRateRowHidden, recoveryCharRowHidden, recoveryRateRowShown, severityLabelUpdates, timelineGotFiveSteps, stepsHaveSettlements, placesUntouched, waysUntouched, outHasStats };
+  });
+
+  // audit fixes in the Simulate wiring: no phantom year-0 era on an empty timeline (civAddYear's v0.62
+  // guard), and authored years inside the simulated span are confirm-guarded — Playwright auto-dismisses
+  // the confirm(), which must abort the simulation and leave the existing entries untouched.
+  R.collapseSimUI2 = await page.evaluate(() => {
+    _civAutoWorld();
+    civYear = 0; civTimeline.length = 0;
+    document.getElementById('civSimMode').value = 'collapse';
+    document.getElementById('civSimStartYear').value = 100;
+    document.getElementById('civSimDuration').value = 30;
+    document.getElementById('civSimStepYears').value = 10;
+    document.getElementById('civSimulateBtn').click();
+    const noPhantomZero = !civTimeline.some(e => e.year === 0)
+      && !!civTimeline.find(e => e.year === 100) && !!civTimeline.find(e => e.year === 130);
+    civTimeline.find(e => e.year === 110).places = [{ name: 'PROBE' }];   // sentinel an "authored" year
+    document.getElementById('civSimulateBtn').click();                    // same span → confirm → dismissed → abort
+    const e110 = civTimeline.find(e => e.year === 110);
+    const overwriteGuarded = !!(e110 && e110.places.length === 1 && e110.places[0].name === 'PROBE');
+    civTimeline.length = 0; state.places = []; civWays = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof renderNow === 'function') renderNow();
+    return { noPhantomZero, overwriteGuarded };
   });
 
   await browser.close();
@@ -755,6 +794,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.85 UI: Simulate writes one civTimeline entry per step, each carrying settlements', R.collapseSimUI.timelineGotFiveSteps && R.collapseSimUI.stepsHaveSettlements);
   A('v0.85 UI: simulating never touches state.places/civWays (writes history, not the live world)', R.collapseSimUI.placesUntouched && R.collapseSimUI.waysUntouched);
   A('v0.85 UI: result summary reports mortality/migration/failure stats', R.collapseSimUI.outHasStats);
+  A('v0.85 fix: annual rates compound over stepYears (10-yr step kills more than 1-yr)', R.collapseSim.compounding);
+  A('v0.85 fix: baseline centrality map keyed by tid over ALL input settlements', R.collapseSim.baselineContract);
+  A('v0.85 fix: saturated-destination overflow re-flows while system headroom remains (doc §5)', R.collapseSim.overflowReflows);
+  A('v0.85 fix: empty-timeline simulation conjures no phantom year-0 era', R.collapseSimUI2.noPhantomZero);
+  A('v0.85 fix: overwriting authored timeline years is confirm-guarded (dismiss aborts)', R.collapseSimUI2.overwriteGuarded);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

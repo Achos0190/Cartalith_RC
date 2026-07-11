@@ -14146,8 +14146,10 @@ function _civApplyRecovery(places, phase, rng, opts){
    Mechanistic, year-stepped collapse/recovery simulator that writes directly into civTimeline in the SAME
    shape civAddYear already produces — the existing timeline slider, tid-diff ghost/highlight/exist-only
    overlay work on simulated history with no new rendering code (§7 of the doc). Every function here is
-   pure: given a places array + options, returns a NEW places array (deep-copied entries) plus stats; nothing
-   is written to civTimeline/state.places until the caller explicitly does so. ===================== */
+   deterministic and side-effect-free — given a places array + options it returns a NEW places array
+   (copied entries) plus stats, writing nothing to civTimeline/state.places (only the _civRunCollapse-
+   Simulation wiring does); they do READ the module globals GW/state.world/state.mapWidthKm and the
+   carrying-capacity cache for scale, wrap and headroom. ===================== */
 
 /* Character weight triples (wL trade-dependency-loss, wD density/connectivity exposure, wV undefended-
    violence exposure), each summing to 1 — doc §3. [D] blend, cited DIRECTION per character in the doc. */
@@ -14168,7 +14170,8 @@ const _CIV_FORTIFIED_BONUS=0.5;          // migration destination attractiveness
 
 /* Symmetric k-nearest proximity graph among the given places (world-wrap aware), in REAL km via cellKm —
    the stepper's own network representation, decoupled from the rendered `ways` (whose aIdx/bIdx indices
-   would go stale across settlement removals). Pure; returns an array of Sets. */
+   would go stale across settlement removals). Deterministic, no writes; reads the module globals
+   GW/state.world for longitude wrap. Returns an array of Sets. */
 function _civProximityAdjacency(places, k, maxKm, cellKm){
   const n=places.length, adj=Array.from({length:n},()=>new Set());
   const wrap=!!state.world;
@@ -14233,7 +14236,8 @@ function _civMortalityMigrationRates(stress, severity, character){
    is split across every OTHER place proportional to Attractiveness_j/Distance(i,j)^β, capped by each
    destination's headroom; system-wide overflow (beyond total remaining headroom) is unplaced transit/
    diaspora loss. `capField` (persons/km² ceiling per settlement, indexed by array position) sets headroom;
-   `migrantsOf(i)` gives each origin's pool. Pure — returns {received:Float64Array(n), unplaced}. */
+   `migrantsOf(i)` gives each origin's pool. Deterministic, no writes (reads GW/state.world for wrap) —
+   returns {received:Float64Array(n), unplaced}. */
 function _civGravityMigrate(places, migrantsOf, capField, cellKm){
   const n=places.length, received=new Float64Array(n);
   const wrap=!!state.world;
@@ -14246,38 +14250,50 @@ function _civGravityMigrate(places, migrantsOf, capField, cellKm){
   const attractOf=j=>headroom[j]*bonusFactor[j];   // recomputed live from remaining headroom as it depletes
   let totalUnplaced=0;
   for(let i=0;i<n;i++){
-    const pool=migrantsOf(i); if(!(pool>0)) continue;
-    const weights=new Float64Array(n); let wsum=0;
+    let remaining=migrantsOf(i); if(!(remaining>0)) continue;
+    const distW=new Float64Array(n);   // 1/d^β, fixed per origin — only attractiveness changes across passes
     for(let j=0;j<n;j++){
-      if(j===i||attractOf(j)<=0) continue;
+      if(j===i) continue;
       let dx=Math.abs(places[i].x-places[j].x); if(wrap) dx=Math.min(dx,GW-dx);
       const dy=places[i].y-places[j].y, dKm=Math.max(1e-6,Math.hypot(dx,dy)*cellKm);
-      const w=attractOf(j)/Math.pow(dKm,_CIV_MIGRATE_BETA);
-      weights[j]=w; wsum+=w;
+      distW[j]=1/Math.pow(dKm,_CIV_MIGRATE_BETA);
     }
-    if(wsum<=0){ totalUnplaced+=pool; continue; }
-    let placed=0;
-    for(let j=0;j<n;j++){
-      if(weights[j]<=0) continue;
-      const want=pool*(weights[j]/wsum), take=Math.min(want,headroom[j]);
-      received[j]+=take; headroom[j]-=take;
-      placed+=take;
+    // Proportional allocation saturates destinations mid-split, so re-offer the clipped remainder to the
+    // still-open ones: doc §5 counts as unplaced ONLY what exceeds the system's total remaining headroom.
+    // Bounded passes — the tail after 4 is negligible and joins the diaspora statistic.
+    for(let pass=0; pass<4 && remaining>1e-9; pass++){
+      let wsum=0; const weights=new Float64Array(n);
+      for(let j=0;j<n;j++){ if(j===i) continue; const a=attractOf(j); if(a<=0) continue; const w=a*distW[j]; weights[j]=w; wsum+=w; }
+      if(wsum<=0) break;
+      let placed=0;
+      for(let j=0;j<n;j++){
+        if(weights[j]<=0) continue;
+        const want=remaining*(weights[j]/wsum), take=Math.min(want,headroom[j]);
+        received[j]+=take; headroom[j]-=take;
+        placed+=take;
+      }
+      remaining-=placed;
+      if(placed<=1e-12) break;
     }
-    totalUnplaced+=Math.max(0,pool-placed);
+    totalUnplaced+=Math.max(0,remaining);
   }
   return {received,unplaced:totalUnplaced};
 }
-/* One collapse step (a `stepYears`-long jump). Pure: returns {places:[...new snapshot...], stats}.
-   `baselineNormB` (Map tid→normB) should be computed once at t=0 and threaded through every subsequent
-   call unchanged (doc §3's "loss relative to ORIGINAL centrality"). */
+/* One collapse step (a `stepYears`-long jump; the ANNUAL rates from _civMortalityMigrationRates are
+   compounded over the step, mirroring _civRecoveryGrowthStep — doc §4's calibration is per-year).
+   Deterministic, no module-state writes (reads GW/state for wrap+scale). Returns {places:[...new
+   snapshot...], stats, normBByTid} — normBByTid maps EVERY input settlement's tid to its normalised
+   betweenness this step (failed ones included), so the t=0 caller can seed the baseline for doc §3's
+   "loss relative to ORIGINAL centrality"; thread that Map unchanged through every subsequent call. */
 function _civCollapseStep(places, opts){
   opts=opts||{};
   const character=opts.character||'mixed', severity=opts.severity!=null?opts.severity:0.5;
+  const stepYears=Math.max(1,opts.stepYears||1);
   const cellKm=(state.mapWidthKm||800)/GW;
   const settleIdx=[]; for(let i=0;i<places.length;i++) if(places[i]&&places[i].category==='settlement') settleIdx.push(i);
   const settlements=settleIdx.map(i=>places[i]);
   const n=settlements.length;
-  if(!n) return {places:places.map(p=>({...p})),stats:{died:0,migrated:0,unplaced:0,failed:0}};
+  if(!n) return {places:places.map(p=>({...p})),stats:{died:0,migrated:0,unplaced:0,failed:0},normBByTid:new Map()};
   const adj=_civProximityAdjacency(settlements, opts.kNearest||4, opts.maxLinkKm||(cellKm*GW*0.5), cellKm);
   const btwRaw=_civBetweennessFromAdjacency(n, adj);
   const maxBtw=Math.max(...btwRaw,1e-9);
@@ -14293,11 +14309,12 @@ function _civCollapseStep(places, opts){
   for(let i=0;i<n;i++){
     const p=settlements[i];
     const stress=_civSettlementStress(p, normB[i], opts.baselineNormB, maxPopNow, character);
-    const {m,g}=_civMortalityMigrationRates(stress, severity, character);
-    const pop0=p.pop||0, survivors=pop0*(1-m);
+    const {m,g}=_civMortalityMigrationRates(stress, severity, character);   // ANNUAL rates (doc §4)
+    const survFrac=Math.pow(1-m,stepYears), migFrac=1-Math.pow(1-g,stepYears);
+    const pop0=p.pop||0, survivors=pop0*survFrac;
     died+=pop0-survivors;
-    stayers[i]=survivors*(1-g);
-    migrantPool[i]=survivors*g;
+    stayers[i]=survivors*(1-migFrac);
+    migrantPool[i]=survivors*migFrac;
   }
   const {received,unplaced}=_civGravityMigrate(settlements, i=>migrantPool[i], capField, cellKm);
   let migrated=0, failed=0;
@@ -14326,7 +14343,11 @@ function _civCollapseStep(places, opts){
     const rep=repByTid.get(p.tid);
     if(rep) out.push(rep);
   }
-  return {places:out, stats:{died:Math.round(died), migrated:Math.round(migrated), unplaced:Math.round(unplaced), failed}, normB, settlements:outSettlements};
+  // normBByTid over the INPUT settlements (index-aligned with normB) — outSettlements may be shorter
+  // (failed entries removed), so pairing it with normB would misattribute baselines after any failure.
+  const normBByTid=new Map();
+  for(let i=0;i<n;i++) if(settlements[i].tid!=null) normBByTid.set(settlements[i].tid, normB[i]);
+  return {places:out, stats:{died:Math.round(died), migrated:Math.round(migrated), unplaced:Math.round(unplaced), failed}, normBByTid};
 }
 /* Logistic regrowth step (doc §5 recovery-mode complement; Verhulst 1838 standard form; post-plague regrowth
    rate anchor ~0.5–1%/yr, Chambers 1972 [A]/[B]). Compounds `rate` internally `stepYears` times for
@@ -14352,7 +14373,8 @@ function _civRecoveryGrowthStep(places, opts){
 }
 /* Orchestrator: runs `steps` collapse-or-recovery steps from `startPlaces`, returning an array of
    {places, stats} snapshots (one per step) — the caller pushes these into civTimeline. Never mutates
-   `startPlaces` or touches civTimeline/state.places itself. Pure (deterministic given `opts.rng`). */
+   `startPlaces` or touches civTimeline/state.places itself. Fully deterministic (the model consumes
+   no randomness — same inputs always replay the same history). */
 function _civSimulateTimeline(startPlaces, opts){
   opts=opts||{};
   const steps=Math.max(1,opts.steps||1), mode=opts.mode||'collapse';
@@ -14365,10 +14387,7 @@ function _civSimulateTimeline(startPlaces, opts){
       cur=r.places; snapshots.push({places:cur,stats:r.stats});
     } else {
       const r=_civCollapseStep(cur,Object.assign({},opts,{baselineNormB}));
-      if(t===0){
-        baselineNormB=new Map();
-        for(let i=0;i<r.settlements.length;i++) if(r.settlements[i].tid!=null) baselineNormB.set(r.settlements[i].tid, r.normB[i]);
-      }
+      if(t===0) baselineNormB=r.normBByTid||new Map();   // t=0 centrality = doc §3's "original" baseline
       cur=r.places; snapshots.push({places:cur,stats:r.stats});
     }
   }
@@ -14390,11 +14409,16 @@ function _civRunCollapseSimulation(){
   const stepYears=Math.max(1,Math.round(+((document.getElementById('civSimStepYears')||{}).value||10)));
   const steps=Math.max(1,Math.round(duration/stepYears));
 
+  // Authored history is not silently clobbered: warn when simulated years land on existing entries.
+  const clobber=[]; for(let t=1;t<=steps;t++){ const y=startYear+t*stepYears; if(civTimeline.some(e=>e.year===y)) clobber.push(_civFormatYear(y)); }
+  if(clobber.length && !confirm('Simulation will overwrite '+clobber.length+' existing timeline year'+(clobber.length===1?'':'s')+' ('+clobber.join(', ')+').\n\nContinue?')) return;
+
   const snapshots=_civSimulateTimeline(state.places, {mode,character,severity,rate,steps,stepYears});
 
-  // Anchor: preserve whatever's currently live under wherever the timeline cursor is (matches
-  // civAddYear), and also anchor a "before" frame at the simulation's own start year if none exists there yet.
-  civSnapshotSave(civYear);
+  // Anchor: preserve whatever's currently live under the timeline cursor (matches civAddYear — including
+  // its v0.62 empty-timeline guard, or an empty timeline would conjure a phantom era at the init civYear=0),
+  // and anchor a "before" frame at the simulation's own start year if none exists there yet.
+  if(civTimeline.length) civSnapshotSave(civYear);
   if(!civTimeline.find(e=>e.year===startYear)) civSnapshotSave(startYear);
 
   // territory/ways carried forward unchanged from the nearest prior entry at/before startYear
