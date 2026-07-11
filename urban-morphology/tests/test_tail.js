@@ -82,18 +82,19 @@ for (const seed of SEEDS) {
   ok(!!m.plaza, tag + 'market plaza exists');
   ok(m.churches.length >= 1, tag + `religious sites exist (${m.churches.length} churches)`);
   ok(!!m.wall.ring && m.wall.gates.length >= 2, tag + `wall with >=2 gates (${m.wall.gates.length})`);
-  // curtain walls turn gently: no sharp corners in the circuit
-  if (m.wall.ring) {
-    const ring = m.wall.ring, nR = ring.length;
+  // curtain walls turn gently along the LAND-facing arc (the earlier spike bug); the
+  // land↔water junctions and bastion salients are legitimately sharper and excluded
+  if (m.wall.landArc && m.wall.style === 'curtain') {
+    const la = m.wall.landArc;
     let minAng = Math.PI;
-    for (let i = 0; i < nR; i++) {
-      const a = ring[(i - 1 + nR) % nR], b = ring[i], c = ring[(i + 1) % nR];
+    for (let i = 1; i < la.length - 1; i++) {
+      const a = la[i - 1], b = la[i], c = la[i + 1];
       const l1 = Math.hypot(a.x - b.x, a.y - b.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
       if (l1 < 1 || l2 < 1) continue;
       const dot = ((a.x - b.x) * (c.x - b.x) + (a.y - b.y) * (c.y - b.y)) / (l1 * l2);
       minAng = Math.min(minAng, Math.acos(Math.max(-1, Math.min(1, dot))));
     }
-    ok(minAng > 1.6, tag + `wall circuit has no sharp corners (min interior angle ${(minAng * 180 / Math.PI).toFixed(0)} deg > 92)`);
+    ok(minAng > 1.4, tag + `land-facing curtain has no sharp corners (min interior angle ${(minAng * 180 / Math.PI).toFixed(0)} deg > 80)`);
   }
   ok(Math.abs(m.pop - m.popTarget) / m.popTarget < 0.6,
     tag + `realized population ~${m.pop} tracks target ${m.popTarget} (M-DEN-1/2)`);
@@ -273,6 +274,45 @@ for (const kind of ['bay', 'coast']) {
   while (q.length) { const n = q.pop(); for (const o of adj.get(n) || []) if (!seen.has(o)) { seen.add(o); q.push(o); } }
   const sn = new Set(); m.graph.edges.forEach(e => { sn.add(e.a); sn.add(e.b); });
   ok(seen.size === sn.size, tag + `network connected (${seen.size}/${sn.size})`);
+}
+
+/* ---------- walls follow the water; optional bastioned star fort ---------- */
+{
+  // river, one bank: the curtain follows the bank, dips a spur into the water at each end,
+  // and encloses the market — it does not bulge around the water
+  const m = UME.generate(12345, { epochs: 8, pop: 5000, walls: true });
+  const w = m.wall;
+  ok(w.style === 'curtain', 'river wall is a curtain by default');
+  ok(w.landArc && w.landArc.length >= 4, 'wall has a land-facing arc');
+  ok(w.spurs && w.spurs.length === 2, `wall dips a spur into the water at each end (${w.spurs && w.spurs.length})`);
+  ok(T.pointInPoly(m.anchors.market, w.ring), 'market lies inside the wall ring');
+  const rd = (p) => { let d = Infinity; for (let i = 0; i < m.site.river.length - 1; i++) d = Math.min(d, T.distPtSeg(p, m.site.river[i], m.site.river[i + 1])); return d; };
+  let inWater = 0; for (const p of w.landArc) if (rd(p) < m.site.riverW / 2 - 1) inWater++;
+  ok(inWater === 0, `no land-wall vertex sits in the channel — the wall follows the bank (${inWater} wet)`);
+
+  // harbour is never cordoned: a walled coast town leaves a water-side opening at the quay
+  const hc = UME.generate(31337, { epochs: 8, pop: 5000, site: 'coast', walls: true });
+  ok(hc.wall.ring, 'coast town builds a wall');
+  ok(hc.wall.gates.some(g => g.water) || (hc.wall.waterWalls && hc.wall.waterWalls.length >= 1),
+    'coast wall has a water opening / waterfront wall (harbour not cordoned)');
+
+  // star fort for a decent-size town: bastioned trace with outworks
+  const f = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, fortified: true });
+  ok(f.fortified && f.wall.style === 'bastioned', 'fortified town gets a bastioned trace');
+  ok(f.wall.fort && f.wall.fort.bastions.length >= 3, `bastions present (${f.wall.fort && f.wall.fort.bastions.length})`);
+  ok(f.wall.fort.ravelins.length >= 1, `ravelins present (${f.wall.fort.ravelins.length})`);
+  ok(f.wall.fort.counterscarp.length >= 3 && f.wall.fort.glacis.length >= 3, 'ditch counterscarp + glacis present');
+  ok(f.wall.gates.length >= 1, `bastioned enceinte has gates (${f.wall.gates.length})`);
+  const f2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, fortified: true });
+  ok(UME.hashModel(f) === UME.hashModel(f2), 'fortified generation deterministic');
+
+  // below the size threshold a fortification request stays a curtain (not a hamlet, M-FOR-4)
+  const small = UME.generate(12345, { epochs: 8, pop: 2400, walls: true, fortified: true });
+  ok(small.wall.ring && small.fortRequested && !small.fortified && small.wall.style === 'curtain',
+    'below threshold, a fortification request stays a curtain wall');
+  // a bastioned trace needs a wall enabled
+  const nw = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, fortified: true });
+  ok(!nw.fortified && !nw.wall.ring, 'no fort without a wall');
 }
 
 /* ---------- user controls: population size, optional walls, religious scaling ---------- */

@@ -66,10 +66,16 @@ svg.panning{cursor:grabbing}
 .roadfill{fill:none;stroke:#f8f3e4;stroke-linecap:round;stroke-linejoin:round}
 .roadfill.lane{stroke:#efe8d2}
 .bridgedeck{fill:#e8dcc0;stroke:#6d5a37;stroke-width:.8}
-.wall{fill:none;stroke:#4a3a22;stroke-width:3.2}
+.wall{fill:none;stroke:#4a3a22;stroke-width:3.2;stroke-linejoin:round;stroke-linecap:round}
 .wallditch{fill:none;stroke:#9d8d66;stroke-width:.8;stroke-dasharray:3 3;opacity:.8}
 .tower{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.5}
 .gate{fill:#e8dcc0;stroke:#3a2e18;stroke-width:.8}
+.watergate{fill:#b9c7c3;stroke:#3a2e18;stroke-width:.8}
+.fortwall{fill:none;stroke:#4a3a22;stroke-width:4;stroke-linejoin:round}
+.salient{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.4}
+.ravelin{fill:#e7ddc4;stroke:#6d5a37;stroke-width:1}
+.counterscarp{fill:none;stroke:#9d8d66;stroke-width:1;stroke-dasharray:5 4;opacity:.85}
+.glacis{fill:#efe7d0;stroke:#c9bb96;stroke-width:.8;opacity:.5}
 .tree{fill:#9aa96e;stroke:#6b7a45;stroke-width:.4}
 .tree.orchard{fill:#a9b478}
 .well{fill:#cfd6d4;stroke:#4a3a22;stroke-width:.7}
@@ -99,8 +105,9 @@ svg.panning{cursor:grabbing}
       <option value="coast">Open coast (mole)</option></select></div>
     <div class="row"><label>Population</label><input id="pop" type="number" value="5000" min="400" max="20000" step="100">
       <button id="fit">Fit view</button></div>
-    <div class="row"><label>Growth epochs</label><input id="epochs" type="number" value="8" min="2" max="14" style="width:52px">
-      <label style="margin-left:8px"><input id="walls" type="checkbox" checked> city wall</label></div>
+    <div class="row"><label>Growth epochs</label><input id="epochs" type="number" value="8" min="2" max="14" style="width:52px"></div>
+    <div class="row"><label style="flex:0 0 auto"><input id="walls" type="checkbox" checked> city wall</label>
+      <label style="margin-left:10px;flex:0 0 auto"><input id="fortified" type="checkbox"> star fort</label></div>
     <div id="status"></div>
   </div>
   <div class="box" id="insp"><h2>Inspector — click any object</h2>
@@ -804,7 +811,7 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
     placedLen+=len;
     // wall episode (M-GRW-2): optional enclosure, built once the town has substance
     if(opts.walls&&!wallState.ring&&ep===Math.max(3,Math.floor(epochs*0.6))){
-      buildWall(seed,site,anchors,g,wallState,ep);
+      buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
     }
   }
   return placedLen;}
@@ -824,67 +831,234 @@ function convexHull(pts){
   const up=[];for(let i=p.length-1;i>=0;i--){const q=p[i];
     while(up.length>=2&&cr(up[up.length-2],up[up.length-1],q)<=0)up.pop();up.push(q);}
   lo.pop();up.pop();return lo.concat(up);}
-function buildWall(seed,site,anchors,g,wallState,ep){
-  // hull over the coherent built mass only: connected nodes (deg>=2) on the market bank,
-  // trimmed at the 85th distance percentile so stray spurs don't balloon the circuit
-  const mktSide=site.bankSide(anchors.market);
-  const cand=[];
-  for(const n of g.nodes){
-    if(n.adj.filter(id=>g.edges[id].alive).length<2)continue;
-    if(site.riverDist(n)<site.riverW/2+16)continue;
-    if(site.bankSide(n)!==mktSide)continue; // bridgehead stays extramural (lit. review §1.1 #23)
-    const dM=V.dist(n,anchors.market);
-    if(dM>620)continue;
-    cand.push({n,dM});}
-  if(cand.length<8)return;
-  const ds=cand.map(c=>c.dM).sort((a,b)=>a-b);
-  const cut=ds[Math.floor(ds.length*0.85)]*1.12;
-  const pts=cand.filter(c=>c.dM<=cut).map(c=>({x:c.n.x,y:c.n.y}));
-  if(pts.length<8)return;
-  let hull=convexHull(pts);
-  // growth reserve ~15% linear (M-NET-9)
-  const c=polyCentroid(hull);
-  hull=hull.map(p=>V.add(c,V.mul(V.sub(p,c),1.10)));
-  hull=hull.map(p=>V.add(p,V.mul(V.norm(V.sub(p,c)),16)));
-  // keep the circuit off the flood band: move offending points straight away from the
-  // channel (river-distance gradient) BEFORE smoothing — pushing them away from the
-  // bridge slid points along the river and folded sharp spikes into the circuit
-  let ring=hull.map(p=>{
-    let q=p,i=0;
-    while(site.riverDist(q)<site.riverW/2+14&&i++<20){
-      const e=6;
-      const gx=site.riverDist({x:q.x+e,y:q.y})-site.riverDist({x:q.x-e,y:q.y});
-      const gy=site.riverDist({x:q.x,y:q.y+e})-site.riverDist({x:q.x,y:q.y-e});
-      const gl=Math.hypot(gx,gy)||1;
-      q={x:q.x+gx/gl*8,y:q.y+gy/gl*8};}
-    return q;});
-  // restore convexity broken by the push, then smooth into gentle curtain turns
-  ring=convexHull(ring);
-  if(ring.length<3)return;
-  ring=chaikin(chaikin(ring,true),true);
-  // curtain-wall rule: no corner sharper than ~100 deg — cut until every turn is gentle
-  for(let pass=0;pass<4;pass++){
+function densifyLoop(poly,step){
+  const out=[];const n=poly.length;
+  for(let i=0;i<n;i++){const a=poly[i],b=poly[(i+1)%n];
+    const s=Math.max(1,Math.ceil(V.dist(a,b)/step));
+    for(let k=0;k<s;k++)out.push(V.lerp(a,b,k/s));}
+  return out;}
+function nearestIdx(pts,p){let bi=0,bd=Infinity;
+  for(let i=0;i<pts.length;i++){const d=V.dist(pts[i],p);if(d<bd){bd=d;bi=i;}}return bi;}
+function polylineCrossings(pts,a,b){const out=[];
+  for(let i=0;i<pts.length-1;i++){const h=segInt(a,b,pts[i],pts[i+1]);if(h)out.push(h.pt);}return out;}
+function cornerCut(ring,minAng,passes){
+  for(let pass=0;pass<passes;pass++){
     const n=ring.length;const out=[];let cut=false;
     for(let i=0;i<n;i++){
       const a=ring[(i-1+n)%n],b=ring[i],c=ring[(i+1)%n];
       const v1=V.norm(V.sub(a,b)),v2=V.norm(V.sub(c,b));
       const angI=Math.acos(Math.max(-1,Math.min(1,V.dot(v1,v2))));
-      if(angI<1.75){out.push(V.lerp(b,a,0.3),V.lerp(b,c,0.3));cut=true;}
+      if(angI<minAng){out.push(V.lerp(b,a,0.3),V.lerp(b,c,0.3));cut=true;}
       else out.push(b);}
-    ring=out;
-    if(!cut)break;}
-  ring=simplify(ring,2);
-  if(ring.length<8)return;
-  // gates where primaries cross (M-NET-9: gates pin the road frame)
+    ring=out;if(!cut)break;}
+  return ring;}
+// the town's water edge as an ordered polyline: near bank (river) or shoreline (sea),
+// offset a little onto land so the wall sits at the water's edge, not in it
+function townBank(site,anchors){
+  const line=site.river,out=[];
+  for(let i=0;i<line.length;i++){
+    const a=line[Math.max(0,i-1)],b=line[Math.min(line.length-1,i+1)];
+    const d=V.norm(V.sub(b,a));let nl=V.rot90(d);
+    if(site.kind==='river'){
+      if(V.dot(nl,V.sub(anchors.market,line[i]))<0)nl=V.mul(nl,-1); // toward the town bank
+      out.push(V.add(line[i],V.mul(nl,site.riverW/2+5)));
+    }else out.push({x:line[i].x,y:line[i].y-5}); // shoreline, town is landward (north)
+  }
+  return out;}
+function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
+  const mktSide=site.bankSide(anchors.market);
+  const near=[],far=[];
+  for(const n of g.nodes){
+    if(n.adj.filter(id=>g.edges[id].alive).length<2)continue;
+    if(V.dist(n,anchors.market)>620)continue;
+    if(site.kind==='river'&&site.riverDist(n)<site.riverW/2+14)continue;
+    if(site.kind!=='river'&&site.isWater(n))continue;
+    if(site.kind==='river'&&site.bankSide(n)!==mktSide)far.push(n);else near.push(n);}
+  if(near.length<8)return;
+  // "the wall crosses the water only once the city has grown around it": include the far
+  // bank only when it carries a substantial share of the built mass (bridge-town, §1.1 #23)
+  const spansWater=site.kind==='river'&&far.length>Math.max(20,near.length*0.32);
+  const massNodes=spansWater?near.concat(far):near;
+  const ds=massNodes.map(n=>V.dist(n,anchors.market)).sort((a,b)=>a-b);
+  const cut=ds[Math.floor(ds.length*0.85)]*1.12;
+  const pts=massNodes.filter(n=>V.dist(n,anchors.market)<=cut).map(n=>({x:n.x,y:n.y}));
+  if(pts.length<8)return;
+  let hull=convexHull(pts);
+  const c=polyCentroid(hull); // growth reserve ~15% (M-NET-9)
+  hull=hull.map(p=>V.add(c,V.mul(V.sub(p,c),1.10)));
+  hull=hull.map(p=>V.add(p,V.mul(V.norm(V.sub(p,c)),16)));
+
+  const isLand=(p)=> site.kind==='river'
+    ? (site.bankSide(p)===mktSide&&site.riverDist(p)>site.riverW/2+1)
+    : !site.isWater(p);
+  const intoWater=(p)=>{
+    if(site.kind!=='river')return {x:0,y:1};
+    const e=6;
+    const gx=site.riverDist({x:p.x+e,y:p.y})-site.riverDist({x:p.x-e,y:p.y});
+    const gy=site.riverDist({x:p.x,y:p.y+e})-site.riverDist({x:p.x,y:p.y-e});
+    return V.mul(V.norm({x:gx,y:gy}),-1);}; // toward the channel
+  const spurDepth=site.kind==='river'?site.riverW/2+9:20;
+
+  let ring,landArc,waterWalls=[],spurs=[],waterGates=[];
+  const bank=townBank(site,anchors);
+
+  if(spansWater){
+    // town on both banks: the enceinte simply encloses the river, which passes under the
+    // wall at two water-gates (up- and downstream)
+    ring=cornerCut(chaikin(chaikin(convexHull(hull),true),true),1.75,4);
+    ring=simplify(ring,2);
+    landArc=ring.slice();
+    for(let i=0;i<ring.length;i++){
+      const a=ring[i],b=ring[(i+1)%ring.length];
+      for(let j=0;j<site.river.length-1;j++){
+        const h=segInt(a,b,site.river[j],site.river[j+1]);
+        if(h&&!waterGates.some(w=>V.dist(w,h.pt)<40))waterGates.push(h.pt);}}
+  }else{
+    // one bank: clip the hull to the land side and let the wall follow the bank on the water
+    const dense=densifyLoop(hull,8);
+    const land=dense.map(isLand);
+    const m=dense.length;
+    if(land.every(x=>x)){ // hull never reaches the water — smooth curtain all round
+      ring=cornerCut(chaikin(chaikin(hull,true),true),1.75,4);
+      ring=simplify(ring,2);landArc=ring.slice();
+    }else if(land.every(x=>!x)){return;}
+    else{
+      // pick the LONGEST contiguous land run (classification is noisy at the bank, which can
+      // fragment it into several short runs; the main land arc is the long one)
+      const w0=land.indexOf(false);
+      let bestStart=-1,bestLen=0,curStart=-1,count=0;
+      for(let k=0;k<m;k++){const j=(w0+k)%m;
+        if(land[j]){if(curStart<0){curStart=j;count=0;}count++;if(count>bestLen){bestLen=count;bestStart=curStart;}}
+        else{curStart=-1;count=0;}}
+      const run=[];for(let k=0;k<bestLen;k++)run.push(dense[(bestStart+k)%m]);
+      landArc=cornerCut(run,1.75,3); // smooth the land-facing arc only
+      // water wall follows the bank between the two transition points
+      const je=nearestIdx(bank,landArc[landArc.length-1]);
+      const js=nearestIdx(bank,landArc[0]);
+      let water=[];
+      if(je<=js)for(let k=je;k<=js;k++)water.push(bank[k]);
+      else for(let k=je;k>=js;k--)water.push(bank[k]);
+      // the two ends dip a spur into the water so no one walks round at the waterline
+      if(water.length){
+        spurs.push({a:water[0],b:V.add(water[0],V.mul(intoWater(water[0]),spurDepth)),
+          prov:'Wall spur: the circuit dips into the water at its end so the shore cannot be rounded on foot (defensive closure).'});
+        spurs.push({a:water[water.length-1],b:V.add(water[water.length-1],V.mul(intoWater(water[water.length-1]),spurDepth)),
+          prov:'Wall spur: the circuit dips into the water at its end so the shore cannot be rounded on foot (defensive closure).'});}
+      // closed ring for containment follows the bank with no gap (water already runs from
+      // the landArc-end side back to the landArc-start side, so no reversal)
+      ring=landArc.concat(water);
+      // drawn water wall: leave the harbour mouth open (never cordon the quay, §1.1 #22)
+      if(harbour&&harbour.quay&&harbour.quay.length){
+        const hp=harbour.pt;const gapR=48;
+        let cur=[];
+        for(const p of water){
+          if(V.dist(p,hp)<gapR){if(cur.length>1)waterWalls.push(cur);cur=[];}
+          else cur.push(p);}
+        if(cur.length>1)waterWalls.push(cur);
+      }else waterWalls=[water];
+    }
+  }
+  if(!ring||ring.length<6)return;
+
+  wallState.ring=ring;wallState.landArc=landArc;wallState.waterWalls=waterWalls;
+  wallState.spurs=spurs;wallState.spansWater=spansWater;
+  wallState.style='curtain';wallState.epoch=ep;wallState.centroid=polyCentroid(ring);
+  wallState.prov=spansWater
+    ?'Wall circuit: the town outgrew one bank, so the enceinte encloses both and the river passes under it at two water-gates (M-NET-9, M-GRW-2, lit. review §1.1 #23).'
+    :'Wall circuit: a curtain around the built core that follows the water\'s edge along the bank rather than bulging around it, dipping a spur into the water at each end and leaving the harbour mouth open (M-NET-9, M-GRW-2).';
+  // optional bastioned trace (trace italienne) for a decent-size, strategically fortified town
+  if(opts&&opts.fortified)applyStarFort(seed,site,anchors,wallState,opts);
+
+  // gates where primaries cross the circuit (M-NET-9); a crossing on the water edge is a
+  // water-gate (river passing under, or the harbour mouth), not a land gate
+  const nearWater=(p)=> site.kind==='river'
+    ? site.riverDist(p)<site.riverW/2+22
+    : Math.abs(p.y-(site.river.reduce((b,q,i,a)=> p.x<=q.x&&(i===0||p.x>a[i-1].x)?q.y:b, site.river[0].y)))<24;
   const gates=[];
   for(const e of g.edges){
     if(!e.alive||e.cls!=='primary')continue;
-    const cps=ringCrossings(ring,g.nodes[e.a],g.nodes[e.b]);
-    for(const cp of cps){
-      if(!gates.some(gt=>V.dist(gt.pt,cp)<45))
-        gates.push({pt:cp,prov:'Gate: the wall opens where an immutable primary route crosses the circuit (M-NET-9, M-GRW-3).'});}}
-  wallState.ring=ring;wallState.gates=gates;wallState.epoch=ep;
-  wallState.prov='Wall circuit: convex hull of the built-up area + ~15% growth reserve, smoothed and kept off the flood band (M-NET-9, M-GRW-2).';}
+    for(const cp of ringCrossings(wallState.ring,g.nodes[e.a],g.nodes[e.b])){
+      if(gates.some(gt=>V.dist(gt.pt,cp)<40))continue;
+      const water=nearWater(cp);
+      gates.push({pt:cp,water,prov:water
+        ?'Water-gate: the circuit opens to the water here (harbour mouth or river passage), never cordoning the quay (M-NET-9, §1.1 #22).'
+        :(wallState.style==='bastioned'
+          ?'Gate: a curtain gate where an immutable primary route crosses the enceinte, covered by the flanking bastions and its ravelin (M-NET-9, M-GRW-3).'
+          :'Gate: the wall opens where an immutable primary route crosses the circuit (M-NET-9, M-GRW-3).')});}}
+  for(const wp of waterGates)
+    if(!gates.some(gt=>V.dist(gt.pt,wp)<40))
+      gates.push({pt:wp,water:true,prov:'Water-gate: the river passes under the wall where the town grew across both banks (M-NET-9).'});
+  wallState.gates=gates;}
+
+/* ---------------- star fort: bastioned trace (trace italienne) ----------------
+ * From c.1500 (Pisa's 1500 defence of an earthwork rampart against French siege guns),
+ * angled bastions replaced round towers: their two faces + two flanks let defenders sweep
+ * the curtain foot with flanking fire and leave no dead ground, while low thick ramparts,
+ * a wide ditch, detached ravelins and a glacis defeat direct artillery. Costly state works,
+ * built only for strategically important towns — never hamlets. Refs: M-FOR-1..5;
+ * Bastion fort (Wikipedia); Vauban's magistral geometry (face = 2/7 of the polygon side). */
+function applyStarFort(seed,site,anchors,wallState,opts){
+  const r=stream(seed,'starfort');
+  const land=wallState.landArc;
+  if(!land||land.length<3)return;
+  // land arc length → number of curtains (one bastion per corner). Curtain lengths are set
+  // to effective musket range so adjacent bastions cover each other (M-FOR-2).
+  let arc=0;for(let i=0;i<land.length-1;i++)arc+=V.dist(land[i],land[i+1]);
+  const curtain=230; // m, within musket range (M-FOR-2)
+  const nSeg=Math.max(2,Math.min(6,Math.round(arc/curtain)));
+  // resample the land arc into nSeg+1 evenly spaced corner points
+  const Pc=[land[0]];
+  for(let s=1;s<nSeg;s++){
+    const target=arc*s/nSeg;let acc=0;
+    for(let i=0;i<land.length-1;i++){const d=V.dist(land[i],land[i+1]);
+      if(acc+d>=target){Pc.push(V.lerp(land[i],land[i+1],(target-acc)/d));break;}acc+=d;}}
+  Pc.push(land[land.length-1]);
+  const C=wallState.centroid||polyCentroid(wallState.ring);
+  // bastion geometry (M-FOR-1/3)
+  const sb=18,fh=13,bd=r.range(34,42),ditchW=22,glacisW=52;
+  const trace=[];const bastions=[];const curtains=[];
+  for(let i=0;i<Pc.length;i++){
+    const P=Pc[i];
+    const out=V.norm(V.sub(P,C));
+    const du=i>0?V.norm(V.sub(P,Pc[i-1])):V.norm(V.sub(Pc[i+1],P));
+    const dw=i<Pc.length-1?V.norm(V.sub(Pc[i+1],P)):V.norm(V.sub(P,Pc[i-1]));
+    if(i===0||i===Pc.length-1){
+      // demi-bastion at the waterline ends: a single flank + salient, then meet the water
+      const dir=(i===0)?dw:V.mul(du,-1);
+      const S=V.add(P,V.mul(out,bd*0.8));
+      const sh=V.add(V.add(P,V.mul(dir,sb)),V.mul(out,fh));
+      if(i===0){trace.push(P,S,sh);bastions.push({salient:S,outline:[P,S,sh],demi:true});}
+      else{trace.push(sh,S,P);bastions.push({salient:S,outline:[sh,S,P],demi:true});}
+    }else{
+      const cIn=V.add(P,V.mul(du,-sb)),cOut=V.add(P,V.mul(dw,sb));
+      const shIn=V.add(cIn,V.mul(out,fh)),shOut=V.add(cOut,V.mul(out,fh));
+      const S=V.add(P,V.mul(out,bd));
+      trace.push(cIn,shIn,S,shOut,cOut);
+      bastions.push({salient:S,outline:[cIn,shIn,S,shOut,cOut],demi:false});}
+  }
+  // curtains: straight runs between successive bastion throats (for gate placement)
+  for(let i=0;i<bastions.length-1;i++){
+    const a=bastions[i].outline[bastions[i].outline.length-1];
+    const b=bastions[i+1].outline[0];
+    curtains.push({a,b,mid:V.lerp(a,b,0.5)});}
+  // outworks: counterscarp (far ditch edge), ravelins in front of curtains, glacis crest
+  const offsetOut=(poly,d)=>poly.map(p=>V.add(p,V.mul(V.norm(V.sub(p,C)),d)));
+  const counterscarp=offsetOut(trace,ditchW);
+  const glacis=offsetOut(trace,glacisW);
+  const ravelins=[];
+  for(const cu of curtains){
+    const out=V.norm(V.sub(cu.mid,C));
+    const perp=V.rot90(out);
+    const halfW=Math.min(38,V.dist(cu.a,cu.b)*0.34);
+    const base1=V.add(V.add(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.5));
+    const base2=V.add(V.sub(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.5));
+    const apex=V.add(cu.mid,V.mul(out,ditchW+20));
+    ravelins.push([base1,apex,base2]);}
+  wallState.style='bastioned';
+  wallState.landArc=trace; // the bastioned trace is now the drawn land wall
+  wallState.fort={trace,bastions,curtains,counterscarp,glacis,ravelins,
+    prov:'Bastioned trace (trace italienne, from c.1500): angled bastions give flanking fire along the curtains with no dead ground; a wide ditch, detached ravelins and a glacis defeat siege artillery (M-FOR-1..5).'};
+  wallState.prov='Bastioned enceinte: a Renaissance artillery fortification wrapping the town — angled bastions, straight curtains at musket range, wet/dry ditch, ravelins and glacis (M-FOR-1..5). Built only for strategically important towns.';}
 
 /* ---------------- interior lane pass: split oversized central blocks ---------------- */
 function lanePass(seed,site,anchors,g,epoch){
@@ -1178,16 +1352,33 @@ function buildChurches(seed,parcels,buildings,anchors,count){
       par.provDistrict='Churchyard: parish church on its own plot serving ~200-800 households (M-DEN-8); earlier houses cleared.';}
     const ids=new Set(group.map(p=>p.id));
     for(let i=buildings.length-1;i>=0;i--)if(ids.has(buildings[i].parcel))buildings.splice(i,1);
-    // cross-plan church centred on the merged yard, chancel to the east (liturgical orientation)
-    const c=polyCentroid(best.poly);
-    const L=Math.min(ci===0?28:22,best.depth*0.9),Wn=L*0.38;
-    const nave=[{x:c.x-L/2,y:c.y-Wn/2},{x:c.x+L/2,y:c.y-Wn/2},{x:c.x+L/2,y:c.y+Wn/2},{x:c.x-L/2,y:c.y+Wn/2}];
-    const T=L*0.55,Tw=Wn*0.9;
-    const trans=[{x:c.x+L*0.08-Tw/2,y:c.y-T/2},{x:c.x+L*0.08+Tw/2,y:c.y-T/2},{x:c.x+L*0.08+Tw/2,y:c.y+T/2},{x:c.x+L*0.08-Tw/2,y:c.y+T/2}];
-    churches.push({id:'church'+ci,polys:[nave,trans],center:c,yard:group.map(p=>p.id),
-      ridge:[{x:c.x-L/2+2,y:c.y},{x:c.x+L/2-2,y:c.y}],
+    // cross-plan church sized to fit the merged churchyard footprint. Churches keep their
+    // liturgical east-west axis regardless of the street grid (chancel eastward), so the
+    // body is world-axis-aligned but clamped to the cleared yard so it never overruns its
+    // plot or a neighbour (M-BLD-4 orientation regime; lit. review §2 anchor placement).
+    let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
+    for(const par of group)for(const pt of par.poly){
+      if(pt.x<minx)minx=pt.x;if(pt.x>maxx)maxx=pt.x;
+      if(pt.y<miny)miny=pt.y;if(pt.y>maxy)maxy=pt.y;}
+    const cx=(minx+maxx)/2,cy=(miny+maxy)/2;
+    const exX=maxx-minx,exY=maxy-miny,mg=2.5;
+    const L=Math.max(9,Math.min(ci===0?30:22,exX-2*mg));
+    const Wn=Math.max(4.5,Math.min(L*0.42,exY*0.5-mg));
+    const rect=(rx,ry,w,h)=>[{x:rx-w/2,y:ry-h/2},{x:rx+w/2,y:ry-h/2},{x:rx+w/2,y:ry+h/2},{x:rx-w/2,y:ry+h/2}];
+    const nave=rect(cx,cy,L,Wn);
+    // transept crosses near the eastern (chancel) third, kept inside the yard
+    const T=Math.max(Wn,Math.min(Wn*1.7,exY-2*mg));
+    const Tw=Math.min(Wn*0.85,L*0.28);
+    const tcx=cx+Math.min(L*0.14,(exX-L)/2+L*0.14);
+    const trans=rect(tcx,cy,Tw,T);
+    // clear any surviving building that the footprint would overlap (keep the yard open)
+    for(let i=buildings.length-1;i>=0;i--){
+      const bc=polyCentroid(buildings[i].poly);
+      if(pointInPoly(bc,nave)||pointInPoly(bc,trans))buildings.splice(i,1);}
+    churches.push({id:'church'+ci,polys:[nave,trans],center:{x:cx,y:cy},yard:group.map(p=>p.id),
+      ridge:[{x:cx-L/2+2,y:cy},{x:cx+L/2-2,y:cy}],
       prov:(ci===0?'Principal parish church':'Parish church')+
-        ': cross-plan, chancel eastward; one parish per ~200-800 households (M-DEN-8).'});}
+        ': cross-plan on the liturgical east-west axis (chancel eastward), sized to its churchyard; one parish per ~200-800 households (M-DEN-8, M-BLD-4).'});}
   return churches;}
 
 /* ---------------- details: wells, trees, fences, fields (M-DEN-7, M-GRW-5) ---------------- */
@@ -1302,6 +1493,11 @@ function generate(seed,opts){
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
   const walls=opts.walls!==false; // enclosures are optional (default on for the medieval pack)
+  // a bastioned trace was a costly state investment for strategically important towns —
+  // never hamlets; require a decent size (M-FOR-4). Below the threshold it stays a curtain.
+  const fortMin=2500;
+  const fortRequested=!!opts.fortified;
+  const fortified=fortRequested&&popTarget>=fortMin&&walls;
   // population -> street length + urban radius via intramural density (M-DEN-1, M-DEN-2,
   // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant
   const targetLen=Math.max(3500,Math.min(42000,popTarget*2.1));
@@ -1315,7 +1511,7 @@ function generate(seed,opts){
   const plaza=buildPlaza(seed,site,anchors,g);
   const harbour=buildHarbour(seed,site,anchors,g);
   const wallState={ring:null,gates:[],epoch:0};
-  grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour});
+  grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget});
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
   const blocks=buildBlocks(g,plaza,site);
   const parcels=buildParcels(seed,g,blocks,anchors,epochs,site);
@@ -1326,7 +1522,7 @@ function generate(seed,opts){
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,Wm,Hm,site:{kind:site.kind,river:site.river,riverW:site.riverW,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
     anchors,plaza,harbour,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
     wall:wallState,blocks,parcels,buildings,churches,details,pop,metrics};}
@@ -1421,25 +1617,59 @@ function render(){
     const e=el('path',{d:pd(d.poly),class:'fence'},L.plots);
     reg(e,'Fence','Plot fence',{},d.prov);}
 
-  // wall + ditch + towers + gates
+  // wall: land arc + water walls (bank-following) + spurs + gates; or a bastioned trace
   if(model.wall.ring){
-    const ring=model.wall.ring;
-    el('path',{d:pd(ring),class:'wallditch',transform:''},L.walls);
-    const wpath=el('path',{d:pd(ring),class:'wall',fill:'none'},L.walls);
-    reg(wpath,'Town wall','Town wall (epoch '+model.wall.epoch+')',
-      {circuit:(ring.reduce((s,p,i)=>s+Math.hypot(p.x-ring[(i+1)%ring.length].x,p.y-ring[(i+1)%ring.length].y),0)/1000).toFixed(2)+' km',
-       gates:model.wall.gates.length},model.wall.prov);
-    // towers
-    let acc=0;
-    for(let i=0;i<ring.length;i++){
-      const a=ring[i],b=ring[(i+1)%ring.length];const l=Math.hypot(b.x-a.x,b.y-a.y);
-      acc+=l;
-      if(acc>80){acc=0;
-        const t=el('rect',{x:a.x-3,y:a.y-3,width:6,height:6,class:'tower'},L.walls);
-        reg(t,'Wall tower','Wall tower',{},'Mural tower at ~75-90 m intervals (effective bowshot coverage).');}}
-    for(const gt of model.wall.gates){
-      const ge=el('rect',{x:gt.pt.x-6,y:gt.pt.y-6,width:12,height:12,class:'gate',transform:`rotate(45 ${gt.pt.x} ${gt.pt.y})`},L.walls);
-      reg(ge,'Gate','Town gate',{},gt.prov);}}
+    const W=model.wall;
+    const perim=(pts,closed)=>{let s=0;for(let i=0;i<pts.length-(closed?0:1);i++)
+      s+=Math.hypot(pts[i].x-pts[(i+1)%pts.length].x,pts[i].y-pts[(i+1)%pts.length].y);return s;};
+    if(W.style==='bastioned'&&W.fort){
+      const F=W.fort;
+      // glacis crest (faint), ditch (counterscarp outline), ravelins, then the enceinte
+      el('path',{d:pd(F.glacis),class:'glacis'},L.walls);
+      el('path',{d:pl(F.counterscarp),class:'counterscarp'},L.walls);
+      for(const rv of F.ravelins){
+        const e=el('path',{d:pd(rv),class:'ravelin'},L.walls);
+        reg(e,'Ravelin','Ravelin (outwork)',{},'Detached triangular ravelin covering the curtain and its gate from direct fire (M-FOR-3).');}
+      // water side stays a plain sea/river wall
+      for(const ww of W.waterWalls||[]){
+        const e=el('path',{d:pl(ww),class:'wall'},L.walls);
+        reg(e,'Sea wall','Waterfront wall',{length:perim(ww,false).toFixed(0)+' m'},
+          'Waterfront wall along the quay/bank; the harbour mouth is left open (§1.1 #22).');}
+      // the bastioned trace itself
+      const tr=el('path',{d:pl(F.trace),class:'fortwall'},L.walls);
+      reg(tr,'Bastioned wall','Bastioned enceinte (epoch '+W.epoch+')',
+        {curtains:F.curtains.length,bastions:F.bastions.length,gates:W.gates.length},F.prov);
+      for(const b of F.bastions){
+        const e=el('circle',{cx:b.salient.x,cy:b.salient.y,r:2.4,class:'salient'},L.walls);
+        reg(e,'Bastion','Bastion'+(b.demi?' (demi, at the water)':''),{},
+          'Angled bastion: two faces and two flanks sweep the adjacent curtains with flanking fire, leaving no dead ground (trace italienne, M-FOR-1).');}
+    }else{
+      // curtain wall: land arc + water walls
+      const la=el('path',{d:pl(W.landArc),class:'wall'},L.walls);
+      reg(la,'Town wall','Town wall (epoch '+W.epoch+')',
+        {circuit:(perim(W.ring,true)/1000).toFixed(2)+' km',gates:W.gates.length,
+         'water side':W.spansWater?'encloses both banks':'follows the bank'},W.prov);
+      for(const ww of W.waterWalls||[]){
+        const e=el('path',{d:pl(ww),class:'wall'},L.walls);
+        reg(e,'Town wall','Waterfront wall',{length:perim(ww,false).toFixed(0)+' m'},
+          'The circuit runs along the water\'s edge here; the harbour mouth is left open (M-NET-9, §1.1 #22).');}
+      // towers along the land arc
+      let acc=0;const la2=W.landArc;
+      for(let i=0;i<la2.length-1;i++){
+        acc+=Math.hypot(la2[i].x-la2[i+1].x,la2[i].y-la2[i+1].y);
+        if(acc>80){acc=0;
+          const t=el('rect',{x:la2[i].x-3,y:la2[i].y-3,width:6,height:6,class:'tower'},L.walls);
+          reg(t,'Wall tower','Wall tower',{},'Mural tower at ~75-90 m intervals (effective bowshot coverage).');}}
+    }
+    // spurs dipping into the water at the wall ends
+    for(const sp of W.spurs||[]){
+      const e=el('path',{d:pl([sp.a,sp.b]),class:'wall'},L.walls);
+      reg(e,'Wall spur','Wall spur into the water',{},sp.prov);}
+    // gates (land gates as blocks, water-gates as open arches)
+    for(const gt of W.gates){
+      const cls=gt.water?'watergate':'gate';
+      const ge=el('rect',{x:gt.pt.x-6,y:gt.pt.y-6,width:12,height:12,class:cls,transform:`rotate(45 ${gt.pt.x} ${gt.pt.y})`},L.walls);
+      reg(ge,gt.water?'Water-gate':'Gate',gt.water?'Water-gate':'Town gate',{},gt.prov);}}
 
   // roads (casing + fill), bridge deck
   const byCls={primary:[],street:[],lane:[],quay:[]};
@@ -1617,14 +1847,19 @@ function regen(){
   const epochs=parseInt(document.getElementById('epochs').value,10)||8;
   const pop=parseInt(document.getElementById('pop').value,10)||5000;
   const walls=document.getElementById('walls').checked;
+  const fortified=document.getElementById('fortified').checked;
   const siteKind=document.getElementById('siteKind').value;
   const t0=performance.now();
-  model=UME.generate(seed,{epochs,pop,walls,site:siteKind});
+  model=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind});
   const dt=performance.now()-t0;
   render();
+  let note='';
+  if(model.fortRequested&&!model.fortified)
+    note=` — ⚠ star fort needs pop ≥ ${model.fortMin.toLocaleString()} (a strategic town, not a hamlet); built a curtain wall`;
+  else if(model.fortified)note=' — bastioned trace';
   document.getElementById('status').textContent=
     `generated in ${dt.toFixed(0)} ms — realized ~${model.pop.toLocaleString()} of target `+
-    `${model.popTarget.toLocaleString()} inhabitants — hash ${UME.hashModel(model).toString(16)}`;
+    `${model.popTarget.toLocaleString()} inhabitants${note} — hash ${UME.hashModel(model).toString(16)}`;
   window.__UM_MODEL=model; // for headless drivers
 }
 document.getElementById('gen').addEventListener('click',regen);

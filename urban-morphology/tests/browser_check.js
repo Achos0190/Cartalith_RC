@@ -90,6 +90,29 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     await page.screenshot({ path: path.join(outDir, `town-${kind}.png`) });
   }
 
+  // fortified (star fort) river town
+  await page.evaluate(() => {
+    document.getElementById('siteKind').value = 'river';
+    document.getElementById('pop').value = '8000';
+    document.getElementById('fortified').checked = true;
+    document.getElementById('gen').click();
+  });
+  await page.waitForFunction(() => window.__UM_MODEL && window.__UM_MODEL.fortified, { timeout: 60000 });
+  const fort = await page.evaluate(() => {
+    const m = window.__UM_MODEL, w = m.wall;
+    return { style: w.style, bastions: w.fort ? w.fort.bastions.length : 0,
+      ravelins: w.fort ? w.fort.ravelins.length : 0, gates: w.gates.length,
+      waterGates: w.gates.filter(g => g.water).length };
+  });
+  console.log('FORT ' + JSON.stringify(fort));
+  await page.screenshot({ path: path.join(outDir, 'town-fort.png') });
+  // zoom to a bastion salient for detail
+  await page.evaluate(() => {
+    const m = window.__UM_MODEL, s = m.wall.fort.bastions[Math.floor(m.wall.fort.bastions.length / 2)].salient;
+    document.querySelector('svg').setAttribute('viewBox', `${s.x - 170} ${s.y - 120} 340 240`);
+  });
+  await page.screenshot({ path: path.join(outDir, 'town-fort-detail.png') });
+
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);
   if (errors.length) { console.error('PAGE ERRORS:\n' + errors.join('\n')); process.exit(1); }

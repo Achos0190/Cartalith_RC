@@ -105,6 +105,20 @@ values in brackets `[a–b]` are acceptance ranges, not samplers.
 | M-DEN-7 | Wells/fountains | ~1 public water point per 200–400 residents; placed in squares/junction bulges | count | L — convention from municipal-water histories | L | Placeholder pending a quantified source; drives detail-object stage; TODO(M-DEN-7). |
 | M-DEN-8 | Religious-site service size | parish ~200–800 households (medieval Europe); mosque within 300–500 m walk in Islamic fabric | households, m | parish-formation literature; Friday-mosque spacing studies | L/M | Anchor spawn rule per population increment; refine in Phase 2. |
 
+## H. Fortification (M-FOR)
+
+Bastioned fortification is an optional, later fortification epoch (the *trace italienne*),
+distinct from the medieval curtain wall (M-NET-9). The curtain wall itself is refined here to
+follow the water's edge.
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-FOR-1 | Bastion form | angled bastion: two faces + two flanks, salient projecting ~34–42 m beyond the curtain, flanks set back ~18 m and raised ~13 m | m | [Bastion fort (Wikipedia)](https://en.wikipedia.org/wiki/Bastion_fort); Vauban's magistral geometry ([Nexus NJ](https://link.springer.com/article/10.1007/s00004-014-0205-9)) | H (form) / M (our metres) | Faces and flanks sweep the adjacent curtains with flanking fire, eliminating the dead ground round-towers left; the arrowhead shape comes from projecting fire-lines off adjacent flanks. |
+| M-FOR-2 | Curtain length between bastions | ≈ 200–260 m (within effective musket range so adjacent bastions cover one another) | m | Vauban's polygon method; musket-range rationale (Bastion fort) | H (principle) / M (value) | Bastion spacing is set by the range of the flanking weapon; too long a curtain leaves its middle uncovered. |
+| M-FOR-3 | Outworks | wide ditch (counterscarp ~22 m out); detached triangular **ravelins** in front of each curtain; **glacis** crest ~50 m out | m | Bastion fort; Vauban system ([Vauban sites](https://sites-vauban.org/en/resources/history-bastioned-fortification)) | H (kinds) / M (metres) | Low thick ramparts + wide ditch + ravelins + a glacis (from the 1520s) hide the wall from horizontal artillery and deny point-blank fire. |
+| M-FOR-4 | When / for whom | from **c.1500** (Pisa 1500 earthwork vs. French siege guns); costly state works built only for **strategically important towns**, never hamlets → require a decent size (PoC threshold ~2,500 inhabitants) | year, persons | [Bastion fort](https://en.wikipedia.org/wiki/Bastion_fort); [ACOUP fortification IV](https://acoup.blog/2021/12/17/collections-fortification-part-iv-french-guns-and-italian-lines/) | H (date/rationale) / L (exact threshold) | The 1494 French invasion of Italy showed mobile siege artillery shatter high medieval walls; the response was expensive and reserved for important places, so a hamlet never received one. Threshold is a PoC convention — TODO(M-FOR-4). |
+| M-FOR-5 | Wall at the water | the enceinte follows the **bank/shoreline** at the water, does not bulge around it, dips a short **spur into the water** at each end (deny walking round at the waterline), leaves the **harbour mouth open**, and **crosses the water only once the town has grown across it** | – | town-plan corpus; harbour/bridge-town families (lit. review §1.1 #22–23, §4) | M | Walls hug the natural water barrier rather than duplicating it inland; sea-gates/chains closed harbours rather than solid walls (the harbour was not cordoned); a river inside the walls appears only when both banks were built up. |
+
 ## G. Growth dynamics (M-GRW)
 
 | ID | Quantity | Value | Units | Source | Conf. | Justification |
