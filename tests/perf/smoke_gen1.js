@@ -531,9 +531,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   //      2-position phase switch ----
   R.tabCount = await page.$$eval('.tab', els => els.length);
   R.tabsOnly2 = await page.$$eval('.tab', els => JSON.stringify(els.map(e => e.dataset.tab)) === JSON.stringify(['generate','explore']));
-  await page.click('#exportMenuBtn');
+  await page.click('#fileMenuBtn');   // v0.87: Import+Export consolidated into one "File ▾" menu
   await page.waitForTimeout(150);
-  R.exportMenuOpen = await page.$eval('#exportMenu', el => el.classList.contains('open'));
+  R.fileMenuOpen = await page.$eval('#fileMenu', el => el.classList.contains('open'));
+  // Export section (form) present + Import actions present in the same menu; ticking a form checkbox
+  // keeps the menu open (only single-shot import/export buttons close it).
+  R.fileMenuHasBoth = await page.evaluate(() => {
+    const m = document.getElementById('fileMenu');
+    const hasImport = !!m.querySelector('#loadZipBtn') && !!m.querySelector('#packBtn');
+    const hasExport = !!m.querySelector('#exportBtn') && !!m.querySelector('#bakeRes');
+    const cb = m.querySelector('#bakeTiles'); cb.click();   // toggling a form control must NOT close the menu
+    const stillOpen = m.classList.contains('open'); cb.click();
+    return { hasImport, hasExport, stillOpenAfterFormClick: stillOpen };
+  });
   await page.click('#assetsHeaderBtn');
   await page.waitForTimeout(250);
   R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
@@ -777,6 +787,23 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { total: keys.length, bad };
   });
 
+  // v0.87: entering LOD/atlas mode fills the viewport (letterboxed) instead of shrinking the canvas to its
+  // intrinsic GW×GH size; exiting restores the intrinsic size (owner report: "viewport restricts to the
+  // initial World px size instead of full screen").
+  R.lodViewport = await page.evaluate(() => {
+    const view = document.getElementById('view'), wrap = document.querySelector('.canvas-wrap');
+    const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
+    const wrapA = area(wrap);
+    const intrinsicA = area(view);                                  // non-LOD, scale 1 ⇒ small
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
+    const lodA = area(view);                                        // should fill most of the wrap
+    const filled = lodA > intrinsicA * 2 && lodA > wrapA * 0.5;     // clearly enlarged, majority of viewport
+    _lodOn = false; if (lc) lc.checked = false; applyView(); renderNow();
+    const restoredA = area(view);                                   // back to intrinsic (inline size cleared)
+    return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -867,7 +894,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
   A('typing "B" in a text field does not trigger the hotkey', R.debugUnchangedWhileTyping === true);
   A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
-  A('Export ▾ header dropdown opens', R.exportMenuOpen === true);
+  A('v0.87: consolidated File ▾ dropdown opens with both Import and Export sections', R.fileMenuOpen === true && R.fileMenuHasBoth.hasImport && R.fileMenuHasBoth.hasExport);
+  A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
+  A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
   A('v0.85 collapse: proximity graph + betweenness identify the hub as most central', R.collapseSim.hubMaxBtw);

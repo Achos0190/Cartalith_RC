@@ -12,6 +12,26 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.87 (2026-07-11)
+**Two owner-reported UI items.** No engine changes; render battery **ALL IDENTICAL to v0.86**, headless
+**911** unchanged, Playwright UI smoke **111 → 113**.
+- **LOD/atlas viewport regression (fix).** In LOD/atlas mode the CSS transform is identity (LOD does its
+  own in-canvas zoom/pan), which left the `#view` canvas at its intrinsic GW×GH size — a small tile in a
+  big viewport (owner: "the viewport restricts again to the initial World px size instead of full screen").
+  Added `_lodFitCanvas()`: when `_lodOn`, letterbox-fit the canvas element to the `.canvas-wrap` content box
+  (fills the viewport, preserves aspect); cleared back to intrinsic + the `viewT` CSS-transform path when LOD
+  is off. Transparent to LOD input — `evtToGrid` and the LOD pan capture both read `view.getBoundingClientRect()`,
+  so a larger on-screen canvas needs no mapping change. Called from `applyView()` and on window resize.
+  Display-only ⇒ render bit-identical (probe: LOD canvas 514×330 → 920×589 in a 956×804 wrap).
+- **Import + Export consolidated into one "File ▾" header menu (owner request).** The two `.dropdown-wrap`
+  containers (Import ▾ / Export ▾) merged into a single `#fileMenu` with an **Import** section (the five
+  action buttons) and an **Export** section (the image/project form). Every element id is unchanged
+  (loadBtn/inferTectBtn/loadZipBtn/packBtn/atlasImportBtn + bakeRes/bakeTiles/chanAtlasChk/embedAtlasChk/
+  exportBtn/bakeProgRow) so all wiring is untouched. Close behavior preserved per-section: the single-shot
+  Import rows (and Export .zip) close the menu on click; clicks inside the Export form don't (so ticking a
+  checkbox doesn't dismiss it). CSS `#exportMenu` rules retargeted to `#fileMenu` (incl. the v0.86 mobile
+  viewport-pin). +2 smoke assertions (both sections present; form-click keeps it open).
+
 ### v0.86 (2026-07-11)
 **Seven owner-reported fixes/additions** — UI/UX bug-fixes plus two new header utilities. No engine
 (block 1) simulation changes at defaults; render battery **ALL IDENTICAL to v0.85**, headless **909 →

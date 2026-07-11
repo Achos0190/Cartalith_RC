@@ -9,10 +9,19 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.86.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.87.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.87 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.85` are kept and never edited.
+  (v0.88 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.86` are kept and never edited.
+- **v0.87 — two owner-reported UI items** (no engine changes; render battery ALL IDENTICAL to v0.86,
+  headless **911** unchanged, smoke **111 → 113**): (1) **LOD/atlas viewport regression** — in LOD mode the
+  CSS transform is identity, so the canvas sat at its intrinsic GW×GH size (small tile in a big viewport).
+  New `_lodFitCanvas()` letterbox-fits the `#view` element to the `.canvas-wrap` content box while `_lodOn`
+  (cleared on exit); transparent to LOD input since `evtToGrid`/LOD-pan read `getBoundingClientRect()`;
+  called from `applyView()` + window resize. (2) **Import + Export merged into one "File ▾" header menu**
+  (`#fileMenu`, Import section + Export form) — all element ids unchanged so wiring is untouched; the
+  `#exportMenu` CSS retargeted to `#fileMenu`; single-shot Import rows + Export .zip close the menu, form
+  clicks don't.
 - **v0.86 — seven owner-reported fixes/additions** (no engine-simulation changes; render battery ALL
   IDENTICAL to v0.85, headless **909 → 911**, smoke **103 → 111**): (1) **climate redraw** — added a
   `_climGen` counter (bumped by the climate field-writers) to `_civBakeKey`/`_lodRenderKey`, so "Simulate
@@ -27,14 +36,6 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   the whole affordance/civ derived-cache set (was stale on sea change), and `buildResourcePotentials`
   computes over the **full map** (bedrock potential exists below sea too) instead of masking to exposed
   land. Bit-identity preserved throughout (all changes are UI/off-default-render or debug-view-only).
-- **Next up (v0.87 — owner-queued):** (1) **consolidate Import + Export into one header menu** — keep all
-  existing element ids (loadZipBtn/inferTectBtn/packBtn/atlasImportBtn + bakeRes/bakeTiles/chanAtlasChk/
-  embedAtlasChk/exportBtn/bakeProgRow) so the wiring is untouched; just merge the two `.dropdown-wrap`
-  containers (e.g. one "File ▾" with Import/Export sections), respecting the v0.86 mobile viewport-pin rule.
-  (2) **LOD atlas-tiling viewport regression** — when atlas tiling is on, the viewport shrinks back to the
-  initial World px size instead of filling the screen (was fixed before, regressed). Investigate the canvas/
-  `#view` sizing on the `_lodOn`/`drawLODView`/`enterLodFromView` paths vs. the full-`.canvas-wrap` fit; find
-  where the canvas dims/CSS reset to the base GW×GH working resolution and restore the full-viewport fit.
 - **v0.85 — mechanistic collapse/recovery timeline simulator** (owner: "research the mathematics in regards
   to population mechanics (survival and migration rates…) and how to use this new function in regards to the
   timeline"). New `docs/research/collapse-timeline-dynamics.md` (network-robustness/gravity-migration/
