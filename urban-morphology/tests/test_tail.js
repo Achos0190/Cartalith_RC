@@ -82,6 +82,19 @@ for (const seed of SEEDS) {
   ok(!!m.plaza, tag + 'market plaza exists');
   ok(m.churches.length >= 1, tag + `religious sites exist (${m.churches.length} churches)`);
   ok(!!m.wall.ring && m.wall.gates.length >= 2, tag + `wall with >=2 gates (${m.wall.gates.length})`);
+  // curtain walls turn gently: no sharp corners in the circuit
+  if (m.wall.ring) {
+    const ring = m.wall.ring, nR = ring.length;
+    let minAng = Math.PI;
+    for (let i = 0; i < nR; i++) {
+      const a = ring[(i - 1 + nR) % nR], b = ring[i], c = ring[(i + 1) % nR];
+      const l1 = Math.hypot(a.x - b.x, a.y - b.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
+      if (l1 < 1 || l2 < 1) continue;
+      const dot = ((a.x - b.x) * (c.x - b.x) + (a.y - b.y) * (c.y - b.y)) / (l1 * l2);
+      minAng = Math.min(minAng, Math.acos(Math.max(-1, Math.min(1, dot))));
+    }
+    ok(minAng > 1.6, tag + `wall circuit has no sharp corners (min interior angle ${(minAng * 180 / Math.PI).toFixed(0)} deg > 92)`);
+  }
   ok(Math.abs(m.pop - m.popTarget) / m.popTarget < 0.6,
     tag + `realized population ~${m.pop} tracks target ${m.popTarget} (M-DEN-1/2)`);
 

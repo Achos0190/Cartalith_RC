@@ -695,15 +695,35 @@ function buildWall(seed,site,anchors,g,wallState,ep){
   const c=polyCentroid(hull);
   hull=hull.map(p=>V.add(c,V.mul(V.sub(p,c),1.10)));
   hull=hull.map(p=>V.add(p,V.mul(V.norm(V.sub(p,c)),16)));
-  let ring=chaikin(chaikin(hull,true),true);
-  ring=simplify(ring,3);
-  if(ring.length<8)return;
-  // clip ring away from the river: pull points out of the flood band
-  ring=ring.map(p=>{
+  // keep the circuit off the flood band: move offending points straight away from the
+  // channel (river-distance gradient) BEFORE smoothing — pushing them away from the
+  // bridge slid points along the river and folded sharp spikes into the circuit
+  let ring=hull.map(p=>{
     let q=p,i=0;
-    while(site.riverDist(q)<site.riverW/2+14&&i++<20)
-      q=V.add(q,V.mul(V.norm(V.sub(q,site.bridgePt)),8));
+    while(site.riverDist(q)<site.riverW/2+14&&i++<20){
+      const e=6;
+      const gx=site.riverDist({x:q.x+e,y:q.y})-site.riverDist({x:q.x-e,y:q.y});
+      const gy=site.riverDist({x:q.x,y:q.y+e})-site.riverDist({x:q.x,y:q.y-e});
+      const gl=Math.hypot(gx,gy)||1;
+      q={x:q.x+gx/gl*8,y:q.y+gy/gl*8};}
     return q;});
+  // restore convexity broken by the push, then smooth into gentle curtain turns
+  ring=convexHull(ring);
+  if(ring.length<3)return;
+  ring=chaikin(chaikin(ring,true),true);
+  // curtain-wall rule: no corner sharper than ~100 deg — cut until every turn is gentle
+  for(let pass=0;pass<4;pass++){
+    const n=ring.length;const out=[];let cut=false;
+    for(let i=0;i<n;i++){
+      const a=ring[(i-1+n)%n],b=ring[i],c=ring[(i+1)%n];
+      const v1=V.norm(V.sub(a,b)),v2=V.norm(V.sub(c,b));
+      const angI=Math.acos(Math.max(-1,Math.min(1,V.dot(v1,v2))));
+      if(angI<1.75){out.push(V.lerp(b,a,0.3),V.lerp(b,c,0.3));cut=true;}
+      else out.push(b);}
+    ring=out;
+    if(!cut)break;}
+  ring=simplify(ring,2);
+  if(ring.length<8)return;
   // gates where primaries cross (M-NET-9: gates pin the road frame)
   const gates=[];
   for(const e of g.edges){
