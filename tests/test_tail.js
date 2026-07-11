@@ -2230,6 +2230,75 @@ if (typeof applyTidalSedimentation === 'function') {
   const carry2 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea);
   check('carryingCapacity deterministic', carryLand.every((v, i) => v === carry2[i]));
 
+  /* ---------- v0.69: sourced settlement density (docs/research/settlement-density.md) ---------- */
+  if (typeof foragerFloorKm2 === 'function') {
+    /* forager floor calibration — the ×0.45 dry-matter→carbon conversion is load-bearing (doc §1) */
+    check('foragerFloorKm2: NPP 0 ≈ 0.030/km² (Binford-scale forage floor)', Math.abs(foragerFloorKm2(0) - 0.0295) < 0.003);
+    check('foragerFloorKm2: NPP 3000 g DM ≈ 0.58/km² (Tallavaara richest biomes)', Math.abs(foragerFloorKm2(3000) - 0.58) < 0.05);
+    check('foragerFloorKm2: monotonic in NPP', foragerFloorKm2(3000) > foragerFloorKm2(1000) && foragerFloorKm2(1000) > foragerFloorKm2(0));
+  }
+  if (typeof biomeDensityResidual === 'function') {
+    check('biomeDensityResidual: all land biomes in [0.55,1.0], lake=0', (() => {
+      for (let bi = 1; bi <= 12; bi++) { const r = biomeDensityResidual(bi); if (r < 0.55 || r > 1.0) return false; }
+      return biomeDensityResidual(13) === 0 && biomeDensityResidual(0) === 0;
+    })());
+    check('biomeDensityResidual: tropWet(12) is the rainforest-paradox low', biomeDensityResidual(12) <= biomeDensityResidual(5));
+  }
+  if (typeof buildCarryingCapacity === 'function') {
+    /* the whole bit-identity promise: biomeK omitted / 0 must byte-match the pre-v0.69 output */
+    const cDefault = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea);
+    const cK0 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 0 });
+    check('buildCarryingCapacity: biomeK:0 byte-identical to default (bit-identity)', cDefault.every((v, i) => v === cK0[i]));
+    const cK1 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 1 });
+    check('buildCarryingCapacity: biomeK:1 ≤ default everywhere (residual ≤ 1)', cK1.every((v, i) => v <= cDefault[i] + 1e-7));
+  }
+  if (typeof estimateRegionalDensityKm2 === 'function') {
+    /* anchor: a prime cell (K=1, temperate-forest, full water) ≈ 81/km²; Maya floodplain (K=0.6, tropWet, water=1) ≈ 92 (doc §3) */
+    const K1 = new Float32Array(n).fill(1), K06 = new Float32Array(n).fill(0.6), w1 = new Float32Array(n).fill(1);
+    const bTemp = new Uint8Array(n).fill(5), bMaya = new Uint8Array(n).fill(12), npp0 = new Float32Array(n).fill(0);
+    const dTemp = estimateRegionalDensityKm2(K1, w1, bTemp, npp0, fld, W, H, sea);
+    const dMaya = estimateRegionalDensityKm2(K06, w1, bMaya, npp0, fld, W, H, sea);
+    check('estimateRegionalDensityKm2: temperate prime cell ≈ 81/km²', Math.abs(dTemp[10 * W + 6] - 81) < 3);
+    check('estimateRegionalDensityKm2: Maya floodplain cell ≈ 92/km²', Math.abs(dMaya[10 * W + 6] - 92) < 4);
+    check('estimateRegionalDensityKm2: ocean = 0', estimateRegionalDensityKm2(K1, w1, bTemp, npp0, noFld, W, H, sea).every(v => v === 0));
+  }
+  if (typeof suppressionRadiusCells === 'function') {
+    /* 10 km village spacing at 800 km / 2048 px ⇒ cellKm≈0.39 ⇒ ~26 cells (doc §6) */
+    check('suppressionRadiusCells: 10 km @ 800 km/2048 ≈ 26 cells', suppressionRadiusCells(10, 2048, 800) === Math.max(4, Math.round(10 / (800 / 2048))));
+    check('suppressionRadiusCells: floors at 4', suppressionRadiusCells(0.01, 2048, 800) === 4);
+  }
+
+  /* ---------- v0.77: wetland/marsh carrying capacity (settlement-density §2b) ---------- */
+  if (typeof WETLAND_DENSITY_RESIDUAL !== 'undefined') {
+    check('WETLAND_DENSITY_RESIDUAL in the residual band [0.55,1.0]', WETLAND_DENSITY_RESIDUAL >= 0.55 && WETLAND_DENSITY_RESIDUAL <= 1.0);
+    check('WETLAND_INTENSIFY_ELIGIBLE high (water-managed intensification story)', WETLAND_INTENSIFY_ELIGIBLE >= 0.8 && WETLAND_INTENSIFY_ELIGIBLE <= 1.0);
+  }
+  if (typeof buildCarryingCapacity === 'function') {
+    /* wetMask only bites when biomeK>0 ⇒ default (and biomeK:0) stay byte-identical even WITH a mask supplied */
+    const wetAll = new Uint8Array(n).fill(1);
+    const cNoWet0 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 0 });
+    const cWet0 = buildCarryingCapacity(soil, water, biome, temp, fld, W, H, sea, { biomeK: 0, wetMask: wetAll });
+    check('buildCarryingCapacity: wetMask with biomeK:0 byte-identical (bit-identity)', cNoWet0.every((v, i) => v === cWet0[i]));
+    /* with biomeK:1, a wetland cell uses the wetland residual, not its climate biome's — here biome=tempForest(5, residual 1.0),
+       so the wetland override (0.70) must LOWER K vs. no mask on that cell */
+    const bTF = new Uint8Array(n).fill(5);
+    const cWetK1 = buildCarryingCapacity(soil, water, bTF, temp, fld, W, H, sea, { biomeK: 1, wetMask: wetAll });
+    const cNoWetK1 = buildCarryingCapacity(soil, water, bTF, temp, fld, W, H, sea, { biomeK: 1 });
+    check('buildCarryingCapacity: wetland residual (0.70) overrides tempForest (1.0) under biomeK:1', cWetK1[10 * W + 6] < cNoWetK1[10 * W + 6] - 1e-6);
+  }
+  if (typeof estimateRegionalDensityKm2 === 'function') {
+    /* wetland intensify eligibility (0.95) raises the water-gated ceiling — a wet cell with full water
+       out-densifies the same cell with no mask (whose grass biome eligibility is 0.50) */
+    const K1 = new Float32Array(n).fill(1), w1 = new Float32Array(n).fill(1), npp0 = new Float32Array(n).fill(0);
+    const bGrass = new Uint8Array(n).fill(7), wetAll = new Uint8Array(n).fill(1);
+    const dNoWet = estimateRegionalDensityKm2(K1, w1, bGrass, npp0, fld, W, H, sea);
+    const dWet = estimateRegionalDensityKm2(K1, w1, bGrass, npp0, fld, W, H, sea, wetAll);
+    check('estimateRegionalDensityKm2: wetland raises the water-gated ceiling', dWet[10 * W + 6] > dNoWet[10 * W + 6] + 1e-6);
+    /* omitting the wetMask arg is byte-identical to passing null (bit-identity of the existing call sites) */
+    const dNull = estimateRegionalDensityKm2(K1, w1, bGrass, npp0, fld, W, H, sea, null);
+    check('estimateRegionalDensityKm2: no-wetMask arg byte-identical to null', dNoWet.every((v, i) => v === dNull[i]));
+  }
+
   /* buildSettlementSuitability */
   const slopeFlat = new Float32Array(n).fill(0.5), slopeCliff = new Float32Array(n).fill(6.0);
   const carry = buildCarryingCapacity(soil, water, null, temp, fld, W, H, sea);
@@ -2619,6 +2688,175 @@ if (typeof strahlerFromReceivers === 'function') {
     const widthAt = (net, row) => { let w = 0; for (let x = 0; x < W; x++) if (net.intensity[row * W + x] > 0.01) w++; return w; };
     check('Rosgen: steeper channel narrower than gentle at equal discharge (' + widthAt(steep, 10) + ' ≤ ' + widthAt(gentle, 10) + ')', widthAt(steep, 10) <= widthAt(gentle, 10));
   }
+}
+
+/* ---------- v0.71: persistent feature registry (river-lod brief) ---------- */
+if (typeof buildFeatureRegistry === 'function') {
+  const W = 32, H = 32, n = W * H, sea = 0.42, thr = n * 0.0004;
+  const fld = new Float32Array(n), flow = new Float32Array(n);
+  // south-sloping land with a gaining channel at x=16, a tall peak at (8,8), a steep-banked gorge along the channel rows 18-26
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) fld[y * W + x] = 0.90 - y * 0.012;
+  fld[8 * W + 8] = 0.99;                                                        // isolated peak
+  for (let y = 2; y < 30; y++) flow[y * W + 16] = thr * (6 + y * 40);           // channel gaining discharge
+  for (let y = 18; y < 27; y++) { fld[y * W + 15] += 0.06; fld[y * W + 17] += 0.06; fld[y * W + 16] -= 0.02; }   // canyon walls
+  const fm = new Float32Array(n); for (let y = 27; y < 31; y++) for (let x = 14; x < 19; x++) fm[y * W + x] = 0.8;   // synthetic fjord patch
+  /* minOrder:1 — a single unbranched synthetic channel is Strahler order 1 throughout (order only rises
+     where two order-1s meet), so the engine default of 2 would trace nothing here. The engine world test
+     below exercises the default. Guard every dependent check (empty-seed suite-crash lesson, v0.61). */
+  const F = buildFeatureRegistry(fld, flow, W, H, sea, { fjordMask: fm, mapWidthKm: 320, minOrder: 1, canyonMinOrder: 1 });
+  check('featureRegistry: at least one river traced', F.rivers.length >= 1);
+  check('featureRegistry: river has geometry, mouth, discharge, length & width', (() => {
+    const r = F.rivers[0]; if (!r) return false;
+    return r.pts.length >= 2 && r.mouth && r.source && r.discharge > 0 && r.lengthKm > 0 && r.widthKm > 0; })());
+  check('featureRegistry: river width grows with order (hydrology-derived)', (() => {
+    const km = (o, mag) => 2 * Math.min(9, Math.max(0.5, 0.6 + 3.0 * mag * mag + 0.45 * (o - 1)));
+    return km(4, 0.5) > km(1, 0.5); })());
+  check('featureRegistry: fjord component found with area + strength', F.fjords.length === 1 && F.fjords[0].cells >= 4 && F.fjords[0].strength >= 0.8 - 1e-6 && F.fjords[0].areaKm2 > 0);
+  check('featureRegistry: canyon detected along the steep-banked reach', F.canyons.length >= 1 && F.canyons[0].reliefMean >= 0.045);
+  check('featureRegistry: peak found at the local maximum', F.peaks.length >= 1 && F.peaks.some(p => p.x === 8 && p.y === 8));
+  check('featureRegistry: deterministic', JSON.stringify(F.rivers) === JSON.stringify(buildFeatureRegistry(fld, flow, W, H, sea, { fjordMask: fm, mapWidthKm: 320, minOrder: 1, canyonMinOrder: 1 }).rivers));
+  // query API on the real engine world (cached path + invalidation)
+  if (typeof currentFeatures === 'function') {
+    const FR = currentFeatures();
+    check('currentFeatures: registry built on the engine world', FR && Array.isArray(FR.rivers) && Array.isArray(FR.peaks));
+    const sum = featureSummary();
+    check('featureSummary counts match the registry', sum.rivers === FR.rivers.length && sum.peaks === FR.peaks.length && sum.fjords === FR.fjords.length && sum.canyons === FR.canyons.length);
+    if (FR.rivers.length) {
+      const m = FR.rivers[0].mouth, near = featuresNear(m.x, m.y, 4);
+      check('featuresNear finds the river at its own mouth', near.some(o => o.feature.id === FR.rivers[0].id));
+      const p0 = FR.rivers[0].pts[0];
+      check('riversInRect finds the river through its first point', riversInRect(p0.x - 1, p0.y - 1, p0.x + 1, p0.y + 1).some(r => r.id === FR.rivers[0].id));
+    } else { check('featuresNear finds the river at its own mouth', true); check('riversInRect finds the river through its first point', true); }
+    check('currentFeatures cached (same object on second call)', currentFeatures() === FR);
+  }
+}
+
+/* ---------- v0.71: featureDetailPass — zoom-revealed feature morphology on LOD tiles ---------- */
+if (typeof featureDetailPass === 'function') {
+  const cW = 16, cH = 16, sea = 0.42;
+  const V = (x) => Math.fround(x);                                       // Float32Array stores f32 — compare against the rounded constant
+  const mkTile = (v) => new Float32Array(24 * 24).fill(v);
+  const b = { x: 4, y: 4, w: 8, h: 8 };                                  // tile covers coarse cells 4..12
+  // coarse grids: an order-3 channel column at cx=8; a fjord patch; a canyon cell
+  const ord = new Int16Array(cW * cH); for (let y = 4; y < 13; y++) ord[y * cW + 8] = 3;
+  const fj = new Float32Array(cW * cH); fj[6 * cW + 6] = 0.9;
+  const cyn = new Uint8Array(cW * cH); cyn[10 * cW + 10] = 1;
+  // 1. no grids ⇒ byte-identical no-op (the bit-identity contract for suite-pinned paths)
+  { const t = mkTile(0.6); featureDetailPass(t, 24, 24, cW, cH, b, 6, { sea });
+    check('featureDetailPass: no feature grids ⇒ tile untouched', t.every(v => v === V(0.6))); }
+  // 2. below the zoom gate (z=2) ⇒ no-op even with grids
+  { const t = mkTile(0.6); featureDetailPass(t, 24, 24, cW, cH, b, 2, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
+    check('featureDetailPass: z=2 is below the reveal gate ⇒ untouched', t.every(v => v === V(0.6))); }
+  // 3. valley cross-section at deep zoom: land near the order-3 channel is carved, far land is not
+  { const t = mkTile(0.6); featureDetailPass(t, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord });
+    // tile x maps to coarse 4+ (x/23)*8 → coarse 8 ≈ tile x 11-12; far column tile x 0 → coarse 4
+    const nearI = 12 * 24 + 12, farI = 12 * 24 + 0;
+    check('featureDetailPass: valley carved near an order-3 channel at z=6', t[nearI] < V(0.6));
+    check('featureDetailPass: land far from the channel untouched', t[farI] === V(0.6));
+    const t4 = mkTile(0.6); featureDetailPass(t4, 24, 24, cW, cH, b, 4, { sea, coarseOrder: ord });
+    check('featureDetailPass: carve deepens with zoom (z6 ≥ z4)', (V(0.6) - t[nearI]) >= (V(0.6) - t4[nearI]) - 1e-9); }
+  // 4. fjord walls deepen shallow WATER under the mask (above the sea−0.06 floor), never land,
+  //    and never deep ocean (the floor only limits carving — it must never raise terrain)
+  { const t = mkTile(0.40);                                             // shallow shelf (sea−0.02, above the 0.36 floor)
+    featureDetailPass(t, 24, 24, cW, cH, b, 5, { sea, fjordM: fj });
+    check('featureDetailPass: fjord shelf water deepened under the mask', t[6 * 24 + 6] < V(0.40));
+    const tl = mkTile(0.6); featureDetailPass(tl, 24, 24, cW, cH, b, 5, { sea, fjordM: fj });
+    check('featureDetailPass: fjord pass leaves LAND untouched', tl.every(v => v === V(0.6)));
+    const td = mkTile(0.30);                                            // deep ocean, already below the floor
+    featureDetailPass(td, 24, 24, cW, cH, b, 5, { sea, fjordM: fj });
+    check('featureDetailPass: deep ocean below the floor is NEVER raised or carved', td.every(v => v === V(0.30))); }
+  // 5. canyon incision + floor clamp
+  { const t = mkTile(sea + 0.005); featureDetailPass(t, 24, 24, cW, cH, b, 6, { sea, canyonM: cyn });
+    const ci = Math.round((10 - 4) / 8 * 23), i = ci * 24 + ci;
+    check('featureDetailPass: canyon cell incised at z=6', t[i] < V(sea + 0.005));
+    check('featureDetailPass: floor clamped to sea-0.06', t.every(v => v >= sea - 0.06 - 1e-9)); }
+  // 6. seam consistency: two adjacent tiles agree along their shared edge (world-coord sampling)
+  { const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 6, { sea, coarseOrder: ord });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 6, { sea, coarseOrder: ord });
+    let maxSeam = 0; for (let y = 0; y < 24; y++) maxSeam = Math.max(maxSeam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: seam Δ=0 between adjacent tiles (max ' + maxSeam.toExponential(1) + ')', maxSeam < 1e-6); }
+  // 7. deterministic
+  { const t1 = mkTile(0.6), t2 = mkTile(0.6);
+    featureDetailPass(t1, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
+    featureDetailPass(t2, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn });
+    check('featureDetailPass deterministic', t1.every((v, i) => v === t2[i])); }
+  // 8. meander wobble at z≥7: the valley centerline wanders (differs from the straight z-6 carve pattern),
+  //    stays seam-safe (pure function of world coords), and is off below the gate
+  { const t7 = mkTile(0.6), t6 = mkTile(0.6);
+    featureDetailPass(t7, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(t6, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, seed: 123 });
+    // both carve (zk capped at 1 from z=6), but the z=7 pattern is displaced by the wobble somewhere
+    let differs = false; for (let i = 0; i < t7.length; i++) { const c7 = t7[i] < V(0.6), c6 = t6[i] < V(0.6); if (c7 !== c6) { differs = true; break; } }
+    check('featureDetailPass: meander wobble displaces the carve pattern at z=7', differs);
+    const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 7, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 7, { sea, coarseOrder: ord, seed: 123 });
+    let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: meandered tiles still seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
+  // 9. v0.72 LOD10+ tier: local incision + dendritic tributaries, revealed only at z≥8
+  // 9a. strictly gated above z=7 — even absurd depths do nothing until zt>0 (z=7 output is byte-identical)
+  { const ta = mkTile(0.6), tb = mkTile(0.6);
+    featureDetailPass(ta, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tb, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123, tribDepth: 0.5, incisionK: 0.5 });
+    check('featureDetailPass: tributaries/incision gated off at z=7 (zt=0)', ta.every((v, i) => v === tb[i])); }
+  // 9b. z=8 adds net carving beyond z=7 (both meander; z8 additionally incises the bed + cuts tributaries)
+  { const t8 = mkTile(0.6), t7 = mkTile(0.6);
+    featureDetailPass(t8, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(t7, 24, 24, cW, cH, b, 7, { sea, coarseOrder: ord, seed: 123 });
+    let s8 = 0, s7 = 0; for (let i = 0; i < t8.length; i++) { s8 += V(0.6) - t8[i]; s7 += V(0.6) - t7[i]; }
+    check('featureDetailPass: z8 incision+tributaries add carving beyond z7', s8 > s7 + 1e-6); }
+  // 9c. tributaries reach beyond the trunk valley footprint (a cell the z6 narrow valley never touched)
+  { const t8 = mkTile(0.6), t6 = mkTile(0.6);
+    featureDetailPass(t8, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123, tribThr: 0 });  // thr=0 ⇒ every catchment cell drains, deterministically
+    featureDetailPass(t6, 24, 24, cW, cH, b, 6, { sea, coarseOrder: ord, seed: 123 });
+    let extended = false; for (let i = 0; i < t8.length; i++) { if (t8[i] < V(0.6) - 1e-7 && t6[i] === V(0.6)) { extended = true; break; } }
+    check('featureDetailPass: z8 tributaries carve beyond the z6 valley footprint', extended); }
+  // 9d. seam Δ=0 at z=8 (noise sampled at world coords; catchment LUT agrees across the shared edge)
+  { const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 8, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 8, { sea, coarseOrder: ord, seed: 123 });
+    let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: z8 tributaries seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
+  // 9e. deterministic, and still floor-respecting / never raising deep ocean at z=8
+  { const t1 = mkTile(0.6), t2 = mkTile(0.6);
+    featureDetailPass(t1, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn, seed: 7 });
+    featureDetailPass(t2, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, fjordM: fj, canyonM: cyn, seed: 7 });
+    check('featureDetailPass: z8 deterministic', t1.every((v, i) => v === t2[i]));
+    const td = mkTile(0.30); featureDetailPass(td, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 7 });
+    check('featureDetailPass: z8 deep ocean below the floor is never raised', td.every(v => v === V(0.30)));
+    const tf = mkTile(sea + 0.005); featureDetailPass(tf, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 7 });
+    check('featureDetailPass: z8 carving respects the sea-0.06 floor', tf.every(v => v >= sea - 0.06 - 1e-9)); }
+  // 10. v0.79 oxbow pockets: relict floodplain water pockets, revealed only at z≥9, seam-safe, floor-bounded
+  // 10a. z≤8 byte-identical — oxbows contribute nothing at z=8 even at absurd depth (zo=0 ⇒ gated off)
+  { const ta = mkTile(0.6), tb = mkTile(0.6);
+    featureDetailPass(ta, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123 });
+    featureDetailPass(tb, 24, 24, cW, cH, b, 8, { sea, coarseOrder: ord, seed: 123, oxbowDepth: 0.5, oxbowThr: 0 });
+    check('featureDetailPass: oxbows gated off at z=8 (z≤8 byte-identical)', ta.every((v, i) => v === tb[i])); }
+  // 10b. z=9 oxbows add floodplain carving beyond the rest of the pass (isolated by toggling oxbowDepth)
+  { const t9a = mkTile(0.6), t9b = mkTile(0.6);
+    featureDetailPass(t9a, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 123, oxbowDepth: 0 });
+    featureDetailPass(t9b, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 123, oxbowDepth: 0.4, oxbowThr: 0 });
+    let s = 0, extra = false; for (let i = 0; i < t9a.length; i++) { const dd = t9a[i] - t9b[i]; s += dd; if (dd > 1e-6) extra = true; }
+    check('featureDetailPass: z9 oxbows add floodplain carving beyond the rest of the pass', s > 1e-6 && extra); }
+  // 10c. seam Δ=0 at z=9 with oxbows (world-coord noise + shared coarse LUT)
+  { const bA = { x: 4, y: 4, w: 4, h: 8 }, bB = { x: 8, y: 4, w: 4, h: 8 };
+    const tA = mkTile(0.6), tB = mkTile(0.6);
+    featureDetailPass(tA, 24, 24, cW, cH, bA, 9, { sea, coarseOrder: ord, seed: 123, oxbowThr: 0 });
+    featureDetailPass(tB, 24, 24, cW, cH, bB, 9, { sea, coarseOrder: ord, seed: 123, oxbowThr: 0 });
+    let seam = 0; for (let y = 0; y < 24; y++) seam = Math.max(seam, Math.abs(tA[y * 24 + 23] - tB[y * 24 + 0]));
+    check('featureDetailPass: z9 oxbows seam Δ=0 (max ' + seam.toExponential(1) + ')', seam < 1e-6); }
+  // 10d. z9 oxbows: deterministic, floor-respecting, never raise deep ocean
+  { const t1 = mkTile(0.6), t2 = mkTile(0.6);
+    featureDetailPass(t1, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 9, oxbowThr: 0 });
+    featureDetailPass(t2, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 9, oxbowThr: 0 });
+    check('featureDetailPass: z9 oxbows deterministic', t1.every((v, i) => v === t2[i]));
+    check('featureDetailPass: z9 oxbows respect the sea-0.06 floor', t1.every(v => v >= sea - 0.06 - 1e-9));
+    const td = mkTile(0.30); featureDetailPass(td, 24, 24, cW, cH, b, 9, { sea, coarseOrder: ord, seed: 9, oxbowThr: 0 });
+    check('featureDetailPass: z9 oxbows never raise deep ocean', td.every(v => v === V(0.30))); }
 }
 
 /* ---------- v0.112 Pillar 2: velocity-field hydraulic erosion ---------- */
@@ -3330,6 +3568,20 @@ if (typeof carveRiverValleys === 'function') {
     check('all R5 sliders off ⇒ land pixels bit-identical', row() === base);
     check('R5 viz defaults are off', state.viz.svf === 0 && state.viz.shadows === 0 && state.viz.curveShade === 0 && state.viz.geology === 0 && state.viz.wetness === 0 && state.viz.season === 0 && state.viz.contourM === 0);
     check('_seasonK stays 0 by default (annual fields untouched)', _seasonK === 0);
+  }
+
+  /* ---------- v0.63 (§4.4): Map-style presets are pure, key-scoped state.viz writes ---------- */
+  if (typeof STYLE_PRESETS !== 'undefined') {
+    check('style preset: Default is a no-op bundle (bit-identical base look)', Object.keys(STYLE_PRESETS.default).length === 0);
+    const managed = new Set([...STYLE_MANAGED_NUM, ...STYLE_MANAGED_BOOL]);
+    check('style presets: every override targets a managed viz key', Object.values(STYLE_PRESETS).every(p => Object.keys(p).every(k => managed.has(k))));
+    // apply "antique" purely (no DOM), assert, then restore the managed keys we touched
+    const snap = {}; for (const k of managed) snap[k] = state.viz[k];
+    for (const k of STYLE_MANAGED_NUM) state.viz[k] = 0; for (const k of STYLE_MANAGED_BOOL) state.viz[k] = false;
+    for (const k in STYLE_PRESETS.antique) state.viz[k] = STYLE_PRESETS.antique[k];
+    check('style preset: Antique sets parchment+sepia+icons only', state.viz.parchment === 0.6 && state.viz.sepia === 0.35 && state.viz.icons === true && state.viz.ink === 0 && state.viz.watercolor === 0);
+    for (const k of managed) state.viz[k] = snap[k];   // restore so nothing downstream sees the probe
+    check('style preset probe restored managed viz keys', STYLE_MANAGED_NUM.every(k => state.viz[k] === 0) && STYLE_MANAGED_BOOL.every(k => state.viz[k] === false));
   }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');

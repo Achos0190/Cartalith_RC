@@ -12,6 +12,747 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.85 (2026-07-10)
+**Mechanistic collapse/recovery timeline simulator** (owner: "I think it should be possible to model how such
+a collapse would play out. What settlements fall first how people migrate etc… research the mathematics in
+regards to population mechanics… how to use this new function in regards to the timeline"). Builds on v0.81's
+capacity-grounded populations and v0.82's phase-scaled recovery: instead of an instant before/after snapshot,
+this runs a **year-stepped simulation** — per-settlement stress → excess mortality + out-migration (or logistic
+regrowth), gravity-model redistribution of migrants, tier demotion/abandonment — and writes ONE `civTimeline`
+entry per step, so the result scrubs through the *existing* timeline slider exactly like manually-authored
+history. New research doc `docs/research/collapse-timeline-dynamics.md` (Albert/Jeong/Barabási 2000 network
+robustness, Zipf 1946/Ravenstein 1885 gravity migration, Benedictow 2004 Black Death mortality calibration,
+Cline 2014/Wickham 2005 collapse-character sourcing). Civ layer (block 2) only — no engine (block 1) changes;
+render battery ALL IDENTICAL to v0.84, headless **909** unchanged, smoke **86 → 98**.
+
+- **Pure simulation core**, all new, all deterministic (no RNG consumed anywhere in the model):
+  `_civProximityAdjacency`/`_civBetweennessFromAdjacency` (a standalone Brandes-betweenness proximity graph,
+  rebuilt fresh each step so it never goes stale across settlement removals, unlike the rendered `ways`);
+  `_civSettlementStress` (per-settlement stress in [0,1] from trade-dependency loss vs. a t=0 baseline,
+  density/connectivity exposure, and undefended-violence exposure, weighted by a **character**: trade/disease/
+  conflict/mixed — each fails settlements in a different order, sourced per doc §2); `_civMortalityMigrationRates`
+  (stress×severity → excess-mortality and out-migration fractions, capped at doc-derived ceilings — 15%/yr
+  mortality ceiling backs out of the Black Death's ~45% toll over ~4 years); `_civGravityMigrate` (Zipf/
+  Ravenstein gravity model: survivors redistribute to reachable settlements ∝ attractiveness/distance^1.5,
+  headroom-capped, system-wide overflow becomes unplaced transit/diaspora loss — mass-conserving);
+  `_civCollapseStep`/`_civRecoveryGrowthStep` (one `stepYears`-long jump: collapse applies mortality+migration
+  then re-derives each survivor's tier, demoting a shrunken city into a fortified ruin-village or abandoning it
+  outright below the v0.82 floor; recovery compounds Verhulst logistic regrowth toward each settlement's own
+  local catchment ceiling, clearing `ruins` on promotion back into an exchange tier); `_civSimulateTimeline`
+  (orchestrator — runs `steps` collapse-or-recovery steps from a starting `places` array, returns one
+  `{places, stats}` snapshot per step; tracks the t=0 baseline betweenness by each place's stable `tid`).
+- **UI**: new "Simulate collapse / recovery" section under Civilization → Polity, right below the existing
+  timeline (mode select, character select, severity/regrowth-rate sliders, start year + duration/step-years
+  fields, a Simulate button, and a result summary reporting deaths/migrants/failed settlements). Wired by the
+  new impure `_civRunCollapseSimulation()`, which reads `state.places`, runs the pure orchestrator, and writes
+  the resulting snapshots into `civTimeline` — **never touching `state.places`/`civWays`**, the same rule every
+  other timeline write already follows (territory/ways carry forward unchanged from the nearest prior entry;
+  collapse doesn't redraw political borders, that stays an authored layer).
+- Verify: browser-confirmed end to end on a real auto-populated world — Simulate wrote the expected number of
+  timeline entries, the year pills/slider picked them up with no new rendering code, and the settlement/ways
+  editors were untouched throughout. Smoke suite grew 86 → 98 (pure-function correctness: hub betweenness,
+  character-dependent stress ordering, mortality/migration monotonicity+ceilings, gravity-migration mass
+  conservation + distance decay, collapse-step determinism + population reduction, recovery logistic growth,
+  multi-step trajectory monotonicity; UI: mode-toggle row visibility, live slider labels, civTimeline writes,
+  and the state.places/civWays-untouched invariant).
+- **Post-ship audit pass (same day)** — a skeptical re-review of the simulator found and fixed five defects:
+  (1) the t=0 baseline-centrality map was built by pairing the *failure-filtered* settlement array against
+  *unfiltered* betweenness indices — any step-0 failure silently misattributed every later settlement's
+  baseline; `_civCollapseStep` now returns `normBByTid` keyed over the INPUT settlements. (2) mortality/
+  migration rates are **annual** (doc §4's Black Death calibration) but were applied once per step regardless
+  of step length — a 10-year step ran an order of magnitude milder than documented; the step now compounds
+  `(1−m)^stepYears`, mirroring the recovery stepper (doc §4 updated with the compounding form). (3) gravity
+  overflow at a saturated destination was dropped as diaspora loss even while other destinations had headroom,
+  deviating from doc §5's "system-wide overflow" definition — allocation now re-offers the clipped remainder
+  over bounded passes. (4) simulating onto an EMPTY timeline conjured a phantom year-0 era via
+  `civSnapshotSave(civYear)` — the exact bug civAddYear's v0.62 guard fixed; same guard applied. (5) simulated
+  years landing on existing (authored) timeline entries were overwritten silently — now confirm()-gated like
+  every other destructive action. Plus comment-honesty fixes (the "pure" claims now state the GW/state.world
+  reads). Smoke **98 → 103** (compounding, baseline-map contract, overflow re-flow, phantom-year guard,
+  overwrite confirm); render battery still ALL IDENTICAL to v0.84, headless 909 unchanged.
+
+### v0.84 (2026-07-10)
+**Fix: restore the "Vertical" sublabel above Sea level/Peak altitude** (owner report: "the option for sea
+level should have stayed where it was"). v0.83 removed the Map width row from the sidebar's Scale &
+calibration section as requested, but its edit also deleted the **"Vertical" sublabel-grp heading** that sat
+above Sea level/Peak altitude — an overreach: only the "Horizontal" heading (which introduced the now-removed
+Map width row) should have gone. Sea level's control itself never moved position; only its section label was
+briefly missing. Pure markup restore; render battery ALL IDENTICAL to v0.83, headless **909**, smoke **86**
+unchanged.
+
+### v0.83 (2026-07-10)
+**Map width input removed from the Generate → World sidebar — creation-time only** (owner request). Since
+v0.70, the sidebar carried a *disabled, read-only* copy of the map width (`#mapw`, "shown for reference"
+alongside a distance-reference legend) next to the real, editable input in the setup gate (`#suWidth`/
+`#suWidth2`). The owner asked to drop the duplicate entirely: map scale is now visible/settable in exactly
+one place — the New-world/Import setup gate — never in the sidebar. Pure UI markup + dead-handler removal;
+**render battery ALL IDENTICAL to v0.82**, headless **909** unchanged, smoke **86** (2 assertions updated for
+the removed elements, none added — no new behavior, just less UI).
+
+- Removed the "Horizontal · fixed at creation" sublabel, the `#mapw` row, and its `#calLegend` reference
+  legend from the sidebar's **Scale & calibration** section; kept the km/mi unit toggle (still governs the
+  Peak-altitude field's display unit and the on-canvas scale bar) and Sea level / Peak altitude. Rewrote the
+  section hint to drop the now-nonexistent row.
+- Removed the now-unreachable `bind('mapw', …)` handler (would have thrown on load — `bind()` doesn't
+  null-check, unlike `v()`/`lab()`) and the `if(el.id==='mapw') return` exemption in the finalize-lock loop
+  (dead once the id no longer exists). Trimmed `_sidebarScaleSync()` to peak-only; `renderDistLegend()` is
+  still used by the setup gate's own legend, untouched.
+- `state.mapWidthKm` is unchanged in meaning — still set once by `_suGenCommit`/`_suCalCommit` at creation/
+  import and read everywhere the engine already read it (cellKm scaling, routing, settlement catchments,
+  the v0.81/v0.82 population model, exports). Nothing about *how* the value is used changed, only *where*
+  it can be entered.
+- Verify: browser-confirmed the sidebar section renders cleanly with no orphaned controls; smoke updated —
+  `#mapw` no longer exists, `#suWidth`/`#suWidth2` still do, and `state.mapWidthKm` survives a `generate()`
+  call unchanged (no live sidebar control can write it).
+
+### v0.82 (2026-07-10)
+**Post-collapse recovery model** (owner: "start it too" — `docs/research/settlement-emergence.md` §5–6). Builds
+on v0.81's capacity-grounded populations: auto-populate can now model a world rebuilding **after a demographic
+collapse**, running *below* the ecological ceiling. Civ layer (block 2) only; render battery ALL IDENTICAL to
+v0.81, headless **909**, smoke **84 → 86**. Default = **Stable** ⇒ auto-populate byte-identical.
+
+- **Recovery-phase selector** under Civilization (`_civRecoveryPhase`, transient): Stable · I Survival ·
+  II Subsistence · III Regional · IV Mature. Each scales settlement populations by a phase fraction
+  (`_CIV_RECOVERY_FRAC`: <10% · 10–30% · 30–70% · 70%+).
+- **Labour-shortage tier demotion** — the doc's key mechanic. New pure `_civApplyRecovery(places, phase, rng)`
+  + `_civTierForPopulation(pop)` (population→tier by the doc's §3.1 bands, floors in `_CIV_TIER_FLOOR`). When a
+  nucleus is scaled below the labour its tier needs, it **demotes to the tier its surviving population
+  supports** — a former city surviving only as a village. A demoted **urban** site keeps its people clustered
+  in the defensible ruins → gains a `fortified` trait + `p.ruins` (a fortified settlement inside the ruins).
+- **Sparse survival nodes** — in Survival/Subsistence, tiny inland nodes with no water/ruin anchor are
+  abandoned; survivors cluster on water (ports) and ruins.
+- Browser-verified across all five phases on one fixed world: Stable 93k pop / full hierarchy / 0 ruins →
+  Survival 5.8k (6%, cities gone, 13 fortified ruins, 41→22 settlements) → Subsistence 17% → Regional 45%
+  (cities returning) → Mature 81%. Exactly the doc's Phase I–IV trajectory. Two new smoke assertions (pure
+  demotion + integration: Survival total ≪ Stable, with ruins).
+- **Deferred (documented follow-ups):** ruin-reuse *placement value* (biasing new settlements toward existing
+  ruins/water/infrastructure, not just re-scoring the placed set), and surplus-gated *growth* over time.
+
+### v0.81 (2026-07-10)
+**Capacity-grounded, map-size-dependent, automatic settlement populations** (owner design doc +
+`docs/research/settlement-emergence.md`). Auto-populate no longer assigns population from a fixed per-tier base
+× suitability — a settlement's population is now the **energy-system model**: what its catchment land can
+sustain and what the transport network lets it concentrate. Civ layer (block 2) only; render battery ALL
+IDENTICAL to v0.80, headless **909**, smoke **83 → 84**.
+
+- **Research decision (option 1 vs 2).** The owner asked which of "catchment × centrality" vs "capacity-first,
+  derive tier" is more realistic. Neither pure form is: the doc's §9 prescribes capacity-first, but §3 is
+  explicit that a town/city "is not the productive unit — it is the exchange node," so a pure capacity model
+  misplaces cities. **Applied the synthesis:** capacity-grounded populations as the base, split by economic
+  role — **productive tiers (hamlet/village)** from local catchment carrying capacity; **exchange tiers
+  (town/city/capital/metropolis)** additionally draw a centrality-weighted share of a regional urban pool.
+- **Grounded in the land + map scale.** A cell's agrarian density = `carryingCapacity(K) × AGRARIAN_MAX_KM2`
+  (200/km² fertile-valley ceiling; prime land ≈120/km², marginal ≈30/km² — the doc's environment table). A
+  settlement's population integrates that over its per-tier catchment (real km², `_CIV_CATCHMENT_KM2`) × a
+  surplus/nucleation fraction × trade concentration, so it **depends on the set map size** and the actual land.
+  New pure `_civSettlementPopulation` / `_civCatchmentDensityMean` / `_civAgrarianRegionalTotal`; constants
+  `_CIV_SURPLUS_FRACTION` / `_CIV_TRADE_K` / `_CIV_URBAN_SHARE=0.09` / `_CIV_POP_CAP` (per-tier ceilings keep
+  the hierarchy on huge maps). Browser-calibrated: at 400/800/2000 km the tiers land in the doc's bands and
+  scale strongly with map size (capital ≈5.5k→9.7k→imperial cities 60–140k; villages/hamlets stable).
+- **Automatic, not a button.** The regional-population estimate is now a **base calculation** run at the end of
+  auto-populate (map-size-dependent), replacing the v0.76 user-triggered "Estimate" button. The Civilization
+  panel readout auto-updates: e.g. *"Land sustains ≈ 1.66 M over 191 k km² (agrarian carrying capacity).
+  Placed settlements hold ≈ 130 k (7.8% nucleated)."*
+- **Foundation for the post-collapse recovery model** (owner: "start it too") committed in the research doc
+  (Phase I–IV, ruin-reuse settlement value, labour-shortage caps, surplus-gated growth) — implementation is the
+  v0.82+ workstream, resting on these capacity-grounded populations.
+- Verify: block-2, render battery ALL IDENTICAL; two new smoke assertions (readout auto-fills on populate with
+  no button; capacity-grounded pops all positive). Browser-calibrated across three map sizes.
+
+### v0.80 (2026-07-10)
+**Quality-default + persistence fixes, and a mobile header fix** (owner: "apply all fixes and optimisation;
+check the UX/UI on mobile"). Three independent changes; headless **909**, smoke **83** (both unchanged).
+
+- **Ocean currents ON by default** (`state.climate.currents` false → **true**). Currents are cheap
+  (integrated into the weather sim's SST before `buildWind`) and add real coastal-climate realism —
+  warm/wet western-boundary coasts (Gulf Stream), cool/dry eastern-boundary coasts (Benguela→Atacama).
+  Browser-verified the flip has effect (rain differs on ~61k cells vs off) and the checkbox reflects the new
+  default. Like `carveRivers` in v0.145 this is an intentional default flip: **the default render is no longer
+  bit-identical to v0.79** — turning currents off reproduces the prior output. `loadZip` keeps its
+  `currents==null ? false` guard, so **pre-v0.80 saves load exactly as saved** (only brand-new worlds get
+  currents on). Deliberately did **not** default-on **albedo** (forces the CPU temperature path — a perf
+  regression, counter to "optimisation") or **seasons** (heaviest pass + changes annual→seasonal field
+  meaning); both stay one-click opt-in.
+- **LOD per-tile sculpt-edit persistence** (fixes the analysis gap: un-baked `_lodEdits` were lost on
+  save unless baked into the atlas first). New `_lodEditsSyncToState`/`FromState` serialise each edit as the
+  **sparse (index,value) cells that differ from the deterministic procedural base** (+ z/col/row/ts); on load
+  the field regenerates identically from the seed, so `pyramidTile` reconstructs the same base and the deltas
+  re-apply — no bulky Float32 arrays in the ZIP, and **nothing written when there are no edits** (save-format
+  unchanged for the common case). Chained onto the already civ/paint-wrapped `exportZip`/`loadZip`;
+  try/catch skips any tile that can't reconstruct (edit lost gracefully, never a crash). Browser-verified a
+  single-cell edit round-trips exactly.
+- **Mobile header fix** (≤860px). The header was ~123px tall and pushed **Export ▾ off-screen (unreachable)**
+  on a ~390px phone: the `#undoMem` step-count status wasn't hidden (it wrapped to 5 lines) and the action
+  buttons couldn't wrap. Fixed in the mobile media query: `header{flex-wrap:wrap}` so Import/Export/Assets
+  wrap to a second reachable row, `header #undoMem{display:none}` (id-scoped, beats the base `.tag` rule),
+  and `header h1{white-space:nowrap;font-size:12px}`. Header **123px → 80px**, no clipped buttons, no
+  horizontal overflow. The rest of the mobile UX audited sound at true device-width: slide-in sidebar drawer,
+  no `aside` overflow (338/338 at 390px), enlarged touch targets, 16px inputs (no iOS zoom-on-focus).
+
+### v0.79 (2026-07-10)
+**Deep-zoom oxbow-lake pockets** — closes the last flagged river-morphology deferral (the v0.72 note:
+"oxbow cut-off geometry, deferred — needs true centerline curvature tracking"). Engine (script block 1),
+opt-in (rides the Burn-rivers toggle, like the rest of `featureDetailPass`), **never in `generate()`/the
+default render** ⇒ render battery ALL IDENTICAL to v0.78. Headless **903 → 909** (+6).
+
+- An abandoned meander loop leaves a crescent water pocket *beside* — not in — the active trunk channel.
+  True cut-off geometry needs vector centerline-curvature tracking, which isn't available per LOD tile; v0.79
+  ships the seam-safe LOD approximation. `featureDetailPass` gains an oxbow term, revealed only at **z≥9**
+  (`zo` ramps 0→1 across z9..z10) so **z≤8 output is byte-identical to v0.78** even at absurd depths: a rare
+  ridged-noise blob field (`oxbowDepth`/`oxbowFreq`/`oxbowThr`), gated to the floodplain **band** beside
+  order≥3 channels (`band=fp·(1−fp)·4` — peaks mid-floodplain, zero at the channel edge and the valley rim),
+  carved to a shallow water pocket.
+- Seam-safe by construction: a pure function of WORLD coordinates (+seed) reading the same coarse
+  order/distance LUT as the valley/tributary passes, so adjacent tiles agree on shared edges (**seam Δ=0**,
+  asserted exactly). Carve-only, bounded by the shared sea−0.06 floor; deep ocean is never raised.
+- Verify: six headless assertions — z≤8 byte-identical (oxbows gated off at z=8), z9 adds floodplain carving
+  beyond the rest of the pass (isolated by toggling `oxbowDepth`), seam Δ=0 at z9, deterministic,
+  floor-respecting, deep-ocean-safe. **Browser pass owed** (like v0.71/v0.72 deep-zoom morphology): the
+  oxbow pockets at z9–z10 on a real floodplain, and perf of the extra noise sample on 1024² tiles.
+
+### v0.78 (2026-07-10)
+**Transport transfer/handling overhead in the journey planner** — the settlement-density §5c deferral (the
+"pathfinding for routes" strand). Civ layer (script block 2) only, **engine bit-identical to v0.77** (render
+battery ALL IDENTICAL; headless **903** unchanged; journeys are transient, never in the render battery).
+Smoke **81 → 83**.
+
+- Wiseman, Ortman & Bulik 2024 [A] show that **transshipments** ("cost points" — every land↔water
+  mode-change forces a load/unload) add cost *independent of distance*: ~5% each, **compounding**, so a dozen
+  transfers ≈ 80% overhead before any distance cost. A route with many way-transitions should cost more than
+  its length implies.
+- New pure `_civTransshipments(stages)` (counts land↔water mode-changes) + `_civTransferOverhead(n, per)`
+  (`(1+per)^n − 1`, `CIV_TRANSSHIP_COST=0.05` [A]). `_jpPlan` now carries `transshipments`,
+  `transferOverhead` (fractional cost), and `handlingDays` (`JP_TRANSSHIP_DAYS=0.5` per transfer) — additive
+  fields; the distance-based travel `days` is **unchanged** (a time model isn't conflated with a cost model).
+  The journey inspector shows a **Transfers** row ("N transshipments · +X% handling cost · +Y d") only when
+  the route actually changes mode. Browser: a 95%-water port-to-port route → 1 transshipment (+5%, +0.5 d);
+  multi-leg routes compound.
+- Verify: two deterministic Playwright smoke assertions on the pure helpers (mode-change counting 0/1/2/4;
+  overhead compounding `1.05^n − 1`, monotone, 0 at n=0). Browser-verified end-to-end on a real
+  water-crossing journey.
+- **Still deferred (search-blocked this session):** the Mediterranean-scrub residual calibration
+  (settlement-density §9 Q5) — `shrub` stays at 0.95 (already reasoned) rather than take an unsourced number;
+  it needs a Roman-demography source pass (Scheidel/Frier), which the web search couldn't reach this session.
+
+### v0.77 (2026-07-10)
+**Wetlands/marshes carrying capacity** — the settlement-density §2b deferral, and the first density track
+that touches the **engine** (script block 1, headless-testable). Two vocabularies never agreed on wetlands:
+`buildBiomeRaster` (the 13-entry climate raster fed to `buildCarryingCapacity`) has no wetlands class, while
+Wetlands/Marshes lives only in `buildCartBiome`'s 15-entry `CART_BIOMES`, from a moisture+flatness override.
+v0.77 exposes that same detector to the K pipeline so a wet, flat, low cell finally carries its own density
+story. Opt-in (rides the existing **Biome carrying-capacity** toggle) ⇒ **default field + render bit-identical
+to v0.76** (render battery ALL IDENTICAL). Headless **897 → 903** (+6), smoke **79 → 81** (+2).
+
+- New pure `buildWetlandMask()` (+ cached `currentWetlandMask()`) uses the **exact** condition
+  `buildCartBiome` uses for its Wetlands class (`M>0.62 && r<0.18 && sn<1.0`, on land) — smoke asserts the
+  mask agrees cell-for-cell with `buildCartBiome()===Wetlands`, so the two pipelines share one definition.
+- `buildCarryingCapacity(…,opts)` gains `opts.wetMask`: a wetland cell overrides its underlying climate
+  biome's residual with `WETLAND_DENSITY_RESIDUAL=0.70` [D] (between grass 0.90 and tropWet 0.55 — productive
+  fish/rice/waterfowl land, but malaria/flood friction, rainforest-paradox logic via a different disease
+  vector). `estimateRegionalDensityKm2(…,wetMask)` uses `WETLAND_INTENSIFY_ELIGIBLE=0.95` [D] (managed
+  wetlands / raised fields / chinampas / rice = the historical water-managed intensification story, ≈ Maya's
+  tropWet 0.90 / Nile's desert 1.0) to raise the water-gated ceiling.
+- **Bit-identity preserved**: `wetMask` is passed only when the biome-K correction is on (`_biomeK`, default
+  off); omitting it, or `biomeK:0`, is byte-identical (headless asserts both). `_wetlandMask` is invalidated
+  in lockstep with `_carryCapField` at every field/flow-change cache-clear site.
+- Verify: headless calibration — `WETLAND_*` constants in band, wetMask+`biomeK:0` byte-identical, wetland
+  residual (0.70) lowers K vs. a tempForest (1.0) cell under `biomeK:1`, wetland intensification raises the
+  ceiling in `estimateRegionalDensityKm2`, and no-`wetMask`-arg ≡ null. Browser smoke: mask agreement + the
+  residual biting under biomeK.
+
+### v0.76 (2026-07-10)
+**Dense village-grid placement mode + regional-population estimate** — the settlement-density §6/§3
+deferral. Civ layer (script block 2) only, **engine bit-identical to v0.75** (render battery ALL
+IDENTICAL; headless **897** unchanged). Both additions opt-in/read-only ⇒ **auto-populate byte-identical
+when off**. Smoke **75 → 79**.
+
+- **Dense village grid** (`_civVillageDensity`, default off). v0.69 landed the `suppressionRadiusCells`
+  helper but left it unwired; §6 flagged that `_civIterativeAutoWorld`'s default suppression (~market-town
+  ~36 km spacing) places nothing at the true ~10 km village catchment (Vita-Finzi & Higgs 1970). This mode
+  (checkbox under Civilization, applied only when the tier-count fields are blank) tightens the seed
+  suppression radius to `suppressionRadiusCells(VILLAGE_SPACING_KM, GW, state.mapWidthKm)` and raises the
+  cap to `_CIV_VILLAGE_CAP=200` — a ~3–4× denser hamlet/village scatter (browser: 40 → 200 pins on a 1024
+  region). Bounded at 200 because §6 notes an unbounded 10 km grid implies ~3,800 pins, which the
+  per-settlement editor list can't stay usable at.
+- **Regional-population estimate** (`_civRegionalPopulation()` + "Estimate regional population" button).
+  The density doc's recommended alternative to placing thousands of hamlets: integrate the persons/km²
+  field (`estimateRegionalDensityKm2` via `currentPopulationDensity`, already the **Pop density** layer)
+  over all land for a real total, plus per-faction totals over the painted territory raster. Reflects the
+  Biome carrying-capacity toggle. Uniform cellKm² (the engine-wide cellKm idiom; world-mode polar
+  foreshortening approximated as elsewhere). Read-only — never touches `generate()`/render. Browser: a
+  1200 km region modeled ~254k people over ~190k km² (~1.33/km², a plausible low-agrarian average).
+- Verify: block-2, four new Playwright smoke assertions — dense mode places strictly more than the default
+  and stays ≤ the 200 cap; default-off + checkbox toggle; `_civRegionalPopulation` returns a positive total
+  over positive land area; the estimate button fills its readout. Browser-verified (dense grid renders +
+  connects without breakage).
+
+### v0.75 (2026-07-10)
+**Imperial-seat (metropolis) tier** — the first of the settlement-density research deferrals
+(`docs/research/settlement-density.md` §5). Civ layer (script block 2) only, **engine bit-identical to
+v0.74** (render battery ALL IDENTICAL; headless **897** unchanged). Opt-in ⇒ **auto-populate output
+byte-identical when off**. Smoke **72 → 75**.
+
+- The current five tiers (hamlet…capital) cap out at Early-Bronze-Age urbanism (~100–130 ha ≈ 15,000
+  people at 150/ha, validated against the Lawrence et al. 2016 era-ceilings in v0.69). There was no tier
+  for genuinely imperial capitals — Nineveh (750 ha), Baghdad/Samarra (≥280,000). v0.75 adds a rare
+  **Metropolis ★** class above Capital (`CIV_SETTLEMENT_CLASSES` rank 5; also in `CIV_LOD_PLACE`,
+  `tierRankDraw`, `minDeg`, the map-filter list, and the editor kind dropdown).
+- **Placement follows the sourced ceiling-breaking rule, not raw population.** Lawrence et al.'s thesis is
+  that post-2000 BC growth is driven by administrative/taxation capacity, not local farmland — exactly what
+  betweenness centrality (trade-through) and polity size proxy for. New pure `_civSelectMetropolises(places,
+  metricByPlace, maxBtwF, opts)` promotes a **capital** that is both a dominant trade hub (normalised
+  betweenness ≥ 0.85) *and* the seat of a large polity (its faction holds ≥ 6 settlements). Rare by
+  construction: ranked by centrality, ≤ 1 per faction, ≤ 3 total. Metropolis base population 45,000 (≈300 ha,
+  territorial-kingdom scale), scaled by the existing centrality/component multipliers — reaching the
+  Nineveh/Baghdad register on dominant hubs (browser probe: a whole-world seed placed one at ~133k).
+- **Gated** behind a "Imperial-seat tier (metropolis ★)" checkbox under Civilization (`_civMetropolis`,
+  default off). Skipped when the user fixes tier counts (explicit quotas hold). Off ⇒ the promotion pass
+  never runs ⇒ auto-populate is byte-identical to v0.74. Frozen pack-slot vocabularies untouched (a
+  metropolis with no pack sprite falls back to the procedural ★ pin — no save-format surface added).
+- Verify: block-2, so covered by three new Playwright smoke assertions — a deterministic synthetic-polity
+  test of `_civSelectMetropolises` (promotes the dominant large-polity capital; rejects low-betweenness and
+  small-polity capitals; respects the per-faction/global caps), the class definition, and the default-off +
+  checkbox-toggle wiring. Browser-verified end-to-end (metropolis placed + rendered on a whole-world seed).
+
+### v0.74 (2026-07-10)
+**Finalize control promoted to the top of Generate → World** (owner request: the "Bake ALL levels & finalize
+world" button was buried two disclosures deep — inside *Tiles & LOD → Atlas*, both collapsed by default — so
+committing a world to the cartographic Atlas phase meant hunting for it). Pure UI markup relocation, **engine
+bit-identical to v0.73** (render battery ALL IDENTICAL; headless **897** unchanged). Smoke **71 → 72**.
+
+- A new **Finalize world** section (`#finalizeSec`) is now the **first block** of Generate → World, directly
+  under the (hidden-until-finalized) banner and above Geology. It hosts the bake-depth picker and the
+  **🔒 Bake ALL levels & finalize world** / **🔓 Un-finalize** buttons — the finalize button is the first
+  button you meet in the sub-tab, no longer behind a collapsed accordion.
+- The moved elements keep their v0.62 ids (`bakeAllDepthRow` / `bakeAllDepth` / `bakeAllBtn` / `unfinalizeBtn`),
+  so all handler wiring and the `applyFinalizedUI()` show/hide/disable logic are unchanged — the relocation is
+  DOM-position only.
+- Per-view baking stays where it belongs: **Bake visible tiles**, **Clear atlas**, **Export atlas…** and the
+  chunk-debug overlay remain under *Tiles & LOD → Atlas*; that section's hint now points up to the promoted
+  finalize control. The finalized-world banner, the header phase chip tooltip, and the "generation is locked"
+  alert were re-worded to say *"the top of Generate → World"* instead of the old *"Tiles & LOD → Atlas"* path.
+- Verify: markup-only, so headless **897** and the A/B render battery (ALL IDENTICAL vs v0.73) are unaffected;
+  one new Playwright smoke assertion confirms the bake button is the first `<button>` in `#genWorld`, sits in
+  `#finalizeSec`, is not nested in any `<details>`, and that the depth picker travelled with it.
+
+### v0.73 (2026-07-10)
+**Economic land/sea routing + settlement-waypoint pathfinding** (owner report: routes ignored a cheaper/more
+direct sea leg and bypassed settlements they passed rather than stopping at them). Civ layer (script block 2)
+only — **engine bit-identical to v0.72** (render battery ALL IDENTICAL; headless **897** unchanged). Both the
+interactive Route tool and the auto-generated network improved (owner chose *both* + *soft-attract, capped
+detour*). Smoke **68 → 71**; verified in-browser (routing probe + before/after screenshot).
+
+- **Settlement gravity** (`_civApplySettlementGravity`) — a capped, radius-limited cost discount (centre ×0.5,
+  fading to ×1 at ~RW/80 routing cells) around every settlement, applied to the Route-tool grid
+  (`_civDijkstraPath`) and both passes of the auto network (`_civHierarchicalNetwork`). A least-cost path now
+  bends **through** settlements near its corridor (they become practical stops/stages) instead of bypassing
+  them. Soft + capped by construction: only finite (traversable) cells are discounted — gravity never carves a
+  water crossing — and the bounded disc means a path bends toward a nearby settlement but never takes a large
+  detour for a far one.
+- **Economic land-vs-sea** — the Route tool's mixed grid water cost dropped 2.2 → **1.5** (`_CIV_WATER_COST`):
+  still above flat land (so land is the default on comparable distance) but low enough that Dijkstra takes a
+  water leg when the land route is >~1.5× longer — "if the sea route is more direct, take it". A committed
+  route that turns out mostly water is auto-flagged a **sea voyage** (`_civPathWaterFrac` ≥ 0.5) so the planner
+  picks a real vessel instead of the land itinerary.
+- **Sea-network augmentation** (`_civMstRoutes`) — the port sea-lane MST (a tree) left neighbouring coastal
+  towns linked only via a long spine detour; each port now also gets a direct lane to its nearest sea-reachable
+  port (when within the MST's own longest hop), so short coastal hops are direct without meshing the map.
+- **Passed-settlement stops** (`_civPassedSettlements`) — the ordered settlements a route threads through are
+  surfaced in the journey planner as a **Stops** row (origin → intermediate stops → destination), computed live
+  from the path (works for loaded routes too; not serialised — derived/transient).
+- Verify: `_civApplySettlementGravity`/`_civPathWaterFrac`/`_civPassedSettlements` are block-2 (not in the
+  headless engine suite); covered by three new Playwright smoke assertions — a deterministic **injection** test
+  (a settlement placed a few cells off a real corridor pulls the path toward it, detour capped), the economic
+  sea crossing, and settlement count. Also fixed a pre-existing **flaky** v0.72 smoke assertion (z8-vs-z7 tiles
+  compared different extents on an unseeded world → now a deterministic same-extent morphology-on-vs-off check).
+
+### v0.72 (2026-07-10)
+**Deep-zoom river morphology — dendritic tributaries + local incision (the river-lod brief's LOD10+ tier).**
+Extends v0.71's `featureDetailPass` with the last tractable JS items from `docs/research/river-lod-brief.md`
+("LOD10+ … floodplains, meanders, tributaries, local incision"; meanders shipped in v0.71). **Engine
+bit-identical to v0.71** (render battery ALL IDENTICAL — the whole pass is opt-in behind the Burn-rivers
+toggle and never runs in `generate()`/default render); headless **890 → 897** (7 new assertions); smoke
+**67 → 68**.
+
+- **Local incision** (z≥8): the trunk thalweg cuts deeper into its own bed as zoom deepens — a small extra
+  deepening (`incisionK` default 0.004) applied where the valley cross-section is strong (`t>0.45`), ramped by
+  `zt = clamp((z−7)/3)` (0 at z7 → 1 at z10+).
+- **Dendritic tributaries** (z≥8): a ridged value-noise creek network (`ridge = 1−|2·fbm−1|`, thresholded),
+  **catchment-gated** to (and only within) a trunk channel's valley influence (`Rt = 2.5 + order`, wider than
+  the channel itself) and **land-only** (`v>sea`). The noise is a pure function of WORLD coords (+seed) and the
+  catchment gate reads the same coarse Strahler LUT, so adjacent tiles agree along shared edges — **seam Δ=0
+  asserted** (including with the z≥7 meander wobble active). Carve-only; the shared sea−0.06 floor clamp bounds
+  every cut, so deep ocean is never raised and no cell is over-carved (asserted).
+- Strictly gated above the pinned tier: at z≤7 the outputs are byte-identical to v0.71 even when
+  `tribDepth`/`incisionK` are forced absurdly high (`zt=0` kills the pass) — asserted, so the z≤7 refine paths
+  are provably untouched. New opt knobs (`incisionK`, `tribDepth`, `tribFreq`, `tribThr`, all defaulted) thread
+  through `lodTileOpts`.
+- Still deferred (documented): oxbow cut-off geometry (needs true centerline curvature tracking, not a scalar
+  field carve) and the full Rust/WASM engine port (owner decision: JS-first). With tributaries + local incision
+  in, the brief's JS-side render tiers (LOD4→LOD10+) are complete.
+
+### v0.71 (2026-07-10)
+**Zoom-dependent feature rendering** (the owner's "features render according to zoom/scale" goal +
+`docs/research/river-lod-brief.md` / the render half of `rust-wasm-lod-brief.md`) — three stages in one
+version. **Engine bit-identical to v0.70** (render battery ALL IDENTICAL; every new path is opt-in/additive);
+headless **864 → 888** (24 new assertions); smoke **65 → 67**.
+
+- **Persistent feature registry** (`buildFeatureRegistry` + cached `currentFeatures`, invalidated with
+  `_riverNet`): rivers become objects — Strahler polyline geometry, source/mouth, discharge, hydrology-derived
+  width, length-km — plus fjord components (mask ≥0.35, area/strength), canyon components (order≥2 channels
+  with ≥0.045 bank relief in a 5×5), and suppressed-maxima peaks. Query API per the brief: `featuresNear`,
+  `riversInRect`, `featureSummary`. Exported as `features.json` (features survive baking). "A river is not a
+  pixel" — every zoom now has the same persistent objects to render from.
+- **GIS-style LOD render caches** (`drawLODView`): the LOD view used to re-run the per-pixel tile renderer for
+  every visible tile on every pointermove. Now (a) a per-tile canvas LRU (`_lodTileCanvasCache`, keyed on
+  tile + `_lodRenderKey` = fieldGen/paintGen/lodGen/editGen/mode/debug/sea/style) makes pan/zoom a set of
+  `drawImage()`s, and (b) the fullscreen coarse overview — the most expensive per-frame render — is reused
+  shifted during same-zoom pans and re-rendered exactly on the debounced settle. `_lodEditGen` bumps on every
+  tile-edit mutation so caches never serve stale edits. Rendering functions untouched ⇒ identical pixels,
+  just computed once.
+- **Per-zoom feature morphology** (`featureDetailPass`, threaded through `lodTileOpts` → `pyramidTile` behind
+  the existing Burn-rivers toggle): deeper zoom reveals STRUCTURED detail generated from the feature data, not
+  amplified noise — river valley cross-sections from z≥4 (parabolic shoulder, width/depth ∝ Strahler order,
+  deepening with zoom), fjord wall steepening from z≥3 (shallow shelf under the fjord mask carves toward the
+  sea−0.06 floor; land and deep ocean untouched), canyon floor incision from z≥4. Seam-safe (all carves are
+  coarse-grid lookups at world coords, the burnChannels idiom — seam Δ=0 asserted); strictly opt-in (no grids
+  in opts ⇒ tile byte-identical, so every suite-pinned refine path is unchanged). Caught during testing: the
+  first floor-clamp implementation RAISED deep ocean to sea−0.06 — rewritten so the floor only limits carving,
+  never lifts terrain (asserted: deep ocean below the floor is never raised or carved).
+- Also: a first-cut **meander wobble** at z≥7 — the valley centerline wanders via a deterministic wave that
+  is a pure function of world coords (seam Δ=0 asserted), amplitude <1 coarse cell. Deferred from the brief
+  (documented): oxbow geometry, micro-tributary synthesis beyond the existing `addZoomDetail`/`tileErode`,
+  and the full Rust/WASM engine port (owner decision: JS-first).
+
+### v0.70 (2026-07-10)
+**Bug-fix batch (imported heightmaps, sea-level render, plate count) + map-scale locked at creation.**
+Engine generation path untouched — **bit-identical to v0.69** (render battery ALL IDENTICAL); headless **864**;
+smoke **61 → 65**. All four bugs were reproduced in a real browser (Playwright) before fixing and re-verified.
+
+- **`roadDijkstra` crash on imported worlds (`RangeError: Invalid array length`).** The pathfinder is a lazy
+  min-heap but `dist` was **Float32** while priorities/`nd` were **Float64** — on the very uniform cost grid an
+  imported heightmap produces (no rivers to break symmetry; costs all ≈1.0003) many Float64 `nd` fall just
+  below the Float32 `dist[j]` yet round to the *same* Float32, so `nd<dist[j]` stays true, the distance never
+  actually changes, and the cell is re-pushed until the heap array overflows 2³² (measured 50M+ pushes on a
+  92 160-cell grid). Fix: a precision-independent `visited` (source-finalization) array — each cell relaxes out
+  exactly once ⇒ pushes ≤ 8·V. The shortest-path tree is unchanged, so all road/route output is bit-identical.
+  (Auto-populate on an imported world went from crashing after ~127 s to succeeding in ~4 s.)
+- **Imported worlds had no rivers/discharge.** `inferTectonics` reconstructed the tectonic substrate but never
+  ran `computeFlow`, so `flowField` stayed all-zero — no river network, no discharge, degenerate settlement
+  suitability, and the uniform cost grid that tripped the crash above. Fix: `inferTectonics` now ends with
+  `refreshClimate(); enforceRiverChannels(); computeFlow(true)` (generate()'s climate → flow(discharge) order),
+  so an imported world behaves like a generated one for every downstream layer.
+- **~900 Voronoi plates on import.** `pickPlateSeeds` defaulted to `W·H/3000` (≈895 at 2K). Capped at 40
+  (matching the procedural Plates slider max) — faster infer, readable plate map.
+- **Sea level didn't update the coastline.** The rendered-bitmap cache key (`_civBakeKey`) omitted
+  `state.seaLevel`, so dragging the sea slider (which moves `isWater = v<seaLevel`) reused the stale bitmap;
+  the shoreline only moved when LOD tiles re-baked on zoom. Fix: `state.seaLevel` added to the key (+ the
+  water-body/biome-raster caches cleared on the slider). Same output at a given sea level ⇒ bit-identical.
+- **Map scale locked at creation.** Map width is a creation-time decision (set in the setup gate) — rescaling
+  it mid-project would silently change every distance, grade, route length and settlement spacing. `#mapw` is
+  now disabled in the sidebar (exempt from the finalize-lock's blanket re-enable) with the legend reference-only;
+  the km/mi toggle stays (display-only). Zoom/scale-dependent *feature* rendering (fjords/rivers/canyons at
+  different zooms) is the separate LOD track, queued next.
+
+### v0.69 (2026-07-07)
+**Settlement density — sourced carrying-capacity + regional population** (`docs/research/settlement-density.md`,
+a fully-cited audit that replaced invented civ numbers with calibrated ones). All pure/CPU-path additions;
+**engine bit-identical to v0.68** (render battery ALL IDENTICAL — the biome term defaults off, the density
+field is additive and never runs in `generate()`); headless **852 → 864** (12 calibration assertions);
+`tests/perf/smoke_gen1.js` **59 → 61**.
+
+- **Forager floor** — `foragerFloorKm2(nppDryMatter)` (Zhu et al. 2021 regression after Tallavaara 2018 [A]).
+  Converts `buildNPP`'s g-dry-matter to the gC basis the regression assumes (×0.45 — load-bearing; omitting it
+  is 10× high). Calibrated: NPP 0 → ~0.030/km², 3000 g DM → ~0.58/km² (both asserted headlessly).
+- **Biome-residual carrying capacity** — `BIOME_DENSITY_RESIDUAL[13]` (indexed to `BIOME_KEYS`) folded into
+  `buildCarryingCapacity` behind `opts.biomeK` (**default 0 ⇒ byte-identical**; asserted). Captures only the
+  residual soil/temp/water miss: the rainforest paradox (tropWet 0.55 — pathogen suppression [A]) and
+  arid/cold survival friction. An opt-in "Biome carrying-capacity" checkbox (Civilization) flips it and
+  re-derives K / suitability / density.
+- **Regional population density** — `estimateRegionalDensityKm2` + `BIOME_INTENSIFY_ELIGIBLE[13]` + ceilings
+  `RAINFED_CEILING_KM2=45` [B, Low Countries c.1500] / `INTENSIVE_CEILING_KM2=165` [A, Classic Maya lidar].
+  Forager floor + a water-gated agrarian ceiling. Anchors reproduced (temperate prime cell ~81/km², Maya
+  floodplain ~92/km²; asserted). Surfaced as the new **"Pop density"** debug view (log heat ramp + sourced
+  legend) and a `population_density.f32` export entry. Never feeds K (kept a pure [0,1] affordance).
+- **Scale-anchored spacing helper** — `suppressionRadiusCells(spacingKm,GW,mapWidthKm)` + `VILLAGE_SPACING_KM=10`
+  [A, Vita-Finzi & Higgs] / `MARKET_TOWN_SPACING_KM=25`. Helper only — `_civIterativeAutoWorld` keeps its
+  current ~market-town default so auto-populate stays bit-identical; a village-density mode is a v0.70 candidate.
+- Source briefs committed to `docs/research/` (settlement-density, river-lod-brief, rust-wasm-lod-brief) for
+  the roadmap. Deferred (flagged): metropolis/imperial tier, village-density placement mode, Wetlands/Marshes
+  carrying capacity, Mediterranean-scrub calibration.
+
+### v0.68 (2026-07-07)
+**Fix: sidebar was live during the setup gate (looked like broken sea/climate/weather).** v0.67's hard
+gate modal (`#onboard`) lives inside `.canvas-wrap`, so it only covers the canvas — the sidebar (`aside`,
+a sibling) stayed interactive. Before committing a world there is no field, so the Generate→World sliders
+(sea level, climate, weather) acted on an empty grid and appeared broken (they worked fine post-commit —
+verified: sea 0.42→0.60, equator-temp moved tempField, weather sim moved rainField). Fix: a
+`body.setup-gated` class (added in `_setupOpen`, removed in `_setupHide`) applies
+`aside{pointer-events:none;opacity:.4}` so the sidebar is visibly locked until a world is committed or a
+project/heightmap is loaded. Engine untouched — **bit-identical to v0.67** (render battery ALL IDENTICAL);
+headless **852**; smoke **57 → 59** (added: sidebar locked while gated, unlocked after commit). Also
+corrected the header chip that read v0.65 in v0.66 (v0.67 already fixed it; noted here for the record).
+
+### v0.67 (2026-07-07)
+**Setup gate + scale/height calibration.** The app no longer auto-generates a world on load and then
+overlays a once-per-browser card (the `cartalith_onboarded` flag suppressed that card forever after the
+first click — why it "didn't load on opening"). Instead a **hard setup gate** blocks the canvas until the
+user commits base settings. **Engine bit-identical to v0.66** (render battery ALL IDENTICAL; a default
+commit reproduces peakM=4000/width=800; checksums unbroken back to v0.62); headless **852 green** (the
+gate is browser-only — see below); `tests/perf/smoke_gen1.js` rewritten to drive the gate, **50 → 57**
+assertions.
+
+- **Boot gating.** Browser boot allocates buffers, renders the empty field, and opens the gate — no
+  `generate()` until commit. Headless (no `indexedDB` — the stub harness) keeps the old
+  `withBusy('generating…',generate)` path verbatim, so the 852-suite environment and FNV bit-identity are
+  byte-unchanged. `generate()` stays the sole generation path either way.
+- **Setup gate** (`_setupOpen(mode)`, three modes over the old `#onboard` modal): **intro** (Generate /
+  Load project / Import — no Skip, mandatory); **generate** (working resolution, map extent,
+  center-landmasses, scale & calibration with a km/mi toggle + distance legend, peak altitude, then
+  **Generate/Commit**); **calibrate** (shown after a heightmap loads — scale + peak, then **Commit** which
+  auto-runs the existing `inferTectonics()` so climate/biomes/lithology/resources get a substrate). Forms
+  share one canonical working object (km + m); commit mirrors the sidebar segs + `syncUI()` then runs
+  `generate()` once (center-landmasses runs right after, awaited).
+- **Units** (`_units` km|mi, localStorage pref — not serialized, invariant 6). Display-only conversions
+  (km↔mi, m↔ft) on the setup forms, the scale bar, and a new sidebar **Scale & calibration** parity block
+  (units toggle + legend). Canonical storage stays km + metres ⇒ default 'km' is byte-identical.
+- **Peak auto-suggest** `suggestPeakM(w)=round(8849·(1−e^(−w/1330)))` — real max relief grows sub-linearly
+  and saturates near Everest, so a 100 km region tops ~640 m while a whole planet caps at ~8 849 m (not
+  40 000× taller). Passes through 800 km → 4000 m (default preserved). Fills the peak field as width
+  changes; user override sticks.
+- **Scale-aware 3D** (`_v3dEffExag()`): the drape's vertical exaggeration is now
+  `view3d.exag · (reliefRatio / RATIO0)` where `reliefRatio = metresPerUnit / mapWidthMetres` and RATIO0 is
+  the default's ratio — so the default look is bit-identical, whole-world maps auto-flatten (~20× less
+  spiky) and small maps show a touch more relief. Used for both the shader uniform and 3D label anchoring.
+  2D render (separate `state.exag`) untouched.
+- Fixes: the header version chip read **v0.65** in v0.66 (missed bump) — corrected to v0.67 here.
+- Browser pass owed: the scale-aware 3D feel region↔whole-world, the live units toggle, and the
+  import→calibrate→infer flow with a real DEM file.
+
+### v0.66 (2026-07-06)
+**IA correction — the Generate branch menu is restored.** v0.64's Stage-2 re-homing (retiring the
+Generate sub-tab bar and moving Civilization + Cartography into Explore) followed the research
+proposal's §3 but contradicted the owner's intended information architecture ("Under Generate -
+Civilization: …", "Explore - Timeline"); the owner flagged the loss of the startup menu and
+directed the correction. **Engine bit-identical to v0.65** (render battery ALL IDENTICAL,
+checksums unbroken back through v0.62); headless **852 green**; `tests/perf/smoke_gen1.js`
+rewritten for the corrected IA, **41 → 50** assertions, all green.
+`docs/research/ui-ux-upgrade.md` §Status now carries a prominent correction note superseding §3's
+re-homing so future sessions don't re-apply it.
+
+- **Generate = authoring, three categorical branches.** `#genSubBar` (World | Civilization |
+  Cartography) is back at the top of the Generate panel; `#genCiv` (Tools, Peoples/Factions,
+  Settlements, Polity, Infrastructure) and `#genCarto` (Tools, Region names, Manual icons, Paint
+  brush, Map view, Map style) re-wrap the sections that v0.64 had moved into Explore — pure DOM
+  moves, every element id unchanged, so all handler/syncUI wiring held without edits. The restored
+  gsub handler toggles the three sub-panels, resets the tool to Inspect (which since v0.64 also
+  commits in-progress ways/routes and disarms label/icon/paint), and explicitly disarms the Paint
+  brush when leaving Cartography (paint arms without changing `_civTool`, so the tool reset alone
+  can be skipped by its equality guard — the one non-obvious bit).
+- **Explore = planning/reading.** The Explore panel returns to its v0.63 shape plus the unified
+  tooling: an Info · Route palette (entering Explore auto-arms Info — Inspect is an authoring tool
+  and lives in the Generate branches), ✓ Commit route, the Info readout, Journeys and the Journey
+  planner; the filter funnel + twinned timeline stay on the canvas.
+- **Tool palette split per branch, one state machine.** Civ: Inspect·Settlement·POI·Territory·Way;
+  Carto: Inspect·Label·Icon; Explore: Info·Route. All buttons keep `[data-civtool]`, so the
+  existing auto-wiring and `_civSetTool`'s all-buttons highlight sweep handle the duplicate
+  Inspect buttons for free; mutual exclusion holds across branches and tabs. The tab handler now
+  arms `info` on entering Explore / `inspect` on entering Generate, with an equality guard because
+  `_civSetTool` treats a repeated same-tool call as toggle-off (a double tab-click would have
+  flipped Info→Inspect).
+- **Pinned Selection inspector re-homed** under the sub-tab bar, shared by the Civilization and
+  Cartography branches (hidden on World — and, sitting outside `#genWorld`, exempt from the
+  finalize lock by construction). The viewport right-click "✎ Edit" now first reveals the owning
+  branch via `_civRevealBranch('civ')` — clicking the real tab/sub-tab buttons so every side
+  effect runs — then selects, since editing must land somewhere visible from any tab.
+- **Paint brush re-gated to Generate → Cartography** (`_activeTab==='generate' && _genSubTab==='carto'`),
+  matching where its arming checkbox lives (was gated on the Explore tab in v0.64/v0.65).
+- **Fixes bundled:** the finalize lock's blanket disable had locked the **Un-finalize button
+  itself** since v0.62 (`#unfinalizeBtn` is inside `#genWorld`) — now exempted alongside
+  `#genV3dSec`; the active phase sub-tab label was invisible (v0.64's generic `button.on` accent
+  fill painted amber-on-amber — `.subtab.on` now forces `background:transparent`); three stale
+  "Edit → Tiles & LOD" path strings updated to "Generate → World → Tiles & LOD"; the stale
+  "Places & roads (Edit tab)" sentence dropped from the Infrastructure hint.
+- Browser pass owed: the restored branch flow end-to-end (sub-tab switching mid-draw, paint
+  disarm feel, ctx-menu branch reveal), plus the passes already listed under v0.65.
+
+### v0.65 (2026-07-06)
+UI/UX overhaul — closes out the scope cuts v0.64 made deliberately ("lite" inspector, no
+Assets/Export header move). **Engine bit-identical to v0.64** (FIELD/TEMP/RAIN/FLOW FNV checksums
+byte-equal at seed 12345/256px, unbroken back through v0.62); headless suite **852 green**
+(UI-only batch); `tests/perf/smoke_gen1.js` grew **27 → 41** assertions, all green.
+`docs/research/ui-ux-upgrade.md` §Status now shows every stage genuinely complete.
+
+- **§4.7 — the pinned inspector now hosts the FULL edit form.** `_civRenderSettlementList`/
+  `_civRenderPoiList`/`_civRenderLabelList` no longer build a per-row `editHost` div; they only
+  render the row + selection highlight and, if the row is selected, hand its `{nameSpan,popSpan}`
+  to a new module-level `_civSelectedRowRefs`. `_civRenderInspector` (in `#inspectorBody`) reads
+  `_civSelectedPlace`/`_civSelectedLabel`/`_iconSelected` and calls the SAME `_civPopulatePlaceEditor`/
+  `_civPopulateLabelEditor`/`_carPopulateIconEditor` functions the inline editors used to call —
+  pointed at the one stable inspector host instead of a per-row div — so the live-row-summary-patch
+  optimization survives the move (no full list rebuild per keystroke). Extended to a **third**
+  selection group: the Placed-Icons list's per-instance editor (`_iconSelected`) now also lives in
+  the inspector, with `_civRenderPlaceEditor`/`_civRenderLabelEditor`/`_carRenderIconEditor` each
+  enforcing that selecting their own kind clears the other two — single selection across all three
+  groups. Caught mid-refactor: the label list's delete button only called `_civRenderLabelList()`,
+  never the full `_civRenderLabelEditor()` refresh, so deleting the selected label used to leave a
+  stale editor on screen — fixed as part of the same pass. Every "expand its editor directly
+  underneath" hint string (3 sections) updated to point at the pinned Selection panel.
+- **§4.10 — per-layer hotkeys.** `LAYER_HOTKEYS` maps 7 of the most-reached-for Layers-popover
+  views to bare-key shortcuts (`0`=Off, `B`=Biomes, `T`=Terrain, `F`=Flow, `S`=Settlement,
+  `W`=Wildlife, `R`=Resources) — deliberately scoped to the curated Explore subset rather than all
+  29 debug views, since forcing collision-free mnemonics onto rarely-used diagnostics (Flow vs
+  Flood both wanting "F") wasn't worth the awkward picks. Badge shown per item in the popover;
+  global `keydown` listener guarded against typing focus and modifier keys, active whenever the
+  Layers FAB itself is reachable (Generate/Explore), mirroring the existing Shift+D resource-overlay
+  shortcut's reach.
+- **Assets/Export promoted to header-level utilities** — the tab bar is now a genuine
+  **two-position phase switch** (Generate ⇄ Explore only), matching §3's Forge/Atlas description
+  directly instead of mixing phases with utilities. Export moved into a header dropdown
+  (`#exportWrap`/`#exportMenu`, same ids as the old sidebar panel so `exportZip()`'s wiring is
+  untouched) that — unlike Import ▾'s one-shot action list — stays open across internal clicks
+  (it's a form: image size + 3 checkboxes), closing on outside-click, Escape, or pressing Export
+  itself. Assets became a plain header button (`_carEnterAssetsMode`) that directly performs the
+  same full-viewport Asset-Library takeover the old `tp==='assets'` tab branch did; exiting needed
+  no new code at all — the existing tab-click handler's canvas-wrap/assetLibrary swap already
+  recomputed `on=(tp==='assets')` on every Generate/Explore click, which is now permanently false,
+  so clicking either phase tab unconditionally restores the canvas. Verified `_activeTab` is never
+  compared against `'assets'`/`'export'` anywhere else in the file before making this change.
+
+Browser pass owed: the relocated inspector's feel end-to-end (especially the icon-instance
+editor sharing the panel), the hotkeys in daily use, and the header Export/Assets controls.
+
+### v0.64 (2026-07-06)
+UI/UX overhaul completed — implements every remaining stage of `docs/research/ui-ux-upgrade.md`
+that v0.63 deferred as "higher-risk IA surgery". **Engine bit-identical to v0.63** (FIELD/TEMP/
+RAIN/FLOW FNV checksums byte-equal at seed 12345/256px, unbroken back through v0.62); headless
+suite **852 green** (unchanged — this batch is UI-only, no new engine assertions); the Playwright
+UI-smoke harness (`tests/perf/smoke_gen1.js`) grew **12 → 27** assertions, all green.
+
+- **Stage 2 — full information-architecture re-homing.** The Edit tab is retired: its "Tiles &
+  LOD" section moved into Generate → World (new cat-acc, same ids); "Undo" moved into the header
+  (§4.8, below); "Places & roads (terrain)" — `#placeChk`/`#roadsBtn`/`#clearRoadsBtn`/
+  `#clearPlacesBtn` — is retired outright per the proposal ("keep the engine functions, remove
+  the duplicate UI"). This closes a real landmine: that section's `state.places` array was
+  **shared** with Civilization's settlements/POIs (kind-less entries render as small dots,
+  `_civDropPlace`/`_civDropPOI` entries always carry a `kind`), so its silent, unconfirmed "Clear
+  places" could wipe user-placed settlements as a side effect. The Generate sub-tab bar
+  (World/Civilization/Cartography) is also retired — Generate is World-only now — and
+  Civilization + Cartography move wholesale into Explore (all ids/content unchanged, pure
+  container move). Consequential fixes threaded through the tab-switch handler: the
+  freehand-sculpt cancel-on-leave now keys off `_activeTab!=='generate'` (was the retired Edit
+  tab); the Cartography paint-brush pointer gate keys off `_activeTab==='explore'` (was the
+  retired `_genSubTab==='carto'`, which would otherwise have permanently blocked painting — no
+  code path sets `_genSubTab` away from `'world'` anymore); `_gpuApplyTabOverride`'s GPU-suspend
+  heuristic changed from "which sub-tab is open" to "is the paint/icon tool actually armed"
+  (`_paintMode||_iconPlaceMode`) — arguably tighter than before, since GPU now stays available
+  while a user is just managing settlements in Explore.
+- **§4.5 — unified tool palette.** One 9-button `.seg` at the top of Explore — Inspect, Info,
+  Settlement, POI, Label, Icon, Territory, Way, Route — replaces the formerly-scattered
+  originals (Settlements' `#civToolSeg`, Polity's "Paint territory", Infrastructure's "Draw way",
+  the old Explore Tools row's Route/Info). Every button reuses the existing `[data-civtool]`
+  auto-wiring (`document.querySelectorAll('[data-civtool]').forEach(...)`), so adding Label/Icon
+  required no new click-wiring — only `_civSetTool`'s body grew to fold them in. Label and Icon
+  were previously a **separate, not-fully-exclusive** checkbox/gallery system
+  (`_labelMode`/`_iconPlaceMode`/`_carIconArmed` via `_carDisarmOtherTools`) that never disarmed,
+  or got disarmed by, the `_civTool` system — picking "Route" while "Add labels" was checked
+  left both active. `_civSetTool` now also disarms Paint (Cartography's separate brush) on any
+  civtool pick, and arming Paint disarms `_civTool` in turn (careful ordering: the paint checkbox
+  handler must call `_civSetTool('inspect')` *before* setting `_paintMode=true`, since
+  `_civSetTool` unconditionally disarms paint — reversed order was a self-defeating loop caught
+  by the browser smoke test). Icon's family-picker + gallery become the tool's **contextual
+  options** (`#carIconContextSec`, Dungeondraft/Wonderdraft pattern) — hidden until Icon is the
+  active tool, with an idle hint shown otherwise. `_carDisarmOtherTools` simplified to just
+  icon/paint (place and label no longer need branches there).
+- **§4.7 — pinned selection inspector (scoped "lite").** A `#inspector` card pinned atop Explore
+  (`_civRenderInspector`, hooked into the existing `_civRenderPlaceEditor`/`_civRenderLabelEditor`
+  refresh points) shows a live name/type/population summary of the selected settlement, POI or
+  label. The full edit form (name/history/population/traits) deliberately stays inline in the
+  settlement/POI/label lists — v0.62's expand-in-place design — rather than being relocated here;
+  that's a separate, larger refactor of `_civRenderSettlementList`/`_civRenderPoiList`/
+  `_civRenderLabelList`, deferred (see the proposal's updated §Status).
+- **§4.8 — header undo + danger accents.** `#undoBtn`/`#undoMem` moved from the retired Edit tab
+  into the header, always visible, same ids so `pushUndo()`/`undoLast()`/`updateUndoUI()` wiring
+  is untouched. The existing `.al-danger` class (previously Asset-Library-only) is now applied
+  consistently to 8 one-click destructive Clear buttons; the three the proposal named by name
+  (Clear territory / Clear ways & journeys / Clear places) additionally gained a
+  confirm-when-non-empty guard — **none had any confirmation before**, unlike `#reseedBtn`'s
+  existing `confirmRegenerate()`. Skipped when the corresponding data is already empty, so a
+  fresh map's Clear buttons stay instant.
+- Not in scope (documented in the proposal's §Status): promoting Assets/Export to header-level
+  utilities (separable from the phase-journey confusion this pass targeted); further reduction
+  of the Layers popover's 29 debug views (grouping already shipped in v0.63).
+
+Browser pass owed: the whole reorganized Explore flow end-to-end, the tool palette's feel in
+practice (especially Icon's contextual gallery and Way/Route's always-visible commit rows), the
+pinned inspector, and Undo/Tiles & LOD in their new locations.
+
+### v0.63 (2026-07-06)
+UI/UX upgrade — implements the shippable, engine-safe stages of `docs/research/ui-ux-upgrade.md`.
+**Engine bit-identical to v0.62 at defaults** (FIELD/TEMP/RAIN/FLOW FNV checksums byte-equal at
+seed 12345/256px); every change is DOM/CSS/handler chrome over existing `state`/`state.viz` keys —
+no engine or renderer touch. Headless suite **852 green** (848 + 4 preset assertions); a new
+Playwright UI smoke harness (`tests/perf/smoke_gen1.js`) proves the chrome in a real browser
+(12/12). Shipped:
+- **§4.4 Map-style presets** — a preset `.seg` (Default · Antique · Ink · Watercolor · Print) at the
+  top of Map style; each preset is an *absolute* bundle of `state.viz` writes (managed render keys
+  reset to 0/false, then overrides applied), so **Default reproduces the base look bit-identically**.
+  Editing any Map-style control flips the row to "Custom". Headless-asserted pure + key-scoped.
+- **§4.3 Progressive disclosure** — the ~29-control Map style folds into two `<details class="adv">`
+  accordions (Rendering / Painter NPR) under the preset row; Tectonics' physical-coupling dials
+  (flexure/heterogeneity/resistance) likewise fold into Advanced. Collapsed by default; defaults
+  unchanged.
+- **§4.2 Layers popover** — the 30-button `#debugSeg` picker is re-housed into a canvas FAB popover
+  (◇, top-left) with a **grouped, full-name** radio list (Base/Climate/Tectonics/Hydrology/Surface/
+  Civilization), a 3-item most-recently-used pin row, and an opacity slider. It's a pure re-housing:
+  the popover is *built from* the (now hidden) `#debugSeg` buttons and proxies clicks to them, so
+  every existing `seg('debugSeg',…)` handler + `syncUI()` reflection is reused. In the finalized
+  (Atlas) phase it shows only a curated user-facing subset.
+- **§3 phase signal** — building on v0.62's `state.finalized`: finalizing now also tints the shell
+  chrome (Unity play-mode convention) and shows a header "✓ Atlas — world finalized" chip, so the
+  frozen-simulation state is unmissable. `applyFinalizedUI` drives it; no new serialized field.
+- **§4.9 onboarding** — a first-run empty-state card (Generate / Load / Import + a Forge▸Finalize▸
+  Atlas diagram), dismissed forever via a `localStorage` flag. Never shown headlessly.
+- **§4.10 small fixes** — corrected the stale Export hint ("Explore → Atlas tab" → "Edit tab"),
+  widened the sidebar to 360px at ≥1440px viewports (canvas stays first).
+
+**Deferred to a follow-up** (higher-risk IA surgery, better isolated): Stage 2 full information-
+architecture re-homing (retire the Edit tab, move Civilization/Cartography under an Explore phase,
+Tiles+Undo under Generate), §4.5 the merged tool-first Explore palette, and §4.7 the pinned
+selection inspector. These touch large amounts of cross-block civ wiring and want their own pass;
+tracked in `docs/research/ui-ux-upgrade.md` §Status. Browser pass owed: preset aesthetics, Layers
+popover feel on touch, onboarding copy.
+
+### v0.62 (2026-07-06)
+Civilization-layer UX batch + the finalize milestone (user request). **Engine bit-identical to
+v0.61 at defaults** (FIELD/TEMP/RAIN/FLOW FNV checksums byte-equal at seed 12345/256px; suite
+848/848 green). (1) **Polity section**: the Generate → Civilization *Economy* and *Politics*
+sections merged into one **Polity** section (territory painting + politics timeline together;
+every element id unchanged), and the faction picker now includes an **∅ Unclaimed** pill (index
+0) — paint with it to erase territory. (2) **Timeline slider fixed + twinned**: `civAddYear` no
+longer conjures a phantom "0 AD" era when the timeline is empty (the live state is captured
+under the year actually being added); a new **year slider in Polity** (`#civTlSlider`) mirrors
+the Explore → Timeline slider through shared `_civWireYearSlider` wiring, and a `_civTlDragSrc`
+guard stops the mid-drag rebuild from resetting the thumb (the broken-drag bug — every `oninput`
+rebuilt the slider's own value/max). (3) **Settlement/POI editing**: places gain a persistent
+free-text **History** field (settlements *and* POIs, saved via `state.places`); POIs get their
+own **"All POIs" collapsible list** (`#civPoiList`, the settlement list's twin with the same
+expand-in-place editor); and a **right-click context menu** on the viewport (edit/move-to/delete
+nearest place, drop settlement/POI at the cursor, info readout) — right button now belongs
+exclusively to the menu (`e.button` guards on the sculpt/civ handlers). (4) **Bake ALL levels &
+finalize**: `bakeAllTiles(maxZ)` bakes the entire LOD pyramid 0..depth (depth select 2–5, 21–1365
+tiles, skip-if-baked so re-runs fill gaps) into the IndexedDB atlas, then **finalizes the world**
+— `state.finalized` (persisted; legacy saves merge false) locks every Generate → World control
+(3D-view dials exempt), banners the panel, and guards `generate()` / `confirmRegenerate()` /
+`_manualTerrainActive()` so nothing regenerates under the baked atlas; the app drops into the
+tiled-LOD view and behaves as a cartographic viewer/editor (settlements/labels/icons/territory/
+routes/timeline stay live). Un-finalize reverses the lock. Headless-proven: finalized
+`generate()` leaves the field byte-identical; un-finalize regenerates. Also shipped:
+`docs/research/ui-ux-upgrade.md` — the researched UI/UX upgrade proposal (phase-based IA,
+layers popover, progressive disclosure, inspector/context-menu patterns; staged rollout).
+Browser pass owed: Polity section flow, both timeline sliders + drag feel, POI list + history
+editor, context menu, the full bake + finalize→viewer flow.
+
 ### v0.61 (2026-07-06)
 Restores the v0.135 sync-`generate()` contract that v0.6 broke. v0.6 extracted the tectonic
 prefix of `generate()` into `async buildTectonicSubstrate()` (a good refactor — `loadZip` replays

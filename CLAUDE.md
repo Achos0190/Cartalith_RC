@@ -3,18 +3,18 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.61**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.85**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.61.html` | **Current** unified tool (~14.6k lines, 3 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.85.html` | **Current** unified tool (~15.7k lines, 3 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.84.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 848-assertion suite) + `tests/perf/` Playwright A/B harness |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 909-assertion suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -26,7 +26,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (848 assertions green).
+  until it passes (909 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
 - GPU (WebGL) code, Web Worker glue, and canvas interaction cannot be tested headlessly — flag
@@ -40,7 +40,7 @@ execute in order; cross-block initialization must not assume a later block has r
 `#carIconGallery` comment in the file for the established pattern — a later block performs the
 init, not `setTimeout(...,0)`).
 
-1. **Generator engine + app shell** (~8.0k lines, `const VERSION='0.61'`). The full
+1. **Generator engine + app shell** (~8.0k lines, `const VERSION='0.85'`). The full
    `elevation_foundation` lineage: procedural heightmap/tectonics/climate/erosion pipeline,
    renderer, LOD/atlas, exports, UI wiring. Everything `tests/run.sh` exercises.
 2. **Civ/politics layer** (~4.2k lines): factions (`CIV_FACTIONS`, deterministic golden-angle
@@ -109,10 +109,11 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 848-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 909-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (onboarding/layers/presets/phase)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding
