@@ -32,9 +32,14 @@ spacing rules) → planar-face blocks → series-platted strip parcels → gramm
 districts (incl. harbour quarter) → optional wall + gates → churches (parish count scales
 with population, M-DEN-8) → wells/trees/fences/strip-fields.
 
-**Site & harbour:** river ports (quay downstream of the bridge), bay harbours (natural
-shelter), open coasts (breakwater mole); quay + back-street + piers + crane, with warehouse
-grammar on the quay.
+**Site & harbour:** river crossing, **river-through-town** (bisecting, both banks built,
+several bridges, wall spanning both with water-gates), bay harbour, open coast (mole); quay +
+back-street + piers + crane, warehouse grammar. **Harbour defence is selectable** — chain &
+mouth towers / enclosing sea wall + water-gate / mole-head fort / unprotected — so a harbour
+outside the walls is still defended per the historical repertoire.
+**Amenities scale with rank:** market squares multiply and specialise (shambles → fish/corn →
+cloth → cattle) and a town-hall/guildhall appears once a place is a chartered town — a village
+and an imperial seat differ visibly in the services they carry (M-AMEN-1).
 **Walls & fortification (M-FOR, M-NET-9):** the curtain follows the water's edge along the
 bank rather than bulging around it, dips a spur into the water at each end, leaves the
 harbour mouth open, and crosses the water only once the town grew across both banks.

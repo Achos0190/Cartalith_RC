@@ -346,6 +346,78 @@ for (const kind of ['bay', 'coast']) {
   ok(!nw.fortified && !nw.wall.ring, 'no fort without a wall');
 }
 
+/* ---------- river that runs through the town (both banks) ---------- */
+{
+  const m = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, site: 'riverthrough' });
+  ok(m.site.kind === 'riverthrough' && m.site.through, 'river-through site recorded');
+  const riv = m.site.river, rw = m.site.riverW;
+  const rD = (p) => { let d = Infinity; for (let i = 0; i < riv.length - 1; i++) d = Math.min(d, T.distPtSeg(p, riv[i], riv[i + 1])); return d; };
+  let bridges = 0;
+  for (const e of m.graph.edges) {
+    if (e.cls !== 'primary') continue;
+    const a = m.graph.nodes[e.a], b = m.graph.nodes[e.b], mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (rD(mid) < rw / 2 + 3) bridges++;
+  }
+  ok(bridges >= 2, `river-through town has several bridges (${bridges})`);
+  ok(m.wall.spansWater, 'river-through wall encloses both banks (water-gates)');
+  // both banks built: buildings on both sides of the river centreline
+  let above = 0, below = 0;
+  const yAtRiver = (x) => { for (let i = 0; i < riv.length - 1; i++) if (x <= riv[i + 1].x) return riv[i].y + (riv[i + 1].y - riv[i].y) * ((x - riv[i].x) / ((riv[i + 1].x - riv[i].x) || 1)); return riv[riv.length - 1].y; };
+  for (const b of m.buildings) { const c = T.polyCentroid(b.poly); if (c.y < yAtRiver(c.x) - rw) above++; else if (c.y > yAtRiver(c.x) + rw) below++; }
+  ok(above > 30 && below > 30, `both banks are built up (${above} / ${below})`);
+  const m2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, site: 'riverthrough' });
+  ok(UME.hashModel(m) === UME.hashModel(m2), 'river-through deterministic');
+}
+
+/* ---------- selectable harbour protection ---------- */
+{
+  for (const [k, t] of [['chain', 'chain'], ['seawall', 'seawall'], ['molefort', 'molefort']]) {
+    const m = UME.generate(999, { epochs: 6, pop: 4000, site: 'bay', harbourDefence: k });
+    ok(m.harbour && m.harbour.defence && m.harbour.defence.type === t, `harbour defence '${k}'`);
+  }
+  const none = UME.generate(999, { epochs: 6, pop: 4000, site: 'bay', harbourDefence: 'none' });
+  ok(none.harbour && !none.harbour.defence, "harbour defence 'none' leaves it unprotected");
+  ok(UME.generate(999, { epochs: 6, pop: 4000, site: 'coast', harbourDefence: 'auto' }).harbour.defence.type === 'molefort', 'open coast auto → mole-head fort');
+  ok(UME.generate(999, { epochs: 6, pop: 4000, site: 'river', harbourDefence: 'auto' }).harbour.defence.type === 'chain', 'river port auto → chain & towers');
+}
+
+/* ---------- amenities scale with settlement rank (village → city) ---------- */
+{
+  const village = UME.generate(5, { epochs: 6, pop: 900, walls: false });
+  const town = UME.generate(5, { epochs: 8, pop: 5000, walls: true });
+  const city = UME.generate(5, { epochs: 9, pop: 16000, walls: true });
+  ok(village.markets.length === 0, `village: no specialised markets (${village.markets.length})`);
+  ok(city.markets.length > town.markets.length, `markets multiply with size (${town.markets.length} → ${city.markets.length})`);
+  ok(city.markets.length >= 3, `city carries many specialised markets (${city.markets.length})`);
+  ok(!village.civic, 'village: no town hall');
+  ok(!!town.civic && !!city.civic, 'town & city have a town hall on the market');
+}
+
+/* ---------- wet-moat feasibility + no overlap into water or fortifications ---------- */
+{
+  // the standard river fort sits by the water → wet ditch feasible
+  ok(UME.generate(12345, { epochs: 8, pop: 6000, walls: true, fortified: true }).wall.fort.wetDitch,
+    'fort by the water gets a wet ditch');
+  for (const site of ['river', 'riverthrough', 'bay', 'coast']) {
+    const m = UME.generate(21, { epochs: 8, pop: 5000, walls: true, fortified: true, site });
+    const tag = `[${site}] `;
+    const isWater = (m.site.kind === 'river' || m.site.kind === 'riverthrough')
+      ? (p) => { let d = Infinity; for (let i = 0; i < m.site.river.length - 1; i++) d = Math.min(d, T.distPtSeg(p, m.site.river[i], m.site.river[i + 1])); return d < m.site.riverW / 2 - 1; }
+      : (p) => { const c = m.site.river; let y; if (p.x <= c[0].x) y = c[0].y; else { y = c[c.length - 1].y; for (let i = 0; i < c.length - 1; i++) if (p.x <= c[i + 1].x) { y = c[i].y + (c[i + 1].y - c[i].y) * ((p.x - c[i].x) / ((c[i + 1].x - c[i].x) || 1)); break; } } return p.y > y + 2; };
+    let bWet = 0; for (const b of m.buildings) if (isWater(T.polyCentroid(b.poly))) bWet++;
+    ok(bWet === 0, tag + `no building sits in the water (${bWet})`);
+    let pWet = 0; for (const p of m.parcels) if (!p.cleared && isWater(T.polyCentroid(p.poly))) pWet++;
+    ok(pWet === 0, tag + `no parcel sits in the water (${pWet})`);
+    // no building in the fort's cleared field of fire (moat/glacis) — overlap check
+    if (m.wall.style === 'bastioned') {
+      const land = m.wall.landArc, clearDist = (m.wall.fort.glacisOff || 60) + 4;
+      const dL = (p) => { let d = Infinity; for (let i = 0; i < land.length - 1; i++) d = Math.min(d, T.distPtSeg(p, land[i], land[i + 1])); return d; };
+      let inZone = 0; for (const b of m.buildings) { const c = T.polyCentroid(b.poly); if (!T.pointInPoly(c, m.wall.ring) && dL(c) < clearDist - 8) inZone++; }
+      ok(inZone === 0, tag + `no building overlaps the fort/moat/glacis (${inZone})`);
+    }
+  }
+}
+
 /* ---------- user controls: population size, optional walls, religious scaling ---------- */
 {
   const small = UME.generate(777, { epochs: 8, pop: 1200 });

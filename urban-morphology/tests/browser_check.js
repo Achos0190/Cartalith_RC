@@ -113,6 +113,27 @@ const { chromium } = require(PLAYWRIGHT_DIR);
   });
   await page.screenshot({ path: path.join(outDir, 'town-fort-detail.png') });
 
+  // river-through-town + big amenity-rich city, and a chain-protected harbour
+  const scenarios = [
+    { name: 'riverthrough', set: { siteKind: 'riverthrough', pop: '9000', fortified: false, walls: true } },
+    { name: 'city-amenities', set: { siteKind: 'river', pop: '16000', fortified: false, walls: true } },
+    { name: 'harbour-chain', set: { siteKind: 'bay', pop: '6000', fortified: false, walls: false, harbourDefence: 'chain' } },
+  ];
+  for (const sc of scenarios) {
+    await page.evaluate((s) => {
+      for (const k in s) { const el = document.getElementById(k); if (el.type === 'checkbox') el.checked = s[k]; else el.value = s[k]; }
+      document.getElementById('gen').click();
+    }, sc.set);
+    await page.waitForFunction(() => window.__UM_MODEL, { timeout: 60000 });
+    const info = await page.evaluate(() => {
+      const m = window.__UM_MODEL;
+      return { site: m.site.kind, markets: (m.markets || []).length, civic: !!m.civic,
+        harbourDef: m.harbour && m.harbour.defence ? m.harbour.defence.type : null };
+    });
+    console.log('SCENARIO ' + sc.name + ' ' + JSON.stringify(info));
+    await page.screenshot({ path: path.join(outDir, `town-${sc.name}.png`) });
+  }
+
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);
   if (errors.length) { console.error('PAGE ERRORS:\n' + errors.join('\n')); process.exit(1); }
