@@ -75,6 +75,13 @@ civilizations 3–18).
   they were built for, not just Rome/the medina — with plain cardinal gate names (North/South/
   East/West Gate, M-CHN-3) and a household-size correction for the siheyuan's typically larger,
   extended-family compound (M-CHN-4). No specialised markets; never a bastioned trace.
+- **Aztec (lake-city, Tenochtitlan-style)** — reuses the Roman grid and the Islamic/Chinese
+  courtyard-house grammar for the causeway framework and housing, but adds a genuinely new
+  infrastructure layer: **chinampas** — narrow (~2.5–4 m) raised-bed garden strips reclaimed
+  from the lake shallows along the town's own shoreline, canals between them (M-AZT-2). No
+  European-style wall (the lake, causeways and their removable bridges were the defence,
+  M-AZT-3 — forced off regardless of the walls checkbox); no civic hall (temple-state
+  governance seated in the sacred precinct itself).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

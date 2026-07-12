@@ -102,6 +102,7 @@ svg.panning{cursor:grabbing}
 .cross{stroke:#4a3a22;stroke-width:1;fill:none}
 .fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
 .field{fill:none;stroke:#cbbd92;stroke-width:.55;opacity:.9}
+.chinampa{fill:#c3d6a8;stroke:#8a9e6a;stroke-width:.6;opacity:.85}
 .fieldedge{fill:none;stroke:#b3a276;stroke-width:.6;opacity:.8}
 .grave{fill:#8d8d7a}
 .lbl{font:italic 10px Georgia,serif;fill:#5c4a28;pointer-events:none}
@@ -124,7 +125,8 @@ svg.panning{cursor:grabbing}
       <option value="roman">Roman (planned colonia)</option>
       <option value="islamic">Islamic (traditional medina)</option>
       <option value="byzantine">Byzantine</option>
-      <option value="chinese">Chinese Imperial (walled capital)</option></select></div>
+      <option value="chinese">Chinese Imperial (walled capital)</option>
+      <option value="aztec">Aztec (lake-city)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -232,7 +234,13 @@ const CULTURE_PROFILES={
     planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
     defaultFaith:'temple',defaultCivic:'basilica',markets:false,
     wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'palace',householdMultiplier:2.9,
-    prov:'The Kaogongji tradition (Rites of Zhou, Warring States era): a square/rectangular walled capital on a strict cardinal grid, the palace at the geometric centre facing due south, gates on each side — reuses the grid-growth machinery built for the Roman profile (docs/07 §2) and the universal courtyard-house grammar built for the Islamic profile (the siheyuan is the same "four ranges around a private court" pattern, at every social scale). Civic/temple geometry reuses the existing basilica/temple forms as a schematic stand-in for the palace/temple complex — a distinct pagoda/palace geometry is future work (M-CHN register).'}
+    prov:'The Kaogongji tradition (Rites of Zhou, Warring States era): a square/rectangular walled capital on a strict cardinal grid, the palace at the geometric centre facing due south, gates on each side — reuses the grid-growth machinery built for the Roman profile (docs/07 §2) and the universal courtyard-house grammar built for the Islamic profile (the siheyuan is the same "four ranges around a private court" pattern, at every social scale). Civic/temple geometry reuses the existing basilica/temple forms as a schematic stand-in for the palace/temple complex — a distinct pagoda/palace geometry is future work (M-CHN register).'},
+  aztec:{id:'aztec',name:'Aztec (lake-city, Tenochtitlan-style)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'none',markets:false,
+    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'sacred precinct',
+    householdMultiplier:2.9,chinampas:true,noWalls:true,
+    prov:'A lake-city on the Tenochtitlan model: a cardinal grid of causeways (this engine\'s single reused street network stands in for the historical dual street-and-canal circulation — a genuine simplification, noted honestly rather than modelled as fully distinct infrastructure, docs/07 §7) meeting at a central sacred precinct; and, uniquely to this profile, chinampas — narrow raised-bed garden strips reclaimed from the shallows along the town\'s own shoreline, canals between them (M-AZT-2). No walls in the European sense (the lake itself, causeways and removable bridges were the defence); no separate civic hall (temple-state governance was seated in the sacred precinct itself).'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -1586,9 +1594,18 @@ function buildParcels(seed,g,blocks,anchors,epochs,site,profile){
     const rB=stream((fnv1a(blk.id)^0)>>>0,'parcels/'+blk.id);
     if(profile.parcelPattern==='insula'){
       const acc=[];
+      // check the FULL lot footprint (all 4 corners + centroid), not just the centroid: a
+      // harbour-district building can run to ~85% of a parcel's depth (M-BLD-2), so a lot whose
+      // centroid is dry but whose back corners dip into the water would still float a warehouse
+      // in the channel — the exact "impossible intersection" this project audits for.
+      const wetLot=(lot)=>{ if(!site)return false;
+        const margin=site.kind==='river'?site.riverW/2+1:3;
+        const wet=(p)=>site.isWater(p)||site.riverDist(p)<margin;
+        if(wet(polyCentroid(lot.poly)))return true;
+        for(const q of lot.poly)if(wet(q))return true;
+        return false;};
       for(const lot of insulaLots(poly,rB)){
-        const qc=polyCentroid(lot.poly);
-        if(site&&site.isWater(qc))continue;
+        if(wetLot(lot))continue;
         acc.push(Object.assign({id:'par'+(pid++),block:blk.id,age:0,edgeCls:'street'},lot));}
       for(const p of acc)parcels.push(p);
       continue;}
@@ -1663,10 +1680,17 @@ function buildParcels(seed,g,blocks,anchors,epochs,site,profile){
         const Q0=V.lerp(backA,backB,f0),Q1=V.lerp(backA,backB,Math.min(1,f1));
         const quad=[P0,P1,Q1,Q0];
         const area=Math.abs(polyArea(quad));
-        const qc=polyCentroid(quad);
-        const wetPar=site&&(site.isWater(qc)||
-          site.riverDist(qc)<(site.kind==='river'?site.riverW/2+1:3));
-        if(!wetPar&&area>=26&&area<=2600){
+        // check the full footprint, not just the centroid: a harbour-district warehouse can run
+        // to ~85% of the parcel's depth (M-BLD-2), so a parcel whose centroid is dry but whose
+        // back corners (Q0/Q1) dip into the water would still float a building in the channel.
+        const margin=site&&(site.kind==='river'?site.riverW/2+1:3);
+        const wetPar=site&&quad.some(q=>site.isWater(q)||site.riverDist(q)<margin);
+        // reject a twisted (self-intersecting/bowtie) quad outright: at a reflex vertex on a
+        // noisy boundary the front/back bisector correspondence can flip, producing a shape
+        // whose area-weighted centroid lands OUTSIDE the visible quad entirely — which is how a
+        // parcel with every corner on dry land was still reported "in the water" (the centroid,
+        // not the footprint, was wet). A self-intersecting footprint isn't a buildable lot at all.
+        if(!wetPar&&area>=26&&area<=2600&&!polySelfIntersects(quad)){
           cand.push({id:'par'+(pid++),poly:quad,block:blk.id,
             frontage:V.dist(P0,P1),depth:(V.dist(P0,Q0)+V.dist(P1,Q1))/2,
             area,age,edgeCls:eref?eref.cls:'street',
@@ -1953,6 +1977,47 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith,site,harbour
   return sites;}
 
 /* ---------------- details: wells, trees, fences, fields (M-DEN-7, M-GRW-5) ---------------- */
+/* ---------------- chinampas: raised-bed lake agriculture (M-AZT-2) ----------------
+ * A lake-city tradition's defining feature: narrow, man-made rectangular garden strips built
+ * out from the shore into the shallows, canals between them. Genuinely different from every
+ * other profile's fields (which stay ON land, avoiding water, M-GRW-5) — these deliberately
+ * extend INTO the water, along the town's own shoreline (reuses townBank, the same shoreline
+ * reference buildWall uses). A decorative/agricultural detail layer, like wells/trees/fences —
+ * not a parcel or building, so it carries none of the "must not be in water" invariants that
+ * apply to built fabric; sitting in shallow water is the entire point. */
+function buildChinampas(seed,site,anchors,wallState,maxRF){
+  if(site.noWater)return [];
+  const bank=townBank(site,anchors);
+  if(!bank||bank.length<2)return [];
+  const r=stream(seed,'chinampas');
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  const intoWater=(p)=>{
+    if(rk){const e=6;
+      const gx=site.riverDist({x:p.x+e,y:p.y})-site.riverDist({x:p.x-e,y:p.y});
+      const gy=site.riverDist({x:p.x,y:p.y+e})-site.riverDist({x:p.x,y:p.y-e});
+      return V.mul(V.norm({x:gx,y:gy}),-1);}
+    return {x:0,y:1};}; // open coast/bay: water lies south, matching townBank's offset convention
+  const details=[];let did=0;
+  const stripW=r.range(2.5,4); // chinampa width, M-AZT-2
+  const maxLen=rk?Math.max(10,site.riverW*0.4):60; // never reach the far bank on a narrow channel
+  for(let i=0;i<bank.length-1;i++){
+    const A=bank[i],B=bank[i+1];
+    if(V.dist(A,anchors.market)>maxRF*1.1)continue; // chinampas cluster near the town, not the whole shore
+    const dir=V.norm(V.sub(B,A));if(!isFinite(dir.x))continue;
+    const segLen=V.dist(A,B),nrm=V.rot90(dir);
+    for(let t=4;t<segLen-4;t+=r.range(5,8)){ // canal width between chinampas, M-AZT-2
+      const p=V.add(A,V.mul(dir,t));
+      const into=intoWater(p);
+      const len=Math.min(maxLen,r.range(24,50));
+      const q=V.add(p,V.mul(into,len));
+      if(!site.isWater(V.lerp(p,q,0.5)))continue; // only where the strip actually sits in water
+      const poly=[V.add(p,V.mul(nrm,stripW/2)),V.add(q,V.mul(nrm,stripW/2)),
+        V.add(q,V.mul(nrm,-stripW/2)),V.add(p,V.mul(nrm,-stripW/2))];
+      details.push({id:'chin'+(did++),kind:'chinampa',poly,
+        prov:'Chinampa: a narrow raised-bed garden plot reclaimed from the shallows (~2.5-4 m wide), one of a grid separated by canoe canals — the lake-city\'s intensive agricultural base (M-AZT-2).'});
+      if(details.length>220)return details;}}
+  return details;}
+
 function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour){
   const r=stream(seed,'details');
   const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
@@ -2064,7 +2129,10 @@ function generate(seed,opts){
   const profile=resolveProfile(opts.culture);
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
-  const walls=opts.walls!==false; // enclosures are optional (default on for the medieval pack)
+  // enclosures are optional (default on for the medieval pack); a lake-city profile (Aztec)
+  // never gets a European-style curtain — the lake, causeways and removable bridges were its
+  // defence (M-AZT-3) — regardless of the walls checkbox
+  const walls=opts.walls!==false&&!profile.noWalls;
   // a bastioned trace was a costly state investment for strategically important towns —
   // never hamlets; require a decent size (M-FOR-4). Below the threshold it stays a curtain.
   const fortMin=2500;
@@ -2166,6 +2234,7 @@ function generate(seed,opts){
   const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
+  if(profile.chinampas)details.push(...buildChinampas(seed,site,anchors,wallState,maxRF));
   // Islamic-family cul-de-sac encroachment (M-ISL-2, no-op for profiles without deadEndBias):
   // runs AFTER blocks/parcels/buildings are built from the full graph, so privatizing a lane
   // closes THROUGH ACCESS only — it does not retroactively delete the dwellings that already
@@ -2254,12 +2323,15 @@ function render(){
     if(model.site.kind==='river'||model.site.kind==='riverthrough')
       el('path',{d:pl(model.site.river),class:'riverline'},L.water);}
 
-  // strip fields + fences + trees(details layer later)
-  for(const d of model.details){
-    if(d.kind==='field'){
-      const e=el('path',{d:pl([d.a,d.b]),class:'field'},L.fields);
-      reg(e,'Strip field','Strip-field boundary',{},d.prov);}
-  }
+  // strip fields (land-side, under the water layer is fine — they never overlap it)
+  for(const d of model.details)if(d.kind==='field'){
+    const e=el('path',{d:pl([d.a,d.b]),class:'field'},L.fields);
+    reg(e,'Strip field','Strip-field boundary',{},d.prov);}
+  // chinampas sit IN the water, so they must draw in a layer AFTER 'water' in z-order (L.fields
+  // is drawn before 'water' and would be invisible, entirely covered by the water fill)
+  for(const d of model.details)if(d.kind==='chinampa'){
+    const e=el('path',{d:pd(d.poly),class:'chinampa'},L.blocks);
+    reg(e,'Chinampa','Chinampa (raised-bed garden)',{},d.prov);}
 
   // blocks
   for(const b of model.blocks){
@@ -2609,6 +2681,8 @@ function renderLegend(){
     <span><span class="chip" style="background:#4a3a22"></span>Wall</span>
     <span><span class="chip" style="background:#b9c7c3"></span>Water</span>
     <span><span class="chip" style="background:#9aa96e;border-radius:50%"></span>Tree</span>`;
+  if(model.details.some(d=>d.kind==='chinampa'))
+    html+=`<span><span class="chip" style="background:#c3d6a8;border-color:#8a9e6a"></span>Chinampa</span>`;
   lg.innerHTML=html;}
 
 /* ---------- camera ---------- */

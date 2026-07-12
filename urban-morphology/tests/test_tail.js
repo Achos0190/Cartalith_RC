@@ -537,15 +537,19 @@ for (const site of ['river', 'landlocked']) {
  * (1) no road crosses a wall/enceinte away from a gate (the true geometric crossing, not a
  *     proximity sample — a long/oblique edge can cross the ring while its sample points stay
  *     outside the clear band, which is exactly the bug this check is designed to catch);
- * (2) nothing is built inside a water body. */
+ * (2) nothing is built inside a water body — checked across MULTIPLE seeds, not one: a harbour
+ *     warehouse running to ~85% of its parcel's depth only dips into the water on some seeds
+ *     (a single fixed seed here previously missed a real bug that showed up in ~1 of 8 seeds). */
 {
   const profiles = Object.keys(UME.CULTURE_PROFILES);
   const sites = ['river', 'riverthrough', 'bay', 'coast', 'landlocked'];
+  const seeds = [4242, 777, 12345, 999];
   let crossingFailures = 0, wetBuildingFailures = 0, wetParcelFailures = 0, checked = 0;
   for (const culture of profiles) {
     for (const site of sites) {
       for (const fortified of [false, true]) {
-        const m = UME.generate(4242, { epochs: 8, pop: 7500, walls: true, fortified, culture, site });
+        for (const seed of seeds) {
+        const m = UME.generate(seed, { epochs: 8, pop: 7500, walls: true, fortified, culture, site });
         checked++;
         if (m.wall.ring) {
           const ring = m.wall.ring, gates = m.wall.gates;
@@ -564,10 +568,11 @@ for (const site of ['river', 'landlocked']) {
           for (const b of m.buildings) if (T.pointInPoly(T.polyCentroid(b.poly), m.site.waterPoly)) wetBuildingFailures++;
           for (const p of m.parcels) if (T.pointInPoly(T.polyCentroid(p.poly), m.site.waterPoly)) wetParcelFailures++;
         }
+        }
       }
     }
   }
-  ok(crossingFailures === 0, `no road crosses any wall/enceinte away from a gate, across ${checked} (profile × site × fortified) combinations (${crossingFailures} failures)`);
+  ok(crossingFailures === 0, `no road crosses any wall/enceinte away from a gate, across ${checked} (profile × site × fortified × seed) combinations (${crossingFailures} failures)`);
   ok(wetBuildingFailures === 0, `no building sits in the water, across all combinations (${wetBuildingFailures} failures)`);
   ok(wetParcelFailures === 0, `no parcel sits in the water, across all combinations (${wetParcelFailures} failures)`);
 }
@@ -738,6 +743,39 @@ for (const site of ['river', 'landlocked']) {
     const c1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'chinese', site });
     const c2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'chinese', site });
     ok(c1.parcels.length > 100 && UME.hashModel(c1) === UME.hashModel(c2), `chinese capital on '${site}' site: substantial + deterministic (${c1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Aztec civilization profile (docs/07, M-AZT register) ---------- */
+{
+  const azt = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'aztec' });
+  const azt2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'aztec' });
+  ok(azt.culture === 'aztec', 'aztec profile resolves');
+  ok(UME.hashModel(azt) === UME.hashModel(azt2), 'aztec generation deterministic');
+  ok(azt.parcels.length > 150, `aztec lake-city is a substantial town (${azt.parcels.length} parcels)`);
+
+  // never a wall (the lake + causeways were the defence, M-AZT-3) — even when requested
+  ok(!azt.wall.ring && azt.wall.gates.length === 0, 'aztec profile never builds a european-style wall, even when requested');
+  const azt3 = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'aztec' });
+  ok(UME.hashModel(azt) === UME.hashModel(azt3), 'the walls checkbox has no effect on the aztec profile (forced off either way)');
+
+  // chinampas: a genuinely new infrastructure layer, present for every wet site, absent when
+  // landlocked, and never overlapping a building or parcel (the actual invariant that matters —
+  // sitting in shallow water is the correct place for a chinampa, unlike every other detail kind)
+  ok(azt.details.some(d => d.kind === 'chinampa'), `aztec profile grows chinampas (${azt.details.filter(d=>d.kind==='chinampa').length})`);
+  const aztLandlocked = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'aztec', site: 'landlocked' });
+  ok(aztLandlocked.details.filter(d => d.kind === 'chinampa').length === 0, 'no chinampas on a landlocked site (no water to reclaim)');
+
+  // reuses the roman/chinese grid + courtyard-house mechanism
+  const aztKinds = new Set(azt.buildings.map(b => b.kind));
+  ok([...aztKinds].some(k => k === 'street range' || k === 'single-room house'), 'aztec buildings reuse the courtyard-house grammar');
+  ok(!azt.civic, 'aztec profile has no civic hall (temple-state governance, defaultCivic none)');
+  ok(azt.markets.length === 0, 'aztec profile has no specialised market squares');
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const a1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'aztec', site });
+    const a2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'aztec', site });
+    ok(a1.parcels.length > 100 && UME.hashModel(a1) === UME.hashModel(a2), `aztec lake-city on '${site}' site: substantial + deterministic (${a1.parcels.length} parcels)`);
   }
 }
 
