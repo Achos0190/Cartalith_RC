@@ -9,22 +9,55 @@ harness, keyed assumption register) are reused.
 
 ## Status
 
-**Phase 0 complete (research) + working proof of concept (Phases 1–4 in v0.1).**
+**Phase 0 complete (research) + working proof of concept (Phases 1–4) + Phase 1 of the
+post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v0.1.**
 
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands) | `tests/run.sh` (159 assertions) |
-| Browser driver (screenshots + inspector click-tests) | `tests/browser_check.js` |
+| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (247 assertions) |
+| Browser driver (screenshots + inspector click-tests, incl. the Roman colonia) | `tests/browser_check.js` |
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
-`03-mathematical-assumptions.md` (keyed `M-*` register) · `04-architecture-proposal.md` ·
+`03-mathematical-assumptions.md` (keyed `M-*` register, incl. `M-ROM-*`) ·
+`04-architecture-proposal.md` ·
 **`05-settlement-evolution-and-function.md`** — functional geography: how
 harbours/centres/markets/administration/quarters/industry are *sited*, and in what order
 amenities switch on as population and connectivity grow ·
 **`06-cartalith-integration-map.md`** — maps the Cartalith Gen1 civ-layer settlement
 parameters (kind/pop/traits/specialisation/faction/civWays) onto this generator's inputs, with
-the gaps to close for a future refactor into the Cartalith line.
+the gaps to close for a future refactor into the Cartalith line ·
+**`07-culture-architecture.md`** — the Core Engine / Culture Profile split: which of the
+engine's ~70 functions are culture-independent vs. tradition-supplied, the `CultureProfile`
+data schema, the Roman colonia's quantified morphology, and what's explicitly deferred to
+later phases (phased historical growth, negative space, infrastructure layer, Space
+Syntax/graph-theory metrics, settlement hierarchy, a profile-aware validation panel, and
+civilizations 3–18).
+
+### Civilization profiles (selectable in-app)
+
+- **Medieval Western European** (default) — the original PoC pack below, unchanged.
+- **Roman (planned colonia)** — a *fundamentally different growth model*, not a re-skin: a
+  regular grid laid in one act (cardo maximus × decumanus maximus crossing at the forum, minor
+  cardines/decumani at ~50–60 m, M-ROM-1), insula blocks cut into a lot grid rather than
+  medieval strip-platting (M-ROM-2/3), domus (atrium + peristyle courtyard) for the
+  market/burgher elite vs. dense multi-storey **insula** apartment blocks for everyone else,
+  a classical **temple** + **basilica** by default (reusing the existing worship-rite/civic-hall
+  machinery unchanged), no specialised market squares (the forum substitutes), a castrum-scheme
+  wall with the four traditional named gates (*porta praetoria/decumana/principalis
+  dextra/sinistra*) — and **never** a gunpowder-era bastioned trace, however requested, since
+  that fortification revolution postdates Rome by over a millennium. Statistically distinct
+  from the medieval pack in a testable way: its street grid is overwhelmingly axis-aligned
+  (M-ROM-6), unlike the organic pack's all-angle tangle — the morphometrics panel shows the
+  medieval-calibrated bands for reference only when a non-medieval profile is active, rather
+  than mis-marking a legitimately different morphology as a failure.
+- Switching the civilization selector resets the worship rite / civic-hall style to that
+  profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
+  change (organic → grid), not just a re-skin, per the profile's `planning` field.
+
+An **Evidence Ledger** panel lists every `M-*`/`M-ROM-*` register id actually load-bearing for
+the currently generated town (collected from every object's provenance as it's drawn), formalizing
+the assumptions register as in-app, queryable data rather than only a markdown file.
 
 The v0.1 app generates a deterministic medieval-pack town from a seed: site (river crossing,
 bay harbour, or open coast) → anchors → least-cost primary routes over a slope/water cost

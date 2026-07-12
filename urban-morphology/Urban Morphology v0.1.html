@@ -36,6 +36,8 @@ svg.panning{cursor:grabbing}
 .leg{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:11px}
 .leg span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .chip{width:11px;height:11px;border:1px solid #00000033;display:inline-block}
+.ledgerchip{display:inline-block;white-space:nowrap;background:#e9e0c4;border:1px solid #b8a877;
+  padding:1px 5px;border-radius:3px;margin:0 3px 3px 0;font-size:10.5px}
 #metrics table{width:100%;border-collapse:collapse;font-size:11px}
 #metrics td{padding:1px 3px;border-bottom:1px dotted #e4dabb}
 #metrics td.v{text-align:right;font-variant-numeric:tabular-nums}
@@ -117,6 +119,9 @@ svg.panning{cursor:grabbing}
     <h2>Generation</h2>
     <div class="row"><label>Seed</label><input id="seed" type="number" value="12345">
       <button id="gen">Generate</button><button id="rnd">Random</button></div>
+    <div class="row"><label>Civilization</label><select id="culture" style="font:12px Georgia,serif">
+      <option value="medieval">Medieval Western European</option>
+      <option value="roman">Roman (planned colonia)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -154,12 +159,15 @@ svg.panning{cursor:grabbing}
     (rule + evidence register reference).</div></div>
   <div class="box"><h2>Legend</h2><div class="leg" id="legend"></div></div>
   <div class="box" id="metrics"><h2>Morphometrics vs. historical bands</h2><div id="mBody"></div></div>
+  <div class="box"><h2>Evidence ledger</h2><div id="ledger"></div></div>
   <div class="box"><h2>About</h2>
-    <div style="font-size:11px">Deterministic growth simulation: site &rarr; anchors &rarr; least-cost
-    primary routes &rarr; epoch-looped street growth (densification + exploration) &rarr; planar-face
-    blocks &rarr; series-platted strip parcels &rarr; grammar buildings &rarr; derived districts &rarr;
-    wall &amp; gates &rarr; details. The renderer draws only what the simulation produced.
-    Evidence register: <code>docs/03-mathematical-assumptions.md</code> (M-* refs in the inspector).
+    <div style="font-size:11px">Deterministic growth simulation: environment/site &rarr; anchors &rarr;
+    culture-profiled street growth (medieval: epoch-looped organic densification + exploration over
+    least-cost routes; Roman: a planned cardo/decumanus grid laid in one act) &rarr; planar-face
+    blocks &rarr; culture-profiled parcels (medieval: series-platted strips; Roman: insula lots) &rarr;
+    grammar buildings &rarr; derived districts &rarr; wall &amp; gates &rarr; details. The renderer draws
+    only what the simulation produced. Evidence register: <code>docs/03-mathematical-assumptions.md</code>
+    (M-* refs in the inspector and the Evidence Ledger panel); architecture: <code>docs/07-culture-architecture.md</code>.
     Drag to pan, wheel to zoom.</div></div>
 </div>
 <div id="map"><div id="svgHost"></div></div>
@@ -188,6 +196,26 @@ function stream(seed,label){
     chance:(p)=>f()<p};
   return r;
 }
+
+/* ---------------- culture profiles (docs/07-culture-architecture.md) ----------------
+ * The core engine (geometry kernel, graph, growth mechanics, environment/site) never branches
+ * on a culture; every tradition-specific choice — growth model, parcel metrology, building
+ * grammar, default rite/civic hall, market economy, wall/gate scheme, street orientation — is
+ * data on the resolved profile object, read once in generate() and threaded down the call
+ * chain. Adding a 3rd/4th civilization is a new table row, not an engine change. */
+const CULTURE_PROFILES={
+  medieval:{id:'medieval',name:'Medieval Western European',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
+    defaultFaith:'church',defaultCivic:'auto',markets:true,
+    wallGates:{scheme:'organic'},orientation:'terrain',civicAnchorLabel:'market',
+    prov:'Accretive growth over centuries: epoch-looped organic streets, series-platted burgage strip parcels, a parish church per few thousand souls, market squares that specialise with rank (docs/01 §1.1; docs/03 M-* register).'},
+  roman:{id:'roman',name:'Roman (planned colonia)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
+    defaultFaith:'temple',defaultCivic:'basilica',markets:false,
+    wallGates:{scheme:'castrum'},orientation:'cardinal',civicAnchorLabel:'forum',
+    prov:'A planned colonia laid out in one act from a castrum-derived module: cardo maximus × decumanus maximus crossing at the forum, a regular grid of minor cardines/decumani ~50-60 m apart, rectangular insula blocks, four castrum-scheme gates (docs/07 §4, M-ROM register).'}
+};
+function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
 /* ---------------- vector / polygon helpers ---------------- */
 const V={ add:(a,b)=>({x:a.x+b.x,y:a.y+b.y}), sub:(a,b)=>({x:a.x-b.x,y:a.y-b.y}),
@@ -629,6 +657,52 @@ function buildPrimaries(seed,site,anchors,g){
   const prov='Primary route: least-cost path over slope/water cost field with trail reinforcement (Helbing 1997, Tobler kernel M-REG-5); immutable backbone (M-GRW-3).';
   for(const rt of routes)addPolylineStreet(g,rt.pts,'primary',7,0,prov); // width M-NET-8
   return routes;}
+
+/* ---------------- grid streets: planned colonia (M-ROM-1) ----------------
+ * A planned tradition (Roman colonia; noted for a later phase, Aztec canal cities) does not
+ * grow organically at all — it lays a regular module in one act. Two wider "maximus" streets
+ * cross at the civic anchor (forum); a regular minor grid at ~50-60 m spacing fills the rest,
+ * clipped to the buildable land (never drawn into water). addStreet's snap/split-at-crossing
+ * planarity invariant (core engine, unchanged) turns this into proper 4-way city blocks exactly
+ * as it does for the organic pack — only the LAYOUT RULE producing the candidate segments
+ * differs, per the Core/Culture split (docs/07 §2). */
+function buildGridStreets(seed,site,anchors,g,opts){
+  const r=stream(seed,'gridstreets');
+  const F=anchors.market; // the civic anchor; labelled 'forum' for this profile (civicAnchorLabel)
+  const spacing=r.range(50,60); // minor cardines/decumani spacing, M-ROM-1
+  const half=Math.max(140,Math.min(480,opts.maxRF*0.62)); // minor grid's built extent
+  const margin=25;
+  const land=(x,y)=>x>margin&&y>margin&&x<site.Wm-margin&&y<site.Hm-margin&&!site.isWater({x,y})&&
+    site.riverDist({x,y})>(site.riverW?site.riverW/2+8:0);
+  // longest-contiguous-land runs along a fixed-coordinate line, out to a given half-extent
+  // (reuses the technique buildWall uses to pick the land arc at a noisy bank boundary)
+  const landRuns=(fixed,axis,ext)=>{
+    const runs=[];let curStart=null,lastT=null;
+    for(let t=-ext;t<=ext;t+=6){
+      const p=axis==='h'?{x:F.x+t,y:fixed}:{x:fixed,y:F.y+t};
+      if(land(p.x,p.y)){if(curStart===null)curStart=t;lastT=t;}
+      else{if(curStart!==null&&lastT-curStart>40)runs.push([curStart,lastT]);curStart=null;}}
+    if(curStart!==null&&lastT-curStart>40)runs.push([curStart,lastT]);
+    return runs;};
+  const addAxis=(fixed,axis,cls,w,ext,prov)=>{
+    for(const [t0,t1] of landRuns(fixed,axis,ext)){
+      const A=axis==='h'?{x:F.x+t0,y:fixed}:{x:fixed,y:F.y+t0};
+      const B=axis==='h'?{x:F.x+t1,y:fixed}:{x:fixed,y:F.y+t1};
+      addStreet(g,A.x,A.y,B.x,B.y,cls,w,0,prov);}};
+  // the maximus streets are through-routes to the edge of the map (like the organic pack's
+  // immutable primaries reaching site.routeEnds), so they always cross a wall placed around the
+  // built-up core, whatever that core's radius turns out to be — a colonia's cardo/decumanus
+  // maximus continued beyond the town as the road to the next place (M-ROM-1, M-ROM-4)
+  const fullExtent=Math.max(site.Wm,site.Hm);
+  addAxis(F.y,'h','primary',7,fullExtent,'Decumanus maximus: the colonia\'s principal east-west street, run through the forum (M-ROM-1, M-ROM-4).');
+  addAxis(F.x,'v','primary',7,fullExtent,'Cardo maximus: the colonia\'s principal north-south street, run through the forum (M-ROM-1, M-ROM-4).');
+  const nRings=Math.max(2,Math.round(half/spacing));
+  const minorExtent=half*1.15;
+  for(let i=-nRings;i<=nRings;i++){
+    if(i===0)continue;
+    addAxis(F.y+i*spacing,'h','street',4.5,minorExtent,'Minor decumanus: regular colonial grid street (M-ROM-1).');
+    addAxis(F.x+i*spacing,'v','street',4.5,minorExtent,'Minor cardo: regular colonial grid street (M-ROM-1).');}
+  return {forum:F,spacing};}
 
 /* ---------------- plaza: widened market street (M-DEN-6, additive mode) ---------------- */
 function buildPlaza(seed,site,anchors,g){
@@ -1395,8 +1469,50 @@ function buildBlocks(g,plaza,site){
         :'Urban block: a face of the planar street graph, inset by half the width of each fronting street (+ verge).'});}
   return blocks;}
 
-/* ---------------- parcels: series platting via bisector edge-cells ---------------- */
-function buildParcels(seed,g,blocks,anchors,epochs,site){
+/* ---------------- insula parcels: regular lot grid within a planned block (M-ROM-2/3) ----------------
+ * A planned colonia's blocks are cut in one act, not accreted street-frontage by street-frontage:
+ * a regular row (or two back-to-back rows) of rectangular lots along the block's long axis,
+ * rather than medieval bisector strip-platting. Blocks from the grid street layout are
+ * axis-aligned rectangles, so the block's own bounding box IS its lot grid's frame. */
+function insulaLots(poly,rB){
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(const p of poly){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);}
+  const spanX=maxX-minX,spanY=maxY-minY;
+  if(spanX<8||spanY<8)return [];
+  const longIsX=spanX>=spanY;
+  const longSpan=longIsX?spanX:spanY,shortSpan=longIsX?spanY:spanX;
+  const lotW=Math.max(12,Math.min(26,rB.logn(19,0.15))); // insula lot frontage, M-ROM-2/3
+  const nLots=Math.max(1,Math.round(longSpan/lotW));
+  const rows=shortSpan>=42?2:1; // double-loaded frontage on a deep block (M-ROM-2)
+  const rowDepth=shortSpan/rows;
+  const cand=[];
+  for(let row=0;row<rows;row++){
+    for(let k=0;k<nLots;k++){
+      const u0=minX+(longIsX?k/nLots*spanX:0),u1=minX+(longIsX?(k+1)/nLots*spanX:0);
+      const v0=minY+(longIsX?0:k/nLots*spanY),v1=minY+(longIsX?0:(k+1)/nLots*spanY);
+      let F0,F1,B0,B1;
+      if(longIsX){
+        const y0=minY+row*rowDepth,y1=minY+(row+1)*rowDepth;
+        const x0=minX+k/nLots*spanX,x1=minX+(k+1)/nLots*spanX;
+        if(row===0){F0={x:x0,y:y0};F1={x:x1,y:y0};B0={x:x0,y:y1};B1={x:x1,y:y1};}
+        else{F0={x:x0,y:y1};F1={x:x1,y:y1};B0={x:x0,y:y0};B1={x:x1,y:y0};}
+      }else{
+        const x0=minX+row*rowDepth,x1=minX+(row+1)*rowDepth;
+        const y0=minY+k/nLots*spanY,y1=minY+(k+1)/nLots*spanY;
+        if(row===0){F0={x:x0,y:y0};F1={x:x0,y:y1};B0={x:x1,y:y0};B1={x:x1,y:y1};}
+        else{F0={x:x1,y:y0};F1={x:x1,y:y1};B0={x:x0,y:y0};B1={x:x0,y:y1};}
+      }
+      const quad=[F0,F1,B1,B0];
+      const area=Math.abs(polyArea(quad));
+      if(area<26)continue;
+      cand.push({poly:quad,frontage:V.dist(F0,F1),depth:(V.dist(F0,B0)+V.dist(F1,B1))/2,
+        area,F0,F1,B1,B0,
+        prov:'Insula lot: a regular rectangular lot cut from the planned block in one act — one row (or two, back-to-back) along the block\'s long axis (M-ROM-2/3), unlike medieval series-platted strips.'});}}
+  return cand;}
+
+/* ---------------- parcels: series platting via bisector edge-cells, or insula lots (M-ROM) ---------------- */
+function buildParcels(seed,g,blocks,anchors,epochs,site,profile){
+  profile=profile||CULTURE_PROFILES.medieval;
   const parcels=[];let pid=0;
   for(const blk of blocks){
     if(blk.plaza)continue;
@@ -1404,6 +1520,14 @@ function buildParcels(seed,g,blocks,anchors,epochs,site){
     const n=poly.length;
     if(n<3)continue;
     const rB=stream((fnv1a(blk.id)^0)>>>0,'parcels/'+blk.id);
+    if(profile.parcelPattern==='insula'){
+      const acc=[];
+      for(const lot of insulaLots(poly,rB)){
+        const qc=polyCentroid(lot.poly);
+        if(site&&site.isWater(qc))continue;
+        acc.push(Object.assign({id:'par'+(pid++),block:blk.id,age:0,edgeCls:'street'},lot));}
+      for(const p of acc)parcels.push(p);
+      continue;}
     const cand=[]; // per-block candidates; filtered for overlap + area conservation below
     const dM=V.dist(polyCentroid(poly),anchors.market);
     // block-uniform target plot depth (M-PAR-2), shallower at the core where land is dear
@@ -1538,13 +1662,40 @@ function bmap(par,u,v){ // bilinear patch over parcel quad
   return V.lerp(e0,e1,v);}
 function rectPoly(par,u0,u1,v0,v1){
   return [bmap(par,u0,v0),bmap(par,u1,v0),bmap(par,u1,v1),bmap(par,u0,v1)];}
-function buildBuildings(seed,parcels,plaza,anchors){
+function buildBuildings(seed,parcels,plaza,anchors,profile){
+  profile=profile||CULTURE_PROFILES.medieval;
   const out=[];let bid=0;
   for(const par of parcels){
     const r=stream(fnv1a(par.id),'bld');
     const d=par.district;
     if(d==='agrarian'&&r.chance(0.45)){par.empty=true;continue;} // paddocks
     if(par.frontage<3.2||par.depth<6){par.empty=true;continue;}
+    // Roman domus/insula grammar (M-ROM-3): the harbour quarter still reuses the warehouse
+    // grammar below unchanged (harbour/quay typology is core, not culture-specific, docs/07 §2).
+    if(profile.buildingGrammar==='domus-insula'&&d!=='harbour'){
+      const isDomus=(d==='market'||d==='burgher')&&par.frontage>=15&&par.depth>=20&&r.chance(0.45);
+      const rects=isDomus?[
+        {u0:0,u1:1,v0:0,v1:0.28,kind:'atrium range'},
+        {u0:0,u1:0.3,v0:0.26,v1:0.78,kind:'wing'},
+        {u0:0.7,u1:1,v0:0.26,v1:0.78,kind:'wing'},
+        {u0:0,u1:1,v0:0.76,v1:0.94,kind:'peristyle range'}]
+        :[{u0:0.04,u1:0.96,v0:0.04,v1:0.96,kind:'insula block'}];
+      for(const rc of rects){
+        const poly=rectPoly(par,rc.u0,rc.u1,rc.v0,rc.v1);
+        if(Math.abs(polyArea(poly))<9)continue;
+        const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
+        let ridge=wU>=wV?[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)]:[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+        const ins=0.16;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
+        out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:rc.kind,district:d,age:0,
+          courtyard:isDomus,
+          prov:isDomus
+            ?(rc.kind==='atrium range'?'Atrium range: the domus\'s street-facing reception rooms around the roofed, skylit atrium (M-ROM-3).'
+              :rc.kind==='wing'?'Domus wing: rooms flanking the peristyle garden (M-ROM-3).'
+              :'Peristyle range: the colonnaded garden court at the rear of the domus — the Hellenistic addition to the Italic atrium house (M-ROM-3).')
+            :'Insula: a multi-storey apartment block (~15-20 m tall, 3-5 storeys) let out room-by-room or floor-by-floor to non-elite tenants, often with shops (tabernae) at street level (M-ROM-3).'});}
+      par.built=true;
+      continue;
+    }
     const rects=[]; // in (u,v) space
     const isWare=d==='harbour';
     // warehouses run deep to the plot tail (goods storage); houses stop at roof-span depth
@@ -1798,6 +1949,7 @@ function computeMetrics(g,blocks,parcels){
 /* ---------------- top-level generate ---------------- */
 function generate(seed,opts){
   opts=opts||{};
+  const profile=resolveProfile(opts.culture);
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
   const walls=opts.walls!==false; // enclosures are optional (default on for the medieval pack)
@@ -1805,7 +1957,10 @@ function generate(seed,opts){
   // never hamlets; require a decent size (M-FOR-4). Below the threshold it stays a curtain.
   const fortMin=2500;
   const fortRequested=!!opts.fortified;
-  const fortified=fortRequested&&popTarget>=fortMin&&walls;
+  // the bastioned trace italienne is a c.1500 gunpowder-artillery response (M-FOR-4) — anachronistic
+  // for a castrum-scheme (Roman) wall by well over a millennium, so that profile never gets one
+  // regardless of the request; it keeps its plain castrum-gated curtain instead (docs/07 §2).
+  const fortified=fortRequested&&popTarget>=fortMin&&walls&&profile.wallGates.scheme==='organic';
   // population -> street length + urban radius via intramural density (M-DEN-1, M-DEN-2,
   // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant. A low floor
   // lets a hamlet stay a small crossroads cluster rather than a full town (M-AMEN-2)
@@ -1816,33 +1971,66 @@ function generate(seed,opts){
   const site=buildSite(seed,Wm,Hm,siteKind);
   const anchors=placeAnchors(seed,site);
   const g=makeGraph();
-  const routes=buildPrimaries(seed,site,anchors,g);
-  const plaza=buildPlaza(seed,site,anchors,g);
-  const harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
-  if(site.through)addRiverBridges(seed,site,anchors,g,2); // a river that bisects the town
   const wallState={ring:null,gates:[],epoch:0};
-  grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget});
+  // growth model (docs/07 §2, the single biggest culture fork): 'organic' epoch-loops least-cost
+  // routes into an accretive tangle; 'grid' lays a regular planned module in one act and has no
+  // epoch loop at all — the wall (if any) is founded with the colonia, not grown into later.
+  let plaza,harbour;
+  if(profile.planning==='grid'){
+    buildGridStreets(seed,site,anchors,g,{maxRF});
+    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
+    if(site.through)addRiverBridges(seed,site,anchors,g,2);
+    if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified});
+    plaza=buildPlaza(seed,site,anchors,g);
+  }else{
+    buildPrimaries(seed,site,anchors,g);
+    plaza=buildPlaza(seed,site,anchors,g);
+    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
+    if(site.through)addRiverBridges(seed,site,anchors,g,2); // a river that bisects the town
+    grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget});
+  }
+  // castrum gate scheme: relabel the (already-capped/placed) gates with the four traditional
+  // names where they sit on the maximus streets, rather than a wholly separate gate function
+  // (M-ROM-5) — the underlying wall/gate-placement machinery is reused unchanged (docs/07 §2).
+  if(profile.wallGates.scheme==='castrum'&&wallState.gates&&wallState.gates.length){
+    const F=anchors.market;
+    for(const gt of wallState.gates){
+      if(gt.water)continue;
+      if(Math.abs(gt.pt.y-F.y)<10)gt.name=gt.pt.x>=F.x?'Porta Praetoria':'Porta Decumana';
+      else if(Math.abs(gt.pt.x-F.x)<10)gt.name=gt.pt.y<F.y?'Porta Principalis Dextra':'Porta Principalis Sinistra';}
+  }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
   removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
   const blocks=buildBlocks(g,plaza,site);
-  const parcels=buildParcels(seed,g,blocks,anchors,epochs,site);
+  const parcels=buildParcels(seed,g,blocks,anchors,epochs,site,profile);
   assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
-  const buildings=buildBuildings(seed,parcels,plaza,anchors);
-  const faith=opts.faith||'church';
+  const buildings=buildBuildings(seed,parcels,plaza,anchors,profile);
+  const faith=opts.faith||profile.defaultFaith;
   // hamlets have no church/chapel; a religious building can also be turned off ('none')
   const hamlet=popTarget<600;
   const nChurch=(faith==='none'||hamlet)?0:Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // M-DEN-8
   const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith,site,harbour):[];
-  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
-  // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN)
-  const markets=buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings);
-  const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle,faith);
+  // occupancy per built parcel (M-DEN-2): a multi-storey insula apartment block (3-5 storeys,
+  // M-ROM-3) houses several times what a single-family domus or medieval house does — counting
+  // it as one household like the others would badly undercount a colonia's real density (M-ROM-7)
+  const insulaParcels=profile.buildingGrammar==='domus-insula'
+    ?new Set(buildings.filter(b=>b.kind==='insula block').map(b=>b.parcel)):null;
+  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard)
+    .reduce((s,p)=>s+(insulaParcels&&insulaParcels.has(p.id)?5.2*4:5.2),0));
+  // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN).
+  // Markets are a medieval-specific economy (M-AMEN-1); a profile without them (e.g. Roman, whose
+  // commerce concentrates in the forum/macellum — docs/07 §2) is gated off rather than reusing
+  // medieval market thresholds under a different name.
+  const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
+  const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
   // sweep the fortification's field of fire clear (esplanade/glacis): removes buildings,
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,
+    culture:profile.id,cultureName:profile.name,
+    site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
     anchors,plaza,harbour,markets,civic,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
     wall:wallState,blocks,parcels,buildings,churches,details,pop,metrics,through:site.through};}
@@ -1857,7 +2045,7 @@ function hashModel(m){
   for(const b of m.buildings)parts.push(b.id,b.kind,Math.round(polyArea(b.poly)*10));
   return fnv1a(parts.join('|'));}
 
-return {generate,hashModel,stream,fnv1a,
+return {generate,hashModel,stream,fnv1a,CULTURE_PROFILES,resolveProfile,
   _test:{polyArea,polyCentroid,pointInPoly,segInt,insetPoly,clipConvex,extractFaces,
     makeGraph,addStreet,ensureCCW,convexHull,simplify,chaikin,astar,distPtSeg}};
 })();
@@ -1876,6 +2064,11 @@ const NS='http://www.w3.org/2000/svg';
 const host=document.getElementById('svgHost');
 let model=null,svg=null,selected=null;
 const entityIndex=new Map();
+// evidence ledger (docs/07 §6): every M-*/M-ROM-* register id actually referenced by the
+// currently generated town, collected as each object registers its provenance — formalizes
+// the assumptions register (docs/03) as in-app, queryable data rather than only a markdown file
+const ledgerIds=new Set();
+const LEDGER_RE=/\bM-[A-Z]+-\d+[a-z]?\b/g;
 
 const DISTRICT_INFO={
   market:['Market district','#eddfb9'],burgher:['Burgher district','#e9e0c4'],
@@ -1893,10 +2086,11 @@ function pl(pts){return pts.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixe
 function reg(elm,type,title,fields,prov){
   const id='um'+entityIndex.size;
   elm.setAttribute('data-um',id);
-  entityIndex.set(id,{type,title,fields,prov,elm});}
+  entityIndex.set(id,{type,title,fields,prov,elm});
+  if(prov){const hits=prov.match(LEDGER_RE);if(hits)for(const h of hits)ledgerIds.add(h);}}
 
 function render(){
-  entityIndex.clear();selected=null;
+  entityIndex.clear();ledgerIds.clear();selected=null;
   host.innerHTML='';
   svg=el('svg',{viewBox:`0 0 ${model.Wm} ${model.Hm}`,preserveAspectRatio:'xMidYMid meet'},host);
   const L={};
@@ -2020,7 +2214,7 @@ function render(){
     for(const gt of W.gates){
       const cls=gt.water?'watergate':'gate';
       const ge=el('rect',{x:gt.pt.x-6,y:gt.pt.y-6,width:12,height:12,class:cls,transform:`rotate(45 ${gt.pt.x} ${gt.pt.y})`},L.walls);
-      reg(ge,gt.water?'Water-gate':'Gate',gt.water?'Water-gate':'Town gate',{},gt.prov);}}
+      reg(ge,gt.water?'Water-gate':'Gate',gt.name||(gt.water?'Water-gate':'Town gate'),{},gt.prov);}}
 
   // roads (casing + fill), bridge deck
   const byCls={primary:[],street:[],lane:[],quay:[]};
@@ -2091,10 +2285,13 @@ function render(){
     }}
 
   // buildings
+  const BLD_TITLE={main:'House (main range)',wing:'Rear wing','rear range':'Rear range',
+    warehouse:'Warehouse','atrium range':'Domus (atrium range)','peristyle range':'Domus (peristyle range)',
+    'insula block':'Insula (apartment block)'};
   for(const b of model.buildings){
     const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')},L.buildings);
     el('path',{d:pl(b.ridge),class:'ridge'},L.buildings);
-    reg(e,'Building',(b.kind==='main'?'House (main range)':b.kind==='wing'?'Rear wing':b.kind==='rear range'?'Rear range':'Outbuilding'),
+    reg(e,'Building',BLD_TITLE[b.kind]||'Outbuilding',
       {district:DISTRICT_INFO[b.district]?DISTRICT_INFO[b.district][0]:b.district,
        footprint:Math.abs(polyAreaApp(b.poly)).toFixed(0)+' m²',
        courtyard:b.courtyard?'yes (M-BLD-3)':'no'},b.prov);}
@@ -2145,7 +2342,7 @@ function render(){
   if(model.civic)
     el('text',{x:model.civic.center.x,y:model.civic.center.y-11,class:'lbl','text-anchor':'middle'},L.labels).textContent=model.civic.name;
   for(const gt of model.wall.gates||[])
-    el('text',{x:gt.pt.x,y:gt.pt.y-10,class:'lbl','text-anchor':'middle'},L.labels).textContent=gt.water?'':'Gate';
+    el('text',{x:gt.pt.x,y:gt.pt.y-10,class:'lbl','text-anchor':'middle'},L.labels).textContent=gt.water?'':(gt.name||'Gate');
   // scale bar
   const sb=el('g',{},L.labels);
   el('path',{d:`M60 ${model.Hm-46} h200`,class:'scalebar'},sb);
@@ -2158,6 +2355,7 @@ function render(){
   fitView();
   renderMetrics();
   renderLegend();
+  renderLedger();
 }
 function polyAreaApp(p){let s=0;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];s+=a.x*b.y-b.x*a.y;}return s/2;}
 function distPtSegApp(pt,a,b){const abx=b.x-a.x,aby=b.y-a.y;const l2=abx*abx+aby*aby;
@@ -2214,10 +2412,15 @@ function select(id){
 /* ---------- metrics panel ---------- */
 function renderMetrics(){
   const m=model.metrics,b=m.bands;
+  // the historical bands (docs/03) are calibrated to the accretive medieval pack; a planned
+  // grid tradition (Roman) is EXPECTED to fall outside them (that's the point of M-ROM-6's
+  // statistical signature, not a defect) — a profile-specific band set is future work
+  // (docs/07 §7), so bands are shown for reference only, never marked pass/fail, off-medieval
+  const bandsApply=model.culture==='medieval';
   const fmt=(v,d=2)=>typeof v==='number'?v.toFixed(d):v;
   const row=(name,val,band,disp)=>{
     let cls='',note='';
-    if(band){const ok=val>=band[0]&&val<=band[1];cls=ok?'pass':'fail';note=ok?'✓':'✗';}
+    if(band&&bandsApply){const ok=val>=band[0]&&val<=band[1];cls=ok?'pass':'fail';note=ok?'✓':'✗';}
     return `<tr><td>${name}</td><td class="v">${disp}</td><td class="v ${cls}">${note}${band?` [${band[0]}–${band[1]}]`:''}</td></tr>`;};
   document.getElementById('mBody').innerHTML='<table>'+
     row('street nodes / edges',0,null,m.nodes+' / '+m.edges)+
@@ -2230,7 +2433,23 @@ function renderMetrics(){
     row('blocks / median area',0,null,m.blocks+' / '+(m.medianBlockArea/1000).toFixed(1)+'k m²')+
     row('parcels',0,null,m.parcels)+
     row('median frontage (M-PAR-1)',m.medianFrontage,b.medianFrontage,m.medianFrontage.toFixed(1)+' m')+
-    '</table><div style="font-size:10.5px;color:#7d6c47;margin-top:4px">Bands from docs/03-mathematical-assumptions.md; ✓ means the grown fabric sits inside the historical range.</div>';}
+    '</table><div style="font-size:10.5px;color:#7d6c47;margin-top:4px">'+(bandsApply
+      ?'Bands from docs/03-mathematical-assumptions.md; ✓ means the grown fabric sits inside the historical range.'
+      :'Bands are calibrated to the medieval pack and shown for reference only — a planned grid tradition is expected to fall outside them (M-ROM-6); a profile-specific band set is future work (docs/07 §7).')
+    +'</div>';}
+
+/* ---------------- evidence ledger (docs/07 §6) ----------------
+ * Every register id actually load-bearing for THIS generated town, in one place — the same
+ * assumptions register (docs/03) formalized as in-app data instead of only a markdown file.
+ * Click any inspector item to see its own full justification/source/confidence in docs/03. */
+function renderLedger(){
+  const box=document.getElementById('ledger');
+  if(!box)return;
+  const ids=[...ledgerIds].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  box.innerHTML=`<div style="font-size:10.5px;color:#7d6c47;margin-bottom:5px">`+
+    `${ids.length} register entries (${model.culture==='roman'?'M-ROM + shared M-*':'M-*'}) are load-bearing for this town — full source/confidence/justification in `+
+    `<code>docs/03-mathematical-assumptions.md</code>.</div>`+
+    `<div>${ids.map(id=>`<span class="ledgerchip">${id}</span>`).join('')}</div>`;}
 
 function renderLegend(){
   const lg=document.getElementById('legend');
@@ -2279,8 +2498,9 @@ function regen(){
   const harbourDefence=document.getElementById('harbourDefence').value;
   const faith=document.getElementById('faith').value;
   const civicStyle=document.getElementById('civicStyle').value;
+  const culture=document.getElementById('culture').value;
   const t0=performance.now();
-  model=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind,harbourDefence,faith,civicStyle});
+  model=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind,harbourDefence,faith,civicStyle,culture});
   const dt=performance.now()-t0;
   render();
   let note='';
@@ -2296,6 +2516,15 @@ document.getElementById('gen').addEventListener('click',regen);
 document.getElementById('rnd').addEventListener('click',()=>{
   document.getElementById('seed').value=Math.floor(Math.random()*1e6);regen();});
 document.getElementById('fit').addEventListener('click',fitView);
+// switching civilization resets worship/civic to that profile's defaults (still overridable
+// afterward); per the spec, the profile primarily changes architecture, not morphology —
+// except a profile whose planning fundamentally differs (grid vs organic, docs/07 §2)
+document.getElementById('culture').addEventListener('change',(e)=>{
+  const p=UME.CULTURE_PROFILES[e.target.value];
+  if(!p)return;
+  document.getElementById('faith').value=p.defaultFaith;
+  document.getElementById('civicStyle').value=p.defaultCivic;
+  regen();});
 setupCamera();
 regen();
 })();

@@ -531,5 +531,71 @@ for (const site of ['river', 'landlocked']) {
   ok(UME.hashModel(noWall) === UME.hashModel(noWall2), 'walls-off generation deterministic');
 }
 
+/* ---------- Phase 1 architecture: culture profiles (docs/07) ---------- */
+{
+  ok(Object.keys(UME.CULTURE_PROFILES).sort().join(',') === 'medieval,roman', 'two culture profiles registered');
+  // unknown/omitted culture falls back to medieval, byte-identical
+  const base = UME.generate(12345, { epochs: 8, pop: 5000 });
+  const explicit = UME.generate(12345, { epochs: 8, pop: 5000, culture: 'medieval' });
+  const fallback = UME.generate(12345, { epochs: 8, pop: 5000, culture: 'bogus' });
+  ok(UME.hashModel(base) === UME.hashModel(explicit) && UME.hashModel(base) === UME.hashModel(fallback),
+    'default/explicit-medieval/unknown-culture all produce byte-identical output (neutrality)');
+
+  const r = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'roman' });
+  const r2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'roman' });
+  ok(r.culture === 'roman', 'roman profile resolves');
+  ok(UME.hashModel(r) === UME.hashModel(r2), 'roman generation deterministic');
+  ok(r.parcels.length > 150 && r.buildings.length > 150, `roman colonia is a substantial town (${r.parcels.length} parcels)`);
+
+  // grid regularity: street segments are overwhelmingly axis-aligned (cardinal orientation, M-ROM-6)
+  // vs. the medieval pack's organic, all-angle tangle — a testable statistical signature
+  const orientationShare = (m) => {
+    let axis = 0, total = 0;
+    for (const e of m.graph.edges) {
+      const a = m.graph.nodes[e.a], b = m.graph.nodes[e.b];
+      const len = Math.hypot(b.x - a.x, b.y - a.y); if (len < 3) continue;
+      let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x)) * 180 / Math.PI; ang = ang % 90;
+      const dev = Math.min(ang, 90 - ang);
+      total++; if (dev < 4) axis++;
+    }
+    return axis / total;
+  };
+  const med = UME.generate(12345, { epochs: 8, pop: 6000, walls: true });
+  const romanAxisShare = orientationShare(r), medAxisShare = orientationShare(med);
+  ok(romanAxisShare > 0.85, `roman grid is overwhelmingly axis-aligned (${(romanAxisShare * 100).toFixed(0)}%, M-ROM-1/6)`);
+  ok(romanAxisShare > medAxisShare + 0.3, `roman grid is far more axis-aligned than the organic medieval pack (${(romanAxisShare * 100).toFixed(0)}% vs ${(medAxisShare * 100).toFixed(0)}%)`);
+
+  // forum at the cardo/decumanus maximus crossing (M-ROM-4): two primary edges pass close to it
+  let nearPrimary = 0;
+  for (const e of r.graph.edges) { if (e.cls !== 'primary') continue;
+    const a = r.graph.nodes[e.a], b = r.graph.nodes[e.b];
+    if (T.distPtSeg(r.anchors.market, a, b) < 12) nearPrimary++; }
+  ok(nearPrimary >= 2, `forum sits at the cardo/decumanus maximus crossing (${nearPrimary} primaries within 12 m, M-ROM-4)`);
+
+  // no bastioned trace for the castrum scheme, even when a star fort is requested (anachronistic
+  // pre-gunpowder-era, M-FOR-4) — it keeps a plain curtain with castrum gate names instead
+  const rf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'roman' });
+  ok(!rf.fortified && rf.wall.style === 'curtain', 'roman profile never gets a bastioned trace, even when requested');
+  const namedGates = rf.wall.gates.filter(g => g.name && /^Porta /.test(g.name));
+  ok(namedGates.length >= 1, `castrum gate scheme names land gates (${namedGates.map(g => g.name).join(', ')}, M-ROM-5)`);
+
+  // domus/insula building grammar distinct from medieval burgage grammar (M-ROM-3)
+  const romanKinds = new Set(r.buildings.map(b => b.kind));
+  ok([...romanKinds].some(k => k === 'insula block' || k === 'atrium range'), 'roman buildings use the domus/insula grammar');
+  ok(![...romanKinds].some(k => k === 'main' || k === 'outbuilding'), 'roman buildings do not use the medieval burgage grammar');
+
+  // markets/civic/faith defaults (docs/07 §3)
+  ok(r.markets.length === 0, 'roman profile has no specialised market squares (forum/macellum substitutes, M-AMEN-1 gated off)');
+  ok(r.civic && r.civic.name === 'Basilica', 'roman civic hall defaults to a basilica');
+  ok(r.churches.length >= 1 && r.churches.every(c => c.faith === 'temple'), 'roman worship rite defaults to the classical temple');
+
+  // robustness across site kinds (no crash, substantial town, deterministic)
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const rs = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'roman', site });
+    const rs2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'roman', site });
+    ok(rs.parcels.length > 100 && UME.hashModel(rs) === UME.hashModel(rs2), `roman colonia on '${site}' site: substantial + deterministic (${rs.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

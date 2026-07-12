@@ -122,6 +122,7 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'mosque-town', set: { siteKind: 'coast', pop: '7000', fortified: false, walls: true, faith: 'mosque', harbourDefence: 'chain', civicStyle: 'auto' } },
     { name: 'landlocked', set: { siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'church', civicStyle: 'auto' } },
     { name: 'hamlet', set: { siteKind: 'landlocked', pop: '400', fortified: false, walls: false, faith: 'none' } },
+    { name: 'roman-colonia', set: { culture: 'roman', siteKind: 'river', pop: '8000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
@@ -131,12 +132,15 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     await page.waitForFunction(() => window.__UM_MODEL, { timeout: 60000 });
     const info = await page.evaluate(() => {
       const m = window.__UM_MODEL;
-      return { site: m.site.kind, markets: (m.markets || []).length, civic: !!m.civic,
-        harbourDef: m.harbour && m.harbour.defence ? m.harbour.defence.type : null };
+      return { site: m.site.kind, culture: m.culture, markets: (m.markets || []).length, civic: !!m.civic,
+        harbourDef: m.harbour && m.harbour.defence ? m.harbour.defence.type : null,
+        gates: m.wall.gates.map(g => g.name || (g.water ? 'water' : '?')) };
     });
     console.log('SCENARIO ' + sc.name + ' ' + JSON.stringify(info));
     await page.screenshot({ path: path.join(outDir, `town-${sc.name}.png`) });
   }
+  // reset the culture selector back to medieval so it doesn't leak into any later manual use
+  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; });
 
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);
