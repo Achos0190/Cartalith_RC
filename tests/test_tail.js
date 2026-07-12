@@ -2215,6 +2215,14 @@ if (typeof applyTidalSedimentation === 'function') {
   /* determinism */
   const rp3 = buildResourcePotentials(lith, bt, shear, flow, biome, fld, rain, age, W, H, sea);
   check('resource potentials deterministic', keys.every(k => rp[k].every((v, i) => v === rp3[k][i])));
+  /* v0.86: geological potential is computed over the FULL map, not just exposed land. A submerged cell
+     (fld<sea) sitting on the subduction margin still carries copper — resources no longer blank out under
+     water or shift with the sea slider. */
+  const fldSub = new Float32Array(n); fldSub.set(fld);
+  for (let y = 0; y < H; y++) fldSub[y * W + 4] = 0.20;   // drop the copper (x=4) margin below sea=0.42
+  const rpSub = buildResourcePotentials(lith, bt, shear, flow, biome, fldSub, rain, age, W, H, sea);
+  check('v0.86: submerged subduction margin still carries copper (full-map geology)', rpSub.copper[10 * W + 4] > 0);
+  check('v0.86: geological copper is sea-level-independent (submerging a cell does not change its bedrock potential)', Math.abs(rpSub.copper[10 * W + 4] - rp.copper[10 * W + 4]) < 1e-6);
 
   /* buildCarryingCapacity */
   const noFld = new Float32Array(n).fill(0.30);   // ocean cells

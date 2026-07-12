@@ -12,6 +12,80 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.87 (2026-07-11)
+**Two owner-reported UI items.** No engine changes; render battery **ALL IDENTICAL to v0.86**, headless
+**911** unchanged, Playwright UI smoke **111 → 113**.
+- **LOD/atlas viewport regression (fix).** In LOD/atlas mode the CSS transform is identity (LOD does its
+  own in-canvas zoom/pan), which left the `#view` canvas at its intrinsic GW×GH size — a small tile in a
+  big viewport (owner: "the viewport restricts again to the initial World px size instead of full screen").
+  Added `_lodFitCanvas()`: when `_lodOn`, letterbox-fit the canvas element to the `.canvas-wrap` content box
+  (fills the viewport, preserves aspect); cleared back to intrinsic + the `viewT` CSS-transform path when LOD
+  is off. Transparent to LOD input — `evtToGrid` and the LOD pan capture both read `view.getBoundingClientRect()`,
+  so a larger on-screen canvas needs no mapping change. Called from `applyView()` and on window resize.
+  Display-only ⇒ render bit-identical (probe: LOD canvas 514×330 → 920×589 in a 956×804 wrap).
+- **Import + Export consolidated into one "File ▾" header menu (owner request).** The two `.dropdown-wrap`
+  containers (Import ▾ / Export ▾) merged into a single `#fileMenu` with an **Import** section (the five
+  action buttons) and an **Export** section (the image/project form). Every element id is unchanged
+  (loadBtn/inferTectBtn/loadZipBtn/packBtn/atlasImportBtn + bakeRes/bakeTiles/chanAtlasChk/embedAtlasChk/
+  exportBtn/bakeProgRow) so all wiring is untouched. Close behavior preserved per-section: the single-shot
+  Import rows (and Export .zip) close the menu on click; clicks inside the Export form don't (so ticking a
+  checkbox doesn't dismiss it). CSS `#exportMenu` rules retargeted to `#fileMenu` (incl. the v0.86 mobile
+  viewport-pin). +2 smoke assertions (both sections present; form-click keeps it open).
+
+### v0.86 (2026-07-11)
+**Seven owner-reported fixes/additions** — UI/UX bug-fixes plus two new header utilities. No engine
+(block 1) simulation changes at defaults; render battery **ALL IDENTICAL to v0.85**, headless **909 →
+911**, Playwright UI smoke **103 → 111**.
+- **Climate redraw regression (fix).** "Simulate weather" (and any climate recompute) rewrites
+  `rainField`/`tempField`/`koppenField` but does NOT bump `_fieldGen`, and the render bake-cache key
+  (`_civBakeKey`) plus the LOD render key (`_lodRenderKey`) only keyed on `_fieldGen`/`state.viz`/… — so
+  the cached bitmap was reused and the map only refreshed when an *unrelated* `state.viz` change (e.g.
+  Min stream order) happened to change the key. Added a monotonic **`_climGen`** counter, bumped in
+  `computeTemperature`/`simulateWeather`/`applyClimateMoistureCorrectors`/`applyOceanCurrents` (and via
+  the internal weather calls, `computeSeasons`), and included it in both cache keys. Same climate ⇒ same
+  key ⇒ bit-identity preserved (verified).
+- **Mobile: can't return to the map from Assets (fix).** The only exit was a phase tab, which on mobile
+  lives inside the off-canvas sidebar drawer — no visible control in Assets mode. The header 🎨 button is
+  now a proper **toggle** (relabels to "← Map", marked `.on`) with an explicit `_carExitAssetsMode`;
+  always visible on every screen size. The phase-tab route out still works and keeps the button in sync.
+- **Mobile: Export dropdown clipped (fix).** The 300px header dropdown anchored `right:0` pushed ~10px
+  off the left edge on a ~390px screen. On `max-width:860px` the `.dropdown-wrap .dropdown` menus now pin
+  to the VIEWPORT (`left:8px;right:8px`, height-capped, own scroll). Scoped to header dropdown-wraps, so
+  the on-canvas Layers popover is untouched.
+- **Debug-layer legends + popover scroll containment.** Audited all 31 Layers-popover views — every one
+  already renders a non-empty, visible legend (now locked by a smoke assertion). Real fix: the popover
+  lives inside `.canvas-wrap`, whose wheel handler `preventDefault()`s to zoom the map — so scrolling the
+  layer list zoomed the map underneath. Added a `stopPropagation` wheel guard on the popover; native list
+  scroll runs, the map no longer zooms.
+- **Credits & academic-principles menu (new).** A header **ⓘ** button opens a scrim-backed modal with
+  three sections: programming/code sources studied (studied-not-copied — LanLou123, SebLague, weigert,
+  RiverBuilder, Premože & Ashikhmin, the V1.915 editor), academic principles in terrain/tectonics/climate
+  (plate tectonics, flexure/isostasy, Braun & Willett stream power, Strahler ordering, Leopold & Maddock
+  hydraulic geometry, Mei et al. velocity erosion, Köppen–Geiger), and civilization/population (NPP
+  carrying capacity, Christaller/Lösch central places, Brandes betweenness + Albert–Jeong–Barabási
+  robustness, Zipf/Ravenstein gravity migration, Verhulst logistic growth, Benedictow/Cline/Wickham
+  collapse). Escape / backdrop / ✕ close it. Static reference text — no state.
+- **Light theme switch (new, ported from Cartalith V1.915).** V1.915's editor had an Auto/Dark/AMOLED/
+  **Light** theme selector; Gen1 was dark-only. Added a header **☀/🌙 toggle** that sets
+  `:root[data-theme="light"]` (parchment palette overriding the 10 base palette vars) and persists to
+  `localStorage['cartalith_theme']`. Restyles UI chrome + the map-viewport matte only — the MAP canvas is
+  JS-drawn (`surfaceColor`/`hypso` ramps), so switching themes never touches a map pixel (bit-identity
+  intact). Stub gained `document.documentElement` + `removeAttribute` for headless coverage.
+- **Geological Resources layer: stale on sea change + exposed-land-only (fix).** Owner report: raising/
+  lowering the sea slider didn't update the Resources view, and it only mapped terrain above water. Two
+  causes: (1) the sea-level handler invalidated the water-body/biome caches (v0.70) but NOT the affordance/
+  civ derived caches, so `currentResourcePotentials()` (and its siblings — water access, soil, landforms,
+  fjords, carrying capacity, settlement suitability, pop density, wildlife) served a cached field built at
+  the old coastline. The handler now nulls the whole derived set — the SAME group generate()/computeFlow
+  clear — so each re-derives on its next view. (2) `buildResourcePotentials` skipped every submerged cell
+  (`if(fld[i]<sea) continue`), blanking resources under water and shifting the map as the sea moved.
+  Geological potential (porphyry copper at a subduction margin, orogenic gold on a transform fault, BIF in
+  a shield) is a property of the BEDROCK — present whether the cell is above or below sea level — so it's
+  now computed over the **full map**, sea-level-independent for the tectonic/lithologic resources (the
+  surface-formed evaporite/bog-iron branches keep a lowland term, clamped ≥0 so submerged cells read as
+  base level). +2 headless assertions (submerged margin still carries copper; bedrock copper unchanged by
+  submerging a cell). Default render is dbg='off' so resources aren't built there ⇒ bit-identity intact.
+
 ### v0.85 (2026-07-10)
 **Mechanistic collapse/recovery timeline simulator** (owner: "I think it should be possible to model how such
 a collapse would play out. What settlements fall first how people migrate etc… research the mathematics in

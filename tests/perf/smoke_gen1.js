@@ -531,9 +531,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   //      2-position phase switch ----
   R.tabCount = await page.$$eval('.tab', els => els.length);
   R.tabsOnly2 = await page.$$eval('.tab', els => JSON.stringify(els.map(e => e.dataset.tab)) === JSON.stringify(['generate','explore']));
-  await page.click('#exportMenuBtn');
+  await page.click('#fileMenuBtn');   // v0.87: Import+Export consolidated into one "File ▾" menu
   await page.waitForTimeout(150);
-  R.exportMenuOpen = await page.$eval('#exportMenu', el => el.classList.contains('open'));
+  R.fileMenuOpen = await page.$eval('#fileMenu', el => el.classList.contains('open'));
+  // Export section (form) present + Import actions present in the same menu; ticking a form checkbox
+  // keeps the menu open (only single-shot import/export buttons close it).
+  R.fileMenuHasBoth = await page.evaluate(() => {
+    const m = document.getElementById('fileMenu');
+    const hasImport = !!m.querySelector('#loadZipBtn') && !!m.querySelector('#packBtn');
+    const hasExport = !!m.querySelector('#exportBtn') && !!m.querySelector('#bakeRes');
+    const cb = m.querySelector('#bakeTiles'); cb.click();   // toggling a form control must NOT close the menu
+    const stillOpen = m.classList.contains('open'); cb.click();
+    return { hasImport, hasExport, stillOpenAfterFormClick: stillOpen };
+  });
   await page.click('#assetsHeaderBtn');
   await page.waitForTimeout(250);
   R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
@@ -689,6 +699,111 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { noPhantomZero, overwriteGuarded };
   });
 
+  // ---- v0.86: climate redraw, theme switch, credits modal, popover scroll containment ----
+  const canvasHash86 = () => page.evaluate(() => { const c = document.getElementById('view');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 2166136261;
+    for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = (h * 16777619) >>> 0; } return h; });
+  // climate redraw: "Simulate weather" must visibly repaint (v0.86 fix — _climGen keys the bake cache).
+  await page.evaluate(() => { state.debug = 'rain'; renderNow(); });
+  const rainH0 = await canvasHash86();
+  await page.evaluate(() => { state.climate.wIters = 2; document.getElementById('weatherBtn').click(); });
+  await page.waitForTimeout(2500);   // withBusy chain + RAF
+  const rainH1 = await canvasHash86();
+  R.climateRedraw = { changed: rainH0 !== rainH1 };
+  await page.evaluate(() => { state.debug = 'off'; renderNow(); });
+
+  // theme switch: toggles :root[data-theme], persists to localStorage, flips button label.
+  R.theme = await page.evaluate(() => {
+    const btn = document.getElementById('themeToggleBtn');
+    const start = document.documentElement.getAttribute('data-theme');
+    btn.click();
+    const afterAttr = document.documentElement.getAttribute('data-theme');
+    const afterBg = getComputedStyle(document.body).backgroundColor;
+    const stored = (() => { try { return localStorage.getItem('cartalith_theme'); } catch (_) { return null; } })();
+    btn.click();
+    const backAttr = document.documentElement.getAttribute('data-theme');
+    return { startDark: start !== 'light', wentLight: afterAttr === 'light', bgLightened: afterBg, stored, backToDark: backAttr !== 'light' };
+  });
+
+  // credits modal: opens with the three principle sections + key citations, Escape closes.
+  await page.evaluate(() => document.getElementById('creditsBtn').click());
+  await page.waitForTimeout(80);
+  R.credits = await page.evaluate(() => { const m = document.getElementById('creditsModal');
+    return { open: m.classList.contains('open'), sections: m.querySelectorAll('h3').length,
+             hasStrahler: /Strahler/.test(m.textContent), hasGravity: /Zipf|Ravenstein/.test(m.textContent),
+             hasV1915: /V1\.915/.test(m.textContent) }; });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(80);
+  R.creditsClosed = await page.evaluate(() => !document.getElementById('creditsModal').classList.contains('open'));
+
+  // Layers popover wheel containment: a wheel event on the popover must NOT reach the canvas-wrap
+  // zoom handler (v0.86 fix — the popover lives inside .canvas-wrap whose wheel handler zooms the map).
+  R.popoverWheel = await page.evaluate(() => {
+    document.getElementById('layersBtn').click();
+    const pop = document.getElementById('layersPopover'), wrap = document.querySelector('.canvas-wrap');
+    let reachedWrap = false; const spy = () => { reachedWrap = true; };
+    wrap.addEventListener('wheel', spy, false);
+    pop.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    wrap.removeEventListener('wheel', spy, false);
+    document.getElementById('layersBtn').click();
+    return { containedFromMap: !reachedWrap };
+  });
+
+  // Assets header button is a toggle: enter shows the library + relabels to "← Map"; click again returns.
+  R.assetsToggle = await page.evaluate(() => {
+    const btn = document.getElementById('assetsHeaderBtn');
+    btn.click();
+    const inAssets = getComputedStyle(document.getElementById('assetLibrary')).display !== 'none' && /Map/.test(btn.textContent);
+    btn.click();
+    const back = getComputedStyle(document.querySelector('.canvas-wrap')).display !== 'none' && /Assets/.test(btn.textContent);
+    return { inAssets, back };
+  });
+
+  // v0.86: geological Resources layer is full-map (computed below sea too) and re-derives on a sea change
+  // (owner report: it was cached-stale + masked to exposed land only).
+  R.resources = await page.evaluate(() => {
+    const keys = ['copper','tin','iron','gold','salt','timber'];
+    const countBelowSea = () => { const rp = currentResourcePotentials(); let below = 0;
+      for (let i = 0; i < field.length; i++){ let best=0; for(const k of keys) if(rp[k][i]>best) best=rp[k][i];
+        if (best>0.01 && field[i]<state.seaLevel) below++; } return below; };
+    const belowAtDefault = countBelowSea();          // > 0 ⇒ full-map (was 0 when masked to exposed land)
+    const s = document.getElementById('sea'); const before = state.seaLevel;
+    s.value = Math.round((before + 0.15) * 100); s.dispatchEvent(new Event('input'));
+    const reDerivedAfterSeaMove = _resourcePots === null || state.seaLevel !== before;   // cache cleared on sea change
+    const belowAfterRaise = countBelowSea();
+    s.value = Math.round(before * 100); s.dispatchEvent(new Event('input'));   // restore
+    return { fullMap: belowAtDefault > 0, reDerivedAfterSeaMove, persistsUnderRaisedSea: belowAfterRaise > 0 };
+  });
+
+  // every Layers-popover view has a non-empty, visible legend (v0.86: locked as a guarantee).
+  R.allLegends = await page.evaluate(async () => {
+    const keys = LAYER_GROUPS.flatMap(g => g[1].map(x => x[0]));
+    let bad = 0;
+    for (const k of keys) { const b = document.querySelector('#debugSeg button[data-d="' + k + '"]');
+      if (!b) { bad++; continue; } b.click(); await new Promise(r => setTimeout(r, 40));
+      const el = document.getElementById('legend'); const cs = getComputedStyle(el);
+      if (cs.display === 'none' || (el.innerHTML || '').length < 5) bad++; }
+    const st = document.querySelector('#debugSeg button[data-d="off"]'); if (st) st.click();
+    return { total: keys.length, bad };
+  });
+
+  // v0.87: entering LOD/atlas mode fills the viewport (letterboxed) instead of shrinking the canvas to its
+  // intrinsic GW×GH size; exiting restores the intrinsic size (owner report: "viewport restricts to the
+  // initial World px size instead of full screen").
+  R.lodViewport = await page.evaluate(() => {
+    const view = document.getElementById('view'), wrap = document.querySelector('.canvas-wrap');
+    const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
+    const wrapA = area(wrap);
+    const intrinsicA = area(view);                                  // non-LOD, scale 1 ⇒ small
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
+    const lodA = area(view);                                        // should fill most of the wrap
+    const filled = lodA > intrinsicA * 2 && lodA > wrapA * 0.5;     // clearly enlarged, majority of viewport
+    _lodOn = false; if (lc) lc.checked = false; applyView(); renderNow();
+    const restoredA = area(view);                                   // back to intrinsic (inline size cleared)
+    return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -779,7 +894,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
   A('typing "B" in a text field does not trigger the hotkey', R.debugUnchangedWhileTyping === true);
   A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
-  A('Export ▾ header dropdown opens', R.exportMenuOpen === true);
+  A('v0.87: consolidated File ▾ dropdown opens with both Import and Export sections', R.fileMenuOpen === true && R.fileMenuHasBoth.hasImport && R.fileMenuHasBoth.hasExport);
+  A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
+  A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
   A('v0.85 collapse: proximity graph + betweenness identify the hub as most central', R.collapseSim.hubMaxBtw);
@@ -799,6 +916,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.85 fix: saturated-destination overflow re-flows while system headroom remains (doc §5)', R.collapseSim.overflowReflows);
   A('v0.85 fix: empty-timeline simulation conjures no phantom year-0 era', R.collapseSimUI2.noPhantomZero);
   A('v0.85 fix: overwriting authored timeline years is confirm-guarded (dismiss aborts)', R.collapseSimUI2.overwriteGuarded);
+  A('v0.86: "Simulate weather" repaints the map (climate bake-cache keyed on _climGen)', R.climateRedraw.changed);
+  A('v0.86: theme switch flips :root[data-theme]=light, persists, and toggles back to dark', R.theme.wentLight && R.theme.stored === 'light' && R.theme.backToDark && R.theme.startDark);
+  A('v0.86: credits modal opens (3 principle sections + Strahler/gravity/V1.915 citations)', R.credits.open && R.credits.sections === 3 && R.credits.hasStrahler && R.credits.hasGravity && R.credits.hasV1915);
+  A('v0.86: credits modal closes on Escape', R.creditsClosed);
+  A('v0.86: Layers-popover wheel does not reach the canvas-wrap map-zoom handler', R.popoverWheel.containedFromMap);
+  A('v0.86: Assets header button toggles into the library ("← Map") and back to the canvas', R.assetsToggle.inAssets && R.assetsToggle.back);
+  A('v0.86: every Layers-popover view has a visible, non-empty legend', R.allLegends.total > 25 && R.allLegends.bad === 0);
+  A('v0.86: geological Resources layer is full-map (present below sea) and re-derives on a sea-level change', R.resources.fullMap && R.resources.reDerivedAfterSeaMove && R.resources.persistsUnderRaisedSea);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

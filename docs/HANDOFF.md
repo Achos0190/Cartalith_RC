@@ -9,10 +9,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.85.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.87.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.86 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.84` are kept and never edited.
+  (v0.88 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.86` are kept and never edited.
+- **v0.87 — two owner-reported UI items** (no engine changes; render battery ALL IDENTICAL to v0.86,
+  headless **911** unchanged, smoke **111 → 113**): (1) **LOD/atlas viewport regression** — in LOD mode the
+  CSS transform is identity, so the canvas sat at its intrinsic GW×GH size (small tile in a big viewport).
+  New `_lodFitCanvas()` letterbox-fits the `#view` element to the `.canvas-wrap` content box while `_lodOn`
+  (cleared on exit); transparent to LOD input since `evtToGrid`/LOD-pan read `getBoundingClientRect()`;
+  called from `applyView()` + window resize. (2) **Import + Export merged into one "File ▾" header menu**
+  (`#fileMenu`, Import section + Export form) — all element ids unchanged so wiring is untouched; the
+  `#exportMenu` CSS retargeted to `#fileMenu`; single-shot Import rows + Export .zip close the menu, form
+  clicks don't.
+- **v0.86 — seven owner-reported fixes/additions** (no engine-simulation changes; render battery ALL
+  IDENTICAL to v0.85, headless **909 → 911**, smoke **103 → 111**): (1) **climate redraw** — added a
+  `_climGen` counter (bumped by the climate field-writers) to `_civBakeKey`/`_lodRenderKey`, so "Simulate
+  weather" repaints instead of serving a stale bitmap; (2) **mobile Assets exit** — the header 🎨 button is
+  now a toggle ("← Map", `_carExitAssetsMode`), always visible; (3) **mobile Export dropdown** — pinned to
+  the viewport at ≤860px so it no longer clips off-screen; (4) **Layers-popover scroll** — `stopPropagation`
+  on the popover's wheel so scrolling the list no longer zooms the map under it (all 31 views already have
+  legends — now smoke-locked); (5) **Credits & academic-principles modal** (header ⓘ) — code sources
+  studied + the tectonics/climate/civ academic principles, all cited; (6) **Light theme switch** (header
+  ☀/🌙, ported from V1.915's Light theme) via `:root[data-theme="light"]` + localStorage, UI-chrome only so
+  the map canvas is untouched; (7) **geological Resources layer** — the sea-level handler now invalidates
+  the whole affordance/civ derived-cache set (was stale on sea change), and `buildResourcePotentials`
+  computes over the **full map** (bedrock potential exists below sea too) instead of masking to exposed
+  land. Bit-identity preserved throughout (all changes are UI/off-default-render or debug-view-only).
 - **v0.85 — mechanistic collapse/recovery timeline simulator** (owner: "research the mathematics in regards
   to population mechanics (survival and migration rates…) and how to use this new function in regards to the
   timeline"). New `docs/research/collapse-timeline-dynamics.md` (network-robustness/gravity-migration/
