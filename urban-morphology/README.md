@@ -14,8 +14,15 @@ harness, keyed assumption register) are reused.
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands) | `tests/run.sh` (110 assertions) |
+| Headless suite (determinism, road validity, topology, statistical bands) | `tests/run.sh` (159 assertions) |
 | Browser driver (screenshots + inspector click-tests) | `tests/browser_check.js` |
+
+**Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
+`03-mathematical-assumptions.md` (keyed `M-*` register) · `04-architecture-proposal.md` ·
+**`05-settlement-evolution-and-function.md`** — the functional-geography companion: how
+harbours/centres/markets/administration/quarters/industry are *sited*, and in what order
+amenities switch on as population and connectivity grow (the spec for the next engine phase:
+emergent quarters & amenities).
 
 The v0.1 app generates a deterministic medieval-pack town from a seed: site (river crossing,
 bay harbour, or open coast) → anchors → least-cost primary routes over a slope/water cost
