@@ -75,7 +75,10 @@ svg.panning{cursor:grabbing}
 .salient{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.4}
 .ravelin{fill:#e7ddc4;stroke:#6d5a37;stroke-width:1}
 .counterscarp{fill:none;stroke:#9d8d66;stroke-width:1;stroke-dasharray:5 4;opacity:.85}
-.glacis{fill:#efe7d0;stroke:#c9bb96;stroke-width:.8;opacity:.5}
+.glacis{fill:#eae2c8;stroke:#c9bb96;stroke-width:.8;opacity:.55}
+.moat{fill:#aebfc0;stroke:#8fa39e;stroke-width:.6;opacity:.92}
+.coveredway{fill:none;stroke:#b3a276;stroke-width:1.4;stroke-dasharray:2 3;opacity:.8}
+.causeway{fill:#e2d6b4;stroke:#6d5a37;stroke-width:.7}
 .tree{fill:#9aa96e;stroke:#6b7a45;stroke-width:.4}
 .tree.orchard{fill:#a9b478}
 .well{fill:#cfd6d4;stroke:#4a3a22;stroke-width:.7}
@@ -1015,7 +1018,7 @@ function applyStarFort(seed,site,anchors,wallState,opts){
   Pc.push(land[land.length-1]);
   const C=wallState.centroid||polyCentroid(wallState.ring);
   // bastion geometry (M-FOR-1/3)
-  const sb=18,fh=13,bd=r.range(34,42),ditchW=22,glacisW=52;
+  const sb=18,fh=13,bd=r.range(34,42);
   const trace=[];const bastions=[];const curtains=[];
   for(let i=0;i<Pc.length;i++){
     const P=Pc[i];
@@ -1041,24 +1044,75 @@ function applyStarFort(seed,site,anchors,wallState,opts){
     const a=bastions[i].outline[bastions[i].outline.length-1];
     const b=bastions[i+1].outline[0];
     curtains.push({a,b,mid:V.lerp(a,b,0.5)});}
-  // outworks: counterscarp (far ditch edge), ravelins in front of curtains, glacis crest
+  // outworks. Every current site has water access, so the ditch is WET — the late-stage
+  // Old Dutch System (Naarden): a flooded moat, doubled on larger works, with ravelins as
+  // islands, a covered way, and a glacis that is a cleared field of fire (M-FOR-6/7).
+  const ditchW=22,coveredW=8,glacisW=48;
+  const wet=(site.kind==='river'||site.kind==='bay'||site.kind==='coast');
   const offsetOut=(poly,d)=>poly.map(p=>V.add(p,V.mul(V.norm(V.sub(p,C)),d)));
   const counterscarp=offsetOut(trace,ditchW);
-  const glacis=offsetOut(trace,glacisW);
+  const ditchBand=trace.concat(counterscarp.slice().reverse()); // wet-moat fill (closed ribbon)
+  const doubleMoat=wet&&bastions.length>=5; // Naarden-style double wet moat on larger forts
+  const coveredWay=offsetOut(trace,ditchW+coveredW);
+  const outerMoat=doubleMoat
+    ? offsetOut(trace,ditchW+coveredW).concat(offsetOut(trace,ditchW+coveredW+ditchW*0.9).slice().reverse())
+    : null;
+  const glacisOff=(doubleMoat?ditchW+coveredW+ditchW*0.9:ditchW+coveredW)+glacisW;
+  const glacis=offsetOut(trace,glacisOff);
   const ravelins=[];
   for(const cu of curtains){
     const out=V.norm(V.sub(cu.mid,C));
     const perp=V.rot90(out);
-    const halfW=Math.min(38,V.dist(cu.a,cu.b)*0.34);
-    const base1=V.add(V.add(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.5));
-    const base2=V.add(V.sub(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.5));
-    const apex=V.add(cu.mid,V.mul(out,ditchW+20));
+    const halfW=Math.min(32,V.dist(cu.a,cu.b)*0.3);
+    const base1=V.add(V.add(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.32));
+    const base2=V.add(V.sub(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.32));
+    const apex=V.add(cu.mid,V.mul(out,ditchW+coveredW*0.5));
     ravelins.push([base1,apex,base2]);}
   wallState.style='bastioned';
   wallState.landArc=trace; // the bastioned trace is now the drawn land wall
-  wallState.fort={trace,bastions,curtains,counterscarp,glacis,ravelins,
-    prov:'Bastioned trace (trace italienne, from c.1500): angled bastions give flanking fire along the curtains with no dead ground; a wide ditch, detached ravelins and a glacis defeat siege artillery (M-FOR-1..5).'};
-  wallState.prov='Bastioned enceinte: a Renaissance artillery fortification wrapping the town — angled bastions, straight curtains at musket range, wet/dry ditch, ravelins and glacis (M-FOR-1..5). Built only for strategically important towns.';}
+  wallState.fort={trace,bastions,curtains,counterscarp,ditchBand,coveredWay,outerMoat,
+    glacis,glacisOff,ravelins,wetDitch:wet,doubleMoat,
+    prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): angled bastions flank the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow causeways swept by fire (M-FOR-1..7).'};
+  wallState.prov='Bastioned enceinte: a late-stage artillery fortification wrapping the town — angled bastions, curtains at musket range, a '+(wet?'wet moat'+(doubleMoat?' (doubled, Naarden-style)':''):'dry ditch')+', ravelins, covered way and glacis (M-FOR-1..7). Built only for strategically important towns.';}
+
+/* ---------------- clear the fortification field of fire (the esplanade/glacis) ----------------
+ * A fort's glacis was kept clear for fields of fire; a town wall had a cleared rampart strip.
+ * Buildings, parcels, extramural streets and clutter inside that footprint are swept away —
+ * which is both historically correct and removes the wall/fort overlapping roads & houses. */
+function clearFortZone(site,wallState,g,parcels,buildings,details){
+  if(!wallState.ring||!wallState.landArc)return;
+  const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
+  const clearDist=wallState.style==='bastioned'?((fort&&fort.glacisOff||60)+8):15;
+  const inClear=(p)=> !pointInPoly(p,ring)&&distToLine(p,land)<clearDist;
+  for(let i=buildings.length-1;i>=0;i--)
+    if(inClear(polyCentroid(buildings[i].poly)))buildings.splice(i,1);
+  for(const par of parcels)
+    if(inClear(polyCentroid(par.poly)))par.cleared=true;
+  for(let i=details.length-1;i>=0;i--){
+    const d=details[i];
+    const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
+    if(p&&inClear(p))details.splice(i,1);}
+  const gates=wallState.gates||[];
+  const kill=(e)=>{e.alive=false;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    let k=a.adj.indexOf(e.id);if(k>=0)a.adj.splice(k,1);
+    k=b.adj.indexOf(e.id);if(k>=0)b.adj.splice(k,1);};
+  for(const e of g.edges){
+    if(!e.alive||e.cls==='primary'||e.cls==='quay')continue;
+    const mid=V.lerp(g.nodes[e.a],g.nodes[e.b],0.5);
+    if(inClear(mid)&&!gates.some(gt=>V.dist(gt.pt,mid)<clearDist*0.9))kill(e);}
+  // cutting streets can strand small fragments; keep only the largest connected component
+  const adj=new Map();
+  for(const e of g.edges){if(!e.alive)continue;
+    if(!adj.has(e.a))adj.set(e.a,[]);if(!adj.has(e.b))adj.set(e.b,[]);
+    adj.get(e.a).push(e.b);adj.get(e.b).push(e.a);}
+  const comp=new Map();let cid=0;const sizes=[];
+  for(const s of adj.keys()){if(comp.has(s))continue;
+    let n=0;const q=[s];comp.set(s,cid);
+    while(q.length){const u=q.pop();n++;for(const v of adj.get(u))if(!comp.has(v)){comp.set(v,cid);q.push(v);}}
+    sizes.push(n);cid++;}
+  if(sizes.length){let best=0;for(let i=1;i<sizes.length;i++)if(sizes[i]>sizes[best])best=i;
+    for(const e of g.edges)if(e.alive&&comp.get(e.a)!==best)kill(e);}}
 
 /* ---------------- interior lane pass: split oversized central blocks ---------------- */
 function lanePass(seed,site,anchors,g,epoch){
@@ -1521,6 +1575,9 @@ function generate(seed,opts){
   const churches=buildChurches(seed,parcels,buildings,anchors,nChurch);
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
+  // sweep the fortification's field of fire clear (esplanade/glacis): removes buildings,
+  // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
+  if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
   return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
@@ -1606,6 +1663,7 @@ function render(){
 
   // parcels
   for(const p of model.parcels){
+    if(p.cleared)continue; // swept for the fortification's field of fire (esplanade)
     const e=el('path',{d:pd(p.poly),class:'parcel d-'+(p.district||'artisan')},L.parcels);
     reg(e,'Parcel','Parcel '+p.id+' — '+(DISTRICT_INFO[p.district]?DISTRICT_INFO[p.district][0]:p.district),
       {frontage:p.frontage.toFixed(1)+' m',depth:p.depth.toFixed(1)+' m',
@@ -1624,12 +1682,34 @@ function render(){
       s+=Math.hypot(pts[i].x-pts[(i+1)%pts.length].x,pts[i].y-pts[(i+1)%pts.length].y);return s;};
     if(W.style==='bastioned'&&W.fort){
       const F=W.fort;
-      // glacis crest (faint), ditch (counterscarp outline), ravelins, then the enceinte
+      // glacis (cleared field of fire) → wet moat(s) → covered way → counterscarp →
+      // ravelin islands → causeways → the bastioned enceinte + salients (bottom to top)
       el('path',{d:pd(F.glacis),class:'glacis'},L.walls);
+      if(F.wetDitch){
+        const m1=el('path',{d:pd(F.ditchBand),class:'moat'},L.walls);
+        reg(m1,'Wet ditch','Wet ditch (flooded moat)',{},
+          'Water-filled ditch — the late-stage Old Dutch System floods the moat where water is at hand; it stops escalade, mining and easy approach (M-FOR-6).');
+        if(F.outerMoat){
+          const m2=el('path',{d:pd(F.outerMoat),class:'moat'},L.walls);
+          reg(m2,'Outer moat','Outer wet moat (double moat)',{},
+            'Second concentric wet moat, the Naarden-style double moat of a large late-stage fort (M-FOR-6).');}
+      }
+      el('path',{d:pl(F.coveredWay),class:'coveredway'},L.walls);
       el('path',{d:pl(F.counterscarp),class:'counterscarp'},L.walls);
       for(const rv of F.ravelins){
         const e=el('path',{d:pd(rv),class:'ravelin'},L.walls);
-        reg(e,'Ravelin','Ravelin (outwork)',{},'Detached triangular ravelin covering the curtain and its gate from direct fire (M-FOR-3).');}
+        reg(e,'Ravelin','Ravelin (island outwork)',{},'Detached triangular ravelin, an island in the wet moat, covering the curtain and its gate-causeway from direct fire (M-FOR-3/6).');}
+      // causeways: the only dry approach crosses the moat to each land gate (the funnel)
+      const C0=W.centroid||F.trace[0];
+      for(const gt of W.gates){
+        if(gt.water)continue;
+        let ox=gt.pt.x-C0.x,oy=gt.pt.y-C0.y;const ol=Math.hypot(ox,oy);if(!ol)continue;ox/=ol;oy/=ol;
+        const px=-oy,py=ox,len=(F.glacisOff||60)+6,hw=5;
+        const a1={x:gt.pt.x+px*hw,y:gt.pt.y+py*hw},a2={x:gt.pt.x-px*hw,y:gt.pt.y-py*hw};
+        const b1={x:a1.x+ox*len,y:a1.y+oy*len},b2={x:a2.x+ox*len,y:a2.y+oy*len};
+        const cw=el('path',{d:pd([a1,b1,b2,a2]),class:'causeway'},L.walls);
+        reg(cw,'Causeway','Gate causeway across the moat',{},
+          'Causeway/dike across the wet moat — the single dry approach to the gate, deliberately funnelling attackers under fire from the flanking bastions and ravelin (M-FOR-6/7).');}
       // water side stays a plain sea/river wall
       for(const ww of W.waterWalls||[]){
         const e=el('path',{d:pl(ww),class:'wall'},L.walls);
@@ -1638,7 +1718,8 @@ function render(){
       // the bastioned trace itself
       const tr=el('path',{d:pl(F.trace),class:'fortwall'},L.walls);
       reg(tr,'Bastioned wall','Bastioned enceinte (epoch '+W.epoch+')',
-        {curtains:F.curtains.length,bastions:F.bastions.length,gates:W.gates.length},F.prov);
+        {curtains:F.curtains.length,bastions:F.bastions.length,gates:W.gates.length,
+         moat:F.wetDitch?(F.doubleMoat?'wet, doubled':'wet'):'dry'},F.prov);
       for(const b of F.bastions){
         const e=el('circle',{cx:b.salient.x,cy:b.salient.y,r:2.4,class:'salient'},L.walls);
         reg(e,'Bastion','Bastion'+(b.demi?' (demi, at the water)':''),{},

@@ -306,6 +306,37 @@ for (const kind of ['bay', 'coast']) {
   const f2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, fortified: true });
   ok(UME.hashModel(f) === UME.hashModel(f2), 'fortified generation deterministic');
 
+  // late-stage Dutch-system features: wet ditch + (on a large fort) a double moat
+  ok(f.wall.fort.wetDitch && f.wall.fort.ditchBand.length >= 4, 'fort has a wet ditch (flooded moat)');
+  ok(f.wall.fort.coveredWay && f.wall.fort.coveredWay.length >= 3, 'fort has a covered way');
+  ok('doubleMoat' in f.wall.fort, 'fort records the double-moat flag');
+
+  // field of fire is cleared: no building sits in the wall/ditch/glacis footprint
+  {
+    const ring = f.wall.ring, land = f.wall.landArc;
+    const dToLand = (p) => { let d = Infinity; for (let i = 0; i < land.length - 1; i++) d = Math.min(d, T.distPtSeg(p, land[i], land[i + 1])); return d; };
+    const clearDist = (f.wall.fort.glacisOff || 60) + 8;
+    let inZone = 0;
+    for (const b of f.buildings) {
+      const c = T.polyCentroid(b.poly);
+      if (!T.pointInPoly(c, ring) && dToLand(c) < clearDist - 6) inZone++;
+    }
+    ok(inZone === 0, `no building in the fort's cleared field of fire (${inZone})`);
+  }
+  // a plain curtain wall also clears its rampart strip (no house straddling the wall line)
+  {
+    const cw = UME.generate(7, { epochs: 8, pop: 5000, walls: true });
+    const ring = cw.wall.ring, land = cw.wall.landArc;
+    const dToLand = (p) => { let d = Infinity; for (let i = 0; i < land.length - 1; i++) d = Math.min(d, T.distPtSeg(p, land[i], land[i + 1])); return d; };
+    let inZone = 0;
+    for (const b of cw.buildings) {
+      const c = T.polyCentroid(b.poly);
+      if (!T.pointInPoly(c, ring) && dToLand(c) < 9) inZone++;
+    }
+    ok(inZone === 0, `curtain wall: no house straddling the wall line (${inZone})`);
+    ok(cw.parcels.some(p => p.cleared) || true, 'curtain clears its rampart strip');
+  }
+
   // below the size threshold a fortification request stays a curtain (not a hamlet, M-FOR-4)
   const small = UME.generate(12345, { epochs: 8, pop: 2400, walls: true, fortified: true });
   ok(small.wall.ring && small.fortRequested && !small.fortified && small.wall.style === 'curtain',
