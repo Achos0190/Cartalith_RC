@@ -12,6 +12,58 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.89 (2026-07-12)
+**Owner report: "tiled LOD info-layers don't scale properly."** No engine simulation changes; render
+battery **ALL IDENTICAL to v0.88**, headless **917 → 923**, Playwright UI smoke **117 → 120**.
+- **Root cause.** `drawLODView()` only tiled `state.debug` ∈ {off, lith, soil, water} (v0.109's affordance
+  follow-up); every other debug/info layer (temperature, rainfall, Köppen, resources, wildlife, population
+  density, tectonics, wind/ocean, rivers, …  — ~26 views) fell through to `renderNow`'s full un-zoomed
+  GW×GH pixel loop while the canvas stayed CSS-sized/fitted for the current LOD zoom (`_lodFitCanvas`,
+  v0.87) — so switching to e.g. Temperature while zoomed in just stretched the *entire world* into the
+  zoomed viewport instead of showing the zoomed slice.
+- **Fix — every debug view now tiles.** `renderAffordanceTileRGBA` (the v0.109 lith/soil/water tile
+  colourizer) is generalized to cover all ~29 non-'off' `state.debug` values: each tile pixel samples the
+  live coarse field at its world coordinate (bilinear via `sampleArr`/`bilC` for continuous fields —
+  temperature, rainfall, stress, orogeny, geoid, tides, resources, carrying capacity, population
+  density, wind/ocean coarse grids, flow accumulation, wind velo…; nearest for categorical class/id arrays
+  — plate id, boundary type, lithology, landform, Cartalith biome/terrain, Köppen code, wildlife region id)
+  and applies the EXACT color formula the main map already uses for that view, so a tile at any zoom
+  reproduces what the main map would show for that slice. Relief-lit views (landform/fjord/wildlife/velo/
+  strahler "dim terrain") get a new `tileShade()` — the same hillshade math as `shadeFactor`, but computed
+  from the tile's own amplified local heightmap (like `renderBiomeTileRGBA`'s hillshade), so they stay
+  properly detailed at any zoom instead of using the coarse native-grid gradient. New `debugTileContext(dbg)`
+  builds whichever precomputed field(s) a view needs ONCE per `drawLODView()` call (not per tile), so
+  expensive derived fields (flow accumulation via `computeFlow(true)`, the wind/ocean coarse-grid solves)
+  are computed at the same frequency the main map already pays per render — no new perf cost.
+- **Vector overlays reproject too (owner: "everything, overlays included").** New `drawLODDebugOverlays(v,
+  dbg, ctx)` reprojects the main map's screen-space debug overlays onto the current LOD view rect: wind/
+  ocean current arrows, plate-drift arrows, the T1 boundary-graph polylines + junction nodes, Strahler
+  river splines (via the existing `traceRiverPolylines`/spline pipeline), and the settlement-suitability/
+  wildlife advisory markers. Line/glyph sizes scale with the view's zoom factor `zk=min(8,GW/span)` (capped
+  — past ~8× the underlying coarse fields have no more genuine detail, so growing glyphs further would just
+  clutter the view) so strokes stay proportionate to the terrain the way tile-baked features already do;
+  point markers use the same civIconScale-style "roughly constant on-screen size" convention. Off-view
+  elements are culled before any canvas work.
+- **Follow-on fixes found while generalizing the path.** The two `drawCivLayer`/civ-bake-cache gates that
+  windowed the settlement/way/territory overlay to match the *old* 4-value tiled set now simplify to a
+  plain `_lodOn` check (every debug view tiles now, so the civ layer always windows to match). The LOD
+  early-return was missing `updateLegend()` (pure `state.debug`→DOM, cheap) — pre-existing even for lith/
+  soil/water, far more noticeable now that every layer tiles; added alongside the existing `updateScaleBar()`.
+- **Known, unchanged limitation (not a regression).** Click-to-inspect for the Settlement and Wildlife
+  advisory markers stays gated to non-LOD (`!_lodOn`), exactly as before — `evtToGrid()` has no LOD-zoom
+  awareness (it maps a click as a fraction of the full GW×GH grid, ignoring `_lodZoom`/`_lodCx`/`_lodCy`),
+  so naively enabling the click handler would hit-test against the wrong world coordinates while zoomed.
+  The markers now render correctly at any LOD zoom; wiring their click-to-inspect popups to a LOD-aware
+  coordinate conversion is flagged as a follow-up, not attempted here.
+- Verification: extended `renderAffordanceTileRGBA`'s existing lith/soil/water headless test to loop over
+  all ~27 remaining `which` values (finite + opaque + deterministic), plus spot-checks against exact
+  main-map water-cell colours for koppen/landform/windthrow and a temp-has-no-water-branch parity check.
+  New smoke assertion drives 12 representative debug views while `_lodOn` and asserts `renderNow` never
+  reaches the full pixel loop (`PERF.counters.renderPixelLoop` unchanged), the reprojected overlays throw
+  no canvas errors, and the resulting tiles show real pixel variance (not a blank/solid stretch — the
+  visual symptom of the old bug). Browser-verified via screenshots: Temperature/Resources/Wind/Boundary-
+  type/Strahler all correctly zoomed with matching legends and properly-scaled overlays.
+
 ### v0.88 (2026-07-12)
 **Two owner-reported items: deep-zoom scale + one-button save/restore.** No engine simulation changes;
 render battery **ALL IDENTICAL to v0.87**, headless **911 → 917**, Playwright UI smoke **113 → 117**.

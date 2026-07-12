@@ -2636,6 +2636,37 @@ if (typeof renderAffordanceTileRGBA === 'function') {
     })());
     check('affordance tiles deterministic', (() => { const a = renderAffordanceTileRGBA(tile, W, H, bounds, 'soil'); for (let i = 0; i < a.length; i++) if (a[i] !== ws[i]) return false; return true; })());
   }
+
+  /* v0.89 (owner report: "tiled LOD info-layers don't scale properly" — root cause: drawLODView() only
+     tiled off/lith/soil/water, so every other debug view fell through to a whole-map un-zoomed render
+     while the canvas stayed sized/fitted for the current zoom). renderAffordanceTileRGBA now covers every
+     non-'off' state.debug value via debugTileContext(); exercise the full vocabulary here. */
+  if (typeof debugTileContext === 'function') {
+    const W = 8, H = 8, bounds = { x: 20, y: 20, w: 8, h: 8 }, tile = new Float32Array(W * H).fill(0.6);
+    tile[0] = state.seaLevel - 0.2;   // one water cell
+    const ALL_DEBUG = ['plates', 'bounds', 'btype', 'oro', 'stress', 'age', 'geoid', 'tides', 'cterrain',
+      'landform', 'fjord', 'bclass', 'rsrc', 'carry', 'settle', 'popdensity', 'wildlife', 'windthrow',
+      'flood', 'koppen', 'wind', 'ocean', 'temp', 'rain', 'flow', 'velo', 'strahler'];
+    let allOk = true, allDet = true;
+    for (const which of ALL_DEBUG) {
+      const out = renderAffordanceTileRGBA(tile, W, H, bounds, which, debugTileContext(which));
+      for (let i = 0; i < out.length; i++) { if (!Number.isFinite(out[i])) { allOk = false; break; } if (i % 4 === 3 && out[i] !== 255) { allOk = false; break; } }
+      const out2 = renderAffordanceTileRGBA(tile, W, H, bounds, which, debugTileContext(which));
+      for (let i = 0; i < out.length; i++) if (out[i] !== out2[i]) { allDet = false; break; }
+    }
+    check('every non-off debug view tile-renders finite + opaque (' + ALL_DEBUG.length + ' views)', allOk);
+    check('every non-off debug view tile-render is deterministic', allDet);
+    // spot-check a few exact water-cell colours against the main-map debug branches (renderNow dbg==='...')
+    const koppenOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'koppen', debugTileContext('koppen'));
+    check('koppen tile: water cell matches main-map debug colour', koppenOut[0] === 18 && koppenOut[1] === 34 && koppenOut[2] === 64);
+    const landformOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'landform', debugTileContext('landform'));
+    check('landform tile: water cell matches main-map debug colour', landformOut[0] === 20 && landformOut[1] === 26 && landformOut[2] === 40);
+    const windthrowOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'windthrow', debugTileContext('windthrow'));
+    check('windthrow tile: water cell matches main-map debug colour', windthrowOut[0] === 18 && windthrowOut[1] === 34 && windthrowOut[2] === 64);
+    // temp has no water branch in the main map either (tempColor applies uniformly) — confirm tile parity
+    const tempOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'temp', debugTileContext('temp'));
+    check('temp tile: water cell still colours by temperature (no water override, matches main map)', !(tempOut[0] === 18 && tempOut[1] === 34 && tempOut[2] === 64));
+  }
 }
 
 /* ---------- v0.110: debug-layer opacity + clickable settlement seed "why" ---------- */

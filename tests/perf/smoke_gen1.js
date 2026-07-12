@@ -830,6 +830,33 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { maxZoom, spanOut, spanIn, reachesFiveKm: spanIn <= 5, labelChanged: labelIn !== labelOut };
   });
 
+  // v0.89 (owner report: "tiled LOD info-layers don't scale properly" — every debug/info view except
+  // off/lith/soil/water fell through to a whole-map un-zoomed render while the canvas stayed sized/fitted
+  // for the current zoom). Precise regression check: while LOD is on, renderNow() must NEVER reach the
+  // full (non-tiled) pixel loop for ANY debug view — drawLODView() should early-return every time. Also
+  // exercises the reprojected vector overlays (wind/ocean arrows, plate drift, boundary graph, river
+  // splines, settle/wildlife markers) for canvas-API errors, and confirms a debug tile actually varies
+  // (isn't a blank/solid stretch, the visual symptom of the old bug).
+  R.lodInfoLayers = await page.evaluate(() => {
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 8;
+    const views = ['temp', 'rain', 'koppen', 'rsrc', 'wildlife', 'wind', 'ocean', 'btype', 'strahler', 'settle', 'plates', 'popdensity'];
+    const before = PERF.counters.renderPixelLoop;
+    const errors = [];
+    let variance = true;
+    for (const dbg of views) {
+      state.debug = dbg;
+      try { applyView(); renderNow(); } catch (e) { errors.push(dbg + ': ' + e.message); }
+      const id = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+      let mn = 255, mx = 0;
+      for (let i = 0; i < id.length; i += 4) { if (id[i] < mn) mn = id[i]; if (id[i] > mx) mx = id[i]; }
+      if (mx - mn < 2) variance = false;   // a blank/solid stretch would fail this
+    }
+    const after = PERF.counters.renderPixelLoop;
+    state.debug = 'off'; _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+    return { neverFullPixelLoop: after === before, errors, variance };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -926,6 +953,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.88: dedicated asset-pack import/export stays in the Assets Library menu', R.atlasStandaloneGone.packStillInAssetsLibrary === true);
   A('v0.88: LOD zoom cap reaches a ≤5km view span at the default 800km map width', R.lodZoomDeep.reachesFiveKm === true && R.lodZoomDeep.maxZoom >= 160);
   A('v0.88: scale bar reading shrinks as LOD zoom deepens (was frozen at the full map width)', R.lodZoomDeep.labelChanged === true && R.lodZoomDeep.spanIn < R.lodZoomDeep.spanOut);
+  A('v0.89: every info-layer stays tiled while LOD is on (renderNow never falls through to the full un-zoomed pixel loop)', R.lodInfoLayers.neverFullPixelLoop === true);
+  A('v0.89: LOD-zoomed info layers + their reprojected overlays render without errors', R.lodInfoLayers.errors.length === 0);
+  A('v0.89: LOD-zoomed info-layer tiles show real variance (not a blank/stretched solid fill)', R.lodInfoLayers.variance === true);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

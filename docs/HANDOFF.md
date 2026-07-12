@@ -9,10 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.88.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.89.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.89 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.87` are kept and never edited.
+  (v0.90 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.88` are kept and never edited.
+- **v0.89 — owner report: "tiled LOD info-layers don't scale properly"** (no engine changes; render
+  battery ALL IDENTICAL to v0.88, headless **917 → 923**, smoke **117 → 120**): root cause was
+  `drawLODView()` only tiling `state.debug` ∈ {off, lith, soil, water} — every other debug/info view
+  (~26 of them: temp/rain/koppen/resources/wildlife/popdensity/tectonics/wind/ocean/rivers/…) fell through
+  to the full un-zoomed `renderNow` pixel loop while the canvas stayed CSS-fitted for the current LOD zoom,
+  so switching to e.g. Temperature while zoomed just stretched the whole world into the zoomed box.
+  `renderAffordanceTileRGBA` is now generalized to cover every non-'off' debug value (samples the live
+  coarse field at world coords — bilinear for continuous, nearest for categorical — and applies the exact
+  main-map colour formula); new `debugTileContext(dbg)` builds precomputed fields once per render (not per
+  tile); new `tileShade()` gives relief-lit views a tile-local hillshade. Per the owner's explicit "yes,
+  overlays too": new `drawLODDebugOverlays()` reprojects wind/ocean arrows, plate-drift arrows, the T1
+  boundary graph, Strahler river splines, and settle/wildlife markers onto the current LOD view rect, with
+  zoom-scaled (capped at 8×) line/glyph sizes. Known non-regression: Settlement/Wildlife click-to-inspect
+  stays `!_lodOn`-gated (pre-existing — `evtToGrid()` has no LOD-zoom awareness); flagged as a follow-up.
 - **v0.88 — two owner-reported items** (no engine changes; render battery ALL IDENTICAL to v0.87,
   headless **911 → 917**, smoke **113 → 117**): (1) **LOD zoom capped too shallow** ("highest zoom stops
   at 20km, want 5km") — the ×64 zoom cap was fixed regardless of map width, and `updateScaleBar()` divided
@@ -371,7 +385,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (917 as of v0.88), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -395,6 +409,12 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Queued next (owner, 2026-07-12): settlement interface + Explore timeline rework.** The owner's own
+  words: "think about the settlement interface for generation and how in explore the timeline should
+  work. Currently it works, bit rather clunky. Editing a settlement should open a pop-up menu in the
+  viewscreen with the settlement properties and information." This is a design/UX pass, not a bug fix —
+  per the working rules ("confirm design before building"), start by exploring the current settlement
+  editor (pinned inspector, §4.7) and the Explore→Timeline UI, then propose a design before implementing.
 - The queued work tracked at the end of the pre-merge era (browser passes above) plus whatever
   the user asks next. Check `docs/ROADMAP.md` for the long arcs; recent `CHANGELOG.md` entries
   state per-feature follow-ups (e.g. cross-tile seam editing is the one genuinely open LOD item).
