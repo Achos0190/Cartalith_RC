@@ -19,10 +19,12 @@ harness, keyed assumption register) are reused.
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
 `03-mathematical-assumptions.md` (keyed `M-*` register) · `04-architecture-proposal.md` ·
-**`05-settlement-evolution-and-function.md`** — the functional-geography companion: how
+**`05-settlement-evolution-and-function.md`** — functional geography: how
 harbours/centres/markets/administration/quarters/industry are *sited*, and in what order
-amenities switch on as population and connectivity grow (the spec for the next engine phase:
-emergent quarters & amenities).
+amenities switch on as population and connectivity grow ·
+**`06-cartalith-integration-map.md`** — maps the Cartalith Gen1 civ-layer settlement
+parameters (kind/pop/traits/specialisation/faction/civWays) onto this generator's inputs, with
+the gaps to close for a future refactor into the Cartalith line.
 
 The v0.1 app generates a deterministic medieval-pack town from a seed: site (river crossing,
 bay harbour, or open coast) → anchors → least-cost primary routes over a slope/water cost

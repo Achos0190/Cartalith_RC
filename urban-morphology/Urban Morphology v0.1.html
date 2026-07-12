@@ -1875,15 +1875,19 @@ function render(){
   const byCls={primary:[],street:[],lane:[],quay:[]};
   for(const e of model.graph.edges)(byCls[e.cls]||byCls.street).push(e);
   const N=model.graph.nodes;
-  for(const cls of ['lane','street','quay','primary']){
-    for(const e of byCls[cls]){
-      const a=N[e.a],b=N[e.b];
-      const case_=el('path',{d:pl([a,b]),class:'roadcase','stroke-width':(e.w+1.6)},L.roads);
-      const fill=el('path',{d:pl([a,b]),class:'roadfill'+(cls==='lane'?' lane':cls==='quay'?' quay':''),'stroke-width':e.w},L.roads);
+  // merge each class into continuous chains, then draw ALL casings (bottom) before ANY
+  // fills (top) — per-segment casing-then-fill was overdrawing each fill at the next joint,
+  // which produced the "loose segments" look; continuous strokes read as solid roads
+  const chainSets={};
+  for(const cls of ['primary','street','lane','quay'])chainSets[cls]=roadChains(byCls[cls],N);
+  for(const cls of ['lane','quay','street','primary'])
+    for(const ch of chainSets[cls])
+      el('path',{d:pl(ch.pts),class:'roadcase','stroke-width':(ch.w+1.6)},L.roads);
+  for(const cls of ['lane','quay','street','primary'])
+    for(const ch of chainSets[cls]){
+      const fill=el('path',{d:pl(ch.pts),class:'roadfill'+(cls==='lane'?' lane':cls==='quay'?' quay':''),'stroke-width':ch.w},L.roads);
       const label=cls==='primary'?'Primary road':cls==='quay'?'Quay':(cls==='lane'?'Back lane':'Street');
-      reg(fill,label,label+' (epoch '+e.epoch+')',
-        {width:e.w.toFixed(1)+' m',length:Math.hypot(a.x-b.x,a.y-b.y).toFixed(0)+' m'},e.prov);
-      case_.setAttribute('data-um',fill.getAttribute('data-um'));}}
+      reg(fill,label,label,{width:ch.w.toFixed(1)+' m',length:ch.len.toFixed(0)+' m'},ch.prov);}
   // bridges: draw a deck wherever a primary road crosses the river channel (one on a
   // river-crossing town; several where the river runs through the town)
   if(model.site.bridgePt||model.site.kind==='riverthrough'){
@@ -2002,6 +2006,29 @@ function distPtSegApp(pt,a,b){const abx=b.x-a.x,aby=b.y-a.y;const l2=abx*abx+aby
   if(l2<1e-9)return Math.hypot(pt.x-a.x,pt.y-a.y);
   let t=((pt.x-a.x)*abx+(pt.y-a.y)*aby)/l2;t=Math.max(0,Math.min(1,t));
   return Math.hypot(pt.x-(a.x+abx*t),pt.y-(a.y+aby*t));}
+// merge a class's edges into continuous chains (through degree-2 nodes) so roads render as
+// one solid stroke instead of a string of loose per-edge segments
+function roadChains(edges,N){
+  const adj=new Map();const add=(n,e)=>{let a=adj.get(n);if(!a){a=[];adj.set(n,a);}a.push(e);};
+  for(const e of edges){add(e.a,e);add(e.b,e);}
+  const used=new Set();const other=(e,n)=>e.a===n?e.b:e.a;
+  function walk(startNode,firstEdge){
+    const nodes=[startNode],es=[];let n=startNode,e=firstEdge;
+    while(e&&!used.has(e.id)){
+      used.add(e.id);es.push(e);const nx=other(e,n);nodes.push(nx);
+      const cont=adj.get(nx);if(!cont||cont.length!==2){n=nx;break;}
+      const nextE=cont[0].id===e.id?cont[1]:cont[0];
+      if(used.has(nextE.id))break;e=nextE;n=nx;}
+    return {nodes,es};}
+  const chains=[];
+  for(const [n,es] of adj){if(es.length===2)continue;
+    for(const e of es)if(!used.has(e.id)){const c=walk(n,e);if(c.es.length)chains.push(c);}}
+  for(const e of edges)if(!used.has(e.id)){const c=walk(e.a,e);if(c.es.length)chains.push(c);}
+  return chains.map(c=>{
+    const pts=c.nodes.map(id=>({x:N[id].x,y:N[id].y}));
+    let w=0;for(const e of c.es)w+=e.w;w/=c.es.length;
+    let len=0;for(let i=0;i<pts.length-1;i++)len+=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);
+    return {pts,w,len,epoch:c.es[0].epoch,prov:c.es[0].prov};});}
 
 /* ---------- inspector ---------- */
 function attachInteraction(){
