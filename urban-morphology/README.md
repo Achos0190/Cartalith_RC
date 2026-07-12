@@ -42,6 +42,11 @@ outside the walls is still defended per the historical repertoire.
 **Amenities scale with rank:** market squares multiply and specialise (shambles → fish/corn →
 cloth → cattle) and a town-hall/guildhall appears once a place is a chartered town — a village
 and an imperial seat differ visibly in the services they carry (M-AMEN-1).
+**Rite is selectable (M-BLD-8):** the place of worship can be a Christian **church** (cross-plan),
+a classical **temple** (colonnaded cella on a podium with frontal steps, Roman/Greek), a
+**shrine**, or a **mosque** (prayer hall + courtyard + minaret); and the civic hall a **town
+hall + belfry**, a Roman **basilica** (hall + apse + colonnade), a **guild loggia**, or none
+(auto picks by rite — e.g. a mosque town has no monumental town hall).
 **Walls & fortification (M-FOR, M-NET-9):** the curtain follows the water's edge along the
 bank rather than bulging around it, dips a spur into the water at each end, leaves the
 harbour mouth open, and crosses the water only once the town grew across both banks.

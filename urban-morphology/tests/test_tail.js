@@ -346,6 +346,32 @@ for (const kind of ['bay', 'coast']) {
   ok(!nw.fortified && !nw.wall.ring, 'no fort without a wall');
 }
 
+/* ---------- selectable worship rite + civic hall style ---------- */
+{
+  for (const [faith, name] of [['church', 'Church'], ['temple', 'Temple'], ['shrine', 'Shrine'], ['mosque', 'Mosque']]) {
+    const m = UME.generate(12345, { epochs: 8, pop: 5000, walls: true, faith });
+    ok(m.churches.length >= 1 && m.churches.every(c => c.faith === faith && c.name === name),
+      `worship rite '${faith}' → ${name}`);
+    // temples carry a colonnade + steps; mosques a courtyard + minaret
+    if (faith === 'temple') ok(m.churches[0].columns.length >= 4 && m.churches[0].steps.length >= 1, 'temple has a colonnade + steps');
+    if (faith === 'mosque') ok(m.churches[0].open.length >= 1 && m.churches[0].tower && m.churches[0].tower.kind === 'minaret', 'mosque has a courtyard + minaret');
+    // worship building still sits inside its cleared precinct (no overrun regression)
+    const m2 = UME.generate(12345, { epochs: 8, pop: 5000, walls: true, faith });
+    ok(UME.hashModel(m) === UME.hashModel(m2), `worship rite '${faith}' deterministic`);
+  }
+  // civic style: basilica has an apse; loggia + town hall differ; mosque-auto → no civic hall
+  const bas = UME.generate(5, { epochs: 8, pop: 6000, walls: true, civicStyle: 'basilica' });
+  ok(bas.civic && bas.civic.style === 'basilica' && bas.civic.apse && bas.civic.apse.length >= 3, 'civic basilica has an apse');
+  const log = UME.generate(5, { epochs: 8, pop: 6000, walls: true, civicStyle: 'loggia' });
+  ok(log.civic && log.civic.style === 'loggia' && log.civic.columns.length >= 3 && !log.civic.belfry, 'civic loggia is a colonnade, no belfry');
+  const th = UME.generate(5, { epochs: 8, pop: 6000, walls: true, civicStyle: 'townhall' });
+  ok(th.civic && th.civic.belfry, 'town hall has a belfry');
+  const mq = UME.generate(5, { epochs: 8, pop: 6000, walls: true, faith: 'mosque', civicStyle: 'auto' });
+  ok(!mq.civic, 'mosque rite (auto civic) → no monumental town hall');
+  const tmp = UME.generate(5, { epochs: 8, pop: 6000, walls: true, faith: 'temple', civicStyle: 'auto' });
+  ok(tmp.civic && tmp.civic.style === 'basilica', 'temple rite (auto civic) → basilica');
+}
+
 /* ---------- river that runs through the town (both banks) ---------- */
 {
   const m = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, site: 'riverthrough' });
