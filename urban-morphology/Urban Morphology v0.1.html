@@ -1,0 +1,2222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Urban Morphology PoC v0.1</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{
+  --panel-bg:#f2ecdc; --panel-edge:#c9bb96; --ink:#3a2f1d; --accent:#7a5c2e;
+  --parchment:#f6f1e2;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font:13px/1.45 Georgia,'Times New Roman',serif;color:var(--ink);background:var(--parchment)}
+#app{display:flex;height:100%}
+#side{width:318px;min-width:318px;background:var(--panel-bg);border-right:2px solid var(--panel-edge);
+  display:flex;flex-direction:column;overflow-y:auto;padding:10px 12px;gap:10px}
+#side h1{font-size:16px;margin:0;letter-spacing:.5px}
+#side h1 small{display:block;font-size:10px;color:#7d6c47;font-weight:normal}
+.box{border:1px solid var(--panel-edge);background:#faf6ea;border-radius:3px;padding:8px 9px}
+.box h2{font-size:11px;margin:0 0 6px;text-transform:uppercase;letter-spacing:1px;color:#7a5c2e;
+  border-bottom:1px solid #e0d5b4;padding-bottom:3px}
+.row{display:flex;gap:6px;align-items:center;margin:3px 0}
+.row label{flex:0 0 auto;font-size:12px}
+input[type=number],input[type=text]{width:90px;font:12px Georgia,serif;padding:2px 4px;border:1px solid var(--panel-edge);background:#fff}
+button{font:12px Georgia,serif;padding:4px 10px;border:1px solid #8a7444;background:#e8dfc2;cursor:pointer;border-radius:2px}
+button:hover{background:#f0e8cd}
+#map{flex:1;position:relative;overflow:hidden}
+#svgHost{position:absolute;inset:0}
+svg{display:block;width:100%;height:100%;cursor:grab}
+svg.panning{cursor:grabbing}
+#insp table{width:100%;border-collapse:collapse;font-size:11.5px}
+#insp td{padding:1.5px 3px;vertical-align:top;border-bottom:1px dotted #ddd0aa}
+#insp td:first-child{color:#7a5c2e;white-space:nowrap;width:34%}
+#insp .prov{font-style:italic;color:#5c4d2e;margin-top:5px;font-size:11px}
+#insp .none{color:#9a8b64;font-style:italic}
+.leg{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:11px}
+.leg span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.chip{width:11px;height:11px;border:1px solid #00000033;display:inline-block}
+#metrics table{width:100%;border-collapse:collapse;font-size:11px}
+#metrics td{padding:1px 3px;border-bottom:1px dotted #e4dabb}
+#metrics td.v{text-align:right;font-variant-numeric:tabular-nums}
+.pass{color:#2e6b2e;font-weight:bold}.fail{color:#a23b2e;font-weight:bold}
+#status{font-size:11px;color:#7d6c47;min-height:14px}
+.hl{filter:drop-shadow(0 0 3px #d8a00088)}
+.selglow{stroke:#c86400 !important;stroke-width:1.6px !important}
+/* ---- map object styles (cadastral-ink theme) ---- */
+.water{fill:#b9c7c3;stroke:#8fa39e;stroke-width:1}
+.riverline{fill:none;stroke:#8fa39e;stroke-width:.7;stroke-dasharray:6 5;opacity:.7}
+.contour{fill:none;stroke:#d8cba4;stroke-width:.8;opacity:.85}
+.blockfill{fill:#efe7cf;stroke:none}
+.plaza{fill:#e9ddbd;stroke:#a8916a;stroke-width:.5}
+.market2{fill:#e6d9b6;stroke:#a8916a;stroke-width:.6}
+.townhall{fill:#9a8f6a;stroke:#3a2e18;stroke-width:.6}
+.belfry{fill:#6f5a86;stroke:#463758;stroke-width:.5}
+.chain{fill:none;stroke:#4a3a22;stroke-width:1;stroke-dasharray:1.5 2.5}
+.chaintower{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.5}
+.seawall{fill:none;stroke:#4a3a22;stroke-width:2.4;stroke-linecap:round}
+.molefort{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.6}
+.parcel{stroke:#a08a5f;stroke-width:.55;fill:#efe7cf}
+.parcel.d-market{fill:#eddfb9}.parcel.d-burgher{fill:#e9e0c4}.parcel.d-artisan{fill:#e5e0c9}
+.parcel.d-craftriver{fill:#dde0c9}.parcel.d-suburb{fill:#e7e5ce}.parcel.d-agrarian{fill:#e4e6cd}
+.parcel.d-church{fill:#dfe4d2}.parcel.d-harbour{fill:#e6dcbb}
+.roadfill.quay{stroke:#ded2ab}
+.pier{stroke:#7a5c3a;stroke-width:3.6;fill:none;stroke-linecap:butt}
+.mole{stroke:#8b8577;stroke-width:7;fill:none;stroke-linecap:round}
+.bollard{fill:#4a3a22}
+.crane{stroke:#4a3a22;stroke-width:1.1;fill:#e8dcc0}
+.bld{fill:#8d4a32;stroke:#5b2e1e;stroke-width:.5}
+.bld.aged{fill:#7c4029}
+.bld.church{fill:#6f5a86;stroke:#463758}
+.bld.temple{fill:#d8d0bd;stroke:#6b6350}
+.bld.mosque{fill:#cbd7cb;stroke:#5c7a63}
+.podium{fill:#e4dcc6;stroke:#a89a72;stroke-width:.5}
+.sahn{fill:#e9ddbd;stroke:#a8916a;stroke-width:.5}
+.templecol{fill:#8a8168}
+.tstep{fill:none;stroke:#9a8f6a;stroke-width:.7}
+.minaret{fill:#5c7a63;stroke:#3a4a3a;stroke-width:.5}
+.spire{fill:#6f5a86;stroke:#463758;stroke-width:.5}
+.ridge{stroke:#f6e9db;stroke-width:.55;fill:none;opacity:.75}
+.roadcase{fill:none;stroke:#6d5a37;stroke-linecap:round;stroke-linejoin:round}
+.roadfill{fill:none;stroke:#f8f3e4;stroke-linecap:round;stroke-linejoin:round}
+.roadfill.lane{stroke:#efe8d2}
+.bridgedeck{fill:#e8dcc0;stroke:#6d5a37;stroke-width:.8}
+.wall{fill:none;stroke:#4a3a22;stroke-width:3.2;stroke-linejoin:round;stroke-linecap:round}
+.wallditch{fill:none;stroke:#9d8d66;stroke-width:.8;stroke-dasharray:3 3;opacity:.8}
+.tower{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.5}
+.gate{fill:#e8dcc0;stroke:#3a2e18;stroke-width:.8}
+.watergate{fill:#b9c7c3;stroke:#3a2e18;stroke-width:.8}
+.fortwall{fill:none;stroke:#4a3a22;stroke-width:4;stroke-linejoin:round}
+.salient{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.4}
+.ravelin{fill:#e7ddc4;stroke:#6d5a37;stroke-width:1}
+.counterscarp{fill:none;stroke:#9d8d66;stroke-width:1;stroke-dasharray:5 4;opacity:.85}
+.glacis{fill:#eae2c8;stroke:#c9bb96;stroke-width:.8;opacity:.55}
+.moat{fill:#aebfc0;stroke:#8fa39e;stroke-width:.6;opacity:.92}
+.coveredway{fill:none;stroke:#b3a276;stroke-width:1.4;stroke-dasharray:2 3;opacity:.8}
+.causeway{fill:#e2d6b4;stroke:#6d5a37;stroke-width:.7}
+.tree{fill:#9aa96e;stroke:#6b7a45;stroke-width:.4}
+.tree.orchard{fill:#a9b478}
+.well{fill:#cfd6d4;stroke:#4a3a22;stroke-width:.7}
+.cross{stroke:#4a3a22;stroke-width:1;fill:none}
+.fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
+.field{fill:none;stroke:#cbbd92;stroke-width:.55;opacity:.9}
+.fieldedge{fill:none;stroke:#b3a276;stroke-width:.6;opacity:.8}
+.grave{fill:#8d8d7a}
+.lbl{font:italic 10px Georgia,serif;fill:#5c4a28;pointer-events:none}
+.lbl.big{font-size:13px}
+.scalebar{stroke:#4a3a22;stroke-width:1.2}
+.scalelbl{font:9px Georgia,serif;fill:#4a3a22}
+[data-um]{cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="side">
+  <h1>Urban Morphology <small>research-driven proof of concept — v0.1 (Phase 1–4 PoC)</small></h1>
+  <div class="box">
+    <h2>Generation</h2>
+    <div class="row"><label>Seed</label><input id="seed" type="number" value="12345">
+      <button id="gen">Generate</button><button id="rnd">Random</button></div>
+    <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
+      <option value="river">River crossing (bridge + river port)</option>
+      <option value="riverthrough">River through the town (both banks)</option>
+      <option value="bay">Bay harbour</option>
+      <option value="coast">Open coast (mole)</option></select></div>
+    <div class="row"><label>Harbour</label><select id="harbourDefence" style="font:12px Georgia,serif">
+      <option value="auto">Defence: auto (by site)</option>
+      <option value="none">Unprotected</option>
+      <option value="chain">Chain &amp; mouth towers</option>
+      <option value="seawall">Sea wall + water-gate</option>
+      <option value="molefort">Mole-head fort</option></select></div>
+    <div class="row"><label>Worship</label><select id="faith" style="font:12px Georgia,serif">
+      <option value="church">Church (Christian)</option>
+      <option value="temple">Classical temple (Roman/Greek)</option>
+      <option value="shrine">Shrine</option>
+      <option value="mosque">Mosque</option></select></div>
+    <div class="row"><label>Civic hall</label><select id="civicStyle" style="font:12px Georgia,serif">
+      <option value="auto">Auto (by rite)</option>
+      <option value="townhall">Town hall + belfry</option>
+      <option value="basilica">Basilica (Roman)</option>
+      <option value="loggia">Guild loggia</option>
+      <option value="none">None</option></select></div>
+    <div class="row"><label>Population</label><input id="pop" type="number" value="5000" min="400" max="20000" step="100">
+      <button id="fit">Fit view</button></div>
+    <div class="row"><label>Growth epochs</label><input id="epochs" type="number" value="8" min="2" max="14" style="width:52px"></div>
+    <div class="row"><label style="flex:0 0 auto"><input id="walls" type="checkbox" checked> city wall</label>
+      <label style="margin-left:10px;flex:0 0 auto"><input id="fortified" type="checkbox"> star fort</label></div>
+    <div id="status"></div>
+  </div>
+  <div class="box" id="insp"><h2>Inspector — click any object</h2>
+    <div class="none">Nothing selected. Every road, parcel, building, wall, tree and well is
+    selectable; the pane shows what it is, its measurements, and why it exists
+    (rule + evidence register reference).</div></div>
+  <div class="box"><h2>Legend</h2><div class="leg" id="legend"></div></div>
+  <div class="box" id="metrics"><h2>Morphometrics vs. historical bands</h2><div id="mBody"></div></div>
+  <div class="box"><h2>About</h2>
+    <div style="font-size:11px">Deterministic growth simulation: site &rarr; anchors &rarr; least-cost
+    primary routes &rarr; epoch-looped street growth (densification + exploration) &rarr; planar-face
+    blocks &rarr; series-platted strip parcels &rarr; grammar buildings &rarr; derived districts &rarr;
+    wall &amp; gates &rarr; details. The renderer draws only what the simulation produced.
+    Evidence register: <code>docs/03-mathematical-assumptions.md</code> (M-* refs in the inspector).
+    Drag to pan, wheel to zoom.</div></div>
+</div>
+<div id="map"><div id="svgHost"></div></div>
+</div>
+
+<!-- ================================================================ -->
+<!-- UM-ENGINE-START  (pure JS, no DOM — extracted by tests/run.sh)   -->
+<!-- ================================================================ -->
+<script>
+const UME = (() => {
+'use strict';
+
+/* ---------------- RNG: labeled deterministic substreams ---------------- */
+function fnv1a(str){let h=0x811c9dc5;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,0x01000193);}return h>>>0;}
+function mulberry32(a){return function(){a|=0;a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return ((t^(t>>>14))>>>0)/4294967296;};}
+function stream(seed,label){
+  const f=mulberry32((seed>>>0)^fnv1a(label));
+  const r={u:f,
+    range:(a,b)=>a+(b-a)*f(),
+    int:(a,b)=>a+Math.floor(f()*(b-a+1)),
+    pick:(arr)=>arr[Math.floor(f()*arr.length)],
+    norm:()=>{ // Box-Muller (same-engine determinism; cross-engine noted in docs §3)
+      let u1=f();if(u1<1e-12)u1=1e-12;const u2=f();
+      return Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);},
+    logn:(median,sig)=>median*Math.exp(sig*r.norm()),
+    chance:(p)=>f()<p};
+  return r;
+}
+
+/* ---------------- vector / polygon helpers ---------------- */
+const V={ add:(a,b)=>({x:a.x+b.x,y:a.y+b.y}), sub:(a,b)=>({x:a.x-b.x,y:a.y-b.y}),
+  mul:(a,s)=>({x:a.x*s,y:a.y*s}), len:(a)=>Math.hypot(a.x,a.y),
+  dist:(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),
+  norm:(a)=>{const l=Math.hypot(a.x,a.y)||1;return {x:a.x/l,y:a.y/l};},
+  dot:(a,b)=>a.x*b.x+a.y*b.y, cross:(a,b)=>a.x*b.y-a.y*b.x,
+  lerp:(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t}),
+  rot90:(a)=>({x:-a.y,y:a.x}) };
+function polyArea(p){let s=0;for(let i=0,n=p.length;i<n;i++){const a=p[i],b=p[(i+1)%n];s+=a.x*b.y-b.x*a.y;}return s/2;}
+function polyCentroid(p){let sx=0,sy=0,sa=0;for(let i=0,n=p.length;i<n;i++){const a=p[i],b=p[(i+1)%n];
+  const c=a.x*b.y-b.x*a.y;sa+=c;sx+=(a.x+b.x)*c;sy+=(a.y+b.y)*c;}
+  if(Math.abs(sa)<1e-9){let mx=0,my=0;p.forEach(q=>{mx+=q.x;my+=q.y;});return {x:mx/p.length,y:my/p.length};}
+  return {x:sx/(3*sa),y:sy/(3*sa)};}
+function pointInPoly(pt,p){let inside=false;for(let i=0,j=p.length-1;i<p.length;j=i++){
+  const xi=p[i].x,yi=p[i].y,xj=p[j].x,yj=p[j].y;
+  if(((yi>pt.y)!==(yj>pt.y))&&(pt.x<(xj-xi)*(pt.y-yi)/(yj-yi)+xi))inside=!inside;}return inside;}
+function segInt(p,p2,q,q2){ // returns {t,u,pt} for intersection of segments p-p2, q-q2
+  const r={x:p2.x-p.x,y:p2.y-p.y},s={x:q2.x-q.x,y:q2.y-q.y};
+  const den=V.cross(r,s); if(Math.abs(den)<1e-12)return null;
+  const qp={x:q.x-p.x,y:q.y-p.y};
+  const t=V.cross(qp,s)/den,u=V.cross(qp,r)/den;
+  if(t<-1e-9||t>1+1e-9||u<-1e-9||u>1+1e-9)return null;
+  return {t,u,pt:{x:p.x+t*r.x,y:p.y+t*r.y}};}
+function distPtSeg(pt,a,b){const ab=V.sub(b,a);const l2=ab.x*ab.x+ab.y*ab.y;
+  if(l2<1e-12)return V.dist(pt,a);
+  let t=((pt.x-a.x)*ab.x+(pt.y-a.y)*ab.y)/l2;t=Math.max(0,Math.min(1,t));
+  return V.dist(pt,{x:a.x+ab.x*t,y:a.y+ab.y*t});}
+function polySelfIntersects(p){const n=p.length;
+  for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
+    if(Math.abs(i-j)<=1||(i===0&&j===n-1))continue;
+    if(segInt(p[i],p[(i+1)%n],p[j],p[(j+1)%n]))return true;}
+  return false;}
+function chaikin(pts,closed){const out=[];const n=pts.length;
+  const lim=closed?n:n-1;
+  if(!closed)out.push(pts[0]);
+  for(let i=0;i<lim;i++){const a=pts[i],b=pts[(i+1)%n];
+    out.push(V.lerp(a,b,0.25));out.push(V.lerp(a,b,0.75));}
+  if(!closed)out.push(pts[n-1]);
+  return out;}
+function simplify(pts,tol){ // Douglas-Peucker
+  if(pts.length<3)return pts.slice();
+  const keep=new Uint8Array(pts.length);keep[0]=keep[pts.length-1]=1;
+  const stack=[[0,pts.length-1]];
+  while(stack.length){const [a,b]=stack.pop();let mx=-1,mi=-1;
+    for(let i=a+1;i<b;i++){const d=distPtSeg(pts[i],pts[a],pts[b]);if(d>mx){mx=d;mi=i;}}
+    if(mx>tol){keep[mi]=1;stack.push([a,mi],[mi,b]);}}
+  return pts.filter((_,i)=>keep[i]);}
+// ensure CCW (positive shoelace) so interior lies to the LEFT of directed edges
+function ensureCCW(p){return polyArea(p)<0?p.slice().reverse():p;}
+// per-edge inward offset with miter joins; dists[i] applies to edge (i -> i+1). CCW input.
+function insetPoly(poly,dists){
+  const n=poly.length;if(n<3)return null;
+  const lines=[];
+  for(let i=0;i<n;i++){const a=poly[i],b=poly[(i+1)%n];
+    const d=V.norm(V.sub(b,a));const nl={x:-d.y,y:d.x}; // inward (left) normal for CCW
+    const off=dists[Math.min(i,dists.length-1)];
+    lines.push({p:V.add(a,V.mul(nl,off)),d});}
+  const out=[];
+  for(let i=0;i<n;i++){const l1=lines[(i-1+n)%n],l2=lines[i];
+    const den=V.cross(l1.d,l2.d);
+    let pt;
+    if(Math.abs(den)<1e-9){pt=l2.p;}
+    else{const t=V.cross(V.sub(l2.p,l1.p),l2.d)/den;pt=V.add(l1.p,V.mul(l1.d,t));
+      if(V.dist(pt,poly[i])>4*Math.max(...dists)+6)pt=V.add(poly[i],V.mul(V.norm(V.sub(pt,poly[i])),Math.max(...dists)*1.8));}
+    out.push(pt);}
+  if(polyArea(out)<15)return null;
+  if(out.length<=60&&polySelfIntersects(out))return null;
+  return out;}
+// Sutherland-Hodgman: clip polygon against convex clip polygon (CCW)
+function clipConvex(subject,clip){
+  let out=subject.slice();
+  for(let i=0;i<clip.length&&out.length;i++){
+    const a=clip[i],b=clip[(i+1)%clip.length];const inp=out;out=[];
+    const inside=(p)=>V.cross(V.sub(b,a),V.sub(p,a))>=-1e-9;
+    for(let j=0;j<inp.length;j++){const cur=inp[j],prv=inp[(j+inp.length-1)%inp.length];
+      const ci=inside(cur),pi=inside(prv);
+      if(ci){if(!pi){const h=segInt(prv,cur,a,b);if(h)out.push(h.pt);}out.push(cur);}
+      else if(pi){const h=segInt(prv,cur,a,b);if(h)out.push(h.pt);}}}
+  return out;}
+
+/* ---------------- planar street graph ---------------- */
+function makeGraph(){return {nodes:[],edges:[],cell:26,grid:new Map(),nextE:0,nextN:0};}
+function gKey(cx,cy){return cx+':'+cy;}
+function gridCellsForSeg(g,a,b,cb){
+  const steps=Math.max(1,Math.ceil(V.dist(a,b)/(g.cell*0.7)));
+  const seen=new Set();
+  for(let i=0;i<=steps;i++){const p=V.lerp(a,b,i/steps);
+    const cx=Math.floor(p.x/g.cell),cy=Math.floor(p.y/g.cell);
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+      const k=gKey(cx+dx,cy+dy);if(!seen.has(k)){seen.add(k);cb(k);}}}}
+function indexEdge(g,e){const a=g.nodes[e.a],b=g.nodes[e.b];
+  gridCellsForSeg(g,a,b,k=>{let arr=g.grid.get(k);if(!arr){arr=[];g.grid.set(k,arr);}arr.push(e.id);});}
+function unindexEdge(g,e){const a=g.nodes[e.a],b=g.nodes[e.b];
+  gridCellsForSeg(g,a,b,k=>{const arr=g.grid.get(k);if(arr){const i=arr.indexOf(e.id);if(i>=0)arr.splice(i,1);}});}
+function edgesNear(g,a,b){const set=new Set();
+  gridCellsForSeg(g,a,b,k=>{const arr=g.grid.get(k);if(arr)for(const id of arr)set.add(id);});
+  return set;}
+function addNode(g,x,y){const n={id:g.nextN++,x,y,adj:[]};g.nodes.push(n);return n;}
+function nearestNode(g,x,y,r){let best=null,bd=r;
+  const cx=Math.floor(x/g.cell),cy=Math.floor(y/g.cell),cr=Math.ceil(r/g.cell)+1;
+  const seen=new Set();
+  for(let dx=-cr;dx<=cr;dx++)for(let dy=-cr;dy<=cr;dy++){
+    const arr=g.grid.get(gKey(cx+dx,cy+dy));if(!arr)continue;
+    for(const id of arr){const e=g.edges[id];if(!e||!e.alive)continue;
+      for(const nid of [e.a,e.b]){if(seen.has(nid))continue;seen.add(nid);
+        const n=g.nodes[nid];const d=Math.hypot(n.x-x,n.y-y);
+        if(d<bd){bd=d;best=n;}}}}
+  return best;}
+function rawEdge(g,aId,bId,cls,w,epoch,prov){
+  if(aId===bId)return null;
+  const a=g.nodes[aId],b=g.nodes[bId];
+  for(const eid of a.adj){const e=g.edges[eid];if(e.alive&&(e.a===bId||e.b===bId))return e;}
+  if(V.dist(a,b)<3.5)return null;
+  const e={id:g.nextE++,a:aId,b:bId,cls,w,epoch,prov,alive:true};
+  g.edges.push(e);a.adj.push(e.id);b.adj.push(e.id);indexEdge(g,e);return e;}
+function splitEdge(g,e,pt){
+  const a=g.nodes[e.a],b=g.nodes[e.b];
+  if(V.dist(pt,a)<3.5)return a; if(V.dist(pt,b)<3.5)return b;
+  e.alive=false;unindexEdge(g,e);
+  a.adj.splice(a.adj.indexOf(e.id),1);b.adj.splice(b.adj.indexOf(e.id),1);
+  const n=addNode(g,pt.x,pt.y);
+  rawEdge(g,e.a,n.id,e.cls,e.w,e.epoch,e.prov);
+  rawEdge(g,n.id,e.b,e.cls,e.w,e.epoch,e.prov);
+  return n;}
+// attach a point to the network: snap to node, else split the nearest edge (T-junction), else new node
+function attachPoint(g,x,y){
+  const SNAP=11,ESNAP=9;
+  const n=nearestNode(g,x,y,SNAP);if(n)return n;
+  let bestE=null,bd=ESNAP,bpt=null;
+  const P={x,y};
+  for(const eid of edgesNear(g,P,P)){const e=g.edges[eid];if(!e||!e.alive)continue;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    const d=distPtSeg(P,a,b);
+    if(d<bd){
+      const ab=V.sub(b,a);const l2=ab.x*ab.x+ab.y*ab.y||1;
+      let t=((x-a.x)*ab.x+(y-a.y)*ab.y)/l2;t=Math.max(0.03,Math.min(0.97,t));
+      bd=d;bestE=e;bpt={x:a.x+ab.x*t,y:a.y+ab.y*t};}}
+  if(bestE)return splitEdge(g,bestE,bpt);
+  return addNode(g,x,y);}
+// insert a street segment: snap/attach endpoints, split at all crossings (planarity invariant)
+function addStreet(g,ax,ay,bx,by,cls,w,epoch,prov){
+  const na=attachPoint(g,ax,ay);
+  const nb=attachPoint(g,bx,by);
+  if(na===nb)return [];
+  const A={x:na.x,y:na.y},B={x:nb.x,y:nb.y};
+  const hits=[];
+  const nearIds=edgesNear(g,A,B);
+  for(const eid of nearIds){const e=g.edges[eid];if(!e||!e.alive)continue;
+    if(e.a===na.id||e.b===na.id||e.a===nb.id||e.b===nb.id)continue;
+    const h=segInt(A,B,g.nodes[e.a],g.nodes[e.b]);
+    if(h&&h.t>1e-4&&h.t<1-1e-4&&h.u>1e-4&&h.u<1-1e-4)hits.push({t:h.t,pt:h.pt,eid});}
+  // existing nodes lying on the new segment's interior must become junctions too
+  const seenN=new Set([na.id,nb.id]);
+  const ab=V.sub(B,A);const abl2=ab.x*ab.x+ab.y*ab.y||1;
+  for(const eid of nearIds){const e=g.edges[eid];if(!e||!e.alive)continue;
+    for(const nid of [e.a,e.b]){
+      if(seenN.has(nid))continue;seenN.add(nid);
+      const nd=g.nodes[nid];
+      if(distPtSeg(nd,A,B)<2.5){
+        const t=((nd.x-A.x)*ab.x+(nd.y-A.y)*ab.y)/abl2;
+        if(t>1e-3&&t<1-1e-3)hits.push({t,node:nid});}}}
+  hits.sort((p,q)=>p.t-q.t);
+  const chain=[na];
+  for(const h of hits){
+    if(h.node!==undefined){chain.push(g.nodes[h.node]);continue;}
+    const e=g.edges[h.eid];if(!e.alive)continue;
+    chain.push(splitEdge(g,e,h.pt));}
+  chain.push(nb);
+  const made=[];
+  for(let i=0;i<chain.length-1;i++){
+    const e=rawEdge(g,chain[i].id,chain[i+1].id,cls,w,epoch,prov);
+    if(e)made.push(e);}
+  return made;}
+function addPolylineStreet(g,pts,cls,w,epoch,prov){
+  let out=[];
+  for(let i=0;i<pts.length-1;i++)
+    out=out.concat(addStreet(g,pts[i].x,pts[i].y,pts[i+1].x,pts[i+1].y,cls,w,epoch,prov));
+  return out;}
+
+/* ---------------- planar face extraction (blocks) ---------------- */
+function extractFaces(g){
+  const live=g.edges.filter(e=>e.alive);
+  const adjSorted=new Map(); // nodeId -> [{eid,other,ang}]
+  for(const e of live){
+    for(const [from,to] of [[e.a,e.b],[e.b,e.a]]){
+      let arr=adjSorted.get(from);if(!arr){arr=[];adjSorted.set(from,arr);}
+      const a=g.nodes[from],b=g.nodes[to];
+      arr.push({eid:e.id,other:to,ang:Math.atan2(b.y-a.y,b.x-a.x)});}}
+  for(const arr of adjSorted.values())arr.sort((p,q)=>p.ang-q.ang);
+  const visited=new Set();
+  const faces=[];
+  const heId=(eid,dir)=>eid*2+dir; // dir 0: a->b, 1: b->a
+  for(const e of live){
+    for(const dir of [0,1]){
+      const h0=heId(e.id,dir);
+      if(visited.has(h0))continue;
+      const seq=[];let h=h0,guard=0;
+      while(guard++<20000){
+        visited.add(h);
+        const ee=g.edges[h>>1];const d=h&1;
+        const from=d?ee.b:ee.a,to=d?ee.a:ee.b;
+        seq.push(from);
+        const arr=adjSorted.get(to);
+        let idx=-1;
+        for(let i=0;i<arr.length;i++)if(arr[i].eid===ee.id&&arr[i].other===from){idx=i;break;}
+        const nxt=arr[(idx-1+arr.length)%arr.length];
+        const ne=g.edges[nxt.eid];
+        h=heId(ne.id,ne.a===to?0:1);
+        if(h===h0)break;
+      }
+      if(guard>=20000)continue;
+      // collapse spurs (dead-end round trips): stack removal of v,w,v patterns
+      const stack=[];
+      for(const v of seq){
+        if(stack.length&&stack[stack.length-1]===v)continue;
+        if(stack.length>=2&&stack[stack.length-2]===v)stack.pop();
+        else stack.push(v);}
+      while(stack.length>=3&&stack[0]===stack[stack.length-1])stack.pop();
+      if(stack.length<3)continue;
+      const poly=stack.map(id=>({x:g.nodes[id].x,y:g.nodes[id].y}));
+      faces.push({nodeIds:stack,poly,area:polyArea(poly)});
+    }}
+  if(!faces.length)return faces;
+  let outer=0,mx=-1;
+  faces.forEach((f,i)=>{if(Math.abs(f.area)>mx){mx=Math.abs(f.area);outer=i;}});
+  faces.forEach((f,i)=>f.outer=(i===outer));
+  return faces;}
+function edgeBetween(g,aId,bId){const a=g.nodes[aId];
+  for(const eid of a.adj){const e=g.edges[eid];if(e.alive&&(e.a===bId||e.b===bId))return e;}
+  return null;}
+
+/* ---------------- A* over site cost raster ---------------- */
+function astar(cost,W,H,start,goal){
+  const idx=(x,y)=>y*W+x;
+  const open=[];const g0=new Float64Array(W*H).fill(Infinity);
+  const came=new Int32Array(W*H).fill(-1);
+  function push(i,f){open.push({i,f});let c=open.length-1;
+    while(c>0){const p=(c-1)>>1;if(open[p].f<=open[c].f)break;
+      [open[p],open[c]]=[open[c],open[p]];c=p;}}
+  function pop(){const t=open[0];const l=open.pop();
+    if(open.length){open[0]=l;let c=0;
+      for(;;){let m=c;const a=2*c+1,b=2*c+2;
+        if(a<open.length&&open[a].f<open[m].f)m=a;
+        if(b<open.length&&open[b].f<open[m].f)m=b;
+        if(m===c)break;[open[m],open[c]]=[open[c],open[m]];c=m;}}
+    return t;}
+  const si=idx(start.x,start.y),gi=idx(goal.x,goal.y);
+  g0[si]=0;push(si,0);
+  const dirs=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
+  while(open.length){
+    const {i}=pop();
+    if(i===gi)break;
+    const x=i%W,y=(i/W)|0;
+    if(g0[i]===Infinity)continue;
+    for(const [dx,dy,dl] of dirs){
+      const nx=x+dx,ny=y+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H)continue;
+      const ni=idx(nx,ny);
+      const c=g0[i]+dl*0.5*(cost[i]+cost[ni]);
+      if(c<g0[ni]){g0[ni]=c;came[ni]=i;
+        const h=Math.hypot(nx-goal.x,ny-goal.y);
+        push(ni,c+h*0.9);}}}
+  if(came[gi]<0&&gi!==si)return null;
+  const path=[];let i=gi;
+  while(i>=0){path.push({x:i%W,y:(i/W)|0});if(i===si)break;i=came[i];}
+  path.reverse();return path;}
+
+/* ---------------- site model (parametric context, not terrain sim) ----------------
+ * Site archetypes (lit. review §4, harbour-city family §1.1 #22-23):
+ *  - 'river':       crossing + river port (bridge, quay on the market bank)
+ *  - 'riverthrough':the river bisects the town — both banks built, several bridges
+ *  - 'bay':         sheltered natural harbour at the bay head (no mole needed)
+ *  - 'coast':       open shoreline; the harbour needs a breakwater mole for shelter   */
+function buildSite(seed,Wm,Hm,kind){
+  kind=kind||'river';
+  const through=(kind==='riverthrough');
+  const rk=(kind==='river'||through); // river-like (a channel, not a sea half-plane)
+  const r=stream(seed,'site');
+  // analytic height proxy: inland rise + gentle undulation; water carves its terrace
+  const hills=[];
+  for(let i=0;i<3;i++)hills.push({x:r.range(0.15,0.9)*Wm,y:r.range(0.05,0.45)*Hm,
+    amp:r.range(0.06,0.16),rad:r.range(300,650)});
+  let river,riverW,waterPoly,bridgePt=null,bridgeDir=null,harbourIdx,yAtX=null;
+  if(rk){
+    // river: west -> east; through the middle (bisecting) or around the lower third
+    const pts=[];const n=14;const baseY=(through?r.range(0.44,0.54):r.range(0.58,0.72))*Hm;
+    let y=baseY+r.range(-40,40);
+    const lo=(through?0.34:0.45)*Hm,hi=(through?0.66:0.88)*Hm;
+    for(let i=0;i<=n;i++){const x=(i/n)*Wm;
+      y+=r.range(-1,1)*(through?44:55); y=Math.max(lo,Math.min(hi,y));
+      pts.push({x,y});}
+    river=chaikin(chaikin(pts,false),false);
+    riverW=through?r.range(22,30):r.range(17,24);
+  }else{
+    // coastline: sea fills the map south of a west->east shoreline; a bay indents it
+    const baseY=r.range(0.64,0.76)*Hm;
+    const bayAmp=kind==='bay'?r.range(150,230):r.range(6,22);
+    const bx=r.range(0.35,0.62)*Wm,bw=r.range(230,330);
+    const pts=[];const n=26;
+    for(let i=0;i<=n;i++){const x=(i/n)*Wm;
+      const y=baseY-bayAmp*Math.exp(-((x-bx)*(x-bx))/(2*bw*bw))+r.range(-24,24);
+      pts.push({x,y});}
+    river=chaikin(chaikin(pts,false),false); // the waterline polyline (shoreline)
+    riverW=12; // nominal band for wall/flood offsets; the sea itself is a half-plane
+    yAtX=(x)=>{const c=river;
+      if(x<=c[0].x)return c[0].y;
+      for(let i=0;i<c.length-1;i++)if(x<=c[i+1].x){
+        const t=(x-c[i].x)/((c[i+1].x-c[i].x)||1);return c[i].y+t*(c[i+1].y-c[i].y);}
+      return c[c.length-1].y;};
+    // harbour point: bay head (most sheltered) for bays, seed-chosen stretch for coasts
+    let hx=kind==='bay'?bx:r.range(0.35,0.6)*Wm;
+    let hi=0,hd=Infinity;
+    for(let i=0;i<river.length;i++){const d=Math.abs(river[i].x-hx);if(d<hd){hd=d;hi=i;}}
+    harbourIdx=hi;
+  }
+  function riverDist(p){let d=Infinity;
+    for(let i=0;i<river.length-1;i++)d=Math.min(d,distPtSeg(p,river[i],river[i+1]));
+    return d;}
+  const isWater=rk
+    ?(p)=>riverDist(p)<riverW/2+2
+    :(p)=>p.y>yAtX(p.x)-1;
+  function height(p){
+    let h=0.4+0.00008*(Hm-p.y);
+    for(const hl of hills){const d=Math.hypot(p.x-hl.x,p.y-hl.y);
+      h+=hl.amp*Math.exp(-(d*d)/(2*hl.rad*hl.rad));}
+    // gentle terrace down to the water: the valley floor / shore flat is buildable
+    // prime land (settlement hugs the terrace edge above the flood band, §4)
+    const rd=riverDist(p);
+    h-=0.04*Math.exp(-(rd*rd)/(2*180*180));
+    if(!rk&&isWater(p))h-=0.05;
+    return h;}
+  function slope(p){const e=8;
+    const hx=(height({x:p.x+e,y:p.y})-height({x:p.x-e,y:p.y}))/(2*e);
+    const hy=(height({x:p.x,y:p.y+e})-height({x:p.x,y:p.y-e}))/(2*e);
+    return Math.hypot(hx,hy)*900;} // scaled to ~grade-like magnitude
+  if(rk){
+    // bridge point: flattest approaches, in middle half of river
+    let bi=-1,bs=Infinity;
+    for(let i=Math.floor(river.length*0.3);i<Math.floor(river.length*0.72);i++){
+      const p=river[i];
+      const s=slope({x:p.x,y:p.y-40})+slope({x:p.x,y:p.y+40});
+      if(s<bs){bs=s;bi=i;}}
+    bridgePt=river[bi];
+    bridgeDir=V.norm(V.sub(river[Math.min(bi+1,river.length-1)],river[Math.max(bi-1,0)]));
+    // river port quay sits a little downstream of the bridge (break-of-bulk, §4)
+    let acc=0,hi=bi;
+    while(hi<river.length-2&&acc<95){acc+=V.dist(river[hi],river[hi+1]);hi++;}
+    harbourIdx=hi;
+    // water polygon band
+    const left=[],right=[];
+    for(let i=0;i<river.length;i++){
+      const a=river[Math.max(0,i-1)],b=river[Math.min(river.length-1,i+1)];
+      const d=V.norm(V.sub(b,a));const nl=V.rot90(d);
+      left.push(V.add(river[i],V.mul(nl,riverW/2)));
+      right.push(V.add(river[i],V.mul(nl,-riverW/2)));}
+    waterPoly=left.concat(right.reverse());
+  }else{
+    waterPoly=river.concat([{x:Wm,y:Hm},{x:0,y:Hm}]);
+  }
+  // external route endpoints (M-REG-1: routes to neighbouring places); sea sites
+  // trade seaward, so they get one land route fewer
+  const gatesDir=rk?[
+    {x:r.range(0.08,0.3)*Wm,y:0},
+    {x:Wm,y:r.range(0.1,0.4)*Hm},
+    {x:0,y:r.range(0.15,0.45)*Hm},
+    {x:r.range(0.4,0.75)*Wm,y:Hm}]:[
+    {x:r.range(0.15,0.4)*Wm,y:0},
+    {x:Wm,y:r.range(0.08,0.3)*Hm},
+    {x:0,y:r.range(0.08,0.32)*Hm}];
+  function bankSide(p){
+    let bi=0,bd=Infinity;
+    for(let i=0;i<river.length-1;i++){const d=distPtSeg(p,river[i],river[i+1]);if(d<bd){bd=d;bi=i;}}
+    const a=river[bi],b=river[bi+1];
+    return Math.sign(V.cross(V.sub(b,a),V.sub(p,a)))||1;}
+  return {kind,through,Wm,Hm,river,riverW,waterPoly,riverDist,height,slope,bridgePt,bridgeDir,
+    routeEnds:gatesDir,bankSide,isWater,
+    harbour:{idx:harbourIdx,pt:river[harbourIdx]}};}
+
+/* ---------------- anchors ---------------- */
+function placeAnchors(seed,site){
+  const r=stream(seed,'anchors');
+  // market: on flat land above the flood band, close to the break-of-bulk point —
+  // the bridge for crossings, the quay for harbours (lit.review §4-5; M-REG-6)
+  const ref=site.bridgePt||site.harbour.pt;
+  const dBand=site.kind==='river'?[60,240]:[60,180];
+  let best=null,bs=-Infinity;
+  for(let i=0;i<400;i++){
+    const ang=r.range(-Math.PI,0); // landward side (water lies south)
+    const d=r.range(dBand[0],dBand[1]);
+    const p={x:ref.x+Math.cos(ang)*d,y:ref.y+Math.sin(ang)*d};
+    if(p.x<80||p.y<80||p.x>site.Wm-80||p.y>site.Hm-80)continue;
+    if(site.isWater(p))continue;
+    const rd=site.riverDist(p);
+    if(rd<site.riverW/2+30)continue; // flood band
+    const s=site.slope(p);
+    const score=-(s*4)-Math.abs(d-(site.kind==='river'?120:100))/60-Math.max(0,rd-260)/120;
+    if(score>bs){bs=score;best=p;}}
+  const market=best||{x:ref.x,y:ref.y-120};
+  return {market,
+    prov:site.kind==='river'
+      ?'Market sited on flat land above the flood band, close to the bridge crossing (route convergence). Refs: M-REG-6, lit. review §4.'
+      :'Market sited on the shore flat just behind the quay: goods change mode at the break-of-bulk point (harbour-city family, lit. review §4-5).'};}
+
+/* ---------------- primary routes (least-cost + reinforcement) ---------------- */
+function buildPrimaries(seed,site,anchors,g){
+  const CS=8; // raster cell, m
+  const W=Math.ceil(site.Wm/CS),H=Math.ceil(site.Hm/CS);
+  const cost=new Float64Array(W*H);
+  const bp=site.bridgePt;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const p={x:(x+0.5)*CS,y:(y+0.5)*CS};
+    let c=1+Math.pow(site.slope(p)*3.2,2); // Tobler-flavoured slope penalty (M-REG-5)
+    if(site.isWater(p)){
+      const db=bp?V.dist(p,bp):Infinity;
+      c = db<14 ? c+1.5 : c+240; // crossing only at the bridge (M-REG-6); sea impassable
+    } else if(site.riverDist(p)<site.riverW/2+22) c+=3; // marshy banks / shore flat
+    cost[y*W+x]=c*CS;}
+  const toCell=p=>({x:Math.max(1,Math.min(W-2,Math.round(p.x/CS))),y:Math.max(1,Math.min(H-2,Math.round(p.y/CS)))});
+  const mk=toCell(anchors.market);
+  const used=new Set();
+  const routes=[];
+  site.routeEnds.forEach((end,i)=>{
+    const c2=cost.slice();
+    for(const k of used)c2[k]*=0.45; // trail reinforcement (Helbing 1997; M-GRW-1)
+    const path=astar(c2,W,H,toCell(end),mk);
+    if(!path)return;
+    for(const c of path)used.add(c.y*W+c.x);
+    let pts=path.map(c=>({x:(c.x+0.5)*CS,y:(c.y+0.5)*CS}));
+    pts=chaikin(simplify(pts,7),false);
+    pts=simplify(pts,1.2);
+    routes.push({pts,i});});
+  const prov='Primary route: least-cost path over slope/water cost field with trail reinforcement (Helbing 1997, Tobler kernel M-REG-5); immutable backbone (M-GRW-3).';
+  for(const rt of routes)addPolylineStreet(g,rt.pts,'primary',7,0,prov); // width M-NET-8
+  return routes;}
+
+/* ---------------- plaza: widened market street (M-DEN-6, additive mode) ---------------- */
+function buildPlaza(seed,site,anchors,g){
+  const r=stream(seed,'plaza');
+  // nearest primary edge to market
+  let be=null,bd=Infinity;
+  for(const e of g.edges){if(!e.alive||e.cls!=='primary')continue;
+    const d=distPtSeg(anchors.market,g.nodes[e.a],g.nodes[e.b]);
+    if(d<bd){bd=d;be=e;}}
+  if(!be)return null;
+  const a=g.nodes[be.a],b=g.nodes[be.b];
+  const dir=V.norm(V.sub(b,a));
+  const mid=V.lerp(a,b,0.5);
+  const L=r.range(55,80),Wd=r.range(26,40); // European market place band (M-DEN-6)
+  // widen on the side away from the river
+  const nl=V.rot90(dir);
+  const sideP=V.add(mid,V.mul(nl,20));
+  const side=site.riverDist(sideP)>site.riverDist(V.add(mid,V.mul(nl,-20)))?1:-1;
+  const p1=V.add(mid,V.mul(dir,-L/2)),p2=V.add(mid,V.mul(dir,L/2));
+  const q1=V.add(p1,V.mul(nl,side*Wd)),q2=V.add(p2,V.mul(nl,side*Wd));
+  const prov='Market place formed by widening the principal street (additive plaza mode, M-DEN-6); stall encroachment shapes later frontages.';
+  addStreet(g,p1.x,p1.y,q1.x,q1.y,'street',5,0,prov);
+  addStreet(g,q1.x,q1.y,q2.x,q2.y,'street',5,0,prov);
+  addStreet(g,q2.x,q2.y,p2.x,p2.y,'street',5,0,prov);
+  const c=polyCentroid([p1,p2,q2,q1]);
+  return {center:c,poly:[p1,p2,q2,q1],prov};}
+
+/* ---------------- harbour: quay, piers, mole (harbour-city family) ----------------
+ * Quay-parallel hard edge + harbour road to the market (break-of-bulk), timber piers
+ * into the water; open coasts additionally get a sheltering breakwater mole.
+ * Evidence: harbour/bridge-town families, lit. review §1.1 #22-23 and §4-5.        */
+function distToLine(p,pts){let d=Infinity;
+  for(let i=0;i<pts.length-1;i++)d=Math.min(d,distPtSeg(p,pts[i],pts[i+1]));
+  return d;}
+function buildHarbour(seed,site,anchors,g,opts){
+  const r=stream(seed,'harbour');
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  const H=site.harbour;if(!H||!H.pt)return null;
+  const line=site.river;
+  // gather waterline points along ~120-150m of shore centred on the harbour point
+  const L=r.range(115,150);
+  let i0=H.idx,i1=H.idx,acc0=0,acc1=0;
+  while(i0>0&&acc0<L/2){acc0+=V.dist(line[i0],line[i0-1]);i0--;}
+  while(i1<line.length-1&&acc1<L/2){acc1+=V.dist(line[i1],line[i1+1]);i1++;}
+  const shore=line.slice(i0,i1+1);
+  if(shore.length<2)return null;
+  // quay: the shoreline offset onto land (for rivers the polyline is the CENTRELINE,
+  // so the bank is riverW/2 out; for coasts the polyline is the waterline itself)
+  const inset=rk?site.riverW/2+4:5;
+  const quay=[],waterEdge=[],inland=[];
+  for(let i=0;i<shore.length;i++){
+    const a=shore[Math.max(0,i-1)],b=shore[Math.min(shore.length-1,i+1)];
+    let nl=V.rot90(V.norm(V.sub(b,a)));
+    if(site.isWater(V.add(shore[i],V.mul(nl,inset+6))))nl=V.mul(nl,-1); // point inland
+    quay.push(V.add(shore[i],V.mul(nl,inset)));
+    waterEdge.push(V.add(shore[i],V.mul(nl,rk?site.riverW/2:0)));
+    inland.push(nl);}
+  const quayS=simplify(quay,0.8);
+  const prov='Quay: hard water edge of the harbour; the town turns its working front to the water (harbour-city family, lit. review §1.1 #22).';
+  // add quay segment-wise, dropping any piece that corner-cuts across a water bend
+  // (for rivers the polyline is the centreline, so clearance is the half channel;
+  //  for coasts it IS the waterline, so a couple of metres suffice)
+  const clear=rk?site.riverW/2+1.5:2;
+  const dry=(a,b)=>{for(let t=0;t<=1;t+=0.2){
+    const p=V.lerp(a,b,t);
+    if(site.riverDist(p)<clear||site.isWater(p))return false;}return true;};
+  for(let i=0;i<quayS.length-1;i++)
+    if(dry(quayS[i],quayS[i+1]))
+      addStreet(g,quayS[i].x,quayS[i].y,quayS[i+1].x,quayS[i+1].y,'quay',7,0,prov);
+  // back street: the quay's landward twin ~40m inland — together they enclose the
+  // warehouse blocks (quay/back-lane pair, harbour-city family)
+  const backD=r.range(36,46);
+  const back=quay.map((q,i)=>V.add(q,V.mul(inland[i],backD))).filter(p=>!site.isWater(p));
+  const backS=simplify(back,1.2);
+  for(let i=0;i<backS.length-1;i++)
+    if(dry(backS[i],backS[i+1]))
+      addStreet(g,backS[i].x,backS[i].y,backS[i+1].x,backS[i+1].y,'street',4,0,
+        'Back street: the quay\'s landward twin; together they frame the warehouse blocks (harbour-city family, lit. review §1.1 #22).');
+  // herringbone stubs: perpendicular connectors closing the harbour blocks
+  const stubIdx=[0,Math.floor(shore.length/3),Math.floor(2*shore.length/3),shore.length-1];
+  for(const qi of stubIdx){
+    const e=V.add(quay[qi],V.mul(inland[qi],backD+6));
+    if(!site.isWater(e)&&dry(quay[qi],e))
+      addStreet(g,quay[qi].x,quay[qi].y,e.x,e.y,'street',4,0,
+        'Quayside lane: perpendicular access inland from the quay (herringbone harbour fabric, lit. review §1.1 #22).');}
+  // harbour road: quay -> market, a principal street (goods move from break-of-bulk
+  // to the market; gates form where it crosses a later wall). Steps inland first so
+  // it never runs along the waterline.
+  const midI=Math.floor(shore.length/2);
+  const wayPt=V.add(quay[midI],V.mul(inland[midI],backD+6));
+  const hrProv='Harbour road: the principal street from the quay to the market (break-of-bulk to point of sale, lit. review §5).';
+  addStreet(g,quay[midI].x,quay[midI].y,wayPt.x,wayPt.y,'primary',6,0,hrProv);
+  if(dry(wayPt,anchors.market))
+    addStreet(g,wayPt.x,wayPt.y,anchors.market.x,anchors.market.y,'primary',6,0,hrProv);
+  // piers: timber jetties out into the water
+  const piers=[];
+  const nP=rk?2:r.int(2,3);
+  for(let k=0;k<nP;k++){
+    const qi=Math.max(0,Math.min(shore.length-1,Math.floor((k+0.7)*shore.length/(nP+0.6))));
+    const len=rk?Math.min(site.riverW*0.55,13):r.range(20,32);
+    piers.push({a:waterEdge[qi],b:V.add(waterEdge[qi],V.mul(inland[qi],-len)),
+      prov:'Timber pier: mooring and unloading stage reaching into deeper water.'});}
+  // breakwater mole: only the open coast needs artificial shelter (bays are natural)
+  let mole=null;
+  if(site.kind==='coast'){
+    const sea=V.mul(inland[shore.length-1],-1);
+    const rot=(v,a)=>({x:v.x*Math.cos(a)-v.y*Math.sin(a),y:v.x*Math.sin(a)+v.y*Math.cos(a)});
+    const p0=waterEdge[shore.length-1];
+    const p1=V.add(p0,V.mul(sea,r.range(30,40)));
+    const p2=V.add(p1,V.mul(rot(sea,-0.9),r.range(38,52)));
+    const p3=V.add(p2,V.mul(rot(sea,-1.7),r.range(28,40)));
+    mole=[p0,p1,p2,p3];}
+  // harbour defence (selectable): the historical repertoire for protecting a basin that
+  // sits outside the town wall — chain-and-towers, an enclosing sea wall with a water-gate,
+  // or a mole-head fort. Refs: M-HARB-4; Vitruvius; Kyrenia/Golden Horn; Rhodes moles.
+  const defMode=(opts&&opts.harbourDefence)||'auto';
+  let defence=null;
+  if(defMode!=='none'&&waterEdge.length>=2){
+    const eA=waterEdge[0],eB=waterEdge[waterEdge.length-1];
+    let sd=V.norm(V.add(inland[0],inland[shore.length-1]));sd=V.mul(sd,-1); // toward the water
+    const mid=V.lerp(eA,eB,0.5);
+    const mouthOut=V.add(mid,V.mul(sd,Math.max(28,V.dist(eA,eB)*0.35)));
+    let mode=defMode;
+    if(mode==='auto')mode=(site.kind==='coast')?'molefort':(site.through?'seawall':'chain');
+    if(mode==='chain'){
+      defence={type:'chain',towers:[eA,eB],chain:[eA,mouthOut,eB],
+        prov:'Harbour chain raised between two mouth towers to bar hostile ships (Vitruvius; Kyrenia, the Golden Horn) — M-HARB-4.'};
+    }else if(mode==='seawall'){
+      const wp=waterEdge.map(p=>V.add(p,V.mul(sd,3)));
+      const gi=Math.floor(wp.length/2);
+      defence={type:'seawall',wallA:wp.slice(0,Math.max(1,gi)),wallB:wp.slice(gi+1),
+        gate:wp[gi]||mid,towers:[eA,eB],
+        prov:'Sea wall carried round the harbour with a water-gate — the 14th-c. fortified-port pattern that enclosed the basin — M-HARB-4.'};
+    }else{ // molefort
+      const head=mole?mole[mole.length-1]:mouthOut;
+      defence={type:'molefort',fort:head,base:mole?mole[0]:eB,
+        prov:'Mole-head fort/tower commanding the harbour mouth (the Hospitaller moles at Rhodes; lighthouse-forts) — M-HARB-4.'};
+    }
+  }
+  return {quay:quayS,piers,mole,pt:H.pt,defence,
+    prov:'Harbour: sheltered landing with quay, piers'+(mole?' and breakwater mole (open coasts need artificial shelter)':' (the bay provides natural shelter)')+(defence?'; protected by '+defence.type:'; unprotected')+'.'};}
+
+/* ---------------- extra bridges for a river that runs through the town ---------------- */
+function addRiverBridges(seed,site,g,count){
+  const r=stream(seed,'bridges');const n=site.river.length;
+  for(let k=1;k<=count;k++){
+    const i=Math.max(1,Math.min(n-2,Math.floor(n*(0.28+0.44*k/(count+1)))));
+    const p=site.river[i],a=site.river[i-1],b=site.river[i+1];
+    const nl=V.rot90(V.norm(V.sub(b,a)));const half=site.riverW/2+16;
+    const p1=V.add(p,V.mul(nl,half)),p2=V.add(p,V.mul(nl,-half));
+    addStreet(g,p1.x,p1.y,p2.x,p2.y,'primary',6,0,
+      'Bridge: one of several crossings of a river that runs through the town (bridge-town family; M-REG-6).');}}
+
+/* ---------------- amenities that scale with settlement rank (M-AMEN, M-ADMIN) ----------------
+ * The seat of an empire and a village differ vastly in the services they carry. Markets
+ * multiply and specialise, and civic government becomes a building, as population crosses
+ * documented thresholds (docs/05 §2.2-2.3, §5.1; King's Lynn-type multiple markets). */
+function buildMarkets(seed,site,anchors,g,plaza,pop,parcels,buildings){
+  const r=stream(seed,'markets');
+  const names=[];
+  if(pop>=1500)names.push('Shambles');                 // meat splits off first
+  if(pop>=3500)names.push('Fish Market','Corn Market');
+  if(pop>=8000)names.push('Cloth Market');
+  if(pop>=14000)names.push('Cattle Market');           // at a gate, space-hungry
+  const markets=[];const used=[plaza?plaza.center:anchors.market];
+  for(const nm of names){
+    let best=null,bs=Infinity;
+    for(const nd of g.nodes){
+      if(nd.adj.filter(id=>g.edges[id].alive).length<3)continue;
+      const dM=V.dist(nd,anchors.market);
+      if(dM<85||dM>300||site.isWater(nd))continue;
+      if(used.some(u=>V.dist(u,nd)<95))continue;
+      const s=Math.abs(dM-170)+r.range(0,50);
+      if(s<bs){bs=s;best=nd;}}
+    if(!best)continue;
+    used.push({x:best.x,y:best.y});
+    const sw=r.range(15,22),sh=r.range(11,16);
+    const poly=[{x:best.x-sw,y:best.y-sh},{x:best.x+sw,y:best.y-sh},{x:best.x+sw,y:best.y+sh},{x:best.x-sw,y:best.y+sh}];
+    // clear the square (market colonisation): remove buildings, flag parcels under it
+    for(let i=buildings.length-1;i>=0;i--)if(pointInPoly(polyCentroid(buildings[i].poly),poly))buildings.splice(i,1);
+    for(const par of parcels)if(pointInPoly(polyCentroid(par.poly),poly))par.cleared=true;
+    markets.push({name:nm,center:{x:best.x,y:best.y},poly,
+      prov:'Specialised market ('+nm+'): as the town grew past its threshold, this trade split off onto its own square (M-AMEN-1; multiple-market towns like King\'s Lynn).'});}
+  return markets;}
+// civic hall on the market — selectable style (M-ADMIN): a medieval town hall/guildhall with a
+// belfry, a Roman-style basilica (long hall + apse + colonnade), or an open guild loggia
+function buildCivic(seed,anchors,plaza,pop,style,faith){
+  if(!plaza||pop<1500)return null; // a civic hall appears once a place is a chartered town
+  if(style==='auto'||!style)style=(faith==='temple'||faith==='shrine')?'basilica':(faith==='mosque')?'none':'townhall';
+  if(style==='none')return null; // e.g. Islamic governance was not a monumental civic building
+  const c=plaza.center,p0=plaza.poly[0],p1=plaza.poly[1];
+  const mid=V.lerp(p0,p1,0.5);
+  let inl=V.norm(V.sub(c,mid));if(!isFinite(inl.x))inl={x:0,y:1};
+  const perp=V.rot90(inl);const base=V.add(mid,V.mul(inl,8));
+  const r=stream(seed,'civic');
+  const rect=(cc,ww,dd)=>[V.add(V.add(cc,V.mul(perp,-ww/2)),V.mul(inl,-dd/2)),
+    V.add(V.add(cc,V.mul(perp,ww/2)),V.mul(inl,-dd/2)),
+    V.add(V.add(cc,V.mul(perp,ww/2)),V.mul(inl,dd/2)),
+    V.add(V.add(cc,V.mul(perp,-ww/2)),V.mul(inl,dd/2))];
+  const out={style,center:base,columns:[],belfry:null,apse:null};
+  if(style==='basilica'){
+    const w=r.range(22,30),d=r.range(10,13);
+    out.hall=rect(base,w,d);out.name='Basilica';
+    // semicircular apse at one short end
+    const ex=V.add(base,V.mul(perp,w/2));const ap=[];
+    for(let k=0;k<=8;k++){const a=(-Math.PI/2)+Math.PI*k/8;
+      ap.push(V.add(V.add(ex,V.mul(perp,Math.cos(a)*d*0.5)),V.mul(inl,Math.sin(a)*d*0.5)));}
+    out.apse=ap;
+    for(let k=-3;k<=3;k++)out.columns.push(V.add(V.add(base,V.mul(perp,k*w*0.14)),V.mul(inl,-d/2-1.4)));
+    out.prov='Basilica: the Roman civic hall (law-court + assembly) — a long colonnaded hall with an apse — standing in for the town hall in a classical rite (M-ADMIN; docs/05 §2.1).';
+  }else if(style==='loggia'){
+    const w=r.range(16,22),d=r.range(8,11);
+    out.hall=rect(base,w,d);out.name='Guild loggia';
+    for(let k=-3;k<=3;k++)out.columns.push(V.add(V.add(base,V.mul(perp,k*w*0.15)),V.mul(inl,-d/2)));
+    out.prov='Guild loggia: an open ground-floor arcade on the market where the guilds and merchants met and traded (M-ADMIN; docs/05 §2.2).';
+  }else{
+    const w=r.range(15,21),d=r.range(9,13);
+    out.hall=rect(base,w,d);out.name=pop>=10000?'Town hall':'Guildhall';
+    out.belfry={x:base.x+perp.x*(w*0.32),y:base.y+perp.y*(w*0.32)};
+    out.prov='Town hall/guildhall on the market square, with a belfry — the communal movement (late 12th–13th c.) made civic self-government a building; a rank marker (M-ADMIN; docs/05 §2.3).';
+  }
+  return out;}
+
+/* ---------------- epoch growth loop (densification + exploration) ---------------- */
+function grow(seed,site,anchors,g,epochs,wallState,opts){
+  const targetLen=opts.targetLen; // m of streets, derived from target population (M-DEN-1/2)
+  const mktSide=site.bankSide(anchors.market);
+  let placedLen=0;
+  const kept=[];
+  for(let ep=1;ep<=epochs;ep++){
+    const r=stream(seed,'grow/e'+ep);
+    const exploreShare=Math.max(0.12,0.55-0.05*ep); // M-GRW-1: exploration fades
+    const budget=targetLen/epochs;
+    const primEdges=g.edges.filter(e=>e.alive&&e.cls==='primary');
+    let len=0,tries=0;
+    while(len<budget&&tries<2600){
+      tries++;
+      // pick an origin: mostly a mid-edge tap (new streets branch off frontages as
+      // T-junctions, M-NET-3; branching AT junctions would breed 4-ways, M-NET-1),
+      // or the continuation of a dead-end during exploration (Strano, M-GRW-1)
+      const explore=r.chance(exploreShare);
+      const maxR=opts.maxRF*(0.38+0.62*ep/epochs); // urbanisation front advances by epoch
+      let O,ang;
+      if(explore&&r.chance(0.55)){
+        const n=g.nodes[r.int(0,g.nodes.length-1)];
+        if(!n)continue;
+        const liveAdj=n.adj.filter(id=>g.edges[id].alive);
+        if(liveAdj.length!==1)continue;
+        const e0=g.edges[liveAdj[0]];
+        const o=g.nodes[e0.a===n.id?e0.b:e0.a];
+        O={x:n.x,y:n.y};
+        ang=Math.atan2(n.y-o.y,n.x-o.x)+r.norm()*0.22; // continue outward
+      }else{
+        const e0=g.edges[r.int(0,g.edges.length-1)];
+        if(!e0||!e0.alive)continue;
+        const a0=g.nodes[e0.a],b0=g.nodes[e0.b];
+        if(V.dist(a0,b0)<38)continue; // keep split halves out of the short-segment tail (M-NET-4)
+        O=V.lerp(a0,b0,r.range(0.35,0.65));
+        const edgeAng=Math.atan2(b0.y-a0.y,b0.x-a0.x);
+        ang=edgeAng+(r.chance(0.5)?1:-1)*(Math.PI/2)+r.norm()*0.26; // sigma ~15deg, M-NET-3
+      }
+      // demand decays from the market — and from the quay in port towns, which are
+      // densest at the waterfront (harbour-city family, lit. review §1.1 #22)
+      const dM=opts.harbour
+        ?Math.min(V.dist(O,anchors.market),distToLine(O,opts.harbour.quay)+35)
+        :V.dist(O,anchors.market);
+      if(!explore&&dM>maxR)continue;
+      if(explore&&(dM>maxR+140||dM<60))continue;
+      // bridgehead stays small: growth on the far bank is confined to the bridge approach
+      // (bridge-town family, lit. review §1.1 #23); sea sites have no far bank
+      const oSide=site.bankSide(O);
+      if(site.kind==='river'&&oSide!==mktSide){
+        if(V.dist(O,site.bridgePt)>190)continue;
+        if(r.u()>0.35)continue;}
+      // once walled, extramural growth clings to the approach roads (ribbon suburbs, M-GRW-1)
+      if(wallState.ring&&oSide===mktSide&&!pointInPoly(O,wallState.ring)){
+        let nearPrim=false;
+        for(const pe of primEdges)
+          if(distPtSeg(O,g.nodes[pe.a],g.nodes[pe.b])<90){nearPrim=true;break;}
+        if(!nearPrim)continue;}
+      const w=1/(1+dM/200); // demand decays from the market (Clark gradient, M-DEN-3)
+      if(!explore&&r.u()>w*1.35)continue;
+      const L=Math.min(125,Math.max(30,r.logn(56,0.5))); // segment lengths M-NET-4
+      let B={x:O.x+Math.cos(ang)*L,y:O.y+Math.sin(ang)*L};
+      // ---- local constraints (Parish-Mueller legalization) ----
+      // stop at the first street met: attach as a T-junction (M-NET-3 near-perpendicular
+      // attachment; M-NET-1 keeps 4-ways rare). A small pierce chance yields real crossings.
+      let hitT=Infinity,hitPt=null,hitE=null;
+      for(const eid2 of edgesNear(g,O,B)){
+        const e2=g.edges[eid2];if(!e2||!e2.alive)continue;
+        const h=segInt(O,B,g.nodes[e2.a],g.nodes[e2.b]);
+        if(h&&h.u>1e-3&&h.u<1-1e-3&&h.t>0.03&&h.t<hitT){hitT=h.t;hitPt=h.pt;hitE=e2;}}
+      if(hitPt&&!r.chance(0.10)){
+        B={x:hitPt.x,y:hitPt.y};
+        if(V.dist(O,B)<18)continue;
+        // no acute sliver at the junction: reject shallow-angle attachments (M-NET-3)
+        const a2=g.nodes[hitE.a],b2=g.nodes[hitE.b];
+        const eAng=Math.atan2(b2.y-a2.y,b2.x-a2.x);
+        let dd=Math.abs(((ang-eAng)%Math.PI+Math.PI)%Math.PI);dd=Math.min(dd,Math.PI-dd);
+        if(dd<0.44)continue;}
+      if(B.x<40||B.y<40||B.x>site.Wm-40||B.y>site.Hm-40)continue;
+      if(site.slope(V.lerp(O,B,0.5))>0.34||site.slope(B)>0.34)continue; // M-REG-5
+      // never cross water (bridge already exists)
+      let wet=false;
+      for(let t=0.15;t<=1;t+=0.17)if(site.isWater(V.lerp(O,B,t))){wet=true;break;}
+      if(wet)continue;
+      // wall permeability: after the wall exists, streets cross only at gates (M-NET-9)
+      if(wallState.ring){
+        const cross=ringCrossings(wallState.ring,O,B);
+        if(cross.length){
+          let ok=true;
+          for(const cp of cross){let near=false;
+            for(const gt of wallState.gates)if(V.dist(cp,gt.pt)<20){near=true;break;}
+            if(!near){ok=false;break;}}
+          if(!ok)continue;}}
+      // parallel-spacing: keep room for two plot depths between streets (M-BLK-4)
+      const midp=V.lerp(O,B,0.5);
+      let tooClose=false;
+      for(const eid2 of edgesNear(g,midp,midp)){
+        const e2=g.edges[eid2];if(!e2||!e2.alive)continue;
+        const a2=g.nodes[e2.a],b2=g.nodes[e2.b];
+        if(distPtSeg(O,a2,b2)<1.5)continue; // the frontage being tapped
+        const d=distPtSeg(midp,a2,b2);
+        if(d<24){
+          const ang2=Math.atan2(b2.y-a2.y,b2.x-a2.x);
+          let dd=Math.abs(((ang-ang2)%Math.PI+Math.PI)%Math.PI);dd=Math.min(dd,Math.PI-dd);
+          if(dd<0.5){tooClose=true;break;}}}
+      if(tooClose)continue;
+      const cls=explore?'street':(r.chance(0.25)?'lane':'street');
+      const wdt=cls==='lane'?2.6:r.range(3.4,5.4); // widths M-NET-8
+      const prov=(explore?'Exploration':'Densification')+' growth, epoch '+ep+
+        ': candidate scored by market access (M-DEN-3), legalized by snap/cross/spacing rules (M-NET-3/4, M-BLK-4).';
+      const made=addStreet(g,O.x,O.y,B.x,B.y,cls,wdt,ep,prov);
+      for(const e of made){len+=V.dist(g.nodes[e.a],g.nodes[e.b]);}
+      if(made.length)kept.push(made[0].id);
+    }
+    placedLen+=len;
+    // wall episode (M-GRW-2): optional enclosure, built once the town has substance
+    if(opts.walls&&!wallState.ring&&ep===Math.max(3,Math.floor(epochs*0.6))){
+      buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
+    }
+  }
+  return placedLen;}
+function ringCrossings(ring,a,b){
+  const out=[];
+  for(let i=0;i<ring.length;i++){
+    const h=segInt(a,b,ring[i],ring[(i+1)%ring.length]);
+    if(h)out.push(h.pt);}
+  return out;}
+
+/* ---------------- wall + gates (M-NET-9, M-GRW-2) ---------------- */
+function convexHull(pts){
+  const p=pts.slice().sort((a,b)=>a.x-b.x||a.y-b.y);
+  if(p.length<3)return p;
+  const cr=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+  const lo=[];for(const q of p){while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],q)<=0)lo.pop();lo.push(q);}
+  const up=[];for(let i=p.length-1;i>=0;i--){const q=p[i];
+    while(up.length>=2&&cr(up[up.length-2],up[up.length-1],q)<=0)up.pop();up.push(q);}
+  lo.pop();up.pop();return lo.concat(up);}
+function densifyLoop(poly,step){
+  const out=[];const n=poly.length;
+  for(let i=0;i<n;i++){const a=poly[i],b=poly[(i+1)%n];
+    const s=Math.max(1,Math.ceil(V.dist(a,b)/step));
+    for(let k=0;k<s;k++)out.push(V.lerp(a,b,k/s));}
+  return out;}
+function nearestIdx(pts,p){let bi=0,bd=Infinity;
+  for(let i=0;i<pts.length;i++){const d=V.dist(pts[i],p);if(d<bd){bd=d;bi=i;}}return bi;}
+function polylineCrossings(pts,a,b){const out=[];
+  for(let i=0;i<pts.length-1;i++){const h=segInt(a,b,pts[i],pts[i+1]);if(h)out.push(h.pt);}return out;}
+function cornerCut(ring,minAng,passes){
+  for(let pass=0;pass<passes;pass++){
+    const n=ring.length;const out=[];let cut=false;
+    for(let i=0;i<n;i++){
+      const a=ring[(i-1+n)%n],b=ring[i],c=ring[(i+1)%n];
+      const v1=V.norm(V.sub(a,b)),v2=V.norm(V.sub(c,b));
+      const angI=Math.acos(Math.max(-1,Math.min(1,V.dot(v1,v2))));
+      if(angI<minAng){out.push(V.lerp(b,a,0.3),V.lerp(b,c,0.3));cut=true;}
+      else out.push(b);}
+    ring=out;if(!cut)break;}
+  return ring;}
+// the town's water edge as an ordered polyline: near bank (river) or shoreline (sea),
+// offset a little onto land so the wall sits at the water's edge, not in it
+function townBank(site,anchors){
+  const line=site.river,out=[];
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  for(let i=0;i<line.length;i++){
+    const a=line[Math.max(0,i-1)],b=line[Math.min(line.length-1,i+1)];
+    const d=V.norm(V.sub(b,a));let nl=V.rot90(d);
+    if(rk){
+      if(V.dot(nl,V.sub(anchors.market,line[i]))<0)nl=V.mul(nl,-1); // toward the town bank
+      out.push(V.add(line[i],V.mul(nl,site.riverW/2+5)));
+    }else out.push({x:line[i].x,y:line[i].y-5}); // shoreline, town is landward (north)
+  }
+  return out;}
+function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  const mktSide=site.bankSide(anchors.market);
+  const near=[],far=[];
+  for(const n of g.nodes){
+    if(n.adj.filter(id=>g.edges[id].alive).length<2)continue;
+    if(V.dist(n,anchors.market)>620)continue;
+    if(rk&&site.riverDist(n)<site.riverW/2+14)continue;
+    if(!rk&&site.isWater(n))continue;
+    if(rk&&site.bankSide(n)!==mktSide)far.push(n);else near.push(n);}
+  if(near.length<8)return;
+  // "the wall crosses the water only once the city has grown around it": include the far
+  // bank only when it carries a substantial share of the built mass (bridge-town, §1.1 #23);
+  // a river-THROUGH town is on both banks by definition, so it always spans
+  const spansWater=site.through||(site.kind==='river'&&far.length>Math.max(20,near.length*0.32));
+  const massNodes=spansWater?near.concat(far):near;
+  const ds=massNodes.map(n=>V.dist(n,anchors.market)).sort((a,b)=>a-b);
+  const cut=ds[Math.floor(ds.length*0.85)]*1.12;
+  const pts=massNodes.filter(n=>V.dist(n,anchors.market)<=cut).map(n=>({x:n.x,y:n.y}));
+  if(pts.length<8)return;
+  let hull=convexHull(pts);
+  const c=polyCentroid(hull); // growth reserve ~15% (M-NET-9)
+  hull=hull.map(p=>V.add(c,V.mul(V.sub(p,c),1.10)));
+  hull=hull.map(p=>V.add(p,V.mul(V.norm(V.sub(p,c)),16)));
+
+  const isLand=(p)=> rk
+    ? (site.bankSide(p)===mktSide&&site.riverDist(p)>site.riverW/2+1)
+    : !site.isWater(p);
+  const intoWater=(p)=>{
+    if(!rk)return {x:0,y:1};
+    const e=6;
+    const gx=site.riverDist({x:p.x+e,y:p.y})-site.riverDist({x:p.x-e,y:p.y});
+    const gy=site.riverDist({x:p.x,y:p.y+e})-site.riverDist({x:p.x,y:p.y-e});
+    return V.mul(V.norm({x:gx,y:gy}),-1);}; // toward the channel
+  const spurDepth=rk?site.riverW/2+9:20;
+
+  let ring,landArc,waterWalls=[],spurs=[],waterGates=[];
+  const bank=townBank(site,anchors);
+
+  if(spansWater){
+    // town on both banks: the enceinte simply encloses the river, which passes under the
+    // wall at two water-gates (up- and downstream)
+    ring=cornerCut(chaikin(chaikin(convexHull(hull),true),true),1.75,4);
+    ring=simplify(ring,2);
+    landArc=ring.slice();
+    for(let i=0;i<ring.length;i++){
+      const a=ring[i],b=ring[(i+1)%ring.length];
+      for(let j=0;j<site.river.length-1;j++){
+        const h=segInt(a,b,site.river[j],site.river[j+1]);
+        if(h&&!waterGates.some(w=>V.dist(w,h.pt)<40))waterGates.push(h.pt);}}
+  }else{
+    // one bank: clip the hull to the land side and let the wall follow the bank on the water
+    const dense=densifyLoop(hull,8);
+    const land=dense.map(isLand);
+    const m=dense.length;
+    if(land.every(x=>x)){ // hull never reaches the water — smooth curtain all round
+      ring=cornerCut(chaikin(chaikin(hull,true),true),1.75,4);
+      ring=simplify(ring,2);landArc=ring.slice();
+    }else if(land.every(x=>!x)){return;}
+    else{
+      // pick the LONGEST contiguous land run (classification is noisy at the bank, which can
+      // fragment it into several short runs; the main land arc is the long one)
+      const w0=land.indexOf(false);
+      let bestStart=-1,bestLen=0,curStart=-1,count=0;
+      for(let k=0;k<m;k++){const j=(w0+k)%m;
+        if(land[j]){if(curStart<0){curStart=j;count=0;}count++;if(count>bestLen){bestLen=count;bestStart=curStart;}}
+        else{curStart=-1;count=0;}}
+      const run=[];for(let k=0;k<bestLen;k++)run.push(dense[(bestStart+k)%m]);
+      landArc=cornerCut(run,1.75,3); // smooth the land-facing arc only
+      // water wall follows the bank between the two transition points
+      const je=nearestIdx(bank,landArc[landArc.length-1]);
+      const js=nearestIdx(bank,landArc[0]);
+      let water=[];
+      if(je<=js)for(let k=je;k<=js;k++)water.push(bank[k]);
+      else for(let k=je;k>=js;k--)water.push(bank[k]);
+      // the two ends dip a spur into the water so no one walks round at the waterline
+      if(water.length){
+        spurs.push({a:water[0],b:V.add(water[0],V.mul(intoWater(water[0]),spurDepth)),
+          prov:'Wall spur: the circuit dips into the water at its end so the shore cannot be rounded on foot (defensive closure).'});
+        spurs.push({a:water[water.length-1],b:V.add(water[water.length-1],V.mul(intoWater(water[water.length-1]),spurDepth)),
+          prov:'Wall spur: the circuit dips into the water at its end so the shore cannot be rounded on foot (defensive closure).'});}
+      // closed ring for containment follows the bank with no gap (water already runs from
+      // the landArc-end side back to the landArc-start side, so no reversal)
+      ring=landArc.concat(water);
+      // drawn water wall: leave the harbour mouth open (never cordon the quay, §1.1 #22)
+      if(harbour&&harbour.quay&&harbour.quay.length){
+        const hp=harbour.pt;const gapR=48;
+        let cur=[];
+        for(const p of water){
+          if(V.dist(p,hp)<gapR){if(cur.length>1)waterWalls.push(cur);cur=[];}
+          else cur.push(p);}
+        if(cur.length>1)waterWalls.push(cur);
+      }else waterWalls=[water];
+    }
+  }
+  if(!ring||ring.length<6)return;
+
+  wallState.ring=ring;wallState.landArc=landArc;wallState.waterWalls=waterWalls;
+  wallState.spurs=spurs;wallState.spansWater=spansWater;
+  wallState.style='curtain';wallState.epoch=ep;wallState.centroid=polyCentroid(ring);
+  wallState.prov=spansWater
+    ?'Wall circuit: the town outgrew one bank, so the enceinte encloses both and the river passes under it at two water-gates (M-NET-9, M-GRW-2, lit. review §1.1 #23).'
+    :'Wall circuit: a curtain around the built core that follows the water\'s edge along the bank rather than bulging around it, dipping a spur into the water at each end and leaving the harbour mouth open (M-NET-9, M-GRW-2).';
+  // optional bastioned trace (trace italienne) for a decent-size, strategically fortified town
+  if(opts&&opts.fortified)applyStarFort(seed,site,anchors,wallState,opts);
+
+  // gates where primaries cross the circuit (M-NET-9); a crossing on the water edge is a
+  // water-gate (river passing under, or the harbour mouth), not a land gate
+  const nearWater=(p)=> site.kind==='river'
+    ? site.riverDist(p)<site.riverW/2+22
+    : Math.abs(p.y-(site.river.reduce((b,q,i,a)=> p.x<=q.x&&(i===0||p.x>a[i-1].x)?q.y:b, site.river[0].y)))<24;
+  const gates=[];
+  for(const e of g.edges){
+    if(!e.alive||e.cls!=='primary')continue;
+    for(const cp of ringCrossings(wallState.ring,g.nodes[e.a],g.nodes[e.b])){
+      if(gates.some(gt=>V.dist(gt.pt,cp)<40))continue;
+      const water=nearWater(cp);
+      gates.push({pt:cp,water,prov:water
+        ?'Water-gate: the circuit opens to the water here (harbour mouth or river passage), never cordoning the quay (M-NET-9, §1.1 #22).'
+        :(wallState.style==='bastioned'
+          ?'Gate: a curtain gate where an immutable primary route crosses the enceinte, covered by the flanking bastions and its ravelin (M-NET-9, M-GRW-3).'
+          :'Gate: the wall opens where an immutable primary route crosses the circuit (M-NET-9, M-GRW-3).')});}}
+  for(const wp of waterGates)
+    if(!gates.some(gt=>V.dist(gt.pt,wp)<40))
+      gates.push({pt:wp,water:true,prov:'Water-gate: the river passes under the wall where the town grew across both banks (M-NET-9).'});
+  wallState.gates=gates;}
+
+/* ---------------- star fort: bastioned trace (trace italienne) ----------------
+ * From c.1500 (Pisa's 1500 defence of an earthwork rampart against French siege guns),
+ * angled bastions replaced round towers: their two faces + two flanks let defenders sweep
+ * the curtain foot with flanking fire and leave no dead ground, while low thick ramparts,
+ * a wide ditch, detached ravelins and a glacis defeat direct artillery. Costly state works,
+ * built only for strategically important towns — never hamlets. Refs: M-FOR-1..5;
+ * Bastion fort (Wikipedia); Vauban's magistral geometry (face = 2/7 of the polygon side). */
+function applyStarFort(seed,site,anchors,wallState,opts){
+  const r=stream(seed,'starfort');
+  const land=wallState.landArc;
+  if(!land||land.length<3)return;
+  // land arc length → number of curtains (one bastion per corner). Curtain lengths are set
+  // to effective musket range so adjacent bastions cover each other (M-FOR-2).
+  let arc=0;for(let i=0;i<land.length-1;i++)arc+=V.dist(land[i],land[i+1]);
+  const curtain=230; // m, within musket range (M-FOR-2)
+  const nSeg=Math.max(2,Math.min(6,Math.round(arc/curtain)));
+  // resample the land arc into nSeg+1 evenly spaced corner points
+  const Pc=[land[0]];
+  for(let s=1;s<nSeg;s++){
+    const target=arc*s/nSeg;let acc=0;
+    for(let i=0;i<land.length-1;i++){const d=V.dist(land[i],land[i+1]);
+      if(acc+d>=target){Pc.push(V.lerp(land[i],land[i+1],(target-acc)/d));break;}acc+=d;}}
+  Pc.push(land[land.length-1]);
+  const C=wallState.centroid||polyCentroid(wallState.ring);
+  // bastion geometry (M-FOR-1/3)
+  const sb=18,fh=13,bd=r.range(34,42);
+  const trace=[];const bastions=[];const curtains=[];
+  for(let i=0;i<Pc.length;i++){
+    const P=Pc[i];
+    const out=V.norm(V.sub(P,C));
+    const du=i>0?V.norm(V.sub(P,Pc[i-1])):V.norm(V.sub(Pc[i+1],P));
+    const dw=i<Pc.length-1?V.norm(V.sub(Pc[i+1],P)):V.norm(V.sub(P,Pc[i-1]));
+    if(i===0||i===Pc.length-1){
+      // demi-bastion at the waterline ends: a single flank + salient, then meet the water
+      const dir=(i===0)?dw:V.mul(du,-1);
+      const S=V.add(P,V.mul(out,bd*0.8));
+      const sh=V.add(V.add(P,V.mul(dir,sb)),V.mul(out,fh));
+      if(i===0){trace.push(P,S,sh);bastions.push({salient:S,outline:[P,S,sh],demi:true});}
+      else{trace.push(sh,S,P);bastions.push({salient:S,outline:[sh,S,P],demi:true});}
+    }else{
+      const cIn=V.add(P,V.mul(du,-sb)),cOut=V.add(P,V.mul(dw,sb));
+      const shIn=V.add(cIn,V.mul(out,fh)),shOut=V.add(cOut,V.mul(out,fh));
+      const S=V.add(P,V.mul(out,bd));
+      trace.push(cIn,shIn,S,shOut,cOut);
+      bastions.push({salient:S,outline:[cIn,shIn,S,shOut,cOut],demi:false});}
+  }
+  // curtains: straight runs between successive bastion throats (for gate placement)
+  for(let i=0;i<bastions.length-1;i++){
+    const a=bastions[i].outline[bastions[i].outline.length-1];
+    const b=bastions[i+1].outline[0];
+    curtains.push({a,b,mid:V.lerp(a,b,0.5)});}
+  // outworks. Every current site has water access, so the ditch is WET — the late-stage
+  // Old Dutch System (Naarden): a flooded moat, doubled on larger works, with ravelins as
+  // islands, a covered way, and a glacis that is a cleared field of fire (M-FOR-6/7).
+  const ditchW=22,coveredW=8,glacisW=48;
+  // a WET ditch is only feasible if a water body is close enough to feed it (you cannot
+  // flood a moat with no water to draw from, nor pump it uphill) — M-FOR-6. Measure the
+  // nearest approach of the trace to the waterline; a hilltop/inland trace gets a DRY ditch.
+  let minWaterD=Infinity;
+  for(const p of trace)minWaterD=Math.min(minWaterD,site.riverDist(p));
+  const wet=minWaterD<175;
+  const offsetOut=(poly,d)=>poly.map(p=>V.add(p,V.mul(V.norm(V.sub(p,C)),d)));
+  const counterscarp=offsetOut(trace,ditchW);
+  const ditchBand=trace.concat(counterscarp.slice().reverse()); // wet-moat fill (closed ribbon)
+  const doubleMoat=wet&&bastions.length>=5; // Naarden-style double wet moat on larger forts
+  const coveredWay=offsetOut(trace,ditchW+coveredW);
+  const outerMoat=doubleMoat
+    ? offsetOut(trace,ditchW+coveredW).concat(offsetOut(trace,ditchW+coveredW+ditchW*0.9).slice().reverse())
+    : null;
+  const glacisOff=(doubleMoat?ditchW+coveredW+ditchW*0.9:ditchW+coveredW)+glacisW;
+  const glacis=offsetOut(trace,glacisOff);
+  const ravelins=[];
+  for(const cu of curtains){
+    const out=V.norm(V.sub(cu.mid,C));
+    const perp=V.rot90(out);
+    const halfW=Math.min(32,V.dist(cu.a,cu.b)*0.3);
+    const base1=V.add(V.add(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.32));
+    const base2=V.add(V.sub(cu.mid,V.mul(perp,halfW)),V.mul(out,ditchW*0.32));
+    const apex=V.add(cu.mid,V.mul(out,ditchW+coveredW*0.5));
+    ravelins.push([base1,apex,base2]);}
+  wallState.style='bastioned';
+  wallState.landArc=trace; // the bastioned trace is now the drawn land wall
+  wallState.fort={trace,bastions,curtains,counterscarp,ditchBand,coveredWay,outerMoat,
+    glacis,glacisOff,ravelins,wetDitch:wet,doubleMoat,
+    prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): angled bastions flank the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow causeways swept by fire (M-FOR-1..7).'};
+  wallState.prov='Bastioned enceinte: a late-stage artillery fortification wrapping the town — angled bastions, curtains at musket range, a '+(wet?'wet moat'+(doubleMoat?' (doubled, Naarden-style)':''):'dry ditch')+', ravelins, covered way and glacis (M-FOR-1..7). Built only for strategically important towns.';}
+
+/* ---------------- clear the fortification field of fire (the esplanade/glacis) ----------------
+ * A fort's glacis was kept clear for fields of fire; a town wall had a cleared rampart strip.
+ * Buildings, parcels, extramural streets and clutter inside that footprint are swept away —
+ * which is both historically correct and removes the wall/fort overlapping roads & houses. */
+function clearFortZone(site,wallState,g,parcels,buildings,details){
+  if(!wallState.ring||!wallState.landArc)return;
+  const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
+  const clearDist=wallState.style==='bastioned'?((fort&&fort.glacisOff||60)+8):15;
+  const inClear=(p)=> !pointInPoly(p,ring)&&distToLine(p,land)<clearDist;
+  for(let i=buildings.length-1;i>=0;i--)
+    if(inClear(polyCentroid(buildings[i].poly)))buildings.splice(i,1);
+  for(const par of parcels)
+    if(inClear(polyCentroid(par.poly)))par.cleared=true;
+  for(let i=details.length-1;i>=0;i--){
+    const d=details[i];
+    const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
+    if(p&&inClear(p))details.splice(i,1);}
+  const gates=wallState.gates||[];
+  const kill=(e)=>{e.alive=false;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    let k=a.adj.indexOf(e.id);if(k>=0)a.adj.splice(k,1);
+    k=b.adj.indexOf(e.id);if(k>=0)b.adj.splice(k,1);};
+  for(const e of g.edges){
+    if(!e.alive||e.cls==='primary'||e.cls==='quay')continue;
+    const mid=V.lerp(g.nodes[e.a],g.nodes[e.b],0.5);
+    if(inClear(mid)&&!gates.some(gt=>V.dist(gt.pt,mid)<clearDist*0.9))kill(e);}
+  // cutting streets can strand small fragments; keep only the largest connected component
+  const adj=new Map();
+  for(const e of g.edges){if(!e.alive)continue;
+    if(!adj.has(e.a))adj.set(e.a,[]);if(!adj.has(e.b))adj.set(e.b,[]);
+    adj.get(e.a).push(e.b);adj.get(e.b).push(e.a);}
+  const comp=new Map();let cid=0;const sizes=[];
+  for(const s of adj.keys()){if(comp.has(s))continue;
+    let n=0;const q=[s];comp.set(s,cid);
+    while(q.length){const u=q.pop();n++;for(const v of adj.get(u))if(!comp.has(v)){comp.set(v,cid);q.push(v);}}
+    sizes.push(n);cid++;}
+  if(sizes.length){let best=0;for(let i=1;i<sizes.length;i++)if(sizes[i]>sizes[best])best=i;
+    for(const e of g.edges)if(e.alive&&comp.get(e.a)!==best)kill(e);}}
+
+/* ---------------- interior lane pass: split oversized central blocks ---------------- */
+function lanePass(seed,site,anchors,g,epoch){
+  const r=stream(seed,'lanes/'+epoch);
+  const faces=extractFaces(g);
+  let added=0;
+  for(const f of faces){
+    if(f.outer)continue;
+    const A=Math.abs(f.area);
+    if(A<12000||A>140000)continue;
+    const c=polyCentroid(f.poly);
+    if(V.dist(c,anchors.market)>520)continue;
+    if(site.isWater(c))continue;
+    // connect midpoints of the two longest, roughly-opposite boundary edges
+    let longest=[-1,-1],lens=[0,0];
+    for(let i=0;i<f.poly.length;i++){
+      const l=V.dist(f.poly[i],f.poly[(i+1)%f.poly.length]);
+      if(l>lens[0]){lens[1]=lens[0];longest[1]=longest[0];lens[0]=l;longest[0]=i;}
+      else if(l>lens[1]){lens[1]=l;longest[1]=i;}}
+    if(longest[1]<0)continue;
+    const m1=V.lerp(f.poly[longest[0]],f.poly[(longest[0]+1)%f.poly.length],r.range(0.35,0.65));
+    const m2=V.lerp(f.poly[longest[1]],f.poly[(longest[1]+1)%f.poly.length],r.range(0.35,0.65));
+    if(V.dist(m1,m2)<30)continue;
+    let wet=false;
+    for(let t=0;t<=1;t+=0.12)if(site.isWater(V.lerp(m1,m2,t))){wet=true;break;}
+    if(wet)continue;
+    addStreet(g,m1.x,m1.y,m2.x,m2.y,'lane',2.6,epoch,
+      'Back lane: oversized central block split for rear access (densification, M-GRW-1; block depth 2 plot-depths, M-BLK-4).');
+    added++;}
+  return added;}
+
+/* ---------------- blocks (faces -> inset polygons) ---------------- */
+function buildBlocks(g,plaza,site){
+  const faces=extractFaces(g);
+  const blocks=[];let bId=0;
+  for(const f of faces){
+    if(f.outer)continue;
+    const A=Math.abs(f.area);
+    if(A<120||A>140000)continue;
+    let poly=ensureCCW(f.poly);
+    const ids=polyArea(f.poly)>=0?f.nodeIds:f.nodeIds.slice().reverse();
+    const dists=[];
+    for(let i=0;i<ids.length;i++){
+      const e=edgeBetween(g,ids[i],ids[(i+1)%ids.length]);
+      dists.push((e?e.w:4)/2+1.4);}
+    let inner=insetPoly(poly,dists);
+    if(!inner){
+      const u=Math.max(...dists);
+      inner=insetPoly(poly,poly.map(()=>u));
+      if(!inner)continue;}
+    if(site.isWater(polyCentroid(inner)))continue; // faces straddling the water stay unbuilt
+    const isPlaza=plaza&&pointInPoly(plaza.center,poly);
+    blocks.push({id:'blk'+(bId++),poly:inner,facePoly:poly,faceIds:ids,edgeDists:dists,
+      area:Math.abs(polyArea(inner)),plaza:!!isPlaza,
+      prov:isPlaza?'Market place: the face of the street graph containing the market anchor; kept unbuilt (M-DEN-6).'
+        :'Urban block: a face of the planar street graph, inset by half the width of each fronting street (+ verge).'});}
+  return blocks;}
+
+/* ---------------- parcels: series platting via bisector edge-cells ---------------- */
+function buildParcels(seed,g,blocks,anchors,epochs,site){
+  const parcels=[];let pid=0;
+  for(const blk of blocks){
+    if(blk.plaza)continue;
+    const poly=blk.poly; // CCW
+    const n=poly.length;
+    if(n<3)continue;
+    const rB=stream((fnv1a(blk.id)^0)>>>0,'parcels/'+blk.id);
+    const cand=[]; // per-block candidates; filtered for overlap + area conservation below
+    const dM=V.dist(polyCentroid(poly),anchors.market);
+    // block-uniform target plot depth (M-PAR-2), shallower at the core where land is dear
+    const depthTarget=Math.max(14,Math.min(46,rB.logn(dM<160?22:30,0.28)));
+    // vertex bisectors, capped by ray-cast to the opposite boundary
+    const bis=[],cap=[];
+    for(let i=0;i<n;i++){
+      const p=poly[i],prev=poly[(i-1+n)%n],next=poly[(i+1)%n];
+      const d1=V.norm(V.sub(p,prev)),d2=V.norm(V.sub(next,p));
+      const n1={x:-d1.y,y:d1.x},n2={x:-d2.y,y:d2.x};
+      let b=V.add(n1,n2);
+      if(V.len(b)<1e-6)b=n1;
+      b=V.norm(b);
+      // ray-cast cap
+      let tMin=1e9;
+      const far=V.add(p,V.mul(b,2000));
+      for(let j=0;j<n;j++){
+        if(j===i||j===(i-1+n)%n)continue;
+        const h=segInt(p,far,poly[j],poly[(j+1)%n]);
+        if(h&&h.t>1e-4)tMin=Math.min(tMin,h.t*2000);}
+      bis.push(b);cap.push(Math.max(2,Math.min(tMin*0.42,depthTarget*1.35)));}
+    // per-edge depth clamp: raycast from the edge midpoint along the inward normal so the
+    // cell never reaches past the block's waist (keeps sum(parcels) <= block area)
+    const edgeDepth=[];
+    for(let i=0;i<n;i++){
+      const A=poly[i],B=poly[(i+1)%n];
+      const mid=V.lerp(A,B,0.5);
+      const d=V.norm(V.sub(B,A));const nl={x:-d.y,y:d.x};
+      const far=V.add(mid,V.mul(nl,2000));
+      let tMin=1e9;
+      for(let j=0;j<n;j++){
+        if(j===i)continue;
+        const h=segInt(mid,far,poly[j],poly[(j+1)%n]);
+        if(h&&h.t>1e-4)tMin=Math.min(tMin,h.t*2000);}
+      edgeDepth.push(Math.min(depthTarget,tMin*0.42));}
+    // per-edge cells -> strip parcels
+    for(let i=0;i<n;i++){
+      const A=poly[i],B=poly[(i+1)%n];
+      const eLen=V.dist(A,B);
+      if(eLen<7)continue;
+      if(edgeDepth[i]<4)continue;
+      const LA=Math.min(cap[i],edgeDepth[i]),LB=Math.min(cap[(i+1)%n],edgeDepth[i]);
+      if(LA<4&&LB<4)continue;
+      const backA=V.add(A,V.mul(bis[i],LA)),backB=V.add(B,V.mul(bis[(i+1)%n],LB));
+      // frontage widths: grant then subdivide (M-PAR-1); older streets more subdivided
+      const eref=edgeBetween(g,blk.faceIds?blk.faceIds[i]:-1,blk.faceIds?blk.faceIds[(i+1)%n]:-1);
+      const age=eref?Math.max(0,epochs-eref.epoch):epochs;
+      const widths=[];let acc=0;
+      while(acc<eLen-3){
+        let w=Math.max(4.5,Math.min(16,rB.logn(11,0.22))); // 2-3 perch grants, M-PAR-1
+        let parts=[w];
+        const splits=Math.min(2,Math.floor(age/3));
+        for(let s=0;s<splits;s++){
+          const np=[];
+          for(const pw of parts){
+            if(pw>6.4&&rB.chance(0.4)){const f=rB.range(0.4,0.6);np.push(pw*f,pw*(1-f));}
+            else np.push(pw);}
+          parts=np;}
+        for(const pw of parts){if(acc+pw>eLen-2)break;widths.push(pw);acc+=pw;}
+        if(parts.length===0)break;
+        if(acc+4.5>eLen-2)break;}
+      if(!widths.length)continue;
+      // stretch to fill the frontage exactly
+      const scale=(eLen)/(acc||eLen);
+      let f0=0;
+      for(const w of widths){
+        const f1=f0+w*scale/eLen;
+        const P0=V.lerp(A,B,f0),P1=V.lerp(A,B,Math.min(1,f1));
+        const Q0=V.lerp(backA,backB,f0),Q1=V.lerp(backA,backB,Math.min(1,f1));
+        const quad=[P0,P1,Q1,Q0];
+        const area=Math.abs(polyArea(quad));
+        const qc=polyCentroid(quad);
+        const wetPar=site&&(site.isWater(qc)||
+          site.riverDist(qc)<(site.kind==='river'?site.riverW/2+1:3));
+        if(!wetPar&&area>=26&&area<=2600){
+          cand.push({id:'par'+(pid++),poly:quad,block:blk.id,
+            frontage:V.dist(P0,P1),depth:(V.dist(P0,Q0)+V.dist(P1,Q1))/2,
+            area,age,edgeCls:eref?eref.cls:'street',
+            F0:P0,F1:P1,B1:Q1,B0:Q0,
+            prov:'Strip parcel: series-platted along its street frontage (grant-then-subdivide widths M-PAR-1; depth M-PAR-2; long axis normal to street M-PAR-4).'});}
+        f0=f1;
+        if(f0>=1)break;}
+    }
+    // reflex-vertex cells can overlap: reject any parcel whose centroid falls inside an
+    // already-accepted parcel, then trim to conserve area (invariant: sum <= block area)
+    const acc=[];
+    for(const p of cand){
+      const c=polyCentroid(p.poly);
+      let bad=false;
+      for(const q of acc)if(pointInPoly(c,q.poly)){bad=true;break;}
+      if(!bad)acc.push(p);}
+    let sum=acc.reduce((s,p)=>s+p.area,0);
+    const maxA=Math.abs(polyArea(poly))*0.97;
+    while(sum>maxA&&acc.length){const p=acc.pop();sum-=p.area;}
+    for(const p of acc)parcels.push(p);
+  }
+  return parcels;}
+
+/* ---------------- districts: derived from access + anchors (M-NET-10, M-DEN-5) ---------------- */
+function assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour){
+  // without a wall the intramural/extramural split falls back to the urban-core radius
+  const inWall=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.72;
+  for(const par of parcels){
+    const c=polyCentroid(par.poly);
+    const dM=V.dist(c,anchors.market);
+    const rd=site.riverDist(c);
+    let d;
+    if(plaza&&distPtSeg(c,plaza.poly[0],plaza.poly[1])<par.depth+22&&dM<120)d='market';
+    else if(dM<140)d='market';
+    else if(rd<60)d='craftriver';
+    else if(!inWall(c))d=dM>430?'agrarian':'suburb';
+    else if(dM<260)d='burgher';
+    else d='artisan';
+    // harbour quarter overrides: parcels fronting the quay, or hard by it, carry the
+    // warehouses (harbour-city family: deepest plots at the water, lit. review §1.1 #22)
+    if(harbour&&(par.edgeCls==='quay'||
+        (distToLine(c,harbour.quay)<52&&rd<95)))d='harbour';
+    par.district=d;
+    par.provDistrict={
+      harbour:'Harbour quarter: warehouses and merchant yards on the quay — goods land, are stored and are sold from here (harbour-city family, lit. review §1.1 #22).',
+      market:'Market district: highest network access; commerce clusters on the most integrated frontages (M-NET-10).',
+      burgher:'Burgher district: prime intramural land near the market; dense, tall frontages (M-DEN-1/3).',
+      artisan:'Artisan district: intramural but peripheral; workshops and yards (M-DEN-5).',
+      craftriver:'Riverside craft district: water-dependent and noxious trades (tanning, dyeing) pushed to the bank (M-DEN-5).',
+      suburb:'Suburb: extramural ribbon along the approach roads (Strano exploration phase, M-GRW-1).',
+      agrarian:'Agrarian fringe: smallholdings, orchards and paddocks at the walking limit (M-REG-4).'}[d];}
+}
+
+/* ---------------- buildings: parcel-conditioned grammar (M-BLD-*) ---------------- */
+function bmap(par,u,v){ // bilinear patch over parcel quad
+  const e0=V.lerp(par.F0,par.F1,u),e1=V.lerp(par.B0,par.B1,u);
+  return V.lerp(e0,e1,v);}
+function rectPoly(par,u0,u1,v0,v1){
+  return [bmap(par,u0,v0),bmap(par,u1,v0),bmap(par,u1,v1),bmap(par,u0,v1)];}
+function buildBuildings(seed,parcels,plaza,anchors){
+  const out=[];let bid=0;
+  for(const par of parcels){
+    const r=stream(fnv1a(par.id),'bld');
+    const d=par.district;
+    if(d==='agrarian'&&r.chance(0.45)){par.empty=true;continue;} // paddocks
+    if(par.frontage<3.2||par.depth<6){par.empty=true;continue;}
+    const rects=[]; // in (u,v) space
+    const isWare=d==='harbour';
+    // warehouses run deep to the plot tail (goods storage); houses stop at roof-span depth
+    const mainDepthM=isWare
+      ?Math.min(par.depth*0.85,Math.max(9,r.logn(15,0.18)))
+      :Math.min(par.depth*0.72,Math.max(7,r.logn(d==='market'||d==='burgher'?11.5:9.5,0.2))); // M-BLD-2
+    const dv=mainDepthM/par.depth;
+    let gL=0,gR=0;
+    const detached=(d==='suburb'&&r.chance(0.35))||(d==='agrarian');
+    if(detached){gL=Math.min(0.25,1.2/par.frontage);gR=Math.min(0.25,(r.chance(0.5)?1.4:0.4)/par.frontage);}
+    else if(!isWare&&r.chance(0.12)){gR=Math.min(0.2,0.9/par.frontage);} // occasional eaves gap (M-BLD-5)
+    rects.push({u0:gL,u1:1-gR,v0:0,v1:dv,kind:'main'});
+    // rear wing along one side (burgage-cycle infill, M-BLD-6): probability grows with age
+    let wingP=Math.min(0.85,0.18+par.age*0.09+(d==='market'?0.25:0));
+    if(isWare)wingP=0.12;
+    if(par.depth*(1-dv)>7&&r.chance(wingP)){
+      const side=r.chance(0.5);
+      const wu=Math.min(0.55,Math.max(0.3,4.5/par.frontage));
+      const wl=Math.min(0.92,dv+(par.depth*r.range(0.2,0.42))/par.depth);
+      rects.push({u0:side?gL:1-gR-wu,u1:side?gL+wu:1-gR,v0:dv-0.02,v1:wl,kind:'wing'});}
+    // detached rear outbuilding (barn/workshop)
+    if(par.depth*(1-dv)>10&&r.chance(d==='agrarian'?0.7:0.28)){
+      const ou=Math.min(0.8,Math.max(0.35,5/par.frontage));
+      const c=r.range(0.1,0.9-ou);
+      rects.push({u0:c,u1:c+ou,v0:0.78,v1:0.95,kind:'outbuilding'});}
+    // courtyard ring for grand market/burgher parcels (M-BLD-3)
+    let courtyard=false;
+    if((d==='market'||d==='burgher')&&par.frontage>10&&par.depth>18&&r.chance(0.4)){
+      rects.length=0;courtyard=true;
+      rects.push({u0:0,u1:1,v0:0,v1:0.3,kind:'main'});
+      rects.push({u0:0,u1:0.32,v0:0.28,v1:0.75,kind:'wing'});
+      rects.push({u0:0.68,u1:1,v0:0.28,v1:0.75,kind:'wing'});
+      rects.push({u0:0,u1:1,v0:0.73,v1:0.9,kind:'rear range'});}
+    for(const rc of rects){
+      const poly=rectPoly(par,rc.u0,rc.u1,rc.v0,rc.v1);
+      if(Math.abs(polyArea(poly))<9)continue;
+      // roof ridge: along the longer footprint axis (M-BLD-7, straight-skeleton spine of a quad)
+      const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
+      let ridge,kindName=rc.kind;
+      if(isWare&&rc.kind==='main'){
+        // warehouse signature: gable to the street, ridge perpendicular to the frontage
+        kindName='warehouse';
+        ridge=[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+      }else if(wU>=wV)ridge=[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)];
+      else ridge=[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+      const ins=0.16;
+      ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
+      out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:kindName,district:d,age:par.age,
+        courtyard,
+        prov:(kindName==='warehouse'?'Warehouse: deep gable-fronted store on the quay; goods land at the break-of-bulk point (harbour-city family, lit. review §1.1 #22, §5).':
+          rc.kind==='main'?'Main range on the build-to line (zero setback, M-BLD-1; depth M-BLD-2).':
+          rc.kind==='wing'?'Rear wing: burgage-cycle infill along the plot side (age-driven, M-BLD-6).':
+          rc.kind==='rear range'?'Rear range closing a courtyard plan (M-BLD-3).':
+          'Rear outbuilding (barn/workshop) at the plot tail (M-BLD-6).')});}
+    par.built=true;}
+  return out;}
+
+/* ---------------- religious sites (anchor institutions, M-DEN-8) ---------------- */
+// one parish per ~500 households (M-DEN-8 midpoint); each church claims a run of parcels
+// as its churchyard, clearing earlier houses (institutions deform the fabric, lit. review §10.7)
+function _rectPts(rx,ry,w,h){return [{x:rx-w/2,y:ry-h/2},{x:rx+w/2,y:ry-h/2},{x:rx+w/2,y:ry+h/2},{x:rx-w/2,y:ry+h/2}];}
+function _peristyle(rx,ry,w,h,sp){const cols=[],cn=_rectPts(rx,ry,w,h);
+  for(let i=0;i<4;i++){const a=cn[i],b=cn[(i+1)%4];const len=Math.hypot(b.x-a.x,b.y-a.y);
+    const n=Math.max(2,Math.round(len/sp));
+    for(let k=0;k<n;k++)cols.push({x:a.x+(b.x-a.x)*k/n,y:a.y+(b.y-a.y)*k/n});}return cols;}
+/* place of worship — selectable rite (M-BLD-8): Christian church (cross-plan, chancel east);
+ * classical Roman/Greek temple (colonnaded cella on a podium, frontal steps to the forum);
+ * shrine (a small cella); mosque (prayer hall on the qibla + courtyard + minaret). The
+ * churchyard/temenos site-selection & clearing is common; only the building form differs. */
+function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
+  faith=faith||'church';
+  const NAME={church:'Church',temple:'Temple',shrine:'Shrine',mosque:'Mosque'};
+  const sites=[];
+  for(let ci=0;ci<count;ci++){
+    const r=stream(seed,'faith/'+ci);
+    const dMin=ci===0?70:170+ci*60,dMax=ci===0?230:320+ci*130;
+    let best=null,bs=Infinity;
+    for(const par of parcels){
+      if(par.churchyard)continue;
+      const c=polyCentroid(par.poly),dM=V.dist(c,anchors.market);
+      if(dM<dMin||dM>dMax)continue;
+      if(par.frontage<7||par.depth<10)continue;
+      if(sites.some(s=>V.dist(c,s.center)<180))continue;
+      const sc=dM+r.range(0,40);if(sc<bs){bs=sc;best=par;}}
+    if(!best)continue;
+    const group=[best];
+    for(const par of parcels){
+      if(par===best||par.block!==best.block||par.churchyard)continue;
+      if(V.dist(polyCentroid(par.poly),polyCentroid(best.poly))<best.frontage+par.frontage+6)group.push(par);
+      if(group.length>=3)break;}
+    for(const par of group){par.district='church';par.churchyard=true;
+      par.provDistrict='Sacred precinct: the place of worship on its own plot; earlier houses cleared (M-DEN-8).';}
+    const ids=new Set(group.map(p=>p.id));
+    for(let i=buildings.length-1;i>=0;i--)if(ids.has(buildings[i].parcel))buildings.splice(i,1);
+    let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
+    for(const par of group)for(const pt of par.poly){
+      if(pt.x<minx)minx=pt.x;if(pt.x>maxx)maxx=pt.x;if(pt.y<miny)miny=pt.y;if(pt.y>maxy)maxy=pt.y;}
+    const cx=(minx+maxx)/2,cy=(miny+maxy)/2,exX=maxx-minx,exY=maxy-miny,mg=2.5;
+    const horiz=exX>=exY;
+    const s={id:'worship'+ci,faith,name:NAME[faith],center:{x:cx,y:cy},yard:group.map(p=>p.id),
+      polys:[],open:[],columns:[],steps:[],tower:null,ridge:[]};
+    if(faith==='temple'||faith==='shrine'){
+      const big=faith==='temple';
+      const L=Math.max(big?11:6,Math.min(big?(ci===0?26:20):11,(horiz?exX:exY)-2*mg));
+      const W=Math.max(big?7:4,Math.min(big?13:7,(horiz?exY:exX)-2*mg));
+      const lw=horiz?L:W,lh=horiz?W:L;
+      s.open.push(_rectPts(cx,cy,lw+2.5,lh+2.5));              // podium
+      s.polys.push(_rectPts(cx,cy,lw,lh));                     // cella
+      s.columns=_peristyle(cx,cy,lw+1.6,lh+1.6,big?3.4:3);     // colonnade (peristyle)
+      for(let st=0;st<3;st++){const o=lw/2+2+st*1.3,oY=lh/2+2+st*1.3;
+        if(horiz)s.steps.push([{x:cx+(anchors.market.x>cx?o:-o),y:cy-lh/2},{x:cx+(anchors.market.x>cx?o:-o),y:cy+lh/2}]);
+        else s.steps.push([{x:cx-lw/2,y:cy+(anchors.market.y>cy?oY:-oY)},{x:cx+lw/2,y:cy+(anchors.market.y>cy?oY:-oY)}]);}
+      s.ridge=horiz?[{x:cx-lw/2+2,y:cy},{x:cx+lw/2-2,y:cy}]:[{x:cx,y:cy-lh/2+2},{x:cx,y:cy+lh/2-2}];
+      s.prov=(big?'Classical temple':'Shrine')+': a '+(big?'colonnaded ':'')+'cella on a raised podium with a frontal flight of steps toward the forum/market — the Roman/Greek rite, oriented to its surroundings rather than to the east (M-BLD-8; Roman temple form).';
+    }else if(faith==='mosque'){
+      const L=Math.max(12,Math.min(ci===0?26:20,exX-2*mg));
+      const H=Math.max(9,Math.min(exY-2*mg,L*0.85));
+      s.polys.push(_rectPts(cx,cy+H*0.25,L,H*0.5));            // prayer hall (qibla side)
+      s.open.push(_rectPts(cx,cy-H*0.25,L*0.92,H*0.44));       // sahn (courtyard)
+      s.tower={x:cx-L/2+2,y:cy-H*0.25,r:2.4,kind:'minaret'};   // minaret at a courtyard corner
+      s.ridge=[{x:cx-L/2+2,y:cy+H*0.25},{x:cx+L/2-2,y:cy+H*0.25}];
+      s.prov='Mosque: a covered prayer hall on the qibla side with an open courtyard (sahn) and a minaret — the Islamic rite (M-BLD-8).';
+    }else{
+      const L=Math.max(9,Math.min(ci===0?30:22,exX-2*mg));
+      const Wn=Math.max(4.5,Math.min(L*0.42,exY*0.5-mg));
+      const nave=_rectPts(cx,cy,L,Wn);
+      const T=Math.max(Wn,Math.min(Wn*1.7,exY-2*mg)),Tw=Math.min(Wn*0.85,L*0.28);
+      const tcx=cx+Math.min(L*0.14,(exX-L)/2+L*0.14);
+      s.polys.push(nave,_rectPts(tcx,cy,Tw,T));
+      s.tower={x:cx-L/2+1.6,y:cy,r:1.8,kind:'spire'};          // west tower
+      s.ridge=[{x:cx-L/2+2,y:cy},{x:cx+L/2-2,y:cy}];
+      s.prov=(ci===0?'Principal parish church':'Parish church')+': cross-plan on the liturgical east-west axis (chancel eastward), sized to its churchyard (M-DEN-8, M-BLD-4, M-BLD-8).';
+    }
+    for(let i=buildings.length-1;i>=0;i--){
+      const bc=polyCentroid(buildings[i].poly);
+      if(s.polys.some(pl=>pointInPoly(bc,pl))||s.open.some(pl=>pointInPoly(bc,pl)))buildings.splice(i,1);}
+    sites.push(s);}
+  return sites;}
+
+/* ---------------- details: wells, trees, fences, fields (M-DEN-7, M-GRW-5) ---------------- */
+function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour){
+  const r=stream(seed,'details');
+  const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
+  const details=[];let did=0;
+  // wells: one per ~250-400 residents (M-DEN-7), at well-connected nodes away from each other
+  const nWells=Math.max(2,Math.round(pop/320));
+  const cand=g.nodes.filter(n=>n.adj.filter(id=>g.edges[id].alive).length>=3&&site.riverDist(n)>40)
+    .sort((a,b)=>V.dist(a,anchors.market)-V.dist(b,anchors.market));
+  const wells=[];
+  if(plaza)wells.push({x:plaza.center.x,y:plaza.center.y});
+  for(const n of cand){
+    if(wells.length>=nWells)break;
+    if(wells.every(w=>V.dist(w,n)>150))wells.push({x:n.x,y:n.y});}
+  wells.forEach(w=>details.push({id:'det'+(did++),kind:'well',x:w.x,y:w.y,
+    prov:'Public well: one per few hundred residents, at a well-connected junction or the market (M-DEN-7).'}));
+  if(plaza)details.push({id:'det'+(did++),kind:'cross',x:plaza.center.x+8,y:plaza.center.y-6,
+    prov:'Market cross: the legal marker of market right, centre of the plaza (M-DEN-6).'});
+  if(harbour){
+    const q=harbour.quay,qm=q[Math.floor(q.length/2)];
+    const inl=V.norm(V.sub(anchors.market,qm));
+    details.push({id:'det'+(did++),kind:'crane',x:qm.x+inl.x*7,y:qm.y+inl.y*7,
+      prov:'Treadwheel crane: the quayside hoist at the break-of-bulk point (harbour-city family, lit. review §5).'});
+    for(const pr of harbour.piers)
+      details.push({id:'det'+(did++),kind:'bollard',x:pr.a.x,y:pr.a.y,
+        prov:'Mooring bollard at the pier root.'});}
+  // garden trees in unparceled block cores (backland; M-PAR-5 low rear coverage)
+  for(const blk of blocks){
+    if(blk.plaza)continue;
+    if(blk.area<900)continue;
+    const c=polyCentroid(blk.poly);
+    const rb=stream(fnv1a(blk.id),'trees');
+    const nT=Math.min(9,Math.floor(blk.area/1200));
+    const parsOfBlk=parcels.filter(p=>p.block===blk.id);
+    for(let i=0;i<nT*4&&i<60;i++){
+      const p={x:c.x+rb.norm()*Math.sqrt(blk.area)*0.2,y:c.y+rb.norm()*Math.sqrt(blk.area)*0.2};
+      if(!pointInPoly(p,blk.poly))continue;
+      if(parsOfBlk.some(par=>pointInPoly(p,par.poly)))continue;
+      details.push({id:'det'+(did++),kind:'tree',x:p.x,y:p.y,rr:rb.range(1.6,3.2),
+        prov:'Garden tree in the unbuilt block core (backland gardens behind the plot tails, M-PAR-5).'});
+      if(details.filter(d=>d.kind==='tree').length>240)break;}}
+  // fences round agrarian/suburb parcels
+  for(const par of parcels){
+    if(par.district!=='agrarian'&&!(par.district==='suburb'&&par.empty))continue;
+    details.push({id:'det'+(did++),kind:'fence',poly:par.poly,
+      prov:'Plot fence: low-density holdings are enclosed rather than built to the line (M-BLD-5).'});}
+  // strip fields fossilizing along the approach roads (M-GRW-5)
+  for(const e of g.edges){
+    if(!e.alive||e.cls!=='primary')continue;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    const mid=V.lerp(a,b,0.5);
+    if(urban(mid))continue;
+    if(V.dist(mid,anchors.market)<330)continue;
+    const dir=V.norm(V.sub(b,a));const nl=V.rot90(dir);
+    const L=V.dist(a,b);
+    const rf=stream(fnv1a('f'+e.id),'fields');
+    for(let t=18;t<L-12;t+=rf.range(28,40)){ // selion-width strips (M-GRW-5)
+      const p=V.add(a,V.mul(dir,t));
+      for(const s of [1,-1]){
+        const q1=V.add(p,V.mul(nl,s*9)),q2=V.add(p,V.mul(nl,s*rf.range(70,140)));
+        if(site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5)))continue;
+        if(urban(q2))continue;
+        details.push({id:'det'+(did++),kind:'field',a:q1,b:q2,
+          prov:'Strip-field boundary: the pre-urban furlong fabric along the approach road (M-GRW-5); later growth fossilizes these lines.'});}}
+    if(details.filter(d=>d.kind==='field').length>260)break;}
+  // orchards on some agrarian parcels
+  for(const par of parcels){
+    if(par.district!=='agrarian'||!par.empty)continue;
+    const rb=stream(fnv1a(par.id),'orchard');
+    if(!rb.chance(0.5))continue;
+    for(let u=0.18;u<0.9;u+=0.24)for(let v=0.2;v<0.9;v+=0.26){
+      const p=bmap(par,u,v);
+      details.push({id:'det'+(did++),kind:'tree',orchard:true,x:p.x,y:p.y,rr:2.1,
+        prov:'Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).'});}
+  }
+  return details;}
+
+/* ---------------- morphometrics (validation, register bands) ---------------- */
+function computeMetrics(g,blocks,parcels){
+  const nodes=g.nodes.filter(n=>n.adj.some(id=>g.edges[id].alive));
+  const live=g.edges.filter(e=>e.alive);
+  let d1=0,d3=0,d4=0,dsum=0;
+  for(const n of nodes){
+    const deg=n.adj.filter(id=>g.edges[id].alive).length;
+    dsum+=deg;
+    if(deg===1)d1++;else if(deg===3)d3++;else if(deg>=4)d4++;}
+  const inter=d3+d4;
+  const segLens=live.map(e=>V.dist(g.nodes[e.a],g.nodes[e.b])).sort((a,b)=>a-b);
+  const med=(arr)=>arr.length?arr[Math.floor(arr.length/2)]:0;
+  const V0=nodes.length,E0=live.length;
+  const mesh=V0>2?(E0-V0+1)/(2*V0-5):0;
+  const fronts=parcels.map(p=>p.frontage).sort((a,b)=>a-b);
+  const areas=blocks.filter(b=>!b.plaza).map(b=>b.area).sort((a,b)=>a-b);
+  return {
+    nodes:V0,edges:E0,totalLen:Math.round(segLens.reduce((s,l)=>s+l,0)),
+    deadEndShare:V0?d1/V0:0,          // M-NET-2 band [0.08,0.25]
+    deg3Share:inter?d3/inter:0,       // M-NET-1
+    deg4Share:inter?d4/inter:0,       // M-NET-1 band [0.05,0.28]
+    meanDeg:V0?dsum/V0:0,
+    medianSeg:med(segLens),           // M-NET-4 band [25,90]
+    meshedness:mesh,                  // M-NET-5 band [0.06,0.30]
+    blocks:blocks.length,medianBlockArea:med(areas),
+    parcels:parcels.length,medianFrontage:med(fronts), // M-PAR-1 band [4,10]
+    bands:{deg4Share:[0.05,0.28],deadEndShare:[0.06,0.28],medianSeg:[25,90],
+      meshedness:[0.06,0.30],medianFrontage:[4,10]}};}
+
+/* ---------------- top-level generate ---------------- */
+function generate(seed,opts){
+  opts=opts||{};
+  const epochs=opts.epochs||8;
+  const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
+  const walls=opts.walls!==false; // enclosures are optional (default on for the medieval pack)
+  // a bastioned trace was a costly state investment for strategically important towns —
+  // never hamlets; require a decent size (M-FOR-4). Below the threshold it stays a curtain.
+  const fortMin=2500;
+  const fortRequested=!!opts.fortified;
+  const fortified=fortRequested&&popTarget>=fortMin&&walls;
+  // population -> street length + urban radius via intramural density (M-DEN-1, M-DEN-2,
+  // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant
+  const targetLen=Math.max(3500,Math.min(42000,popTarget*2.1));
+  const maxRF=Math.min(720,Math.sqrt(popTarget*21)*1.35+80);
+  const Wm=1700,Hm=1250;
+  const siteKind=opts.site||'river';
+  const site=buildSite(seed,Wm,Hm,siteKind);
+  const anchors=placeAnchors(seed,site);
+  const g=makeGraph();
+  const routes=buildPrimaries(seed,site,anchors,g);
+  const plaza=buildPlaza(seed,site,anchors,g);
+  const harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
+  if(site.through)addRiverBridges(seed,site,g,2); // a river that bisects the town
+  const wallState={ring:null,gates:[],epoch:0};
+  grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget});
+  for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
+  const blocks=buildBlocks(g,plaza,site);
+  const parcels=buildParcels(seed,g,blocks,anchors,epochs,site);
+  assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
+  const buildings=buildBuildings(seed,parcels,plaza,anchors);
+  const faith=opts.faith||'church';
+  const nChurch=Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // parishes, M-DEN-8
+  const churches=buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith);
+  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
+  // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN)
+  const markets=buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings);
+  const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle,faith);
+  const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
+  // sweep the fortification's field of fire clear (esplanade/glacis): removes buildings,
+  // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
+  if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
+  const metrics=computeMetrics(g,blocks,parcels);
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,through:site.through,river:site.river,riverW:site.riverW,
+      waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
+    anchors,plaza,harbour,markets,civic,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
+    wall:wallState,blocks,parcels,buildings,churches,details,pop,metrics,through:site.through};}
+
+/* stable serialization + FNV hash for determinism goldens */
+function hashModel(m){
+  const parts=[];
+  for(const e of m.graph.edges)parts.push(e.a,e.b,e.cls,Math.round(e.w*10));
+  for(const n of m.graph.nodes)parts.push(Math.round(n.x*100),Math.round(n.y*100));
+  for(const b of m.blocks)parts.push(b.id,Math.round(b.area));
+  for(const p of m.parcels)parts.push(p.id,Math.round(p.area*10),p.district||'');
+  for(const b of m.buildings)parts.push(b.id,b.kind,Math.round(polyArea(b.poly)*10));
+  return fnv1a(parts.join('|'));}
+
+return {generate,hashModel,stream,fnv1a,
+  _test:{polyArea,polyCentroid,pointInPoly,segInt,insetPoly,clipConvex,extractFaces,
+    makeGraph,addStreet,ensureCCW,convexHull,simplify,chaikin,astar,distPtSeg}};
+})();
+if(typeof module!=='undefined'&&module.exports)module.exports=UME;
+</script>
+<!-- UM-ENGINE-END -->
+
+<!-- ================================================================ -->
+<!-- App shell: rendering + camera + inspector (DOM only; renderer     -->
+<!-- invents no geometry — it serializes the model)                    -->
+<!-- ================================================================ -->
+<script>
+(()=>{
+'use strict';
+const NS='http://www.w3.org/2000/svg';
+const host=document.getElementById('svgHost');
+let model=null,svg=null,selected=null;
+const entityIndex=new Map();
+
+const DISTRICT_INFO={
+  market:['Market district','#eddfb9'],burgher:['Burgher district','#e9e0c4'],
+  artisan:['Artisan district','#e5e0c9'],craftriver:['Riverside crafts','#dde0c9'],
+  harbour:['Harbour quarter','#e6dcbb'],
+  suburb:['Suburb (extramural)','#e7e5ce'],agrarian:['Agrarian fringe','#e4e6cd'],
+  church:['Churchyard','#dfe4d2']};
+
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);
+  for(const k in attrs)e.setAttribute(k,attrs[k]);
+  if(parent)parent.appendChild(e);return e;}
+function pd(poly,close=true){return poly.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)).join('')+(close?'Z':'');}
+function pl(pts){return pts.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)).join('');}
+
+function reg(elm,type,title,fields,prov){
+  const id='um'+entityIndex.size;
+  elm.setAttribute('data-um',id);
+  entityIndex.set(id,{type,title,fields,prov,elm});}
+
+function render(){
+  entityIndex.clear();selected=null;
+  host.innerHTML='';
+  svg=el('svg',{viewBox:`0 0 ${model.Wm} ${model.Hm}`,preserveAspectRatio:'xMidYMid meet'},host);
+  const L={};
+  for(const name of ['terrain','fields','water','blocks','parcels','plots','walls','roads','buildings','details','labels'])
+    L[name]=el('g',{'data-um-layer':name},svg);
+
+  // terrain: light height contours for orientation (site model visualization)
+  // (contours are decorative site context; every simulated object below is selectable)
+  // water
+  const wp=el('path',{d:pd(model.site.waterPoly),class:'water'},L.water);
+  reg(wp,'River','River',{width:model.site.riverW.toFixed(0)+' m'},
+    'Site model: the river bounds growth and sites the bridge; banks carry the noxious trades (lit. review §4).');
+  el('path',{d:pl(model.site.river),class:'riverline'},L.water);
+
+  // strip fields + fences + trees(details layer later)
+  for(const d of model.details){
+    if(d.kind==='field'){
+      const e=el('path',{d:pl([d.a,d.b]),class:'field'},L.fields);
+      reg(e,'Strip field','Strip-field boundary',{},d.prov);}
+  }
+
+  // blocks
+  for(const b of model.blocks){
+    const e=el('path',{d:pd(b.poly),class:b.plaza?'plaza':'blockfill'},L.blocks);
+    reg(e,b.plaza?'Market place':'Block',b.plaza?'Market place':'Urban block '+b.id,
+      {area:(b.area/10000).toFixed(2)+' ha'},b.prov);}
+
+  // specialised market squares (multiply with settlement rank)
+  for(const mk of model.markets||[]){
+    const e=el('path',{d:pd(mk.poly),class:'market2'},L.blocks);
+    reg(e,'Market',mk.name,{},mk.prov);}
+  // parcels
+  for(const p of model.parcels){
+    if(p.cleared)continue; // swept for the fortification's field of fire (esplanade)
+    const e=el('path',{d:pd(p.poly),class:'parcel d-'+(p.district||'artisan')},L.parcels);
+    reg(e,'Parcel','Parcel '+p.id+' — '+(DISTRICT_INFO[p.district]?DISTRICT_INFO[p.district][0]:p.district),
+      {frontage:p.frontage.toFixed(1)+' m',depth:p.depth.toFixed(1)+' m',
+       area:p.area.toFixed(0)+' m²','street age':'epoch '+(model.epochs-p.age)},
+      p.prov+(p.provDistrict?' — '+p.provDistrict:''));}
+
+  // fences
+  for(const d of model.details)if(d.kind==='fence'){
+    const e=el('path',{d:pd(d.poly),class:'fence'},L.plots);
+    reg(e,'Fence','Plot fence',{},d.prov);}
+
+  // wall: land arc + water walls (bank-following) + spurs + gates; or a bastioned trace
+  if(model.wall.ring){
+    const W=model.wall;
+    const perim=(pts,closed)=>{let s=0;for(let i=0;i<pts.length-(closed?0:1);i++)
+      s+=Math.hypot(pts[i].x-pts[(i+1)%pts.length].x,pts[i].y-pts[(i+1)%pts.length].y);return s;};
+    if(W.style==='bastioned'&&W.fort){
+      const F=W.fort;
+      // glacis (cleared field of fire) → wet moat(s) → covered way → counterscarp →
+      // ravelin islands → causeways → the bastioned enceinte + salients (bottom to top)
+      el('path',{d:pd(F.glacis),class:'glacis'},L.walls);
+      if(F.wetDitch){
+        const m1=el('path',{d:pd(F.ditchBand),class:'moat'},L.walls);
+        reg(m1,'Wet ditch','Wet ditch (flooded moat)',{},
+          'Water-filled ditch — the late-stage Old Dutch System floods the moat where water is at hand; it stops escalade, mining and easy approach (M-FOR-6).');
+        if(F.outerMoat){
+          const m2=el('path',{d:pd(F.outerMoat),class:'moat'},L.walls);
+          reg(m2,'Outer moat','Outer wet moat (double moat)',{},
+            'Second concentric wet moat, the Naarden-style double moat of a large late-stage fort (M-FOR-6).');}
+      }
+      el('path',{d:pl(F.coveredWay),class:'coveredway'},L.walls);
+      el('path',{d:pl(F.counterscarp),class:'counterscarp'},L.walls);
+      for(const rv of F.ravelins){
+        const e=el('path',{d:pd(rv),class:'ravelin'},L.walls);
+        reg(e,'Ravelin','Ravelin (island outwork)',{},'Detached triangular ravelin, an island in the wet moat, covering the curtain and its gate-causeway from direct fire (M-FOR-3/6).');}
+      // causeways: the only dry approach crosses the moat to each land gate (the funnel)
+      const C0=W.centroid||F.trace[0];
+      for(const gt of W.gates){
+        if(gt.water)continue;
+        let ox=gt.pt.x-C0.x,oy=gt.pt.y-C0.y;const ol=Math.hypot(ox,oy);if(!ol)continue;ox/=ol;oy/=ol;
+        const px=-oy,py=ox,len=(F.glacisOff||60)+6,hw=5;
+        const a1={x:gt.pt.x+px*hw,y:gt.pt.y+py*hw},a2={x:gt.pt.x-px*hw,y:gt.pt.y-py*hw};
+        const b1={x:a1.x+ox*len,y:a1.y+oy*len},b2={x:a2.x+ox*len,y:a2.y+oy*len};
+        const cw=el('path',{d:pd([a1,b1,b2,a2]),class:'causeway'},L.walls);
+        reg(cw,'Causeway','Gate causeway across the moat',{},
+          'Causeway/dike across the wet moat — the single dry approach to the gate, deliberately funnelling attackers under fire from the flanking bastions and ravelin (M-FOR-6/7).');}
+      // water side stays a plain sea/river wall
+      for(const ww of W.waterWalls||[]){
+        const e=el('path',{d:pl(ww),class:'wall'},L.walls);
+        reg(e,'Sea wall','Waterfront wall',{length:perim(ww,false).toFixed(0)+' m'},
+          'Waterfront wall along the quay/bank; the harbour mouth is left open (§1.1 #22).');}
+      // the bastioned trace itself
+      const tr=el('path',{d:pl(F.trace),class:'fortwall'},L.walls);
+      reg(tr,'Bastioned wall','Bastioned enceinte (epoch '+W.epoch+')',
+        {curtains:F.curtains.length,bastions:F.bastions.length,gates:W.gates.length,
+         moat:F.wetDitch?(F.doubleMoat?'wet, doubled':'wet'):'dry'},F.prov);
+      for(const b of F.bastions){
+        const e=el('circle',{cx:b.salient.x,cy:b.salient.y,r:2.4,class:'salient'},L.walls);
+        reg(e,'Bastion','Bastion'+(b.demi?' (demi, at the water)':''),{},
+          'Angled bastion: two faces and two flanks sweep the adjacent curtains with flanking fire, leaving no dead ground (trace italienne, M-FOR-1).');}
+    }else{
+      // curtain wall: land arc + water walls
+      const la=el('path',{d:pl(W.landArc),class:'wall'},L.walls);
+      reg(la,'Town wall','Town wall (epoch '+W.epoch+')',
+        {circuit:(perim(W.ring,true)/1000).toFixed(2)+' km',gates:W.gates.length,
+         'water side':W.spansWater?'encloses both banks':'follows the bank'},W.prov);
+      for(const ww of W.waterWalls||[]){
+        const e=el('path',{d:pl(ww),class:'wall'},L.walls);
+        reg(e,'Town wall','Waterfront wall',{length:perim(ww,false).toFixed(0)+' m'},
+          'The circuit runs along the water\'s edge here; the harbour mouth is left open (M-NET-9, §1.1 #22).');}
+      // towers along the land arc
+      let acc=0;const la2=W.landArc;
+      for(let i=0;i<la2.length-1;i++){
+        acc+=Math.hypot(la2[i].x-la2[i+1].x,la2[i].y-la2[i+1].y);
+        if(acc>80){acc=0;
+          const t=el('rect',{x:la2[i].x-3,y:la2[i].y-3,width:6,height:6,class:'tower'},L.walls);
+          reg(t,'Wall tower','Wall tower',{},'Mural tower at ~75-90 m intervals (effective bowshot coverage).');}}
+    }
+    // spurs dipping into the water at the wall ends
+    for(const sp of W.spurs||[]){
+      const e=el('path',{d:pl([sp.a,sp.b]),class:'wall'},L.walls);
+      reg(e,'Wall spur','Wall spur into the water',{},sp.prov);}
+    // gates (land gates as blocks, water-gates as open arches)
+    for(const gt of W.gates){
+      const cls=gt.water?'watergate':'gate';
+      const ge=el('rect',{x:gt.pt.x-6,y:gt.pt.y-6,width:12,height:12,class:cls,transform:`rotate(45 ${gt.pt.x} ${gt.pt.y})`},L.walls);
+      reg(ge,gt.water?'Water-gate':'Gate',gt.water?'Water-gate':'Town gate',{},gt.prov);}}
+
+  // roads (casing + fill), bridge deck
+  const byCls={primary:[],street:[],lane:[],quay:[]};
+  for(const e of model.graph.edges)(byCls[e.cls]||byCls.street).push(e);
+  const N=model.graph.nodes;
+  // merge each class into continuous chains, then draw ALL casings (bottom) before ANY
+  // fills (top) — per-segment casing-then-fill was overdrawing each fill at the next joint,
+  // which produced the "loose segments" look; continuous strokes read as solid roads
+  const chainSets={};
+  for(const cls of ['primary','street','lane','quay'])chainSets[cls]=roadChains(byCls[cls],N);
+  for(const cls of ['lane','quay','street','primary'])
+    for(const ch of chainSets[cls])
+      el('path',{d:pl(ch.pts),class:'roadcase','stroke-width':(ch.w+1.6)},L.roads);
+  for(const cls of ['lane','quay','street','primary'])
+    for(const ch of chainSets[cls]){
+      const fill=el('path',{d:pl(ch.pts),class:'roadfill'+(cls==='lane'?' lane':cls==='quay'?' quay':''),'stroke-width':ch.w},L.roads);
+      const label=cls==='primary'?'Primary road':cls==='quay'?'Quay':(cls==='lane'?'Back lane':'Street');
+      reg(fill,label,label,{width:ch.w.toFixed(1)+' m',length:ch.len.toFixed(0)+' m'},ch.prov);}
+  // bridges: draw a deck wherever a primary road crosses the river channel (one on a
+  // river-crossing town; several where the river runs through the town)
+  if(model.site.bridgePt||model.site.kind==='riverthrough'){
+    const riv=model.site.river,rw=model.site.riverW;
+    const rDist=(p)=>{let d=Infinity;for(let i=0;i<riv.length-1;i++)d=Math.min(d,distPtSegApp(p,riv[i],riv[i+1]));return d;};
+    const decks=[];
+    for(const e of model.graph.edges){
+      if(e.cls!=='primary')continue;
+      const a=model.graph.nodes[e.a],b=model.graph.nodes[e.b];
+      const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+      if(rDist(m)>rw/2+3)continue;
+      if(decks.some(d=>Math.hypot(d.x-m.x,d.y-m.y)<40))continue;
+      decks.push(m);
+      let dx=b.x-a.x,dy=b.y-a.y;const dl=Math.hypot(dx,dy)||1;dx/=dl;dy/=dl;
+      const nx=-dy,ny=dx,hw=rw/2+7;
+      const p1={x:m.x-nx*hw,y:m.y-ny*hw},p2={x:m.x+nx*hw,y:m.y+ny*hw};
+      const deck=el('path',{d:pd([{x:p1.x-dx*4.5,y:p1.y-dy*4.5},{x:p2.x-dx*4.5,y:p2.y-dy*4.5},{x:p2.x+dx*4.5,y:p2.y+dy*4.5},{x:p1.x+dx*4.5,y:p1.y+dy*4.5}]),class:'bridgedeck'},L.roads);
+      reg(deck,'Bridge','Bridge',{span:(rw+8).toFixed(0)+' m'},
+        'A river crossing: routes funnel over the bridge (M-REG-6, bridge-town family).');}
+  }
+  // harbour works: piers + breakwater mole
+  if(model.harbour){
+    if(model.harbour.mole){
+      const m0=el('path',{d:pl(model.harbour.mole),class:'mole'},L.roads);
+      reg(m0,'Breakwater','Breakwater mole',
+        {length:model.harbour.mole.reduce((s,p,i,arr)=>i?s+Math.hypot(p.x-arr[i-1].x,p.y-arr[i-1].y):0,0).toFixed(0)+' m'},
+        'Breakwater mole: an open coast has no natural shelter, so the harbour builds its own (harbour-city family).');}
+    for(const pr of model.harbour.piers){
+      const pe=el('path',{d:pl([pr.a,pr.b]),class:'pier'},L.roads);
+      reg(pe,'Pier','Timber pier',
+        {length:Math.hypot(pr.a.x-pr.b.x,pr.a.y-pr.b.y).toFixed(0)+' m'},pr.prov);}
+    // harbour defence (selectable): chain & towers / sea wall + water-gate / mole-head fort
+    const D=model.harbour.defence;
+    if(D){
+      if(D.type==='chain'){
+        const ch=el('path',{d:pl(D.chain),class:'chain'},L.walls);
+        reg(ch,'Harbour chain','Harbour chain',{},D.prov);
+        for(const t of D.towers){const e=el('rect',{x:t.x-4,y:t.y-4,width:8,height:8,class:'chaintower',transform:`rotate(45 ${t.x} ${t.y})`},L.walls);
+          reg(e,'Chain tower','Chain/mouth tower',{},'Tower housing the windlass that raises the harbour chain across the mouth (M-HARB-4).');}}
+      else if(D.type==='seawall'){
+        el('path',{d:pl(D.wallA),class:'seawall'},L.walls);
+        const sw=el('path',{d:pl(D.wallB),class:'seawall'},L.walls);
+        reg(sw,'Sea wall','Harbour sea wall',{},D.prov);
+        const wg=el('rect',{x:D.gate.x-5,y:D.gate.y-5,width:10,height:10,class:'watergate',transform:`rotate(45 ${D.gate.x} ${D.gate.y})`},L.walls);
+        reg(wg,'Water-gate','Harbour water-gate',{},'Water-gate through the sea wall: ships enter here, the basin is otherwise closed (M-HARB-4).');
+        for(const t of D.towers){el('rect',{x:t.x-3.5,y:t.y-3.5,width:7,height:7,class:'chaintower',transform:`rotate(45 ${t.x} ${t.y})`},L.walls);}}
+      else if(D.type==='molefort'){
+        const e=el('rect',{x:D.fort.x-6,y:D.fort.y-6,width:12,height:12,class:'molefort',transform:`rotate(45 ${D.fort.x} ${D.fort.y})`},L.walls);
+        reg(e,'Mole fort','Mole-head fort',{},D.prov);}
+    }}
+
+  // buildings
+  for(const b of model.buildings){
+    const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')},L.buildings);
+    el('path',{d:pl(b.ridge),class:'ridge'},L.buildings);
+    reg(e,'Building',(b.kind==='main'?'House (main range)':b.kind==='wing'?'Rear wing':b.kind==='rear range'?'Rear range':'Outbuilding'),
+      {district:DISTRICT_INFO[b.district]?DISTRICT_INFO[b.district][0]:b.district,
+       footprint:Math.abs(polyAreaApp(b.poly)).toFixed(0)+' m²',
+       courtyard:b.courtyard?'yes (M-BLD-3)':'no'},b.prov);}
+  for(const ch of model.churches||[]){
+    const wc=(ch.faith==='temple'||ch.faith==='shrine')?'temple':ch.faith==='mosque'?'mosque':'church';
+    for(const op of ch.open||[])el('path',{d:pd(op),class:wc==='mosque'?'sahn':'podium'},L.buildings);
+    for(const st of ch.steps||[])el('path',{d:pl(st),class:'tstep'},L.buildings);
+    let first=null;
+    for(const poly of ch.polys){const e=el('path',{d:pd(poly),class:'bld '+wc},L.buildings);if(!first)first=e;}
+    if(ch.ridge&&ch.ridge.length)el('path',{d:pl(ch.ridge),class:'ridge'},L.buildings);
+    for(const co of ch.columns||[])el('circle',{cx:co.x,cy:co.y,r:0.9,class:'templecol'},L.buildings);
+    if(ch.tower)el('circle',{cx:ch.tower.x,cy:ch.tower.y,r:ch.tower.r,class:ch.tower.kind==='minaret'?'minaret':'spire'},L.buildings);
+    if(first)reg(first,ch.name,ch.name,{},ch.prov);}
+  // civic hall on the market square (civic government as a building) — style-dependent
+  if(model.civic){
+    const cv=el('path',{d:pd(model.civic.hall),class:'townhall'},L.buildings);
+    reg(cv,'Civic hall',model.civic.name,{},model.civic.prov);
+    if(model.civic.apse)el('path',{d:pd(model.civic.apse),class:'townhall'},L.buildings);
+    for(const co of model.civic.columns||[])el('circle',{cx:co.x,cy:co.y,r:0.85,class:'templecol'},L.buildings);
+    if(model.civic.belfry)el('circle',{cx:model.civic.belfry.x,cy:model.civic.belfry.y,r:2.2,class:'belfry'},L.buildings);}
+
+  // details: trees, wells, cross
+  for(const d of model.details){
+    if(d.kind==='tree'){
+      const e=el('circle',{cx:d.x,cy:d.y,r:d.rr||2.2,class:'tree'+(d.orchard?' orchard':'')},L.details);
+      reg(e,'Tree',d.orchard?'Orchard tree':'Garden tree',{},d.prov);}
+    else if(d.kind==='well'){
+      const e=el('circle',{cx:d.x,cy:d.y,r:3.4,class:'well'},L.details);
+      reg(e,'Well','Public well',{},d.prov);}
+    else if(d.kind==='cross'){
+      const e=el('path',{d:`M${d.x-4} ${d.y}H${d.x+4}M${d.x} ${d.y-4}V${d.y+5}`,class:'cross'},L.details);
+      reg(e,'Market cross','Market cross',{},d.prov);}
+    else if(d.kind==='crane'){
+      const e=el('path',{d:`M${d.x-3} ${d.y+3} h6 l-3 -3 z M${d.x} ${d.y} V${d.y-7} L${d.x+7} ${d.y-9}`,class:'crane'},L.details);
+      reg(e,'Crane','Treadwheel crane',{},d.prov);}
+    else if(d.kind==='bollard'){
+      const e=el('circle',{cx:d.x,cy:d.y,r:1.6,class:'bollard'},L.details);
+      reg(e,'Bollard','Mooring bollard',{},d.prov);}}
+
+  // labels
+  if(model.plaza)el('text',{x:model.plaza.center.x,y:model.plaza.center.y-14,class:'lbl big','text-anchor':'middle'},L.labels).textContent='Market';
+  if(model.harbour){const q=model.harbour.quay,qm=q[Math.floor(q.length/2)];
+    el('text',{x:qm.x,y:qm.y+16,class:'lbl big','text-anchor':'middle'},L.labels).textContent='Harbour';}
+  for(const ch of model.churches||[])
+    el('text',{x:ch.center.x,y:ch.center.y-16,class:'lbl','text-anchor':'middle'},L.labels).textContent=ch.name;
+  for(const mk of model.markets||[])
+    el('text',{x:mk.center.x,y:mk.center.y-12,class:'lbl','text-anchor':'middle'},L.labels).textContent=mk.name;
+  if(model.civic)
+    el('text',{x:model.civic.center.x,y:model.civic.center.y-11,class:'lbl','text-anchor':'middle'},L.labels).textContent=model.civic.name;
+  for(const gt of model.wall.gates||[])
+    el('text',{x:gt.pt.x,y:gt.pt.y-10,class:'lbl','text-anchor':'middle'},L.labels).textContent=gt.water?'':'Gate';
+  // scale bar
+  const sb=el('g',{},L.labels);
+  el('path',{d:`M60 ${model.Hm-46} h200`,class:'scalebar'},sb);
+  el('path',{d:`M60 ${model.Hm-52} v12 M160 ${model.Hm-50} v8 M260 ${model.Hm-52} v12`,class:'scalebar'},sb);
+  el('text',{x:160,y:model.Hm-58,class:'scalelbl','text-anchor':'middle'},sb).textContent='200 m';
+  el('text',{x:64,y:model.Hm-26,class:'scalelbl'},sb).textContent=
+    `seed ${model.seed} — ~${model.pop.toLocaleString()} inhabitants (M-DEN-2)`;
+
+  attachInteraction();
+  fitView();
+  renderMetrics();
+  renderLegend();
+}
+function polyAreaApp(p){let s=0;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];s+=a.x*b.y-b.x*a.y;}return s/2;}
+function distPtSegApp(pt,a,b){const abx=b.x-a.x,aby=b.y-a.y;const l2=abx*abx+aby*aby;
+  if(l2<1e-9)return Math.hypot(pt.x-a.x,pt.y-a.y);
+  let t=((pt.x-a.x)*abx+(pt.y-a.y)*aby)/l2;t=Math.max(0,Math.min(1,t));
+  return Math.hypot(pt.x-(a.x+abx*t),pt.y-(a.y+aby*t));}
+// merge a class's edges into continuous chains (through degree-2 nodes) so roads render as
+// one solid stroke instead of a string of loose per-edge segments
+function roadChains(edges,N){
+  const adj=new Map();const add=(n,e)=>{let a=adj.get(n);if(!a){a=[];adj.set(n,a);}a.push(e);};
+  for(const e of edges){add(e.a,e);add(e.b,e);}
+  const used=new Set();const other=(e,n)=>e.a===n?e.b:e.a;
+  function walk(startNode,firstEdge){
+    const nodes=[startNode],es=[];let n=startNode,e=firstEdge;
+    while(e&&!used.has(e.id)){
+      used.add(e.id);es.push(e);const nx=other(e,n);nodes.push(nx);
+      const cont=adj.get(nx);if(!cont||cont.length!==2){n=nx;break;}
+      const nextE=cont[0].id===e.id?cont[1]:cont[0];
+      if(used.has(nextE.id))break;e=nextE;n=nx;}
+    return {nodes,es};}
+  const chains=[];
+  for(const [n,es] of adj){if(es.length===2)continue;
+    for(const e of es)if(!used.has(e.id)){const c=walk(n,e);if(c.es.length)chains.push(c);}}
+  for(const e of edges)if(!used.has(e.id)){const c=walk(e.a,e);if(c.es.length)chains.push(c);}
+  return chains.map(c=>{
+    const pts=c.nodes.map(id=>({x:N[id].x,y:N[id].y}));
+    let w=0;for(const e of c.es)w+=e.w;w/=c.es.length;
+    let len=0;for(let i=0;i<pts.length-1;i++)len+=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);
+    return {pts,w,len,epoch:c.es[0].epoch,prov:c.es[0].prov};});}
+
+/* ---------- inspector ---------- */
+function attachInteraction(){
+  svg.addEventListener('click',(ev)=>{
+    const t=ev.target.closest('[data-um]');
+    if(!t){select(null);return;}
+    select(t.getAttribute('data-um'));});
+  svg.addEventListener('mousemove',(ev)=>{
+    const t=ev.target.closest('[data-um]');
+    svg.querySelectorAll('.hl').forEach(e=>e.classList.remove('hl'));
+    if(t)t.classList.add('hl');});
+}
+function select(id){
+  if(selected){selected.elm.classList.remove('selglow');selected=null;}
+  const box=document.getElementById('insp');
+  if(!id||!entityIndex.has(id)){
+    box.innerHTML='<h2>Inspector — click any object</h2><div class="none">Nothing selected.</div>';return;}
+  const ent=entityIndex.get(id);
+  selected=ent;ent.elm.classList.add('selglow');
+  let rows=`<tr><td>type</td><td><b>${ent.type}</b></td></tr>`;
+  for(const k in ent.fields)rows+=`<tr><td>${k}</td><td>${ent.fields[k]}</td></tr>`;
+  box.innerHTML=`<h2>Inspector</h2><div style="font-size:12.5px;margin-bottom:4px"><b>${ent.title}</b></div>
+    <table>${rows}</table><div class="prov">${ent.prov}</div>`;}
+
+/* ---------- metrics panel ---------- */
+function renderMetrics(){
+  const m=model.metrics,b=m.bands;
+  const fmt=(v,d=2)=>typeof v==='number'?v.toFixed(d):v;
+  const row=(name,val,band,disp)=>{
+    let cls='',note='';
+    if(band){const ok=val>=band[0]&&val<=band[1];cls=ok?'pass':'fail';note=ok?'✓':'✗';}
+    return `<tr><td>${name}</td><td class="v">${disp}</td><td class="v ${cls}">${note}${band?` [${band[0]}–${band[1]}]`:''}</td></tr>`;};
+  document.getElementById('mBody').innerHTML='<table>'+
+    row('street nodes / edges',0,null,m.nodes+' / '+m.edges)+
+    row('total street length',0,null,(m.totalLen/1000).toFixed(1)+' km')+
+    row('4-way share (M-NET-1)',m.deg4Share,b.deg4Share,(100*m.deg4Share).toFixed(0)+'%')+
+    row('3-way share (M-NET-1)',0,null,(100*m.deg3Share).toFixed(0)+'%')+
+    row('dead-end share (M-NET-2)',m.deadEndShare,b.deadEndShare,(100*m.deadEndShare).toFixed(0)+'%')+
+    row('median segment (M-NET-4)',m.medianSeg,b.medianSeg,m.medianSeg.toFixed(0)+' m')+
+    row('meshedness α (M-NET-5)',m.meshedness,b.meshedness,m.meshedness.toFixed(3))+
+    row('blocks / median area',0,null,m.blocks+' / '+(m.medianBlockArea/1000).toFixed(1)+'k m²')+
+    row('parcels',0,null,m.parcels)+
+    row('median frontage (M-PAR-1)',m.medianFrontage,b.medianFrontage,m.medianFrontage.toFixed(1)+' m')+
+    '</table><div style="font-size:10.5px;color:#7d6c47;margin-top:4px">Bands from docs/03-mathematical-assumptions.md; ✓ means the grown fabric sits inside the historical range.</div>';}
+
+function renderLegend(){
+  const lg=document.getElementById('legend');
+  let html='';
+  for(const k in DISTRICT_INFO)
+    html+=`<span><span class="chip" style="background:${DISTRICT_INFO[k][1]}"></span>${DISTRICT_INFO[k][0]}</span>`;
+  html+=`<span><span class="chip" style="background:#8d4a32"></span>Building</span>
+    <span><span class="chip" style="background:#6f5a86"></span>Church</span>
+    <span><span class="chip" style="background:#f8f3e4;border-color:#6d5a37"></span>Street</span>
+    <span><span class="chip" style="background:#4a3a22"></span>Wall</span>
+    <span><span class="chip" style="background:#b9c7c3"></span>Water</span>
+    <span><span class="chip" style="background:#9aa96e;border-radius:50%"></span>Tree</span>`;
+  lg.innerHTML=html;}
+
+/* ---------- camera ---------- */
+let vb={x:0,y:0,w:1700,h:1250};
+function applyVB(){svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);}
+function fitView(){vb={x:-20,y:-20,w:model.Wm+40,h:model.Hm+40};applyVB();}
+function setupCamera(){
+  let panning=false,px=0,py=0;
+  host.addEventListener('mousedown',e=>{panning=true;px=e.clientX;py=e.clientY;svg.classList.add('panning');});
+  window.addEventListener('mouseup',()=>{panning=false;if(svg)svg.classList.remove('panning');});
+  window.addEventListener('mousemove',e=>{
+    if(!panning||!svg)return;
+    const r=host.getBoundingClientRect();
+    const sx=vb.w/r.width,sy=vb.h/r.height;
+    vb.x-=(e.clientX-px)*sx;vb.y-=(e.clientY-py)*sy;
+    px=e.clientX;py=e.clientY;applyVB();});
+  host.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const r=host.getBoundingClientRect();
+    const mx=vb.x+(e.clientX-r.left)/r.width*vb.w;
+    const my=vb.y+(e.clientY-r.top)/r.height*vb.h;
+    const f=e.deltaY>0?1.15:1/1.15;
+    vb={x:mx-(mx-vb.x)*f,y:my-(my-vb.y)*f,w:vb.w*f,h:vb.h*f};
+    applyVB();},{passive:false});}
+
+/* ---------- wiring ---------- */
+function regen(){
+  const seed=parseInt(document.getElementById('seed').value,10)||1;
+  const epochs=parseInt(document.getElementById('epochs').value,10)||8;
+  const pop=parseInt(document.getElementById('pop').value,10)||5000;
+  const walls=document.getElementById('walls').checked;
+  const fortified=document.getElementById('fortified').checked;
+  const siteKind=document.getElementById('siteKind').value;
+  const harbourDefence=document.getElementById('harbourDefence').value;
+  const faith=document.getElementById('faith').value;
+  const civicStyle=document.getElementById('civicStyle').value;
+  const t0=performance.now();
+  model=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind,harbourDefence,faith,civicStyle});
+  const dt=performance.now()-t0;
+  render();
+  let note='';
+  if(model.fortRequested&&!model.fortified)
+    note=` — ⚠ star fort needs pop ≥ ${model.fortMin.toLocaleString()} (a strategic town, not a hamlet); built a curtain wall`;
+  else if(model.fortified)note=' — bastioned trace';
+  document.getElementById('status').textContent=
+    `generated in ${dt.toFixed(0)} ms — realized ~${model.pop.toLocaleString()} of target `+
+    `${model.popTarget.toLocaleString()} inhabitants${note} — hash ${UME.hashModel(model).toString(16)}`;
+  window.__UM_MODEL=model; // for headless drivers
+}
+document.getElementById('gen').addEventListener('click',regen);
+document.getElementById('rnd').addEventListener('click',()=>{
+  document.getElementById('seed').value=Math.floor(Math.random()*1e6);regen();});
+document.getElementById('fit').addEventListener('click',fitView);
+setupCamera();
+regen();
+})();
+</script>
+</body>
+</html>
