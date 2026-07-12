@@ -458,7 +458,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.waitForTimeout(100);
 
   // ---- v0.64 (§4.7): pinned selection inspector (shared by the Civ + Carto branches) ----
-  R.inspectorEmptyState = await page.$eval('#inspectorBody', el => el.textContent.includes('Select a settlement'));
+  // v0.90: settlements/POIs moved out to the map pop-up (owner request); the sidebar empty-state hint
+  // was reworded accordingly (no longer promises "select a settlement... to see it here").
+  R.inspectorEmptyState = await page.$eval('#inspectorBody', el => el.textContent.includes('label or icon') && !el.textContent.includes('Select a settlement'));
 
   // ---- v0.64 (§4.8): header Undo + confirm-gated destructive Clear buttons ----
   R.undoDisabledInitially = await page.$eval('#undoBtn', el => el.disabled === true);
@@ -480,10 +482,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   R.confirmedWhenNonEmpty = dialogMsg !== null;
   R.placesSurviveDismiss = await page.evaluate(() => state.places.length === 1);
 
-  // ---- v0.65 (§4.7, complete): pinned inspector hosts the FULL edit form; single selection ----
+  // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
+  // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
+  // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
+  // labels/icons are unchanged (still the sidebar-pinned inspector).
   await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
   await page.waitForTimeout(100);
-  R.editorInInspector = await page.$eval('#inspectorBody', el => !!el.querySelector('#_civPeName'));
+  R.editorInPopup = await page.$eval('#placeEditPopup', el => !!el.querySelector('#_civPeName') && el.style.display === 'block');
+  R.editorNotInInspector = await page.$eval('#inspectorBody', el => !el.querySelector('#_civPeName'));
+  R.popupOnScreen = await page.evaluate(() => { const r = document.getElementById('placeEditPopup').getBoundingClientRect(); return r.x >= 0 && r.x < window.innerWidth && r.y >= 0 && r.y < window.innerHeight; });
   R.noInlineEditorInList = await page.evaluate(() => document.getElementById('civSettlementList').querySelector('#_civPeName') === null);
   await page.fill('#_civPeName', 'Renamed');
   await page.dispatchEvent('#_civPeName', 'input');
@@ -497,9 +504,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.waitForTimeout(100);
   R.labelEditorSwapsIn = await page.$eval('#inspectorBody', el => !!el.querySelector('#_carLeName'));
   R.selectingLabelDeselectsPlace = await page.evaluate(() => _civSelectedPlace === null);
+  R.selectingLabelClosesPlacePopup = await page.$eval('#placeEditPopup', el => el.style.display === 'none');
   await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
   await page.waitForTimeout(100);
   R.selectingPlaceDeselectsLabel = await page.evaluate(() => _civSelectedLabel === null);
+  // v0.90: the × close button deselects the place and hides the popup
+  await page.click('#placeEditPopup .si-close');
+  await page.waitForTimeout(100);
+  R.popupCloseButtonWorks = await page.evaluate(() => _civSelectedPlace === null) && await page.$eval('#placeEditPopup', el => el.style.display === 'none');
 
   // ---- v0.65 (§4.10): per-layer hotkeys ----
   await page.click('#layersBtn');
@@ -511,6 +523,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.keyboard.press('KeyF');
   await page.waitForTimeout(100);
   R.debugAfterF = await page.evaluate(() => state.debug);
+  // v0.90: the place pop-up (and its #_civPeName field) was closed by the × button test above — reselect
+  // to reopen it before using that field for the "typing doesn't trigger hotkeys" check below.
+  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  await page.waitForTimeout(100);
   await page.click('#_civPeName');
   await page.keyboard.type('B');   // typing "B" while focused in a text input must not trigger the hotkey
   await page.waitForTimeout(100);
@@ -839,22 +855,23 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // (isn't a blank/solid stretch, the visual symptom of the old bug).
   R.lodInfoLayers = await page.evaluate(() => {
     const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
-    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 8;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2;
     const views = ['temp', 'rain', 'koppen', 'rsrc', 'wildlife', 'wind', 'ocean', 'btype', 'strahler', 'settle', 'plates', 'popdensity'];
     const before = PERF.counters.renderPixelLoop;
     const errors = [];
-    let variance = true;
+    let differsFromOverview = true;   // the old bug: zoomed-in render was IDENTICAL to the whole-map render (stretched, not zoomed)
     for (const dbg of views) {
       state.debug = dbg;
-      try { applyView(); renderNow(); } catch (e) { errors.push(dbg + ': ' + e.message); }
-      const id = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
-      let mn = 255, mx = 0;
-      for (let i = 0; i < id.length; i += 4) { if (id[i] < mn) mn = id[i]; if (id[i] > mx) mx = id[i]; }
-      if (mx - mn < 2) variance = false;   // a blank/solid stretch would fail this
+      _lodZoom = 1; try { applyView(); renderNow(); } catch (e) { errors.push(dbg + ' @1x: ' + e.message); }
+      const wide = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+      _lodZoom = 8; try { applyView(); renderNow(); } catch (e) { errors.push(dbg + ' @8x: ' + e.message); }
+      const zoomed = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+      let same = true; for (let i = 0; i < wide.length; i += 4 * 37) { if (wide[i] !== zoomed[i] || wide[i+1] !== zoomed[i+1] || wide[i+2] !== zoomed[i+2]) { same = false; break; } }
+      if (same) differsFromOverview = false;   // whole-map and zoomed-in pixels identical ⇒ not actually tiling to the zoom
     }
     const after = PERF.counters.renderPixelLoop;
     state.debug = 'off'; _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
-    return { neverFullPixelLoop: after === before, errors, variance };
+    return { neverFullPixelLoop: after === before, errors, differsFromOverview };
   });
 
   await browser.close();
@@ -935,13 +952,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('Clear places does not prompt when empty', R.noConfirmWhenEmpty === true);
   A('Clear places prompts when non-empty', R.confirmedWhenNonEmpty === true);
   A('dismissing the confirm preserves the place', R.placesSurviveDismiss === true);
-  A('pinned inspector hosts the FULL place editor', R.editorInInspector === true);
+  A('v0.90: selecting a place opens the editor in the map pop-up (not the sidebar)', R.editorInPopup === true && R.editorNotInInspector === true);
+  A('v0.90: the place pop-up is positioned on-screen', R.popupOnScreen === true);
   A('settlement list no longer has an inline editor', R.noInlineEditorInList === true);
-  A('editing the inspector name field updates the model', R.liveModelUpdate === true);
-  A('the row summary patches live from the inspector edit', R.liveRowPatch === true);
+  A('editing the pop-up name field updates the model', R.liveModelUpdate === true);
+  A('the row summary patches live from the pop-up edit', R.liveRowPatch === true);
   A('selecting a label swaps the inspector to the label editor', R.labelEditorSwapsIn === true);
   A('selecting a label deselects the place (single selection)', R.selectingLabelDeselectsPlace === true);
+  A('v0.90: selecting a label closes the place pop-up', R.selectingLabelClosesPlacePopup === true);
   A('selecting the place again deselects the label', R.selectingPlaceDeselectsLabel === true);
+  A('v0.90: the pop-up × button closes it and deselects the place', R.popupCloseButtonWorks === true);
   A('Layers popover shows hotkey badges (>=6)', R.keyBadges.length >= 6);
   A('pressing B sets the Biomes layer', R.debugAfterB === 'bclass');
   A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
@@ -955,7 +975,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.88: scale bar reading shrinks as LOD zoom deepens (was frozen at the full map width)', R.lodZoomDeep.labelChanged === true && R.lodZoomDeep.spanIn < R.lodZoomDeep.spanOut);
   A('v0.89: every info-layer stays tiled while LOD is on (renderNow never falls through to the full un-zoomed pixel loop)', R.lodInfoLayers.neverFullPixelLoop === true);
   A('v0.89: LOD-zoomed info layers + their reprojected overlays render without errors', R.lodInfoLayers.errors.length === 0);
-  A('v0.89: LOD-zoomed info-layer tiles show real variance (not a blank/stretched solid fill)', R.lodInfoLayers.variance === true);
+  A('v0.89: LOD-zoomed info-layer tiles genuinely differ from the whole-map render (not a stretched copy)', R.lodInfoLayers.differsFromOverview === true);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

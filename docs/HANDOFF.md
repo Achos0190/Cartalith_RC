@@ -9,10 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.89.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.90.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.90 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.88` are kept and never edited.
+  (v0.91 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.89` are kept and never edited.
+- **v0.90 — owner request: "editing a settlement should open a pop-up in the viewscreen with the
+  settlement properties and information"** (no engine changes — script block 2 civ-UI only; render
+  battery ALL IDENTICAL to v0.89, headless **923** unchanged, smoke **120 → 123**): the settlement/POI
+  editor moved out of the sidebar-pinned `#inspectorBody` (v0.65) into a floating `#placeEditPopup`
+  anchored at the place's own screen position — the `showSettleInfo`/`showWildInfo` popup idiom, made
+  editable, reusing `_civPopulatePlaceEditor`'s field logic unchanged. New `_civPlaceScreenPos(gx,gy)`
+  projects world coords → screen px (both normal pan/zoom and `_lodOn`) so the popup opens correctly
+  regardless of how the place was selected. Per the owner's chosen option, the sidebar "All settlements"/
+  "All POIs" lists stay for browsing — their row-click/Edit button now calls `_civMoveViewTo` first (the
+  existing "📍 Move viewer here" handler) so the popup opens already centered. Labels/icons are unchanged
+  (still the sidebar inspector). Next queued: the Explore timeline rework (see "Next / open" below).
 - **v0.89 — owner report: "tiled LOD info-layers don't scale properly"** (no engine changes; render
   battery ALL IDENTICAL to v0.88, headless **917 → 923**, smoke **117 → 120**): root cause was
   `drawLODView()` only tiling `state.debug` ∈ {off, lith, soil, water} — every other debug/info view
@@ -409,12 +420,20 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **Queued next (owner, 2026-07-12): settlement interface + Explore timeline rework.** The owner's own
-  words: "think about the settlement interface for generation and how in explore the timeline should
-  work. Currently it works, bit rather clunky. Editing a settlement should open a pop-up menu in the
-  viewscreen with the settlement properties and information." This is a design/UX pass, not a bug fix —
-  per the working rules ("confirm design before building"), start by exploring the current settlement
-  editor (pinned inspector, §4.7) and the Explore→Timeline UI, then propose a design before implementing.
+- **Queued next (owner, 2026-07-12): Explore timeline rework.** The settlement-interface half of the
+  owner's 2026-07-12 request ("editing a settlement should open a pop-up… with the settlement properties
+  and information") **shipped in v0.90** (see above). The timeline half is still open — owner's chosen
+  direction (from an `AskUserQuestion` pass): **"one home, real time-scale"** — merge simulate + scrub +
+  author into a single Explore-tab control (no more tab-switching to Civilization→Polity to run a
+  simulation, then back to Explore to scrub it), and switch the slider from index-based ticks (currently
+  evenly spaced regardless of actual year gaps) to a real proportional year-scale. Current architecture
+  (for the next session): one data structure `civTimeline` (array of `{year,territory,places,ways}`
+  snapshots, `civAddYear`/`civGotoYear`/`_civBuildTimelineUI` ~13417–13469) written by BOTH manual
+  authoring and the v0.85 mechanistic collapse/recovery simulator (`_civRunCollapseSimulation`→
+  `_civSimulateTimeline`, ~14498–14830); two separate slider widgets (`#civTlSlider` in Civilization→
+  Polity, `#explTimelineSlider` behind Explore's funnel FAB → `<details id="explTimelineSection">`) kept
+  in sync via a shared rebuild function (`_civWireYearSlider`, ~15670). Design before building, per the
+  working rules.
 - The queued work tracked at the end of the pre-merge era (browser passes above) plus whatever
   the user asks next. Check `docs/ROADMAP.md` for the long arcs; recent `CHANGELOG.md` entries
   state per-feature follow-ups (e.g. cross-tile seam editing is the one genuinely open LOD item).

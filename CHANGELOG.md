@@ -12,6 +12,48 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.90 (2026-07-12)
+**Owner request: "editing a settlement should open a pop-up in the viewscreen with the settlement
+properties and information."** No engine changes; render battery **ALL IDENTICAL to v0.89**, headless
+**923** unchanged (block 1 untouched — this is a script-block-2 civ-UI change), Playwright UI smoke
+**120 → 123**.
+- **Settlement/POI editor moved from the sidebar into a floating map pop-up.** Previously, selecting a
+  place rendered its full edit form into the sidebar-pinned `#inspectorBody` (v0.65 §4.7) — a fixed
+  panel you had to keep in view. Now `_civRenderInspector()`'s place branch opens `#placeEditPopup`
+  instead: a floating card anchored at the place's own on-screen position, mirroring the existing
+  `showSettleInfo`/`showWildInfo` popup idiom but editable (reuses `_civPopulatePlaceEditor`'s field-
+  building/wiring completely unchanged — only the host element moved). Labels/icons are untouched, still
+  the sidebar-pinned inspector (out of scope for this pass; the shared single-selection dispatcher just
+  now branches to a different host per selection type).
+- **New `_civPlaceScreenPos(gx,gy)`** — world-grid → viewport-client-px projection, so the popup follows
+  the place regardless of *how* it was selected (map click, sidebar list, right-click menu — all the
+  existing `_civSelectedPlace=` call sites work unchanged) without threading click coordinates through
+  each one. Handles both the normal `viewT` CSS-transform pan/zoom and `_lodOn` (reusing v0.89's
+  `lodViewRect()`-based projection). Caught a real math bug during testing: the first draft subtracted
+  `panX`/`panY` to recover the untransformed origin and then forgot to add them back — since they cancel
+  algebraically, the fix is simply `r.left + contentX*scale` (no need to touch pan at all; that
+  complexity is only needed by `_civMoveViewTo`'s *inverse* problem of solving for pan, which this
+  function does not do).
+- **Sidebar list stays, per the owner's chosen option.** The "All settlements"/"All POIs" lists keep
+  browsing/deleting; their row-click and "✎ Edit" button now call `_civMoveViewTo(p.x,p.y)` (already
+  existed as the "📍 Move viewer here" button's handler) before selecting, so the popup opens already
+  centered and visible instead of wherever the view last happened to be.
+- **Popup lifecycle**: the × button (and clicking empty map with the Inspect tool, which already set
+  `_civSelectedPlace=null` unconditionally) closes it; selecting a label/icon or the delete action close
+  it too (dispatcher-level, so every existing `_civSelectedPlace=` call site inherits this for free); a
+  tab switch (Generate ↔ Explore) now also dismisses it, mirroring how switching the debug-view segment
+  already dismisses `#settleInfo`/`#wildInfo`.
+- Verification: smoke assertions cover popup-opens-in-map-not-sidebar, on-screen positioning after both
+  map-click and list-select (with the actual pan/zoom asserted), live model + row-summary patching while
+  typing (the `_civSelectedRowRefs` live-patch plumbing, preserved end to end), label/icon selection
+  closing the place popup and vice versa, and the × close button. Also hardened a fragile v0.89 smoke
+  assertion found along the way ("LOD tile shows internal pixel variance") that could spuriously fail on
+  a random world where a debug view's field happens to be locally uniform in the zoomed patch (not a bug,
+  just bad luck of the seed) — replaced with a robust check that the zoomed-in render actually *differs*
+  from the whole-map render for the same debug view (the real invariant the original bug violated).
+  Browser-verified: dark and light theme, both interaction paths (map click, list "✎ Edit"), and the LOD
+  positioning branch, via Playwright screenshots.
+
 ### v0.89 (2026-07-12)
 **Owner report: "tiled LOD info-layers don't scale properly."** No engine simulation changes; render
 battery **ALL IDENTICAL to v0.88**, headless **917 → 923**, Playwright UI smoke **117 → 120**.
