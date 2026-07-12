@@ -35,10 +35,13 @@ districts (incl. harbour quarter) → optional wall + gates → churches (parish
 with population, M-DEN-8) → wells/trees/fences/strip-fields.
 
 **Site & harbour:** river crossing, **river-through-town** (bisecting, both banks built,
-several bridges, wall spanning both with water-gates), bay harbour, open coast (mole); quay +
-back-street + piers + crane, warehouse grammar. **Harbour defence is selectable** — chain &
-mouth towers / enclosing sea wall + water-gate / mole-head fort / unprotected — so a harbour
-outside the walls is still defended per the historical repertoire.
+several bridges, wall spanning both with water-gates), bay harbour, open coast (mole), and
+**landlocked** (no water at all — a full curtain wall, dry fort ditch, land routes on every
+side); quay + back-street + piers + crane, warehouse grammar. **Harbour defence is
+selectable** — chain & mouth towers / enclosing sea wall + water-gate / mole-head fort /
+unprotected — so a harbour outside the walls is still defended per the historical repertoire.
+**Hamlets** (≲ 600) generate as a small crossroads cluster with no church, market or wall
+(M-AMEN-2); the **religious building is optional** (a "none" rite).
 **Amenities scale with rank:** market squares multiply and specialise (shambles → fish/corn →
 cloth → cattle) and a town-hall/guildhall appears once a place is a chartered town — a village
 and an imperial seat differ visibly in the services they carry (M-AMEN-1).

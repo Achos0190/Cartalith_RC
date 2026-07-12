@@ -121,7 +121,8 @@ svg.panning{cursor:grabbing}
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
       <option value="bay">Bay harbour</option>
-      <option value="coast">Open coast (mole)</option></select></div>
+      <option value="coast">Open coast (mole)</option>
+      <option value="landlocked">Landlocked (no water)</option></select></div>
     <div class="row"><label>Harbour</label><select id="harbourDefence" style="font:12px Georgia,serif">
       <option value="auto">Defence: auto (by site)</option>
       <option value="none">Unprotected</option>
@@ -132,7 +133,8 @@ svg.panning{cursor:grabbing}
       <option value="church">Church (Christian)</option>
       <option value="temple">Classical temple (Roman/Greek)</option>
       <option value="shrine">Shrine</option>
-      <option value="mosque">Mosque</option></select></div>
+      <option value="mosque">Mosque</option>
+      <option value="none">None (no religious building)</option></select></div>
     <div class="row"><label>Civic hall</label><select id="civicStyle" style="font:12px Georgia,serif">
       <option value="auto">Auto (by rite)</option>
       <option value="townhall">Town hall + belfry</option>
@@ -463,6 +465,7 @@ function astar(cost,W,H,start,goal){
 function buildSite(seed,Wm,Hm,kind){
   kind=kind||'river';
   const through=(kind==='riverthrough');
+  const noWater=(kind==='landlocked'); // a completely dry inland site — no river, sea or harbour
   const rk=(kind==='river'||through); // river-like (a channel, not a sea half-plane)
   const r=stream(seed,'site');
   // analytic height proxy: inland rise + gentle undulation; water carves its terrace
@@ -470,7 +473,10 @@ function buildSite(seed,Wm,Hm,kind){
   for(let i=0;i<3;i++)hills.push({x:r.range(0.15,0.9)*Wm,y:r.range(0.05,0.45)*Hm,
     amp:r.range(0.06,0.16),rad:r.range(300,650)});
   let river,riverW,waterPoly,bridgePt=null,bridgeDir=null,harbourIdx,yAtX=null;
-  if(rk){
+  if(noWater){
+    river=[{x:-1e4,y:-1e4},{x:-1e4+1,y:-1e4+1}]; // a far dummy so water queries are all "dry"
+    riverW=0;waterPoly=[];harbourIdx=0;
+  }else if(rk){
     // river: west -> east; through the middle (bisecting) or around the lower third
     const pts=[];const n=14;const baseY=(through?r.range(0.44,0.54):r.range(0.58,0.72))*Hm;
     let y=baseY+r.range(-40,40);
@@ -505,8 +511,8 @@ function buildSite(seed,Wm,Hm,kind){
   function riverDist(p){let d=Infinity;
     for(let i=0;i<river.length-1;i++)d=Math.min(d,distPtSeg(p,river[i],river[i+1]));
     return d;}
-  const isWater=rk
-    ?(p)=>riverDist(p)<riverW/2+2
+  const isWater=noWater?(()=>false)
+    :rk?(p)=>riverDist(p)<riverW/2+2
     :(p)=>p.y>yAtX(p.x)-1;
   function height(p){
     let h=0.4+0.00008*(Hm-p.y);
@@ -543,12 +549,12 @@ function buildSite(seed,Wm,Hm,kind){
       left.push(V.add(river[i],V.mul(nl,riverW/2)));
       right.push(V.add(river[i],V.mul(nl,-riverW/2)));}
     waterPoly=left.concat(right.reverse());
-  }else{
+  }else if(!noWater){
     waterPoly=river.concat([{x:Wm,y:Hm},{x:0,y:Hm}]);
   }
   // external route endpoints (M-REG-1: routes to neighbouring places); sea sites
-  // trade seaward, so they get one land route fewer
-  const gatesDir=rk?[
+  // trade seaward, so they get one land route fewer; landlocked sites are all-land
+  const gatesDir=(rk||noWater)?[
     {x:r.range(0.08,0.3)*Wm,y:0},
     {x:Wm,y:r.range(0.1,0.4)*Hm},
     {x:0,y:r.range(0.15,0.45)*Hm},
@@ -561,17 +567,17 @@ function buildSite(seed,Wm,Hm,kind){
     for(let i=0;i<river.length-1;i++){const d=distPtSeg(p,river[i],river[i+1]);if(d<bd){bd=d;bi=i;}}
     const a=river[bi],b=river[bi+1];
     return Math.sign(V.cross(V.sub(b,a),V.sub(p,a)))||1;}
-  return {kind,through,Wm,Hm,river,riverW,waterPoly,riverDist,height,slope,bridgePt,bridgeDir,
+  return {kind,through,noWater,Wm,Hm,river,riverW,waterPoly,riverDist,height,slope,bridgePt,bridgeDir,
     routeEnds:gatesDir,bankSide,isWater,
-    harbour:{idx:harbourIdx,pt:river[harbourIdx]}};}
+    harbour:noWater?{idx:-1,pt:null}:{idx:harbourIdx,pt:river[harbourIdx]}};}
 
 /* ---------------- anchors ---------------- */
 function placeAnchors(seed,site){
   const r=stream(seed,'anchors');
   // market: on flat land above the flood band, close to the break-of-bulk point —
   // the bridge for crossings, the quay for harbours (lit.review §4-5; M-REG-6)
-  const ref=site.bridgePt||site.harbour.pt;
-  const dBand=site.kind==='river'?[60,240]:[60,180];
+  const ref=site.bridgePt||(site.harbour&&site.harbour.pt)||{x:site.Wm*0.52,y:site.Hm*0.42};
+  const dBand=(site.kind==='river'||site.kind==='riverthrough')?[60,240]:[60,180];
   let best=null,bs=-Infinity;
   for(let i=0;i<400;i++){
     const ang=r.range(-Math.PI,0); // landward side (water lies south)
@@ -586,7 +592,9 @@ function placeAnchors(seed,site){
     if(score>bs){bs=score;best=p;}}
   const market=best||{x:ref.x,y:ref.y-120};
   return {market,
-    prov:site.kind==='river'
+    prov:site.noWater
+      ?'Market sited on flat, dry ground where the land routes converge — an inland market town with no water frontage (M-REG-1, lit. review §4).'
+      :(site.kind==='river'||site.kind==='riverthrough')
       ?'Market sited on flat land above the flood band, close to the bridge crossing (route convergence). Refs: M-REG-6, lit. review §4.'
       :'Market sited on the shore flat just behind the quay: goods change mode at the break-of-bulk point (harbour-city family, lit. review §4-5).'};}
 
@@ -764,7 +772,7 @@ function buildHarbour(seed,site,anchors,g,opts){
     prov:'Harbour: sheltered landing with quay, piers'+(mole?' and breakwater mole (open coasts need artificial shelter)':' (the bay provides natural shelter)')+(defence?'; protected by '+defence.type:'; unprotected')+'.'};}
 
 /* ---------------- extra bridges for a river that runs through the town ---------------- */
-function addRiverBridges(seed,site,g,count){
+function addRiverBridges(seed,site,anchors,g,count){
   const r=stream(seed,'bridges');const n=site.river.length;
   for(let k=1;k<=count;k++){
     const i=Math.max(1,Math.min(n-2,Math.floor(n*(0.28+0.44*k/(count+1)))));
@@ -772,7 +780,14 @@ function addRiverBridges(seed,site,g,count){
     const nl=V.rot90(V.norm(V.sub(b,a)));const half=site.riverW/2+16;
     const p1=V.add(p,V.mul(nl,half)),p2=V.add(p,V.mul(nl,-half));
     addStreet(g,p1.x,p1.y,p2.x,p2.y,'primary',6,0,
-      'Bridge: one of several crossings of a river that runs through the town (bridge-town family; M-REG-6).');}}
+      'Bridge: one of several crossings of a river that runs through the town (bridge-town family; M-REG-6).');
+    // connect each bridgehead into the fabric so it is not a stranded segment (and so later
+    // growth radiates from it) — a short approach toward the market on each bank
+    for(const end of [p1,p2]){
+      const dm=V.norm(V.sub(anchors.market,end));
+      const stub=V.add(end,V.mul(dm,Math.min(V.dist(end,anchors.market),120)));
+      if(!site.isWater(stub))addStreet(g,end.x,end.y,stub.x,stub.y,'street',4,0,
+        'Bridge approach linking the crossing into the town (M-REG-6).');}}}
 
 /* ---------------- amenities that scale with settlement rank (M-AMEN, M-ADMIN) ----------------
  * The seat of an empire and a village differ vastly in the services they carry. Markets
@@ -1233,6 +1248,34 @@ function applyStarFort(seed,site,anchors,wallState,opts){
  * A fort's glacis was kept clear for fields of fire; a town wall had a cleared rampart strip.
  * Buildings, parcels, extramural streets and clutter inside that footprint are swept away —
  * which is both historically correct and removes the wall/fort overlapping roads & houses. */
+function _killEdge(g,e){e.alive=false;const a=g.nodes[e.a],b=g.nodes[e.b];
+  let k=a.adj.indexOf(e.id);if(k>=0)a.adj.splice(k,1);
+  k=b.adj.indexOf(e.id);if(k>=0)b.adj.splice(k,1);}
+// cutting edges can strand fragments; keep only the largest connected component
+function pruneLargest(g){
+  const adj=new Map();
+  for(const e of g.edges){if(!e.alive)continue;
+    if(!adj.has(e.a))adj.set(e.a,[]);if(!adj.has(e.b))adj.set(e.b,[]);
+    adj.get(e.a).push(e.b);adj.get(e.b).push(e.a);}
+  const comp=new Map();let cid=0;const sizes=[];
+  for(const s of adj.keys()){if(comp.has(s))continue;
+    let n=0;const q=[s];comp.set(s,cid);
+    while(q.length){const u=q.pop();n++;for(const v of adj.get(u))if(!comp.has(v)){comp.set(v,cid);q.push(v);}}
+    sizes.push(n);cid++;}
+  if(sizes.length){let best=0;for(let i=1;i<sizes.length;i++)if(sizes[i]>sizes[best])best=i;
+    for(const e of g.edges)if(e.alive&&comp.get(e.a)!==best)_killEdge(g,e);}}
+// remove street/lane edges that run through the water channel (only bridges/quay may cross);
+// growth avoids water but planarization splits and route smoothing can leave a straggler
+function removeWaterCrossings(site,g){
+  if(site.noWater)return;
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  const wetAt=(p)=> rk? site.riverDist(p)<site.riverW/2+0.5 : site.isWater(p);
+  for(const e of g.edges){
+    if(!e.alive||e.cls==='primary'||e.cls==='quay')continue; // bridges & the quay are legitimate
+    const a=g.nodes[e.a],b=g.nodes[e.b];let wet=0;
+    for(let i=1;i<10;i++)if(wetAt(V.lerp(a,b,i/10)))wet++;
+    if(wet>=2)_killEdge(g,e);}
+  pruneLargest(g);}
 function clearFortZone(site,wallState,g,parcels,buildings,details){
   if(!wallState.ring||!wallState.landArc)return;
   const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
@@ -1246,27 +1289,17 @@ function clearFortZone(site,wallState,g,parcels,buildings,details){
     const d=details[i];
     const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
     if(p&&inClear(p))details.splice(i,1);}
+  // clear the field of fire of ALL roads (incl. primaries that grazed a bastion/moat/glacis)
+  // except a corridor at each gate, where the approach road crosses on its causeway
   const gates=wallState.gates||[];
-  const kill=(e)=>{e.alive=false;
-    const a=g.nodes[e.a],b=g.nodes[e.b];
-    let k=a.adj.indexOf(e.id);if(k>=0)a.adj.splice(k,1);
-    k=b.adj.indexOf(e.id);if(k>=0)b.adj.splice(k,1);};
   for(const e of g.edges){
-    if(!e.alive||e.cls==='primary'||e.cls==='quay')continue;
-    const mid=V.lerp(g.nodes[e.a],g.nodes[e.b],0.5);
-    if(inClear(mid)&&!gates.some(gt=>V.dist(gt.pt,mid)<clearDist*0.9))kill(e);}
-  // cutting streets can strand small fragments; keep only the largest connected component
-  const adj=new Map();
-  for(const e of g.edges){if(!e.alive)continue;
-    if(!adj.has(e.a))adj.set(e.a,[]);if(!adj.has(e.b))adj.set(e.b,[]);
-    adj.get(e.a).push(e.b);adj.get(e.b).push(e.a);}
-  const comp=new Map();let cid=0;const sizes=[];
-  for(const s of adj.keys()){if(comp.has(s))continue;
-    let n=0;const q=[s];comp.set(s,cid);
-    while(q.length){const u=q.pop();n++;for(const v of adj.get(u))if(!comp.has(v)){comp.set(v,cid);q.push(v);}}
-    sizes.push(n);cid++;}
-  if(sizes.length){let best=0;for(let i=1;i<sizes.length;i++)if(sizes[i]>sizes[best])best=i;
-    for(const e of g.edges)if(e.alive&&comp.get(e.a)!==best)kill(e);}}
+    if(!e.alive||e.cls==='quay')continue; // the quay hugs the water, not the land wall
+    const a=g.nodes[e.a],b=g.nodes[e.b],mid=V.lerp(a,b,0.5);
+    if(!(inClear(mid)||inClear(a)||inClear(b)))continue;
+    const keepR=e.cls==='primary'?clearDist+16:clearDist*0.85; // gate approach corridor
+    if(gates.some(gt=>V.dist(gt.pt,mid)<keepR))continue;
+    _killEdge(g,e);}
+  pruneLargest(g);}
 
 /* ---------------- interior lane pass: split oversized central blocks ---------------- */
 function lanePass(seed,site,anchors,g,epoch){
@@ -1732,8 +1765,9 @@ function generate(seed,opts){
   const fortRequested=!!opts.fortified;
   const fortified=fortRequested&&popTarget>=fortMin&&walls;
   // population -> street length + urban radius via intramural density (M-DEN-1, M-DEN-2,
-  // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant
-  const targetLen=Math.max(3500,Math.min(42000,popTarget*2.1));
+  // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant. A low floor
+  // lets a hamlet stay a small crossroads cluster rather than a full town (M-AMEN-2)
+  const targetLen=Math.max(1600,Math.min(42000,popTarget*2.1));
   const maxRF=Math.min(720,Math.sqrt(popTarget*21)*1.35+80);
   const Wm=1700,Hm=1250;
   const siteKind=opts.site||'river';
@@ -1743,17 +1777,20 @@ function generate(seed,opts){
   const routes=buildPrimaries(seed,site,anchors,g);
   const plaza=buildPlaza(seed,site,anchors,g);
   const harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
-  if(site.through)addRiverBridges(seed,site,g,2); // a river that bisects the town
+  if(site.through)addRiverBridges(seed,site,anchors,g,2); // a river that bisects the town
   const wallState={ring:null,gates:[],epoch:0};
   grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget});
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
+  removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
   const blocks=buildBlocks(g,plaza,site);
   const parcels=buildParcels(seed,g,blocks,anchors,epochs,site);
   assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
   const buildings=buildBuildings(seed,parcels,plaza,anchors);
   const faith=opts.faith||'church';
-  const nChurch=Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // parishes, M-DEN-8
-  const churches=buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith);
+  // hamlets have no church/chapel; a religious building can also be turned off ('none')
+  const hamlet=popTarget<600;
+  const nChurch=(faith==='none'||hamlet)?0:Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // M-DEN-8
+  const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith):[];
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
   // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN)
   const markets=buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings);
@@ -1763,7 +1800,7 @@ function generate(seed,opts){
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,through:site.through,river:site.river,riverW:site.riverW,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
     anchors,plaza,harbour,markets,civic,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
     wall:wallState,blocks,parcels,buildings,churches,details,pop,metrics,through:site.through};}
@@ -1826,11 +1863,13 @@ function render(){
 
   // terrain: light height contours for orientation (site model visualization)
   // (contours are decorative site context; every simulated object below is selectable)
-  // water
-  const wp=el('path',{d:pd(model.site.waterPoly),class:'water'},L.water);
-  reg(wp,'River','River',{width:model.site.riverW.toFixed(0)+' m'},
-    'Site model: the river bounds growth and sites the bridge; banks carry the noxious trades (lit. review §4).');
-  el('path',{d:pl(model.site.river),class:'riverline'},L.water);
+  // water (none on a landlocked site)
+  if(model.site.waterPoly&&model.site.waterPoly.length){
+    const wp=el('path',{d:pd(model.site.waterPoly),class:'water'},L.water);
+    reg(wp,'River','River',{width:model.site.riverW.toFixed(0)+' m'},
+      'Site model: the river bounds growth and sites the bridge; banks carry the noxious trades (lit. review §4).');
+    if(model.site.kind==='river'||model.site.kind==='riverthrough')
+      el('path',{d:pl(model.site.river),class:'riverline'},L.water);}
 
   // strip fields + fences + trees(details layer later)
   for(const d of model.details){

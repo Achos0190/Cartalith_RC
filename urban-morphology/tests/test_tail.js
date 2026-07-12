@@ -346,6 +346,51 @@ for (const kind of ['bay', 'coast']) {
   ok(!nw.fortified && !nw.wall.ring, 'no fort without a wall');
 }
 
+/* ---------- landlocked site (no water at all) ---------- */
+{
+  const m = UME.generate(12345, { epochs: 8, pop: 5000, walls: true, site: 'landlocked' });
+  ok(m.site.kind === 'landlocked' && m.site.noWater, 'landlocked site recorded');
+  ok(!m.harbour, 'landlocked: no harbour');
+  ok(!m.site.bridgePt, 'landlocked: no bridge');
+  ok(m.wall.ring && (!m.wall.waterWalls || m.wall.waterWalls.length === 0) && (!m.wall.spurs || m.wall.spurs.length === 0),
+    'landlocked: a full curtain wall, no water side');
+  ok(m.parcels.length > 250 && m.buildings.length > 200, `landlocked: substantial town (${m.parcels.length} parcels)`);
+  // a fort on a dry site cannot flood its ditch
+  const lf = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, fortified: true, site: 'landlocked' });
+  ok(lf.wall.style === 'bastioned' && lf.wall.fort.wetDitch === false, 'landlocked fort has a DRY ditch (no water to draw)');
+  const m2 = UME.generate(12345, { epochs: 8, pop: 5000, walls: true, site: 'landlocked' });
+  ok(UME.hashModel(m) === UME.hashModel(m2), 'landlocked deterministic');
+}
+
+/* ---------- religious building optional; hamlets have none ---------- */
+{
+  const none = UME.generate(7, { epochs: 8, pop: 5000, walls: true, faith: 'none' });
+  ok(none.churches.length === 0, "faith 'none' → no religious building");
+  ok(none.parcels.length > 250, 'town still generated without a church');
+  const hamlet = UME.generate(7, { epochs: 6, pop: 450, walls: false });
+  ok(hamlet.churches.length === 0, 'hamlet (<600) has no church (research: hamlets lack churches)');
+  ok(hamlet.markets.length === 0 && !hamlet.civic, 'hamlet has no market or civic hall');
+}
+
+/* ---------- fortifications no longer crossed by roads (field of fire really clear) ---------- */
+for (const site of ['river', 'landlocked']) {
+  const m = UME.generate(21, { epochs: 8, pop: 7000, walls: true, fortified: true, site });
+  const tag = `[${site}] `;
+  if (m.wall.style !== 'bastioned') { ok(true, tag + 'fort not built (skip)'); continue; }
+  const ring = m.wall.ring, land = m.wall.landArc, gates = m.wall.gates;
+  const clearDist = (m.wall.fort.glacisOff || 60) + 8;
+  const dL = (p) => { let d = Infinity; for (let i = 0; i < land.length - 1; i++) d = Math.min(d, T.distPtSeg(p, land[i], land[i + 1])); return d; };
+  let crossings = 0;
+  for (const e of m.graph.edges) {
+    const a = m.graph.nodes[e.a], b = m.graph.nodes[e.b], mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const inClear = !T.pointInPoly(mid, ring) && dL(mid) < clearDist - 6;
+    if (!inClear) continue;
+    const keepR = (e.cls === 'primary' ? clearDist + 16 : clearDist * 0.85) + 8;
+    if (!gates.some(g => Math.hypot(g.pt.x - mid.x, g.pt.y - mid.y) < keepR)) crossings++;
+  }
+  ok(crossings === 0, tag + `no road crosses the fort's field of fire away from a gate (${crossings})`);
+}
+
 /* ---------- selectable worship rite + civic hall style ---------- */
 {
   for (const [faith, name] of [['church', 'Church'], ['temple', 'Temple'], ['shrine', 'Shrine'], ['mosque', 'Mosque']]) {

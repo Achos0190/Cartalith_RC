@@ -119,7 +119,9 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'city-amenities', set: { siteKind: 'river', pop: '16000', fortified: false, walls: true } },
     { name: 'harbour-chain', set: { siteKind: 'bay', pop: '6000', fortified: false, walls: false, harbourDefence: 'chain' } },
     { name: 'temple-town', set: { siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica' } },
-    { name: 'mosque-town', set: { siteKind: 'coast', pop: '7000', fortified: false, walls: true, faith: 'mosque', harbourDefence: 'chain' } },
+    { name: 'mosque-town', set: { siteKind: 'coast', pop: '7000', fortified: false, walls: true, faith: 'mosque', harbourDefence: 'chain', civicStyle: 'auto' } },
+    { name: 'landlocked', set: { siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'church', civicStyle: 'auto' } },
+    { name: 'hamlet', set: { siteKind: 'landlocked', pop: '400', fortified: false, walls: false, faith: 'none' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
