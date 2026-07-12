@@ -705,5 +705,41 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Chinese Imperial civilization profile (docs/07, M-CHN register) ---------- */
+{
+  const chn = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'chinese' });
+  const chn2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'chinese' });
+  ok(chn.culture === 'chinese', 'chinese profile resolves');
+  ok(UME.hashModel(chn) === UME.hashModel(chn2), 'chinese generation deterministic');
+  ok(chn.parcels.length > 150, `chinese capital is a substantial town (${chn.parcels.length} parcels)`);
+
+  // reuses the grid-growth machinery (planning:'grid'): overwhelmingly axis-aligned, like roman
+  let axis = 0, total = 0;
+  for (const e of chn.graph.edges) {
+    const a = chn.graph.nodes[e.a], b = chn.graph.nodes[e.b];
+    const len = Math.hypot(b.x - a.x, b.y - a.y); if (len < 3) continue;
+    let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x)) * 180 / Math.PI; ang = ang % 90;
+    total++; if (Math.min(ang, 90 - ang) < 4) axis++;
+  }
+  ok(axis / total > 0.85, `chinese capital reuses the axis-aligned grid growth model (${(axis/total*100).toFixed(0)}%)`);
+
+  // courtyard-house grammar reused from islamic, not roman/medieval
+  const chnKinds = new Set(chn.buildings.map(b => b.kind));
+  ok([...chnKinds].some(k => k === 'street range' || k === 'single-room house'), 'chinese buildings reuse the siheyuan/courtyard-house grammar');
+  ok(![...chnKinds].some(k => k === 'main' || k === 'insula block'), 'chinese buildings do not use the medieval or roman insula-apartment grammar');
+
+  // cardinal gate scheme + never a bastioned trace
+  const chnf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'chinese' });
+  ok(!chnf.fortified && chnf.wall.style === 'curtain', 'chinese profile never gets a bastioned trace, even when requested');
+  ok(chnf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `cardinal gate scheme names land gates (${chnf.wall.gates.map(g=>g.name).join(', ')}, M-CHN-3)`);
+  ok(chn.markets.length === 0, 'chinese profile has no specialised market squares (reuses the forum/macellum-style gating from roman)');
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const c1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'chinese', site });
+    const c2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'chinese', site });
+    ok(c1.parcels.length > 100 && UME.hashModel(c1) === UME.hashModel(c2), `chinese capital on '${site}' site: substantial + deterministic (${c1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

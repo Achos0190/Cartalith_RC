@@ -123,7 +123,8 @@ svg.panning{cursor:grabbing}
       <option value="medieval">Medieval Western European</option>
       <option value="roman">Roman (planned colonia)</option>
       <option value="islamic">Islamic (traditional medina)</option>
-      <option value="byzantine">Byzantine</option></select></div>
+      <option value="byzantine">Byzantine</option>
+      <option value="chinese">Chinese Imperial (walled capital)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -226,7 +227,12 @@ const CULTURE_PROFILES={
     planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
     defaultFaith:'orthodox',defaultCivic:'auto',markets:true,
     wallGates:{scheme:'byzantine'},orientation:'terrain',civicAnchorLabel:'mese',
-    prov:'Organic growth as the medieval pack (the Roman-inherited street plan of an existing city continues to accrete rather than being re-planned), but the rite is the mature Middle Byzantine cross-in-square church — a domed naos on four columns, narthex and apsed bema (M-BYZ-1) — with the civic hall reusing the Roman-derived basilica; never a gunpowder-era bastioned trace (the Byzantine millennium ends, 1453, at the very dawn of that revolution).'}
+    prov:'Organic growth as the medieval pack (the Roman-inherited street plan of an existing city continues to accrete rather than being re-planned), but the rite is the mature Middle Byzantine cross-in-square church — a domed naos on four columns, narthex and apsed bema (M-BYZ-1) — with the civic hall reusing the Roman-derived basilica; never a gunpowder-era bastioned trace (the Byzantine millennium ends, 1453, at the very dawn of that revolution).'},
+  chinese:{id:'chinese',name:'Chinese Imperial (walled capital)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'basilica',markets:false,
+    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'palace',householdMultiplier:2.9,
+    prov:'The Kaogongji tradition (Rites of Zhou, Warring States era): a square/rectangular walled capital on a strict cardinal grid, the palace at the geometric centre facing due south, gates on each side — reuses the grid-growth machinery built for the Roman profile (docs/07 §2) and the universal courtyard-house grammar built for the Islamic profile (the siheyuan is the same "four ranges around a private court" pattern, at every social scale). Civic/temple geometry reuses the existing basilica/temple forms as a schematic stand-in for the palace/temple complex — a distinct pagoda/palace geometry is future work (M-CHN register).'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -682,7 +688,11 @@ function buildPrimaries(seed,site,anchors,g){
 function buildGridStreets(seed,site,anchors,g,opts){
   const r=stream(seed,'gridstreets');
   const F=anchors.market; // the civic anchor; labelled 'forum' for this profile (civicAnchorLabel)
-  const spacing=r.range(50,60); // minor cardines/decumani spacing, M-ROM-1
+  // minor grid spacing (M-ROM-1 default ~50-60 m); a profile can override it for a finer, denser
+  // secondary grid within the same broad avenue framework (e.g. Chinese hutong/alley lanes are
+  // materially narrower-spaced than a Roman insula grid — M-CHN-4)
+  const sp=opts.gridSpacing||[50,60];
+  const spacing=r.range(sp[0],sp[1]);
   const half=Math.max(140,Math.min(480,opts.maxRF*0.62)); // minor grid's built extent
   const margin=25;
   const land=(x,y)=>x>margin&&y>margin&&x<site.Wm-margin&&y<site.Hm-margin&&!site.isWater({x,y})&&
@@ -2079,7 +2089,7 @@ function generate(seed,opts){
   // epoch loop at all — the wall (if any) is founded with the colonia, not grown into later.
   let plaza,harbour;
   if(profile.planning==='grid'){
-    buildGridStreets(seed,site,anchors,g,{maxRF});
+    buildGridStreets(seed,site,anchors,g,{maxRF,gridSpacing:profile.gridSpacing});
     harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
     if(site.through)addRiverBridges(seed,site,anchors,g,2);
     if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified});
@@ -2114,6 +2124,18 @@ function generate(seed,opts){
         :(ang>135||ang<=-135)?'Bab al-Gharb (West Gate)'
         :'Bab ash-Shamal (North Gate)';}
   }
+  // Cardinal gate scheme (M-CHN-3): the Kaogongji tradition's walled, axial capital keys gates
+  // off the palace-centred N-S/E-W axes exactly like the castrum scheme (this profile reuses
+  // 'grid' planning, so the same maximus-axis geometry applies) — plain cardinal names rather
+  // than city-specific proper nouns (e.g. Beijing's named gates), which would overclaim a single
+  // city's history as generic.
+  if(profile.wallGates.scheme==='cardinal'&&wallState.gates&&wallState.gates.length){
+    const F=anchors.market;
+    for(const gt of wallState.gates){
+      if(gt.water)continue;
+      if(Math.abs(gt.pt.y-F.y)<10)gt.name=gt.pt.x>=F.x?'East Gate':'West Gate';
+      else if(Math.abs(gt.pt.x-F.x)<10)gt.name=gt.pt.y<F.y?'North Gate':'South Gate';}
+  }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
   removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
   const blocks=buildBlocks(g,plaza,site);
@@ -2127,11 +2149,16 @@ function generate(seed,opts){
   const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith,site,harbour):[];
   // occupancy per built parcel (M-DEN-2): a multi-storey insula apartment block (3-5 storeys,
   // M-ROM-3) houses several times what a single-family domus or medieval house does — counting
-  // it as one household like the others would badly undercount a colonia's real density (M-ROM-7)
+  // it as one household like the others would badly undercount a colonia's real density (M-ROM-7).
+  // More generally, any profile whose typical lot is simply BIGGER than the medieval strip-parcel
+  // baseline (fewer, larger lots per hectare at the same street length) needs a household-size
+  // correction too, even without Roman's multi-storey reason — e.g. a Chinese siheyuan compound
+  // usually housed an extended, multi-generational family, not a nuclear one (M-CHN-4).
   const insulaParcels=profile.buildingGrammar==='domus-insula'
     ?new Set(buildings.filter(b=>b.kind==='insula block').map(b=>b.parcel)):null;
+  const householdMult=profile.householdMultiplier||1;
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard)
-    .reduce((s,p)=>s+(insulaParcels&&insulaParcels.has(p.id)?5.2*4:5.2),0));
+    .reduce((s,p)=>s+(insulaParcels&&insulaParcels.has(p.id)?5.2*4:5.2*householdMult),0));
   // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN).
   // Markets are a medieval-specific economy (M-AMEN-1); a profile without them (e.g. Roman, whose
   // commerce concentrates in the forum/macellum — docs/07 §2) is gated off rather than reusing

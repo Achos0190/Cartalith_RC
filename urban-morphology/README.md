@@ -68,6 +68,13 @@ civilizations 3–18).
   with the civic hall reusing the Roman-derived basilica; the specialised-market economy is
   kept (unlike Roman/Islamic); never a bastioned trace (the Byzantine millennium ends in 1453,
   at the dawn of that revolution).
+- **Chinese Imperial (walled capital)** — the Kaogongji tradition: a square/rectangular walled
+  capital on a strict cardinal grid, the palace at the geometric centre facing south. Reuses
+  the Roman profile's grid-growth machinery and the Islamic profile's universal courtyard-house
+  (siheyuan) grammar wholesale — proving those two mechanisms generalize beyond the traditions
+  they were built for, not just Rome/the medina — with plain cardinal gate names (North/South/
+  East/West Gate, M-CHN-3) and a household-size correction for the siheyuan's typically larger,
+  extended-family compound (M-CHN-4). No specialised markets; never a bastioned trace.
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.
