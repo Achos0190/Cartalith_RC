@@ -124,6 +124,7 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'hamlet', set: { siteKind: 'landlocked', pop: '400', fortified: false, walls: false, faith: 'none' } },
     { name: 'roman-colonia', set: { culture: 'roman', siteKind: 'river', pop: '8000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica' } },
     { name: 'islamic-medina', set: { culture: 'islamic', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto' } },
+    { name: 'byzantine-city', set: { culture: 'byzantine', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'orthodox', civicStyle: 'auto' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {

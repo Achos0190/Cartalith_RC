@@ -62,6 +62,12 @@ civilizations 3–18).
   pack (M-ISL-2); no monumental civic building (the existing faith→civic auto-pick already got
   this right); gates named by compass quadrant (*Bab ash-Sharq* etc., M-ISL-4); never a
   bastioned trace (same anachronism guard as Roman).
+- **Byzantine** — organic growth as the medieval pack (an existing Roman-founded city's plan
+  continuing to accrete, not a re-plan), but the rite is the mature Middle Byzantine
+  **cross-in-square** church — a domed naos on four columns, narthex, apsed bema (M-BYZ-1) —
+  with the civic hall reusing the Roman-derived basilica; the specialised-market economy is
+  kept (unlike Roman/Islamic); never a bastioned trace (the Byzantine millennium ends in 1453,
+  at the dawn of that revolution).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

@@ -167,6 +167,15 @@ follow the water's edge.
 
 Notes on scope: as with Roman, the **bastioned trace italienne is never available** for this profile regardless of request — it represents the classical/medieval-era Islamic city (souk + cul-de-sac + courtyard-house archetype), predating large-scale artillery fortification. Specialised market-square multiplication (M-AMEN-1) is gated off, as the souk's commercial character is structural (proximity-to-mosque district assignment) rather than a separate amenity system — matching the same reasoning already applied to the Roman forum/macellum (docs/07 §2).
 
+## J. Byzantine morphology (M-BYZ)
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-BYZ-1 | Cross-in-square church plan | a domed **naos** on four columns (nine-bay), a **narthex** (entrance hall) to the town side, an apsed **bema** (sanctuary) behind, terminating in a semicircular apse; the dominant Middle Byzantine church type, 9th–12th c. | – | [Cross-in-square — Wikipedia](https://en.wikipedia.org/wiki/Cross-in-square); [Smarthistory: Middle Byzantine church architecture](https://pressbooks.pub/smarthistoryguidetobyzantineart/chapter/middle-byzantine-church-architecture/) | H | The one clearly distinct, sourced building-form difference implemented for this profile; the civic hall reuses the existing basilica geometry unchanged (Byzantine state architecture directly inherited the Roman basilica), and growth/parcels/burgage building grammar are reused unchanged from the medieval pack — an existing Roman-founded city's street plan continuing to accrete, not a re-plan (docs/07 §2). |
+| M-BYZ-2 | Mese (reference, not separately modelled) | Constantinople's central colonnaded avenue ran ~5 km, 20–40 m wide with porticoes, connecting a chain of forums | m | [Mese (Constantinople) — Wikipedia](https://en.wikipedia.org/wiki/Mese_(Constantinople)) | M | Recorded for completeness; not implemented as distinct geometry this pass (the existing widened-market-street plaza mechanism is reused as a stand-in) — a dedicated colonnaded-avenue detail is future work. |
+
+Scope note: the profile deliberately does **not** attempt Constantinople's iconic triple Theodosian land walls — that is a substantial, city-specific outwork system (inner wall, outer wall, moat) beyond what a generic "Byzantine" profile should assume for every settlement; the reused single-curtain wall machinery stands in. The bastioned trace italienne is never available (the Byzantine millennium ends in 1453, at the very dawn of that revolution).
+
 ---
 
 ## Usage contract

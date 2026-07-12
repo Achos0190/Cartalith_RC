@@ -685,5 +685,25 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Byzantine civilization profile (docs/07, M-BYZ register) ---------- */
+{
+  const byz = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'byzantine' });
+  const byz2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'byzantine' });
+  ok(byz.culture === 'byzantine', 'byzantine profile resolves');
+  ok(UME.hashModel(byz) === UME.hashModel(byz2), 'byzantine generation deterministic');
+  ok(byz.parcels.length > 150, `byzantine city is a substantial town (${byz.parcels.length} parcels)`);
+  ok(byz.churches.length >= 1 && byz.churches.every(c => c.faith === 'orthodox' && c.tower && c.tower.kind === 'dome'),
+    'byzantine profile defaults to the cross-in-square orthodox rite with a central dome');
+  ok(byz.civic && byz.civic.name === 'Basilica', 'byzantine civic hall reuses the Roman-derived basilica (auto-pick)');
+  ok(byz.markets.length > 0, 'byzantine profile keeps the specialised-market economy (unlike roman/islamic)');
+  const byzf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'byzantine' });
+  ok(!byzf.fortified && byzf.wall.style === 'curtain', 'byzantine profile never gets a bastioned trace, even when requested');
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const b1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'byzantine', site });
+    const b2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'byzantine', site });
+    ok(b1.parcels.length > 100 && UME.hashModel(b1) === UME.hashModel(b2), `byzantine city on '${site}' site: substantial + deterministic (${b1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

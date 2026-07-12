@@ -122,7 +122,8 @@ svg.panning{cursor:grabbing}
     <div class="row"><label>Civilization</label><select id="culture" style="font:12px Georgia,serif">
       <option value="medieval">Medieval Western European</option>
       <option value="roman">Roman (planned colonia)</option>
-      <option value="islamic">Islamic (traditional medina)</option></select></div>
+      <option value="islamic">Islamic (traditional medina)</option>
+      <option value="byzantine">Byzantine</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -140,6 +141,7 @@ svg.panning{cursor:grabbing}
       <option value="temple">Classical temple (Roman/Greek)</option>
       <option value="shrine">Shrine</option>
       <option value="mosque">Mosque</option>
+      <option value="orthodox">Orthodox church (Byzantine)</option>
       <option value="none">None (no religious building)</option></select></div>
     <div class="row"><label>Civic hall</label><select id="civicStyle" style="font:12px Georgia,serif">
       <option value="auto">Auto (by rite)</option>
@@ -219,7 +221,12 @@ const CULTURE_PROFILES={
     planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'mosque',defaultCivic:'auto',markets:false,
     wallGates:{scheme:'bab'},orientation:'terrain',civicAnchorLabel:'souk',deadEndBias:0.16,
-    prov:'A congregational mosque at the commercial/religious core with the souk radiating from it (most esteemed trades nearest the mosque); organic growth as the medieval pack, but residential quarters are a network of privacy-oriented, inward-facing courtyard houses reached by a maze of cul-de-sac alleys — the historically documented "encroachment" process privatized what were once through-lanes (M-ISL register).'}
+    prov:'A congregational mosque at the commercial/religious core with the souk radiating from it (most esteemed trades nearest the mosque); organic growth as the medieval pack, but residential quarters are a network of privacy-oriented, inward-facing courtyard houses reached by a maze of cul-de-sac alleys — the historically documented "encroachment" process privatized what were once through-lanes (M-ISL register).'},
+  byzantine:{id:'byzantine',name:'Byzantine',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
+    defaultFaith:'orthodox',defaultCivic:'auto',markets:true,
+    wallGates:{scheme:'byzantine'},orientation:'terrain',civicAnchorLabel:'mese',
+    prov:'Organic growth as the medieval pack (the Roman-inherited street plan of an existing city continues to accrete rather than being re-planned), but the rite is the mature Middle Byzantine cross-in-square church — a domed naos on four columns, narthex and apsed bema (M-BYZ-1) — with the civic hall reusing the Roman-derived basilica; never a gunpowder-era bastioned trace (the Byzantine millennium ends, 1453, at the very dawn of that revolution).'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -904,7 +911,7 @@ function buildMarkets(seed,site,anchors,g,plaza,pop,parcels,buildings){
 // belfry, a Roman-style basilica (long hall + apse + colonnade), or an open guild loggia
 function buildCivic(seed,anchors,plaza,pop,style,faith){
   if(!plaza||pop<1500)return null; // a civic hall appears once a place is a chartered town
-  if(style==='auto'||!style)style=(faith==='temple'||faith==='shrine')?'basilica':(faith==='mosque')?'none':'townhall';
+  if(style==='auto'||!style)style=(faith==='temple'||faith==='shrine'||faith==='orthodox')?'basilica':(faith==='mosque')?'none':'townhall';
   if(style==='none')return null; // e.g. Islamic governance was not a monumental civic building
   const c=plaza.center,p0=plaza.poly[0],p1=plaza.poly[1];
   const mid=V.lerp(p0,p1,0.5);
@@ -1841,7 +1848,7 @@ function _peristyle(rx,ry,w,h,sp){const cols=[],cn=_rectPts(rx,ry,w,h);
  * churchyard/temenos site-selection & clearing is common; only the building form differs. */
 function buildFaithSites(seed,parcels,buildings,anchors,count,faith,site,harbour){
   faith=faith||'church';
-  const NAME={church:'Church',temple:'Temple',shrine:'Shrine',mosque:'Mosque'};
+  const NAME={church:'Church',temple:'Temple',shrine:'Shrine',mosque:'Mosque',orthodox:'Orthodox church'};
   const sites=[];
   for(let ci=0;ci<count;ci++){
     const r=stream(seed,'faith/'+ci);
@@ -1897,6 +1904,27 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith,site,harbour
       s.tower={x:cx-L/2+2,y:cy-H*0.25,r:2.4,kind:'minaret'};   // minaret at a courtyard corner
       s.ridge=[{x:cx-L/2+2,y:cy+H*0.25},{x:cx+L/2-2,y:cy+H*0.25}];
       s.prov='Mosque: a covered prayer hall on the qibla side with an open courtyard (sahn) and a minaret — the Islamic rite (M-BLD-8).';
+    }else if(faith==='orthodox'){
+      // cross-in-square: a domed naos on four columns (nine-bay), a narthex (entrance hall)
+      // toward the town, an apsed bema behind — the mature Middle Byzantine plan (M-BYZ-1)
+      const side=Math.max(8,Math.min(ci===0?18:14,Math.min(exX,exY)-2*mg));
+      s.polys.push(_rectPts(cx,cy,side,side));
+      let inl=V.norm(V.sub(anchors.market,{x:cx,y:cy}));if(!isFinite(inl.x))inl={x:0,y:1};
+      const perp=V.rot90(inl);
+      const nd=side*0.34,nw=side*0.9;
+      const narthexC=V.add({x:cx,y:cy},V.mul(inl,side/2+nd/2));
+      s.polys.push([V.add(V.add(narthexC,V.mul(perp,-nw/2)),V.mul(inl,-nd/2)),
+        V.add(V.add(narthexC,V.mul(perp,nw/2)),V.mul(inl,-nd/2)),
+        V.add(V.add(narthexC,V.mul(perp,nw/2)),V.mul(inl,nd/2)),
+        V.add(V.add(narthexC,V.mul(perp,-nw/2)),V.mul(inl,nd/2))]);
+      const apseC=V.sub({x:cx,y:cy},V.mul(inl,side/2));
+      const apseR=side*0.26,ap=[];
+      for(let k=0;k<=8;k++){const a=(-Math.PI/2)+Math.PI*k/8;
+        ap.push(V.add(V.add(apseC,V.mul(perp,Math.cos(a)*apseR)),V.mul(inl,-Math.sin(a)*apseR)));}
+      s.polys.push(ap);
+      s.tower={x:cx,y:cy,r:2.6,kind:'dome'}; // central dome on the crossing
+      s.ridge=[{x:cx-side/2+1.5,y:cy},{x:cx+side/2-1.5,y:cy}];
+      s.prov='Orthodox church: cross-in-square plan — a domed naos on four columns, a narthex (entrance hall) toward the town, an apsed bema behind — the mature Middle Byzantine rite, 9th-12th c. (M-BYZ-1).';
     }else{
       const L=Math.max(9,Math.min(ci===0?30:22,exX-2*mg));
       const Wn=Math.max(4.5,Math.min(L*0.42,exY*0.5-mg));
