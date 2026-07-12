@@ -531,9 +531,52 @@ for (const site of ['river', 'landlocked']) {
   ok(UME.hashModel(noWall) === UME.hashModel(noWall2), 'walls-off generation deterministic');
 }
 
+/* ---------- standing audit: no impossible intersections, for EVERY registered profile ----------
+ * Runs automatically over whatever civilizations exist (not hardcoded to today's roster), so
+ * adding a new profile is covered by this check with no test-file change required:
+ * (1) no road crosses a wall/enceinte away from a gate (the true geometric crossing, not a
+ *     proximity sample — a long/oblique edge can cross the ring while its sample points stay
+ *     outside the clear band, which is exactly the bug this check is designed to catch);
+ * (2) nothing is built inside a water body. */
+{
+  const profiles = Object.keys(UME.CULTURE_PROFILES);
+  const sites = ['river', 'riverthrough', 'bay', 'coast', 'landlocked'];
+  let crossingFailures = 0, wetBuildingFailures = 0, wetParcelFailures = 0, checked = 0;
+  for (const culture of profiles) {
+    for (const site of sites) {
+      for (const fortified of [false, true]) {
+        const m = UME.generate(4242, { epochs: 8, pop: 7500, walls: true, fortified, culture, site });
+        checked++;
+        if (m.wall.ring) {
+          const ring = m.wall.ring, gates = m.wall.gates;
+          const clearDist = m.wall.style === 'bastioned' ? ((m.wall.fort.glacisOff || 60) + 8) : 15;
+          for (const e of m.graph.edges) {
+            if (!e.alive || e.cls === 'quay') continue; // the quay legitimately crosses the water side
+            const a = m.graph.nodes[e.a], b = m.graph.nodes[e.b];
+            const crossPts = [];
+            for (let i = 0; i < ring.length; i++) { const h = T.segInt(a, b, ring[i], ring[(i + 1) % ring.length]); if (h) crossPts.push(h.pt); }
+            if (!crossPts.length) continue;
+            const keepR = e.cls === 'primary' ? clearDist + 16 : clearDist * 0.85;
+            if (!crossPts.every(pt => gates.some(g => Math.hypot(g.pt.x - pt.x, g.pt.y - pt.y) < keepR))) crossingFailures++;
+          }
+        }
+        if (!m.site.noWater && m.site.waterPoly && m.site.waterPoly.length) {
+          for (const b of m.buildings) if (T.pointInPoly(T.polyCentroid(b.poly), m.site.waterPoly)) wetBuildingFailures++;
+          for (const p of m.parcels) if (T.pointInPoly(T.polyCentroid(p.poly), m.site.waterPoly)) wetParcelFailures++;
+        }
+      }
+    }
+  }
+  ok(crossingFailures === 0, `no road crosses any wall/enceinte away from a gate, across ${checked} (profile × site × fortified) combinations (${crossingFailures} failures)`);
+  ok(wetBuildingFailures === 0, `no building sits in the water, across all combinations (${wetBuildingFailures} failures)`);
+  ok(wetParcelFailures === 0, `no parcel sits in the water, across all combinations (${wetParcelFailures} failures)`);
+}
+
 /* ---------- Phase 1 architecture: culture profiles (docs/07) ---------- */
 {
-  ok(Object.keys(UME.CULTURE_PROFILES).sort().join(',') === 'medieval,roman', 'two culture profiles registered');
+  const registeredProfiles = Object.keys(UME.CULTURE_PROFILES);
+  ok(registeredProfiles.length >= 2 && registeredProfiles.includes('medieval') && registeredProfiles.includes('roman'),
+    `culture profiles registered (${registeredProfiles.join(', ')})`);
   // unknown/omitted culture falls back to medieval, byte-identical
   const base = UME.generate(12345, { epochs: 8, pop: 5000 });
   const explicit = UME.generate(12345, { epochs: 8, pop: 5000, culture: 'medieval' });
@@ -594,6 +637,51 @@ for (const site of ['river', 'landlocked']) {
     const rs = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'roman', site });
     const rs2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'roman', site });
     ok(rs.parcels.length > 100 && UME.hashModel(rs) === UME.hashModel(rs2), `roman colonia on '${site}' site: substantial + deterministic (${rs.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Islamic civilization profile (docs/07, M-ISL register) ---------- */
+{
+  const isl = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'islamic' });
+  const isl2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'islamic' });
+  ok(isl.culture === 'islamic', 'islamic profile resolves');
+  ok(UME.hashModel(isl) === UME.hashModel(isl2), 'islamic generation deterministic');
+  ok(isl.parcels.length > 150 && isl.buildings.length > 150, `islamic medina is a substantial town (${isl.parcels.length} parcels)`);
+
+  // higher dead-end (cul-de-sac) share than the medieval pack, the documented "encroachment"
+  // signature (M-ISL-2) — a testable statistical difference, not just a label
+  const degShare = (m) => {
+    const deg = new Map();
+    for (const e of m.graph.edges) { deg.set(e.a, (deg.get(e.a) || 0) + 1); deg.set(e.b, (deg.get(e.b) || 0) + 1); }
+    let deg1 = 0, total = 0;
+    for (const d of deg.values()) { total++; if (d === 1) deg1++; }
+    return deg1 / total;
+  };
+  const med = UME.generate(12345, { epochs: 8, pop: 6000, walls: true });
+  const islDead = degShare(isl), medDead = degShare(med);
+  ok(islDead > medDead, `islamic medina has a higher dead-end/cul-de-sac share than the medieval pack (${(islDead*100).toFixed(0)}% vs ${(medDead*100).toFixed(0)}%, M-ISL-2)`);
+
+  // courtyard-house grammar distinct from both the medieval burgage and roman domus/insula grammars
+  const islKinds = new Set(isl.buildings.map(b => b.kind));
+  ok([...islKinds].some(k => k === 'street range' || k === 'single-room house'), 'islamic buildings use the courtyard-house grammar');
+  ok(![...islKinds].some(k => k === 'main' || k === 'insula block'), 'islamic buildings do not reuse the medieval or roman grammars');
+
+  // reused worship/civic machinery: mosque rite, no monumental civic building (already-correct
+  // auto-pick logic from the earlier worship-rite work — confirms it needed no changes)
+  ok(isl.churches.length >= 1 && isl.churches.every(c => c.faith === 'mosque'), 'islamic profile defaults to the mosque rite');
+  ok(!isl.civic, 'islamic profile has no monumental civic hall (auto-pick reused unchanged)');
+  ok(isl.markets.length === 0, 'islamic profile has no specialised market squares (the souk is structural, not a separate amenity system)');
+
+  // never a bastioned trace (same anachronism guard as roman), and gates named per the Bab scheme
+  const islf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'islamic' });
+  ok(!islf.fortified && islf.wall.style === 'curtain', 'islamic profile never gets a bastioned trace, even when requested');
+  ok(islf.wall.gates.some(g => g.name && /^Bab /.test(g.name)), `bab gate scheme names land gates (${islf.wall.gates.map(g=>g.name).join(', ')}, M-ISL-4)`);
+
+  // robustness across site kinds
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const is1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'islamic', site });
+    const is2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'islamic', site });
+    ok(is1.parcels.length > 100 && UME.hashModel(is1) === UME.hashModel(is2), `islamic medina on '${site}' site: substantial + deterministic (${is1.parcels.length} parcels)`);
   }
 }
 

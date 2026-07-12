@@ -121,7 +121,8 @@ svg.panning{cursor:grabbing}
       <button id="gen">Generate</button><button id="rnd">Random</button></div>
     <div class="row"><label>Civilization</label><select id="culture" style="font:12px Georgia,serif">
       <option value="medieval">Medieval Western European</option>
-      <option value="roman">Roman (planned colonia)</option></select></div>
+      <option value="roman">Roman (planned colonia)</option>
+      <option value="islamic">Islamic (traditional medina)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -213,7 +214,12 @@ const CULTURE_PROFILES={
     planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
     defaultFaith:'temple',defaultCivic:'basilica',markets:false,
     wallGates:{scheme:'castrum'},orientation:'cardinal',civicAnchorLabel:'forum',
-    prov:'A planned colonia laid out in one act from a castrum-derived module: cardo maximus × decumanus maximus crossing at the forum, a regular grid of minor cardines/decumani ~50-60 m apart, rectangular insula blocks, four castrum-scheme gates (docs/07 §4, M-ROM register).'}
+    prov:'A planned colonia laid out in one act from a castrum-derived module: cardo maximus × decumanus maximus crossing at the forum, a regular grid of minor cardines/decumani ~50-60 m apart, rectangular insula blocks, four castrum-scheme gates (docs/07 §4, M-ROM register).'},
+  islamic:{id:'islamic',name:'Islamic (traditional medina)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
+    defaultFaith:'mosque',defaultCivic:'auto',markets:false,
+    wallGates:{scheme:'bab'},orientation:'terrain',civicAnchorLabel:'souk',deadEndBias:0.16,
+    prov:'A congregational mosque at the commercial/religious core with the souk radiating from it (most esteemed trades nearest the mosque); organic growth as the medieval pack, but residential quarters are a network of privacy-oriented, inward-facing courtyard houses reached by a maze of cul-de-sac alleys — the historically documented "encroachment" process privatized what were once through-lanes (M-ISL register).'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -1382,6 +1388,38 @@ function removeWaterCrossings(site,g){
     for(let i=1;i<10;i++)if(wetAt(V.lerp(a,b,i/10)))wet++;
     if(wet>=2)_killEdge(g,e);}
   pruneLargest(g);}
+/* ---------------- alley privatization: cul-de-sac formation (M-ISL-2) ----------------
+ * Traditional Islamic residential quarters show a MUCH higher dead-end share than the medieval
+ * European pack — a well-documented, quantifiable morphological signature (network of narrow,
+ * winding, privacy-oriented cul-de-sacs off the souk artery). The historical MECHANISM was
+ * encroachment: residents progressively built across a shared through-lane once it served no
+ * one but them, converting a connecting alley into a private cul-de-sac. Modelled here as a
+ * profile-gated post-growth pass, not a growth-loop change (keeps every other profile's growth
+ * mechanics untouched): closes a target share of minor 'street' edges, but ONLY non-bridge
+ * edges (removing one must not disconnect the network — verified by BFS reachability without
+ * the candidate edge, exactly the kind of connectivity check this file's own goal calls for). */
+function privatizeAlleys(seed,profile,g){
+  if(!profile.deadEndBias)return;
+  const r=stream(seed,'privatize');
+  const reachableWithout=(skipId,fromId)=>{
+    const seen=new Set([fromId]);const q=[fromId];
+    while(q.length){const u=q.pop();
+      for(const eid of g.nodes[u].adj){
+        if(eid===skipId)continue;const e=g.edges[eid];if(!e.alive)continue;
+        const v=e.a===u?e.b:e.a;if(!seen.has(v)){seen.add(v);q.push(v);}}}
+    return seen;};
+  const candidates=g.edges.filter(e=>e.alive&&e.cls==='street');
+  const target=Math.round(candidates.length*profile.deadEndBias);
+  let closed=0;
+  for(const e of candidates){
+    if(closed>=target)break;
+    if(!e.alive)continue;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    if(a.adj.filter(id=>g.edges[id].alive).length<2||b.adj.filter(id=>g.edges[id].alive).length<2)continue;
+    if(!r.chance(0.5))continue;
+    if(!reachableWithout(e.id,a.id).has(b.id))continue; // a bridge/articulation edge — never sever it
+    _killEdge(g,e);closed++;}
+}
 function clearFortZone(site,wallState,g,parcels,buildings,details){
   if(!wallState.ring||!wallState.landArc)return;
   const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
@@ -1401,14 +1439,23 @@ function clearFortZone(site,wallState,g,parcels,buildings,details){
     const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
     if(p&&inClear(p))details.splice(i,1);}
   // clear the field of fire of ALL roads (incl. primaries that grazed a bastion/moat/glacis)
-  // except a corridor at each gate, where the approach road crosses on its causeway
+  // except a corridor at each gate, where the approach road crosses on its causeway.
+  // A proximity-only test (mid/endpoints within clearDist of the land curve) MISSES a real
+  // ring-boundary crossing whenever the edge is long/oblique or the ring and the sampled land
+  // curve aren't perfectly coincident — an impossible intersection (a road piercing the wall
+  // with no gate) that proximity sampling alone won't catch. Detect the TRUE geometric crossing
+  // via ringCrossings (the same technique buildWall itself uses to place gates) and require
+  // every actual crossing point — not just a nearby sample — to be covered by a gate.
   const gates=wallState.gates||[];
   for(const e of g.edges){
     if(!e.alive||e.cls==='quay')continue; // the quay hugs the water, not the land wall
     const a=g.nodes[e.a],b=g.nodes[e.b],mid=V.lerp(a,b,0.5);
-    if(!(inClear(mid)||inClear(a)||inClear(b)))continue;
+    const crossPts=ringCrossings(ring,a,b);
+    const graze=inClear(mid)||inClear(a)||inClear(b);
+    if(!crossPts.length&&!graze)continue;
     const keepR=e.cls==='primary'?clearDist+16:clearDist*0.85; // gate approach corridor
-    if(gates.some(gt=>V.dist(gt.pt,mid)<keepR))continue;
+    const checkPts=crossPts.length?crossPts:[mid];
+    if(checkPts.every(pt=>gates.some(gt=>V.dist(gt.pt,pt)<keepR)))continue;
     _killEdge(g,e);}
   pruneLargest(g);}
 
@@ -1693,6 +1740,33 @@ function buildBuildings(seed,parcels,plaza,anchors,profile){
               :rc.kind==='wing'?'Domus wing: rooms flanking the peristyle garden (M-ROM-3).'
               :'Peristyle range: the colonnaded garden court at the rear of the domus — the Hellenistic addition to the Italic atrium house (M-ROM-3).')
             :'Insula: a multi-storey apartment block (~15-20 m tall, 3-5 storeys) let out room-by-room or floor-by-floor to non-elite tenants, often with shops (tabernae) at street level (M-ROM-3).'});}
+      par.built=true;
+      continue;
+    }
+    // Islamic courtyard-house grammar (M-ISL-3): unlike Roman (elite domus vs. dense insula
+    // apartments) the inward-facing courtyard house is the norm across social classes — a
+    // blank, windowless outer wall for privacy, rooms opening only onto the private court
+    if(profile.buildingGrammar==='courtyard-house'&&d!=='harbour'){
+      const hasCourt=par.frontage>=8&&par.depth>=12;
+      const rects=hasCourt?[
+        {u0:0,u1:1,v0:0,v1:0.24,kind:'street range'},
+        {u0:0,u1:0.24,v0:0.22,v1:0.8,kind:'wing'},
+        {u0:0.76,u1:1,v0:0.22,v1:0.8,kind:'wing'},
+        {u0:0,u1:1,v0:0.78,v1:0.98,kind:'rear range'}]
+        :[{u0:0.05,u1:0.95,v0:0.05,v1:0.95,kind:'single-room house'}];
+      for(const rc of rects){
+        const poly=rectPoly(par,rc.u0,rc.u1,rc.v0,rc.v1);
+        if(Math.abs(polyArea(poly))<9)continue;
+        const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
+        let ridge=wU>=wV?[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)]:[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+        const ins=0.16;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
+        out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:rc.kind,district:d,age:0,
+          courtyard:hasCourt,
+          prov:hasCourt
+            ?(rc.kind==='street range'?'Street range: a blank, windowless outer wall (the privacy norm) around the household\'s inward-facing rooms (M-ISL-3).'
+              :rc.kind==='wing'?'Courtyard wing: rooms opening onto the private central court, never directly onto the street (M-ISL-3).'
+              :'Rear range closing the courtyard house (M-ISL-3).')
+            :'Single-room house: too small a lot for a courtyard — the plain minimum dwelling of the quarter.'});}
       par.built=true;
       continue;
     }
@@ -1999,6 +2073,19 @@ function generate(seed,opts){
       if(Math.abs(gt.pt.y-F.y)<10)gt.name=gt.pt.x>=F.x?'Porta Praetoria':'Porta Decumana';
       else if(Math.abs(gt.pt.x-F.x)<10)gt.name=gt.pt.y<F.y?'Porta Principalis Dextra':'Porta Principalis Sinistra';}
   }
+  // Bab (gate) scheme (M-ISL-4): an organic circuit has no maximus axis to key off, so gates are
+  // named by compass quadrant from the wall's own centroid instead — the same reused wall/gate
+  // machinery, just labelled per this tradition (docs/07 §2 pattern, applied a second time).
+  if(profile.wallGates.scheme==='bab'&&wallState.ring&&wallState.gates&&wallState.gates.length){
+    const C=wallState.centroid||polyCentroid(wallState.ring);
+    for(const gt of wallState.gates){
+      if(gt.water)continue;
+      const ang=Math.atan2(gt.pt.y-C.y,gt.pt.x-C.x)*180/Math.PI; // 0=E,90=S,±180=W,-90=N (screen y-down)
+      gt.name=(ang>-45&&ang<=45)?'Bab ash-Sharq (East Gate)'
+        :(ang>45&&ang<=135)?'Bab al-Janub (South Gate)'
+        :(ang>135||ang<=-135)?'Bab al-Gharb (West Gate)'
+        :'Bab ash-Shamal (North Gate)';}
+  }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
   removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
   const blocks=buildBlocks(g,plaza,site);
@@ -2024,6 +2111,11 @@ function generate(seed,opts){
   const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
+  // Islamic-family cul-de-sac encroachment (M-ISL-2, no-op for profiles without deadEndBias):
+  // runs AFTER blocks/parcels/buildings are built from the full graph, so privatizing a lane
+  // closes THROUGH ACCESS only — it does not retroactively delete the dwellings that already
+  // fronted onto it (real encroachment converted a lane's use, it didn't demolish the houses).
+  privatizeAlleys(seed,profile,g);
   // sweep the fortification's field of fire clear (esplanade/glacis): removes buildings,
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);

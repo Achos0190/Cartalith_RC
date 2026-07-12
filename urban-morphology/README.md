@@ -51,6 +51,17 @@ civilizations 3–18).
   (M-ROM-6), unlike the organic pack's all-angle tangle — the morphometrics panel shows the
   medieval-calibrated bands for reference only when a non-medieval profile is active, rather
   than mis-marking a legitimately different morphology as a failure.
+- **Islamic (traditional medina)** — organic growth like the medieval pack, but the
+  congregational mosque anchors a souk that radiates the trade hierarchy outward (most
+  esteemed trades nearest the mosque, reusing the existing mosque-rite geometry and
+  market-anchor siting unchanged); residential quarters are privacy-oriented **courtyard
+  houses** universal across social classes (not just the elite, unlike Roman's domus/insula
+  split); a documented **encroachment** mechanism privatizes a share of through-lanes into
+  cul-de-sacs after the fabric is fully built (so no dwelling frontage is lost — only through
+  *access* is closed), giving a materially higher, testable dead-end share than the medieval
+  pack (M-ISL-2); no monumental civic building (the existing faith→civic auto-pick already got
+  this right); gates named by compass quadrant (*Bab ash-Sharq* etc., M-ISL-4); never a
+  bastioned trace (same anachronism guard as Roman).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.
