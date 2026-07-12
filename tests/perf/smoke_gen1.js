@@ -544,6 +544,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const stillOpen = m.classList.contains('open'); cb.click();
     return { hasImport, hasExport, stillOpenAfterFormClick: stillOpen };
   });
+  // v0.88 (owner report: "export/import take the atlas separately"): the standalone atlas-only round-trip
+  // is retired — "Load project .zip…"/"Export .zip" are the sole 100% import/export actions now.
+  R.atlasStandaloneGone = await page.evaluate(() => ({
+    noImportBtnInFileMenu: !document.getElementById('fileMenu').querySelector('#atlasImportBtn'),
+    noEmbedCheckbox: !document.getElementById('embedAtlasChk'),
+    noExportBtnInSidebar: !document.getElementById('atlasExportBtn'),
+    packStillInAssetsLibrary: !!document.getElementById('alImportPackBtn') && !!document.getElementById('alExportBtn')
+  }));
   await page.click('#assetsHeaderBtn');
   await page.waitForTimeout(250);
   R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
@@ -804,6 +812,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
   });
 
+  // v0.88 (owner report: "highest zoom stops at 20km, I'd like to drop down to 5km"): the LOD zoom cap now
+  // scales with the map's real-world width instead of a fixed ×64, and the scale bar shrinks its reading
+  // as you zoom in (it used to read the full map width no matter how far in you went).
+  R.lodZoomDeep = await page.evaluate(() => {
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    state.mapWidthKm = 800;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2;
+    _lodZoom = 1; applyView(); renderNow(); updateScaleBar();
+    const labelOut = document.getElementById('scaleBar').innerHTML;
+    const spanOut = lodSpanKm();
+    _lodZoom = lodMaxZoom(); applyView(); renderNow(); updateScaleBar();
+    const labelIn = document.getElementById('scaleBar').innerHTML;
+    const spanIn = lodSpanKm();
+    const maxZoom = lodMaxZoom();
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+    return { maxZoom, spanOut, spanIn, reachesFiveKm: spanIn <= 5, labelChanged: labelIn !== labelOut };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -896,6 +922,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
   A('v0.87: consolidated File ▾ dropdown opens with both Import and Export sections', R.fileMenuOpen === true && R.fileMenuHasBoth.hasImport && R.fileMenuHasBoth.hasExport);
   A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
+  A('v0.88: standalone atlas import/export retired; File → Export .zip is the sole 100% round-trip', R.atlasStandaloneGone.noImportBtnInFileMenu && R.atlasStandaloneGone.noEmbedCheckbox && R.atlasStandaloneGone.noExportBtnInSidebar);
+  A('v0.88: dedicated asset-pack import/export stays in the Assets Library menu', R.atlasStandaloneGone.packStillInAssetsLibrary === true);
+  A('v0.88: LOD zoom cap reaches a ≤5km view span at the default 800km map width', R.lodZoomDeep.reachesFiveKm === true && R.lodZoomDeep.maxZoom >= 160);
+  A('v0.88: scale bar reading shrinks as LOD zoom deepens (was frozen at the full map width)', R.lodZoomDeep.labelChanged === true && R.lodZoomDeep.spanIn < R.lodZoomDeep.spanOut);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

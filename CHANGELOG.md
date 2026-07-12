@@ -12,6 +12,37 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.88 (2026-07-12)
+**Two owner-reported items: deep-zoom scale + one-button save/restore.** No engine simulation changes;
+render battery **ALL IDENTICAL to v0.87**, headless **911 → 917**, Playwright UI smoke **113 → 117**.
+- **LOD zoom capped too shallow (fix).** Owner: "highest zoom stops at a scale of 20km, I'd like to drop
+  down lower 5km even." Root cause was two-fold: (1) `_lodZoom` was clamped to a fixed ×64 in all three
+  zoom-input sites (button step, wheel, pinch) — the reachable real-world view span (`mapWidthKm/zoom`)
+  therefore depended entirely on the map's width, and never reached a tight close-up on anything but small
+  maps; (2) `updateScaleBar()` divided the *full* `state.mapWidthKm` by the canvas's on-screen width even
+  while LOD-zoomed in — LOD's own zoom is an in-canvas transform (`_lodZoom`), not the CSS `viewT.scale`
+  the bar's formula assumed, so the bar read a **frozen** distance that never shrank as you zoomed in (the
+  reported "stuck at 20km" reading). Fixed with two small pure helpers: `lodMaxZoom()` scales the cap to
+  `mapWidthKm/5` (floor 64, so small/default maps keep at least the old headroom) used at all three zoom
+  sites; `lodSpanKm()` returns the real-world width actually on screen (`mapWidthKm/_lodZoom` while LOD is
+  on, full width otherwise), now feeding `updateScaleBar()`. Render/engine untouched (browser-chrome only).
+  Probe: default 800 km map now reaches a 5 km span (max zoom 160×) with the scale bar shrinking from
+  50 km → 200 m across the zoom range (previously frozen). +4 headless + 2 smoke assertions.
+- **Export/Import take the atlas separately (fix, owner request).** Owner: "Cartalith makes a save file of
+  everything the user did and used (asset pack included) and exports it… a separate assetpack import
+  [belongs] in the respective assetpack menu." `exportZip()`/`loadZip()` already unconditionally embedded/
+  restored the baked LOD atlas and the asset library alongside every other field — but a standalone
+  **Export atlas…**/**Import atlas…** action pair *also* existed (header File menu + Tiles & LOD sidebar),
+  plus an **Embed baked atlas** checkbox that made the atlas embed optional, undermining "one export = the
+  whole world." Retired all three: removed `atlasImportBtn` (header), `atlasExportBtn` (Tiles & LOD →
+  Atlas), their file input, and the now-dead `exportAtlasZip()`/`importAtlasZip()` browser shells (the pure
+  `atlasExportEntries`/`atlasImportEntries` cores stay — `exportZip`/`loadZip` call them directly,
+  unconditionally). **File → Load project .zip**/**Export .zip** are now the sole 100%-round-trip actions.
+  The dedicated asset-pack-only import/export pair stays exactly where the owner wants it — the Assets
+  Library's own **Import pack…**/**Export pack .zip** (`#alImportPackBtn`/`#alExportBtn`), untouched. UI/
+  wiring-only; hint text in both the File menu and the Atlas accordion rewritten to describe the new
+  one-button model. +2 smoke assertions (buttons gone; Assets-Library pair still present).
+
 ### v0.87 (2026-07-11)
 **Two owner-reported UI items.** No engine changes; render battery **ALL IDENTICAL to v0.86**, headless
 **911** unchanged, Playwright UI smoke **111 → 113**.

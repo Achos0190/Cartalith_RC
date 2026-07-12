@@ -848,6 +848,35 @@ fieldsFinite('generate(world)');
   check('updateScaleBar hides when off', document.getElementById('scaleBar').style.display === 'none');
   state.viz.scaleBar = true;
 
+  // v0.88: lodMaxZoom scales with map width (owner report: "highest zoom stops at 20km, want 5km") —
+  // the reachable view span (mapWidthKm/zoom) must be able to reach ≤5km regardless of map size, while
+  // never being less generous than the old fixed ×64 cap for small/default maps.
+  {
+    const savedW = state.mapWidthKm;
+    state.mapWidthKm = 800; const zBig = lodMaxZoom();
+    state.mapWidthKm = 50; const zSmall = lodMaxZoom();
+    state.mapWidthKm = 4000; const zHuge = lodMaxZoom();
+    check('lodMaxZoom reaches ≤5km span at the default map width', zBig >= 800 / 5);
+    check('lodMaxZoom never drops below the legacy ×64 floor', zSmall === 64);
+    check('lodMaxZoom scales up for larger maps', zHuge >= 4000 / 5 && zHuge > zBig);
+    state.mapWidthKm = savedW;
+  }
+
+  // v0.88: updateScaleBar must reflect the LOD-zoomed-in span, not the full map width (root cause of the
+  // owner-reported "scale reading stuck" — the bar used to divide by the full map width at any zoom).
+  {
+    const savedOn = _lodOn, savedZoom = _lodZoom, savedW = state.mapWidthKm;
+    state.mapWidthKm = 800;
+    _lodOn = false; _lodZoom = 1; updateScaleBar();
+    const labelOut = document.getElementById('scaleBar').innerHTML;
+    check('lodSpanKm() reports the full map width when LOD is off', lodSpanKm() === 800);
+    _lodOn = true; _lodZoom = 160; updateScaleBar();
+    const labelIn = document.getElementById('scaleBar').innerHTML;
+    check('lodSpanKm() shrinks with _lodZoom while LOD is on', lodSpanKm() === 5);
+    check('updateScaleBar label changes between zoomed-out and zoomed-in LOD views', labelIn !== labelOut);
+    _lodOn = savedOn; _lodZoom = savedZoom; state.mapWidthKm = savedW;
+  }
+
   // sample pack on disk — proves STORED (sync unzipStore reads it) + manifest shape + PNG headers
   {
     const ab = fs.readFileSync('assets/sample_pack.zip');

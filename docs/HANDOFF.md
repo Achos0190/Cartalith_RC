@@ -9,10 +9,22 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.87.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.88.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.88 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.86` are kept and never edited.
+  (v0.89 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.87` are kept and never edited.
+- **v0.88 — two owner-reported items** (no engine changes; render battery ALL IDENTICAL to v0.87,
+  headless **911 → 917**, smoke **113 → 117**): (1) **LOD zoom capped too shallow** ("highest zoom stops
+  at 20km, want 5km") — the ×64 zoom cap was fixed regardless of map width, and `updateScaleBar()` divided
+  by the *full* map width even while LOD-zoomed in (the bar's reading never actually changed as you zoomed,
+  reading as "stuck"). New `lodMaxZoom()` (scales to `mapWidthKm/5`, floor 64) replaces the ×64 cap at all
+  three zoom sites (button/wheel/pinch); new `lodSpanKm()` (the real on-screen width — `mapWidthKm/_lodZoom`
+  while LOD is on) now feeds the scale bar. (2) **Export/Import took the atlas separately** — retired the
+  standalone **Export atlas…**/**Import atlas…** action pair (header + Tiles & LOD sidebar) and the
+  **Embed baked atlas** checkbox; `exportZip()`/`loadZip()` already unconditionally embed/restore the atlas
+  + asset library, so **File → Export .zip**/**Load project .zip** are now the sole 100%-round-trip actions.
+  The Assets Library's own **Import pack…**/**Export pack .zip** stays as the dedicated asset-pack-only
+  pair, per the owner's ask. Both items UI/browser-chrome only ⇒ bit-identical render.
 - **v0.87 — two owner-reported UI items** (no engine changes; render battery ALL IDENTICAL to v0.86,
   headless **911** unchanged, smoke **111 → 113**): (1) **LOD/atlas viewport regression** — in LOD mode the
   CSS transform is identity, so the canvas sat at its intrinsic GW×GH size (small tile in a big viewport).
@@ -359,7 +371,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (909 as of v0.79), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (917 as of v0.88), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
