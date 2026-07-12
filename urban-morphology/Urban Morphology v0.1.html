@@ -1066,7 +1066,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
     return V.mul(V.norm({x:gx,y:gy}),-1);}; // toward the channel
   const spurDepth=rk?site.riverW/2+9:20;
 
-  let ring,landArc,waterWalls=[],spurs=[],waterGates=[];
+  let ring,landArc,waterWalls=[],spurs=[],waterGates=[],waterClosure=null;
   const bank=townBank(site,anchors);
 
   if(spansWater){
@@ -1113,7 +1113,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
           prov:'Wall spur: the circuit dips into the water at its end so the shore cannot be rounded on foot (defensive closure).'});}
       // closed ring for containment follows the bank with no gap (water already runs from
       // the landArc-end side back to the landArc-start side, so no reversal)
-      ring=landArc.concat(water);
+      ring=landArc.concat(water);waterClosure=water;
       // drawn water wall: leave the harbour mouth open (never cordon the quay, §1.1 #22)
       if(harbour&&harbour.quay&&harbour.quay.length){
         const hp=harbour.pt;const gapR=48;
@@ -1128,7 +1128,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
   if(!ring||ring.length<6)return;
 
   wallState.ring=ring;wallState.landArc=landArc;wallState.waterWalls=waterWalls;
-  wallState.spurs=spurs;wallState.spansWater=spansWater;
+  wallState.spurs=spurs;wallState.spansWater=spansWater;wallState._waterClosure=waterClosure;
   wallState.style='curtain';wallState.epoch=ep;wallState.centroid=polyCentroid(ring);
   wallState.prov=spansWater
     ?'Wall circuit: the town outgrew one bank, so the enceinte encloses both and the river passes under it at two water-gates (M-NET-9, M-GRW-2, lit. review §1.1 #23).'
@@ -1181,6 +1181,21 @@ function applyStarFort(seed,site,anchors,wallState,opts){
       if(acc+d>=target){Pc.push(V.lerp(land[i],land[i+1],(target-acc)/d));break;}acc+=d;}}
   Pc.push(land[land.length-1]);
   const C=wallState.centroid||polyCentroid(wallState.ring);
+  // push the coarse corners OUTWARD so each straight curtain lies outside the built-up land:
+  // a chord between two points on the (convex-ish) smooth wall cuts inside and would slice
+  // through houses — the enceinte must ENCLOSE the town, with everything falling inside it.
+  let maxBulge=0;
+  for(let i=0;i<Pc.length-1;i++){
+    const A=Pc[i],B=Pc[i+1];const AB=V.sub(B,A);const Lb=V.len(AB)||1;const d=V.mul(AB,1/Lb);
+    let nrm={x:-d.y,y:d.x};if(V.dot(nrm,V.sub(A,C))<0)nrm=V.mul(nrm,-1); // outward normal
+    for(const q of land){const t=V.dot(V.sub(q,A),d)/Lb;if(t<-0.05||t>1.05)continue;
+      const o=V.dot(V.sub(q,A),nrm);if(o>maxBulge)maxBulge=o;}}
+  // a water closure means the land arc is OPEN with waterline ends to keep fixed; without one
+  // (landlocked / spans-water) the arc is a closed loop and every corner is pushed out
+  const push=maxBulge+18,openEnds=!!wallState._waterClosure;
+  for(let i=0;i<Pc.length;i++){
+    if(openEnds&&(i===0||i===Pc.length-1))continue; // keep the waterline ends fixed
+    Pc[i]=V.add(Pc[i],V.mul(V.norm(V.sub(Pc[i],C)),push));}
   // bastion geometry (M-FOR-1/3)
   const sb=18,fh=13,bd=r.range(34,42);
   const trace=[];const bastions=[];const curtains=[];
@@ -1239,6 +1254,12 @@ function applyStarFort(seed,site,anchors,wallState,opts){
     ravelins.push([base1,apex,base2]);}
   wallState.style='bastioned';
   wallState.landArc=trace; // the bastioned trace is now the drawn land wall
+  // containment ring = the bastioned enceinte; everything the town built now falls INSIDE it,
+  // so no curtain/bastion is drawn through a house or road. One-bank forts close along the
+  // water; a landlocked/spanning fort is a closed loop, so its convex hull (which smooths the
+  // resampling seam) is the containment polygon.
+  wallState.ring=wallState._waterClosure?trace.concat(wallState._waterClosure):convexHull(trace);
+  wallState.centroid=polyCentroid(wallState.ring);
   wallState.fort={trace,bastions,curtains,counterscarp,ditchBand,coveredWay,outerMoat,
     glacis,glacisOff,ravelins,wetDitch:wet,doubleMoat,
     prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): angled bastions flank the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow causeways swept by fire (M-FOR-1..7).'};
@@ -1281,10 +1302,15 @@ function clearFortZone(site,wallState,g,parcels,buildings,details){
   const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
   const clearDist=wallState.style==='bastioned'?((fort&&fort.glacisOff||60)+8):15;
   const inClear=(p)=> !pointInPoly(p,ring)&&distToLine(p,land)<clearDist;
+  // clear by FOOTPRINT, not just centroid: any building/parcel with a vertex inside the drawn
+  // wall/moat/glacis band is swept, so no house is left poking into (i.e. drawn over by) the
+  // fortification. A polygon straddling the enceinte itself is cut by the wall — also cleared.
+  const polyInClear=(poly)=>{ if(inClear(polyCentroid(poly)))return true;
+    for(const q of poly)if(inClear(q))return true; return false; };
   for(let i=buildings.length-1;i>=0;i--)
-    if(inClear(polyCentroid(buildings[i].poly)))buildings.splice(i,1);
+    if(polyInClear(buildings[i].poly))buildings.splice(i,1);
   for(const par of parcels)
-    if(inClear(polyCentroid(par.poly)))par.cleared=true;
+    if(polyInClear(par.poly))par.cleared=true;
   for(let i=details.length-1;i>=0;i--){
     const d=details[i];
     const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
@@ -1577,7 +1603,7 @@ function _peristyle(rx,ry,w,h,sp){const cols=[],cn=_rectPts(rx,ry,w,h);
  * classical Roman/Greek temple (colonnaded cella on a podium, frontal steps to the forum);
  * shrine (a small cella); mosque (prayer hall on the qibla + courtyard + minaret). The
  * churchyard/temenos site-selection & clearing is common; only the building form differs. */
-function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
+function buildFaithSites(seed,parcels,buildings,anchors,count,faith,site,harbour){
   faith=faith||'church';
   const NAME={church:'Church',temple:'Temple',shrine:'Shrine',mosque:'Mosque'};
   const sites=[];
@@ -1587,9 +1613,14 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
     let best=null,bs=Infinity;
     for(const par of parcels){
       if(par.churchyard)continue;
+      // worship sits in the civic/residential core, NOT on the working waterfront — skip the
+      // harbour quarter, the noxious riverside crafts, and the immediate quay/water edge
+      if(par.district==='harbour'||par.district==='craftriver')continue;
       const c=polyCentroid(par.poly),dM=V.dist(c,anchors.market);
       if(dM<dMin||dM>dMax)continue;
       if(par.frontage<7||par.depth<10)continue;
+      if(harbour&&harbour.quay&&distToLine(c,harbour.quay)<70)continue;
+      if(site&&!site.noWater&&site.riverDist(c)<45)continue;
       if(sites.some(s=>V.dist(c,s.center)<180))continue;
       const sc=dM+r.range(0,40);if(sc<bs){bs=sc;best=par;}}
     if(!best)continue;
@@ -1790,7 +1821,7 @@ function generate(seed,opts){
   // hamlets have no church/chapel; a religious building can also be turned off ('none')
   const hamlet=popTarget<600;
   const nChurch=(faith==='none'||hamlet)?0:Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // M-DEN-8
-  const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith):[];
+  const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith,site,harbour):[];
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
   // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN)
   const markets=buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings);

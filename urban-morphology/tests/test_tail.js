@@ -389,6 +389,26 @@ for (const site of ['river', 'landlocked']) {
     if (!gates.some(g => Math.hypot(g.pt.x - mid.x, g.pt.y - mid.y) < keepR)) crossings++;
   }
   ok(crossings === 0, tag + `no road crosses the fort's field of fire away from a gate (${crossings})`);
+  // no house is CUT BY the drawn fort: every building is either fully inside the enceinte or
+  // clear beyond the glacis — none straddles the wall/moat/glacis band (the user's complaint of
+  // the fort "rendering through" houses). Faubourgs beyond the cleared field of fire are allowed.
+  const glO = m.wall.fort.glacisOff;
+  let sliced = 0;
+  for (const b of m.buildings) {
+    if (T.pointInPoly(T.polyCentroid(b.poly), ring)) continue; // fully-intramural building
+    if (b.poly.some(q => dL(q) < glO)) sliced++;                // a vertex sits in the drawn band
+  }
+  ok(sliced === 0, tag + `no building is cut by the fort's wall/moat/glacis band (${sliced})`);
+}
+
+/* ---------- the place of worship is not sited on the working waterfront ---------- */
+{
+  const m = UME.generate(31337, { epochs: 8, pop: 6000, site: 'coast', walls: true, faith: 'church' });
+  ok(m.churches.length >= 1, 'harbour town has a church');
+  const bad = new Set(m.parcels.filter(p => p.district === 'harbour' || p.district === 'craftriver').map(p => p.id));
+  let atWater = 0;
+  for (const ch of m.churches) if ((ch.yard || []).some(id => bad.has(id))) atWater++;
+  ok(atWater === 0, `no place of worship sits in the harbour / riverside-craft quarter (${atWater})`);
 }
 
 /* ---------- selectable worship rite + civic hall style ---------- */
