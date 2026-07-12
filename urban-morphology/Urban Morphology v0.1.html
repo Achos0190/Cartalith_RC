@@ -1155,7 +1155,26 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
   for(const wp of waterGates)
     if(!gates.some(gt=>V.dist(gt.pt,wp)<40))
       gates.push({pt:wp,water:true,prov:'Water-gate: the river passes under the wall where the town grew across both banks (M-NET-9).'});
-  wallState.gates=gates;}
+  // a bastioned enceinte keeps only a FEW land gates (Naarden's hexagon has just two): every
+  // other approach was historically re-routed to converge on one of them, since more breaches
+  // in the magistral line meant more places to defend and more customs posts to man. Keep the
+  // land gates closest to the market (busiest approaches) up to a small cap, angularly spread
+  // so they don't cluster on one front; the rest are dropped here and their primaries are swept
+  // by clearFortZone below (which kills any road crossing the field of fire away from a gate).
+  if(wallState.style==='bastioned'){
+    const land=gates.filter(g=>!g.water),water=gates.filter(g=>g.water);
+    const cap=Math.max(2,Math.min(3,Math.round((wallState.fort.bastions.length||6)/3)));
+    land.sort((a,b)=>V.dist(a.pt,anchors.market)-V.dist(b.pt,anchors.market));
+    const kept=[];
+    for(const gt of land){
+      if(kept.length>=cap)break;
+      const ang=Math.atan2(gt.pt.y-wallState.centroid.y,gt.pt.x-wallState.centroid.x);
+      if(kept.some(k=>{const a2=Math.atan2(k.pt.y-wallState.centroid.y,k.pt.x-wallState.centroid.x);
+        let da=Math.abs(ang-a2);if(da>Math.PI)da=2*Math.PI-da;return da<0.9;}))continue;
+      kept.push(gt);}
+    for(const gt of land)if(!kept.includes(gt)&&kept.length<cap)kept.push(gt); // fill the cap if angular spread was too strict
+    wallState.gates=kept.concat(water);
+  }else wallState.gates=gates;}
 
 /* ---------------- star fort: bastioned trace (trace italienne) ----------------
  * From c.1500 (Pisa's 1500 defence of an earthwork rampart against French siege guns),
@@ -1166,83 +1185,72 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
  * Bastion fort (Wikipedia); Vauban's magistral geometry (face = 2/7 of the polygon side). */
 function applyStarFort(seed,site,anchors,wallState,opts){
   const r=stream(seed,'starfort');
-  const land=wallState.landArc;
-  if(!land||land.length<3)return;
-  // land arc length → number of curtains (one bastion per corner). Curtain lengths are set
-  // to effective musket range so adjacent bastions cover each other (M-FOR-2).
-  let arc=0;for(let i=0;i<land.length-1;i++)arc+=V.dist(land[i],land[i+1]);
-  const curtain=230; // m, within musket range (M-FOR-2)
-  const nSeg=Math.max(2,Math.min(6,Math.round(arc/curtain)));
-  // resample the land arc into nSeg+1 evenly spaced corner points
-  const Pc=[land[0]];
-  for(let s=1;s<nSeg;s++){
+  // A late-stage bastioned enceinte is a compact, CLOSED, convex-ish polygon — Naarden's
+  // hexagon is the model: a full bastion at EVERY corner, a curtain on every side, a ravelin
+  // before every curtain, and the whole trace wrapped by a continuous ditch, covered way and
+  // glacis. We therefore base the trace on the convex hull of the containment ring (NOT the
+  // open bank-following land arc), so no smooth-wall/bastion seam and no open-ended offset
+  // "flap" can form at the water. The outworks are continuous rings; where a front faces the
+  // river the water itself is the wet ditch, so the renderer lets the river show through the
+  // land-side works. Refs M-FOR-1..7; Naarden / Vauban magistral geometry.
+  const base=convexHull(wallState.ring);
+  if(!base||base.length<3)return;
+  const C=polyCentroid(base);
+  let arc=0;for(let i=0;i<base.length;i++)arc+=V.dist(base[i],base[(i+1)%base.length]);
+  const curtain=230; // m, within musket range so adjacent bastions cross-cover (M-FOR-2)
+  const nSeg=Math.max(4,Math.min(9,Math.round(arc/curtain)));
+  // resample the CLOSED hull into nSeg evenly spaced corners (one bastion each)
+  const Pc=[];
+  for(let s=0;s<nSeg;s++){
     const target=arc*s/nSeg;let acc=0;
-    for(let i=0;i<land.length-1;i++){const d=V.dist(land[i],land[i+1]);
-      if(acc+d>=target){Pc.push(V.lerp(land[i],land[i+1],(target-acc)/d));break;}acc+=d;}}
-  Pc.push(land[land.length-1]);
-  const C=wallState.centroid||polyCentroid(wallState.ring);
-  // push the coarse corners OUTWARD so each straight curtain lies outside the built-up land:
-  // a chord between two points on the (convex-ish) smooth wall cuts inside and would slice
-  // through houses — the enceinte must ENCLOSE the town, with everything falling inside it.
+    for(let i=0;i<base.length;i++){const A=base[i],B=base[(i+1)%base.length],d=V.dist(A,B);
+      if(acc+d>=target){Pc.push(V.lerp(A,B,(target-acc)/d));break;}acc+=d;}}
+  if(Pc.length<3)return;
+  // push EVERY corner outward past the built-fabric bulge so each straight curtain encloses the
+  // town (a chord of the hull cuts inside and would slice houses) — the magistral line lies
+  // outside all fabric, so nothing is drawn through.
   let maxBulge=0;
-  for(let i=0;i<Pc.length-1;i++){
-    const A=Pc[i],B=Pc[i+1];const AB=V.sub(B,A);const Lb=V.len(AB)||1;const d=V.mul(AB,1/Lb);
-    let nrm={x:-d.y,y:d.x};if(V.dot(nrm,V.sub(A,C))<0)nrm=V.mul(nrm,-1); // outward normal
-    for(const q of land){const t=V.dot(V.sub(q,A),d)/Lb;if(t<-0.05||t>1.05)continue;
+  for(let i=0;i<Pc.length;i++){
+    const A=Pc[i],B=Pc[(i+1)%Pc.length],AB=V.sub(B,A),Lb=V.len(AB)||1,d=V.mul(AB,1/Lb);
+    let nrm={x:-d.y,y:d.x};if(V.dot(nrm,V.sub(A,C))<0)nrm=V.mul(nrm,-1);
+    for(const q of wallState.ring){const t=V.dot(V.sub(q,A),d)/Lb;if(t<-0.05||t>1.05)continue;
       const o=V.dot(V.sub(q,A),nrm);if(o>maxBulge)maxBulge=o;}}
-  // a water closure means the land arc is OPEN with waterline ends to keep fixed; without one
-  // (landlocked / spans-water) the arc is a closed loop and every corner is pushed out
-  const push=maxBulge+18,openEnds=!!wallState._waterClosure;
-  for(let i=0;i<Pc.length;i++){
-    if(openEnds&&(i===0||i===Pc.length-1))continue; // keep the waterline ends fixed
-    Pc[i]=V.add(Pc[i],V.mul(V.norm(V.sub(Pc[i],C)),push));}
-  // bastion geometry (M-FOR-1/3)
+  const push=maxBulge+16;
+  for(let i=0;i<Pc.length;i++)Pc[i]=V.add(Pc[i],V.mul(V.norm(V.sub(Pc[i],C)),push));
+  // full pentagonal bastion at every corner (two faces + two flanks + salient) — M-FOR-1
   const sb=18,fh=13,bd=r.range(34,42);
-  const trace=[];const bastions=[];const curtains=[];
+  const trace=[],bastions=[];
   for(let i=0;i<Pc.length;i++){
-    const P=Pc[i];
-    const out=V.norm(V.sub(P,C));
-    const du=i>0?V.norm(V.sub(P,Pc[i-1])):V.norm(V.sub(Pc[i+1],P));
-    const dw=i<Pc.length-1?V.norm(V.sub(Pc[i+1],P)):V.norm(V.sub(P,Pc[i-1]));
-    if(i===0||i===Pc.length-1){
-      // demi-bastion at the waterline ends: a single flank + salient, then meet the water
-      const dir=(i===0)?dw:V.mul(du,-1);
-      const S=V.add(P,V.mul(out,bd*0.8));
-      const sh=V.add(V.add(P,V.mul(dir,sb)),V.mul(out,fh));
-      if(i===0){trace.push(P,S,sh);bastions.push({salient:S,outline:[P,S,sh],demi:true});}
-      else{trace.push(sh,S,P);bastions.push({salient:S,outline:[sh,S,P],demi:true});}
-    }else{
-      const cIn=V.add(P,V.mul(du,-sb)),cOut=V.add(P,V.mul(dw,sb));
-      const shIn=V.add(cIn,V.mul(out,fh)),shOut=V.add(cOut,V.mul(out,fh));
-      const S=V.add(P,V.mul(out,bd));
-      trace.push(cIn,shIn,S,shOut,cOut);
-      bastions.push({salient:S,outline:[cIn,shIn,S,shOut,cOut],demi:false});}
-  }
-  // curtains: straight runs between successive bastion throats (for gate placement)
-  for(let i=0;i<bastions.length-1;i++){
+    const P=Pc[i],out=V.norm(V.sub(P,C));
+    const du=V.norm(V.sub(P,Pc[(i-1+Pc.length)%Pc.length]));
+    const dw=V.norm(V.sub(Pc[(i+1)%Pc.length],P));
+    const cIn=V.add(P,V.mul(du,-sb)),cOut=V.add(P,V.mul(dw,sb));
+    const shIn=V.add(cIn,V.mul(out,fh)),shOut=V.add(cOut,V.mul(out,fh));
+    const S=V.add(P,V.mul(out,bd));
+    trace.push(cIn,shIn,S,shOut,cOut);
+    bastions.push({salient:S,outline:[cIn,shIn,S,shOut,cOut],demi:false});}
+  // curtains between successive bastion throats (closed loop)
+  const curtains=[];
+  for(let i=0;i<bastions.length;i++){
     const a=bastions[i].outline[bastions[i].outline.length-1];
-    const b=bastions[i+1].outline[0];
+    const b=bastions[(i+1)%bastions.length].outline[0];
     curtains.push({a,b,mid:V.lerp(a,b,0.5)});}
-  // outworks. Every current site has water access, so the ditch is WET — the late-stage
-  // Old Dutch System (Naarden): a flooded moat, doubled on larger works, with ravelins as
-  // islands, a covered way, and a glacis that is a cleared field of fire (M-FOR-6/7).
+  // outworks as continuous RINGS around the closed trace (M-FOR-6/7). A wet ditch needs water
+  // at hand to flood it (M-FOR-6): measure the trace's nearest approach to the waterline; an
+  // inland/landlocked trace gets a DRY ditch.
   const ditchW=22,coveredW=8,glacisW=48;
-  // a WET ditch is only feasible if a water body is close enough to feed it (you cannot
-  // flood a moat with no water to draw from, nor pump it uphill) — M-FOR-6. Measure the
-  // nearest approach of the trace to the waterline; a hilltop/inland trace gets a DRY ditch.
   let minWaterD=Infinity;
-  for(const p of trace)minWaterD=Math.min(minWaterD,site.riverDist(p));
+  if(!site.noWater)for(const p of trace)minWaterD=Math.min(minWaterD,site.riverDist(p));
   const wet=minWaterD<175;
   const offsetOut=(poly,d)=>poly.map(p=>V.add(p,V.mul(V.norm(V.sub(p,C)),d)));
   const counterscarp=offsetOut(trace,ditchW);
-  const ditchBand=trace.concat(counterscarp.slice().reverse()); // wet-moat fill (closed ribbon)
-  const doubleMoat=wet&&bastions.length>=5; // Naarden-style double wet moat on larger forts
   const coveredWay=offsetOut(trace,ditchW+coveredW);
-  const outerMoat=doubleMoat
-    ? offsetOut(trace,ditchW+coveredW).concat(offsetOut(trace,ditchW+coveredW+ditchW*0.9).slice().reverse())
-    : null;
+  const doubleMoat=wet&&bastions.length>=5; // Naarden-style double wet moat on larger works
   const glacisOff=(doubleMoat?ditchW+coveredW+ditchW*0.9:ditchW+coveredW)+glacisW;
-  const glacis=offsetOut(trace,glacisOff);
+  // rings stored {outer,inner}; drawn with an even-odd fill so the town shows through the hole
+  const ditch={outer:counterscarp,inner:trace};
+  const outerMoat=doubleMoat?{outer:offsetOut(trace,ditchW+coveredW+ditchW*0.9),inner:coveredWay}:null;
+  const glacis={outer:offsetOut(trace,glacisOff),inner:coveredWay};
   const ravelins=[];
   for(const cu of curtains){
     const out=V.norm(V.sub(cu.mid,C));
@@ -1253,17 +1261,20 @@ function applyStarFort(seed,site,anchors,wallState,opts){
     const apex=V.add(cu.mid,V.mul(out,ditchW+coveredW*0.5));
     ravelins.push([base1,apex,base2]);}
   wallState.style='bastioned';
-  wallState.landArc=trace; // the bastioned trace is now the drawn land wall
-  // containment ring = the bastioned enceinte; everything the town built now falls INSIDE it,
-  // so no curtain/bastion is drawn through a house or road. One-bank forts close along the
-  // water; a landlocked/spanning fort is a closed loop, so its convex hull (which smooths the
-  // resampling seam) is the containment polygon.
-  wallState.ring=wallState._waterClosure?trace.concat(wallState._waterClosure):convexHull(trace);
+  wallState.landArc=trace; // the closed bastioned trace is the drawn wall (all sides)
+  wallState.waterWalls=[]; // no smooth water wall any more — the trace wraps every front
+  // containment ring = the GORGE polygon through the bastion throats (cIn→cOut of each), i.e.
+  // the true enclosed area bounded by the curtains and bastion gorges — NOT the convex hull of
+  // the salients (which balloons past the curtains into the bastion re-entrants and would let a
+  // road or house sitting outside a curtain read as "inside"). Everything outside this ring and
+  // within the glacis is swept, so nothing is drawn through a curtain (M-FOR-7).
+  const gorge=[];for(const b of bastions){gorge.push(b.outline[0],b.outline[b.outline.length-1]);}
+  wallState.ring=gorge;
   wallState.centroid=polyCentroid(wallState.ring);
-  wallState.fort={trace,bastions,curtains,counterscarp,ditchBand,coveredWay,outerMoat,
+  wallState.fort={trace,bastions,curtains,counterscarp,ditch,coveredWay,outerMoat,
     glacis,glacisOff,ravelins,wetDitch:wet,doubleMoat,
-    prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): angled bastions flank the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow causeways swept by fire (M-FOR-1..7).'};
-  wallState.prov='Bastioned enceinte: a late-stage artillery fortification wrapping the town — angled bastions, curtains at musket range, a '+(wet?'wet moat'+(doubleMoat?' (doubled, Naarden-style)':''):'dry ditch')+', ravelins, covered way and glacis (M-FOR-1..7). Built only for strategically important towns.';}
+    prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): a closed, compact enceinte with a full angled bastion at every corner flanking the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow gate causeways swept by fire (M-FOR-1..7).'};
+  wallState.prov='Bastioned enceinte: a late-stage artillery fortification wrapping the town in a closed polygon — a bastion at every corner, curtains at musket range, a '+(wet?'wet moat'+(doubleMoat?' (doubled, Naarden-style)':''):'dry ditch')+', ravelins, covered way and glacis (M-FOR-1..7). Built only for strategically important towns.';}
 
 /* ---------------- clear the fortification field of fire (the esplanade/glacis) ----------------
  * A fort's glacis was kept clear for fields of fire; a town wall had a cleared rampart strip.
@@ -1940,20 +1951,26 @@ function render(){
       s+=Math.hypot(pts[i].x-pts[(i+1)%pts.length].x,pts[i].y-pts[(i+1)%pts.length].y);return s;};
     if(W.style==='bastioned'&&W.fort){
       const F=W.fort;
-      // glacis (cleared field of fire) → wet moat(s) → covered way → counterscarp →
-      // ravelin islands → causeways → the bastioned enceinte + salients (bottom to top)
-      el('path',{d:pd(F.glacis),class:'glacis'},L.walls);
+      // even-odd ring: outer boundary + inner hole, so the enclosed town shows through
+      const ring2=(rg,cls,layer)=>el('path',{d:pd(rg.outer)+' '+pd(rg.inner),'fill-rule':'evenodd',class:cls},layer);
+      // glacis ring → wet ditch ring(s) → [river shows through the water-facing works] →
+      // covered way → counterscarp → ravelin islands → causeways → closed trace + salients
+      ring2(F.glacis,'glacis',L.walls);
       if(F.wetDitch){
-        const m1=el('path',{d:pd(F.ditchBand),class:'moat'},L.walls);
+        const m1=ring2(F.ditch,'moat',L.walls);
         reg(m1,'Wet ditch','Wet ditch (flooded moat)',{},
           'Water-filled ditch — the late-stage Old Dutch System floods the moat where water is at hand; it stops escalade, mining and easy approach (M-FOR-6).');
         if(F.outerMoat){
-          const m2=el('path',{d:pd(F.outerMoat),class:'moat'},L.walls);
+          const m2=ring2(F.outerMoat,'moat',L.walls);
           reg(m2,'Outer moat','Outer wet moat (double moat)',{},
             'Second concentric wet moat, the Naarden-style double moat of a large late-stage fort (M-FOR-6).');}
       }
-      el('path',{d:pl(F.coveredWay),class:'coveredway'},L.walls);
-      el('path',{d:pl(F.counterscarp),class:'counterscarp'},L.walls);
+      // let the river/sea show through the land-side works on a water-facing front: there the
+      // water itself IS the wet ditch, so no dry glacis is left lying across the channel (§1.1 #22)
+      if(model.site.waterPoly&&model.site.waterPoly.length&&!model.site.noWater)
+        el('path',{d:pd(model.site.waterPoly),class:'water'},L.walls);
+      el('path',{d:pd(F.coveredWay),class:'coveredway'},L.walls);
+      el('path',{d:pd(F.counterscarp),class:'counterscarp'},L.walls);
       for(const rv of F.ravelins){
         const e=el('path',{d:pd(rv),class:'ravelin'},L.walls);
         reg(e,'Ravelin','Ravelin (island outwork)',{},'Detached triangular ravelin, an island in the wet moat, covering the curtain and its gate-causeway from direct fire (M-FOR-3/6).');}
@@ -1968,19 +1985,14 @@ function render(){
         const cw=el('path',{d:pd([a1,b1,b2,a2]),class:'causeway'},L.walls);
         reg(cw,'Causeway','Gate causeway across the moat',{},
           'Causeway/dike across the wet moat — the single dry approach to the gate, deliberately funnelling attackers under fire from the flanking bastions and ravelin (M-FOR-6/7).');}
-      // water side stays a plain sea/river wall
-      for(const ww of W.waterWalls||[]){
-        const e=el('path',{d:pl(ww),class:'wall'},L.walls);
-        reg(e,'Sea wall','Waterfront wall',{length:perim(ww,false).toFixed(0)+' m'},
-          'Waterfront wall along the quay/bank; the harbour mouth is left open (§1.1 #22).');}
-      // the bastioned trace itself
-      const tr=el('path',{d:pl(F.trace),class:'fortwall'},L.walls);
+      // the closed bastioned trace itself (all fronts)
+      const tr=el('path',{d:pd(F.trace),class:'fortwall'},L.walls);
       reg(tr,'Bastioned wall','Bastioned enceinte (epoch '+W.epoch+')',
         {curtains:F.curtains.length,bastions:F.bastions.length,gates:W.gates.length,
          moat:F.wetDitch?(F.doubleMoat?'wet, doubled':'wet'):'dry'},F.prov);
       for(const b of F.bastions){
         const e=el('circle',{cx:b.salient.x,cy:b.salient.y,r:2.4,class:'salient'},L.walls);
-        reg(e,'Bastion','Bastion'+(b.demi?' (demi, at the water)':''),{},
+        reg(e,'Bastion','Bastion',{},
           'Angled bastion: two faces and two flanks sweep the adjacent curtains with flanking fire, leaving no dead ground (trace italienne, M-FOR-1).');}
     }else{
       // curtain wall: land arc + water walls

@@ -301,13 +301,16 @@ for (const kind of ['bay', 'coast']) {
   ok(f.fortified && f.wall.style === 'bastioned', 'fortified town gets a bastioned trace');
   ok(f.wall.fort && f.wall.fort.bastions.length >= 3, `bastions present (${f.wall.fort && f.wall.fort.bastions.length})`);
   ok(f.wall.fort.ravelins.length >= 1, `ravelins present (${f.wall.fort.ravelins.length})`);
-  ok(f.wall.fort.counterscarp.length >= 3 && f.wall.fort.glacis.length >= 3, 'ditch counterscarp + glacis present');
-  ok(f.wall.gates.length >= 1, `bastioned enceinte has gates (${f.wall.gates.length})`);
+  ok(f.wall.fort.counterscarp.length >= 3 && f.wall.fort.glacis.outer.length >= 3 && f.wall.fort.glacis.inner.length >= 3, 'ditch counterscarp + glacis ring present');
+  ok(f.wall.gates.length >= 1 && f.wall.gates.length <= 4, `bastioned enceinte has a small, capped gate count (${f.wall.gates.length}, M-FOR-8)`);
+  // the trace is a CLOSED polygon: every corner is a full bastion (no demi/open-ended bastion,
+  // unlike the old bank-following land arc) — Naarden's model, M-FOR-8
+  ok(f.wall.fort.bastions.every(b => !b.demi), 'every bastion is full (the trace is a closed polygon, none open-ended at the water)');
   const f2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, fortified: true });
   ok(UME.hashModel(f) === UME.hashModel(f2), 'fortified generation deterministic');
 
   // late-stage Dutch-system features: wet ditch + (on a large fort) a double moat
-  ok(f.wall.fort.wetDitch && f.wall.fort.ditchBand.length >= 4, 'fort has a wet ditch (flooded moat)');
+  ok(f.wall.fort.wetDitch && f.wall.fort.ditch.outer.length >= 4 && f.wall.fort.ditch.inner.length >= 4, 'fort has a wet ditch (flooded moat)');
   ok(f.wall.fort.coveredWay && f.wall.fort.coveredWay.length >= 3, 'fort has a covered way');
   ok('doubleMoat' in f.wall.fort, 'fort records the double-moat flag');
 
