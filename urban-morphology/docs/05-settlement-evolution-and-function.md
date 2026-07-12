@@ -8,15 +8,16 @@ centres, markets, administration, quarters, industry, and amenities. It closes w
 **synthesis** proposing concrete engine rules (new `M-*` register entries) so these can be
 generated for reasons, not painted.
 
-**Method note (important, honest):** this document was written during a window when the
-session's live web-search quota was exhausted. Citations are therefore limited to (a) sources
-already web-verified earlier in this project (URLs given), and (b) **standard scholarly works
-cited by author/title/year** — all real, widely held references, but not re-fetched here.
-Every quantitative claim carries a confidence grade (**H/M/L**, as in
-`03-mathematical-assumptions.md`); figures that need precise re-verification are marked **L**
-or "‡ verify". A follow-up pass should re-confirm the numbers against primary sources when
-search is available. Nothing here is invented data — where a number is an inference or a
-convention it says so.
+**Method note (important, honest):** the first draft of this document was written during a
+window when the session's live web-search quota was exhausted. Every quantitative claim
+carries a confidence grade (**H/M/L**, as in `03-mathematical-assumptions.md`). A subsequent
+**verification pass (§9)** re-confirmed the highest-value numbers against primary sources —
+market spacing (6⅔ miles), Domesday mill density (which corrected a drafting error), the
+communal town-hall date, and the prevailing-wind "east-end" mechanism (now with a landmark
+citation) — upgrading those from L/M to H and adding URLs. Remaining figures still marked
+**L** or "‡ verify" (e.g. quay length per berth, mill spacing in metres) await a further
+pass. Nothing here is invented data — where a number is an inference or a convention it says
+so, and §9 logs exactly what was checked.
 
 ---
 
@@ -70,11 +71,16 @@ Harbours are the sharpest case of the access/defence trade-off. Siting drivers, 
 | **Break-of-bulk placement** | The **market sits just behind the quay** (goods change mode → are stored → are sold); warehouses take the **deepest plots at the water**; the customs/weigh house sits at the quay head. | **H** |
 | **Relation to the citadel** | The castle/citadel commands the harbour from a height at one end, so it can fire on both the roadstead and the town (the "citadel-over-port" pattern: Corfu, Acre, La Rochelle, Havana's Morro). | **M** |
 
-**Quantities (all ‡ verify — orders of magnitude):**
-- Quay frontage per berth ≈ **the ship's length + ~20–30 %** working room; medieval cog
-  ~24 m → ~30 m of quay per berthed vessel (**L**).
-- A pre-industrial working port's active quay rarely exceeds **a few hundred metres**;
-  beyond that, trade spreads to beaches, tidal hards, and lighters (**L**).
+**Quantities (verified §9 where noted):**
+- A seagoing **cog** (the workhorse of NW-European trade) was **~15–25 m long, 5–8 m beam,
+  30–200 tons, shallow draft ~8–10 ft (2.4–3 m)** ([Cog (ship)](https://en.wikipedia.org/wiki/Cog_(ship)); **H**). So quay
+  frontage per berthed cog ≈ **ship length + working room ≈ 20–30 m** (**M**).
+- The **flat-bottomed cog could be beached and unloaded on tidal hards at low tide**, so a
+  port's throughput was *not* capped by its quay length — much trade never touched a quay
+  (**H**). A pre-industrial working *quay* rarely exceeds **a few hundred metres** (**M**).
+- Harbours need a **breakwater to calm the basin**; quays without one force ships to **wait
+  for calm weather** — i.e. open coasts genuinely need the mole (matches the engine's
+  coast-only mole; [Ancient port structures](https://www.ancientportsantiques.com/ancient-port-structures/); **H** qualitatively).
 - Prevailing-wind exposure: quays orient to put the **loading face in the lee**; open-water
   fetch at the mouth is minimised (**M**, qualitative).
 
@@ -125,6 +131,12 @@ hall/guildhall, cathedral, citadel/palace, custom house** (§8).
 A key quantitative question. The pattern (Masschaele 1994 on English markets; Braudel vol. 1;
 Kostof 1992):
 
+- Markets themselves are **spaced ~6⅔ miles (≈10.7 km) apart** — the distance a family could
+walk to market, trade, and return within a day (a third of a ~20-mile day). English courts
+enforced this as the market-monopoly radius, and by 1250 much of England averaged ~5 miles to
+a market, with ~760 chartered market towns in all (Masschaele, *Peasants, Merchants, and
+Markets*, 1997; **H**, verified §9). This fixes the **one-market-per-town baseline** (M-REG-1)
+before a town grows large enough to multiply its markets:
 - A small town has **one general market** — usually a **widened street or a triangular/
   rectangular place** (the market-place, M-DEN-6).
 - As it grows, the single market **specialises and multiplies**: distinct **corn, fish,
@@ -151,12 +163,13 @@ Kostof 1992):
 Civic government becoming **architecturally visible** is a datable, threshold phenomenon and a
 strong marker of a town's *rank*:
 
-- **Europe:** the **communal movement** (11th–13th c.) produced the **town hall / hôtel de
-  ville / Rathaus / palazzo comunale / broletto**, almost always **on or beside the market
-  square**, frequently with a **belfry/clock tower** (the commune's voice and time) and a
-  **market loggia** below (Pevsner, *A History of Building Types*, 1976; **H** for the
-  pattern, 12th–13th c. **H**). The **guildhall(s)** of the merchant/craft guilds sit near
-  the market too.
+- **Europe:** the **communal movement** produced the **town hall / hôtel de ville / Rathaus /
+  palazzo comunale / broletto**, almost always **on or beside the market square**, frequently
+  with a **belfry/clock tower** and a **market loggia** below. Verified dating (§9): the
+  *palazzo comunale* emerges in the **late 12th century** (notably after the Peace of Constance,
+  1183, secured communal autonomy) and proliferates through the **13th century**; the municipal
+  **belfry** is the physical symbol of that autonomy — the commune wresting the control of time
+  from the church (Pevsner, *A History of Building Types*, 1976; [Medieval commune](https://en.wikipedia.org/wiki/Medieval_commune); **H**). The **guildhall(s)** sit near the market too.
 - **Islamic:** no monumental town hall; authority is the **ruler's citadel** (separate) plus
   the **market inspector (muhtasib)** and **qadi (judge)** operating in the mosque/suq — so
   "administration" is legal and personal, not a civic building (Hakim 1986; **H**).
@@ -236,11 +249,13 @@ above the town and returned below, or sit on the bridge itself (**bridge mills**
   (cloth, 12th–13th c. NW Europe)** → **later: paper, sawing, iron-slitting, ore-stamping,
   bellows for blast furnaces** (Holt, *Mills of Medieval England*, 1988; Langdon, *Mills in
   the Medieval Economy*, 2004; Reynolds, *Stronger than a Hundred Men*, 1983).
-- **Quantity:** Domesday England (1086) records **~6,000 watermills for ~3,000 settlements**
-  — on the order of **~2 mills per mill-bearing vill**, i.e. mills are *dense* on suitable
-  streams (Holt 1988; **H** for the ~6,000 figure). Spacing on a river is set by the head
-  each mill consumes — practically **a few hundred metres to ~1 km** between mills on a
-  modest stream (‡ verify; **L**).
+- **Quantity (verified §9):** Domesday England (1086) records **>6,000 watermills** — about
+  **one mill for every two vills** across the country (a mill-bearing vill typically had one,
+  some several); mills are unevenly distributed by geology/topography, dense on suitable
+  streams (Holt, *The Mills of Medieval England*, 1988; [Domesday water mills, *Antiquity*](https://www.cambridge.org/core/services/aop-cambridge-core/content/view/1541D152E3E09BAC03BAFC70F50D2DF2/S0003598X00014514a.pdf/domesday_water_mills.pdf); **H**). *(This corrects the first
+  draft's "~2 mills per vill" — the true national ratio is the inverse.)* Spacing on a river
+  is set by the head each mill consumes — practically **a few hundred metres to ~1 km** between
+  mills on a modest stream (‡ verify; **L**).
 - **Windmills** (12th c.+) go on **high, exposed ground** — hills, town ramparts, the windward
   edge — appearing where water power is lacking (fenland, dry uplands) (**H**).
 
@@ -265,11 +280,15 @@ Kept at the **edge or extramural and downwind**, often by ordinance after fires:
 
 ### 4.4 **Smell / nuisance** (the wind rule)
 The **prevailing wind** sorts the foulest trades to the **downwind side** of town. In
-**westerly-wind Europe that is the *east* side** — a genuine, if debated, contributor to the
-enduring "**poor/industrial East End vs. affluent West End**" pattern of many NW-European
-cities (London, Paris's historic distinctions, etc.). Roots are pre-industrial (tanneries,
-slaughter, smoke) and are massively amplified by 19th-c. coal (**M**; the wind mechanism is
-sound, its explanatory weight is debated — mark **M**, not H).
+**westerly-wind Europe that is the *east* side** — the enduring "**poor/industrial East End
+vs. affluent West End**" pattern of NW-European cities. This is now well-evidenced: Heblich,
+Trew & Zylberberg, *"East-Side Story: Historical Pollution and Persistent Neighborhood
+Sorting"* (*Journal of Political Economy*, 2021), modelled ~5,000 industrial chimneys under
+the westerlies and found the **wind-borne pollution gradient explains up to ~20 % of the
+east–west neighbourhood sorting still observed in 2011** ([JPE](https://www.journals.uchicago.edu/doi/abs/10.1086/713101); [working paper PDF](https://edwebcontent.ed.ac.uk/sites/default/files/atoms/files/heblich_trew_zylberberg_2016_east_side_story.pdf)). The **mechanism is
+H** (verified §9); its weight is largest in the 19th-c. coal era, so for the *pre-industrial*
+town the effect is nascent (tanneries/slaughter/smoke already tend downwind) — **M** for
+pre-industrial magnitude, **H** for the direction/mechanism.
 - Trades sorted downwind: **tanning, tallow/soap, glue, slaughter, smoke-producing kilns,
   and (later) the industrial quarter proper.**
 
@@ -428,17 +447,38 @@ as new `M-*` families. Each names the **field(s)** it scores on and its **trigge
 
 - **Robust (H):** the sorting *logic* (access/nuisance/status/threshold); centre bundles per
   culture; the amenity **ordering**; industry **drivers**; harbour break-of-bulk; ward/quarter
-  systems; élite-centre inversion (Sjoberg).
-- **Medium (M):** specific **population thresholds** for amenities; the wind→east-end weight;
-  market-count bands; mill spacing.
-- **Low / verify (L, ‡):** the exact numeric thresholds and metrology (quay length per berth,
-  mills per km, threshold populations to the nearest thousand). These need a web-verification
-  pass (rate-limited at time of writing) against: Masschaele 1994 (markets), Holt 1988 /
-  Langdon 2004 (mills), Christaller 1933 & later CPT threshold tables, Pevsner 1976 (building
-  types & dates), Hohenberg & Lees 1985 (network vs central-place), and regional gazetteers.
+  systems; élite-centre inversion (Sjoberg); **market spacing (6⅔ mi)**, **Domesday mill
+  density (~1 per 2 vills)**, **communal town-hall date (late-12th/13th c.)**, and the
+  **prevailing-wind east-end mechanism** — all verified in §9.
+- **Medium (M):** specific **population thresholds** for amenities (though bounded now by
+  verified size classes — villages 30–90 households, towns ~2–3k, cities ~10–20k+, the borough
+  charter as the town/village line); market-*count* bands; pre-industrial magnitude of the
+  wind effect.
+- **Low / verify (L, ‡):** remaining metrology — quay length per berth, mill spacing in
+  metres, specific ordinance thresholds. A further pass can check these against Langdon 2004
+  (mills), Christaller 1933 & later CPT threshold tables, and port/harbour histories.
+
+## 9. Verification-pass log (what was re-checked when search resumed)
+
+Targeted searches run after the initial draft, to close the flagged gaps. Each result and the
+resulting change to the report:
+
+| Claim (draft) | Verified finding | Source | Action |
+|---|---|---|---|
+| Market spacing (was ‡) | **6⅔ mi (≈10.7 km)** monopoly radius = a third of a ~20-mile day (go/trade/return); ~5 mi average to a market by 1250; **~760** English market towns | Masschaele, *Peasants, Merchants, and Markets* (1997); [Market town](https://en.wikipedia.org/wiki/Market_town) | Added to §2.2; **L→H** |
+| "~2 mills per vill" (draft) | **Wrong** — Domesday records **>6,000 mills ≈ one per two vills** nationally; uneven by geology | Holt (1988); [Domesday water mills, *Antiquity*](https://www.cambridge.org/core/services/aop-cambridge-core/content/view/1541D152E3E09BAC03BAFC70F50D2DF2/S0003598X00014514a.pdf/domesday_water_mills.pdf) | **Corrected** §4.1; **→H** |
+| Town-hall date (12th–13th c.) | *Palazzo comunale* from **late 12th c.** (post Peace of Constance, 1183), proliferating 13th c.; belfry = communal autonomy | [Medieval commune](https://en.wikipedia.org/wiki/Medieval_commune) | Tightened §2.3; **→H** |
+| Wind "east-end" (was M, "debated") | Landmark study: westerly pollution gradient explains **~20 %** of persistent E–W sorting (2011 data) | Heblich, Trew & Zylberberg, *JPE* (2021) — [journal](https://www.journals.uchicago.edu/doi/abs/10.1086/713101) | Cited §4.4; mechanism **→H** |
+| Settlement size classes | Villages **30–90 households**; towns **~2–3k**; cities **~10–20k+**; **borough charter** = the town/village line | [Cesaretti et al. 2016](https://pmc.ncbi.nlm.nih.gov/articles/PMC5051806/); medieval-demography syntheses | Bounds §5.1 ladder; ledger updated |
+| Quay length per berth (was ‡) | Cog **15–25 m** → **~20–30 m/berth**; flat bottom **beached at low tide** (throughput not quay-capped); breakwater needed or ships wait for calm | [Cog (ship)](https://en.wikipedia.org/wiki/Cog_(ship)); [Ancient port structures](https://www.ancientportsantiques.com/ancient-port-structures/) | Updated §1.1; **L→M/H** |
+| Mill spacing (m); CPT numeric thresholds | Not re-verified this pass | — | Remain **L / ‡** for a future pass |
 
 ### Sources
-Web-verified earlier in this project (URLs): [Laws of the Indies (HUD)](https://www.huduser.gov/portal/sites/default/files/pdf/The-Laws-of-the-Indies.pdf) ·
+Web-verified in this project (URLs): [Laws of the Indies (HUD)](https://www.huduser.gov/portal/sites/default/files/pdf/The-Laws-of-the-Indies.pdf) ·
+[Masschaele / Market town](https://en.wikipedia.org/wiki/Market_town) ·
+[Domesday water mills (Antiquity)](https://www.cambridge.org/core/services/aop-cambridge-core/content/view/1541D152E3E09BAC03BAFC70F50D2DF2/S0003598X00014514a.pdf/domesday_water_mills.pdf) ·
+[Medieval commune](https://en.wikipedia.org/wiki/Medieval_commune) ·
+[Heblich, Trew & Zylberberg, *East Side Story*, JPE 2021](https://www.journals.uchicago.edu/doi/abs/10.1086/713101) ·
 [Central place theory](https://www.britannica.com/money/central-place-theory) ·
 [Strano et al. 2012 (road-network growth)](https://www.nature.com/articles/srep00296) ·
 [Chang'an overview](https://en.shaanxi.gov.cn/as/hac/hos/201704/t20170428_1595612_wap.html) ·
