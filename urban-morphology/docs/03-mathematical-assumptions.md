@@ -363,6 +363,17 @@ graph's own largest-component pruning; and a bay/coast shoreline's finer point s
 candidate segments were shorter than the pass's minimum-length floor. All three are now fixed and
 covered by a dedicated regression test asserting a nonzero aggregate count across many seeds/sites.
 
+## Terrain / building suitability (M-TER) — see `08-terrain-building-suitability.md`
+
+Cartalith-port groundwork, not a civilization profile: a first, deliberately small terrain-
+awareness layer, prototyped and tested entirely inside this project's own synthetic site model.
+Preparatory only — no Cartalith Gen1 file is touched by this register entry or its implementation.
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-TER-1 | Two-factor terrain-suitability score | `terrainSuitability(site,p) = slopeScore(p) × floodScore(p)` — a Gaussian slope falloff (reusing the existing `slope()` proxy, M-REG-5) multiplied by a linear flood-margin ramp (reusing the existing `riverW/2+30` flood-band margin already load-bearing in `placeAnchors`/`buildWall`) | – ([0,1] score) | Slope bands: [UpCodes Site Grading](https://up.codes/s/site-grading); [Laguna Hills Hillside Development Standards](https://www.codepublishing.com/CA/LagunaHills/html/LagunaHills09/LagunaHills0950.html) (0-2% ideal, 4-8% preferred, 15%+ costs rise, 25%+ often prohibited). Riparian setback: [Stream Buffers and Setbacks — Colorado](https://planningforhazards.colorado.gov/stream-buffers-and-setbacks) (typical 25-300 ft, ~100 ft baseline). Combining method: McHarg 1969, *Design with Nature* (overlay analysis) | M (qualitative bands + overlay method) / L (the specific numeric thresholds are a schematic mapping onto this engine's own analytic proxies, not a literal unit conversion — flagged the same as every other schematic-but-motivated PoC constant, e.g. M-VEN-3) | Multiplicative, not additive, by design: a flood-prone flat is still bad because it floods regardless of slope, and a dry steep slope is still bad because it's steep regardless of flood risk — either factor alone can drag the score down, so neither can cancel the other out. Always computed and attached to every parcel (`par.suitability`, `assignDistricts`) for every profile; `hashModel()` does not hash it, so this is provably incapable of affecting the cross-version neutrality every other addition in this register is held to. |
+| M-TER-2 | Opt-in terrain-aware building gate | `opts.terrainAware` (default `false`): a parcel scoring below 0.5 is left unbuilt (`par.empty=true`, `par.unsuitable=true`) — the same "bare ground" outcome already used for undersized/agrarian-paddock parcels | – (threshold on the M-TER-1 score) | Threshold derived from M-TER-1's own reference points (§2 of `08-…`), not tuned to a target percentage | L (a first, deliberately simple gate — build/don't-build only, no graded response; `08-…` §5 lists this as a natural next step, not attempted here) | The same additive/opt-in discipline as `GenerationRules` (docs/07 §3.4): `generate()` with `terrainAware` omitted is byte-identical to every prior version (dedicated hash-comparison test, plus the full pre-existing suite passing unchanged). Effect size varies honestly by site kind (~0-6% of parcels at pop 7000, landlocked sites showing zero effect because there is no flood factor and this engine's hills don't get steep enough within a typical settlement radius to cross the threshold) rather than being forced uniform. |
+
 ---
 
 ## Usage contract

@@ -6,10 +6,14 @@ layer, and how do they feed a city generator?* Your intuition is right — **mos
 information needed to generate a city is already present**; the refactor is mostly wiring, not
 new data modelling.
 
-> **Version note:** the newest Cartalith Gen1 file in the repo is **`Cartalith Gen1 v0.61.html`**
-> (only v0.57 / v0.6 / v0.61 exist — there is no v0.85). The civilization layer is **script
-> block 2** (`CIV_*` vocabularies + `state.places`). When the merge happens the new file
-> follows the two-digit-minor rule (`v0.62`, …). This project stays isolated until then.
+> **Version note (updated):** the newest Cartalith Gen1 file in the repo is now
+> **`Cartalith Gen1 v0.85.html`** (this section originally referenced v0.61, the newest file at
+> the time of writing — corrected here rather than left stale, since this document is exactly
+> what the eventual port will be read against). The civilization layer is still **script
+> block 2** (`CIV_*` vocabularies + `state.places`); block 1 is the terrain engine referenced in
+> §1.2 below, now with the fuller field list `08-terrain-building-suitability.md` maps against.
+> When the merge happens the new file follows the two-digit-minor rule. This project stays
+> isolated until then.
 
 ---
 
@@ -37,9 +41,14 @@ Each entry in `state.places` that is a settlement (`CIV_SETTLE_KEYS.has(kind)`) 
   `_civConnectPlaceToNetwork(p)` links a place in.
 - **`CIV_POI_TYPES` / `CIV_FEATURE_ICON_TYPES`** — ruins, shrines, peaks, forests, caves, etc.
   (hinterland context / landmarks).
-- **The EF terrain engine (block 1)** under every place: `field` (height), `riverMask`/rivers,
-  sea level, `tempField`/`rainField`, biome — i.e. **the real site** (river? coast? hill?
-  floodplain?) is derivable at `(x,y)`.
+- **The EF terrain engine (block 1)** under every place: `field` (height, [0,1], sea level 0.42),
+  `riverMask`/`riverFloor` (nullable — every consumer must null-check), `flowField` (discharge
+  accumulation — the real river network, a strictly richer hydrology signal than a single
+  centerline), `tempField`/`rainField`, biome (`BIOME_KEYS`)/Köppen (`KOPPEN_KEYS`) — i.e. **the
+  real site** (river? coast? hill? floodplain?) is derivable at `(x,y)`. Also present but not yet
+  reused for buildability: `resistanceField`/`heterogeneityField` (from the tectonic substrate) —
+  a plausible foundation-stability signal, flagged as a gap in
+  `08-terrain-building-suitability.md` §4, not yet modelled by this project's own synthetic site.
 - **`assetPack.structures.{settlement,poi}`** — per-class structure sprite slots (the icon/art
   side), keyed to the same `CIV_SETTLEMENT_CLASSES`/`CIV_POI_TYPES`.
 
@@ -82,6 +91,13 @@ Small, well-scoped additions — none are new research, just plumbing/decisions:
    river|riverthrough|bay|coast|inland, water lines, flood band, slope, defensible hill}`,
    replacing the PoC's synthetic `buildSite`. Reads `field`/`riverMask`/sea level around
    `(x,y)`. (River-*through* vs river-*crossing* = does the channel bisect the built extent.)
+   The "flood band, slope" half of this reader is now worked through in
+   `08-terrain-building-suitability.md`: a researched, designed, and *tested* `[0,1]`
+   suitability score (slope × flood-proximity, McHarg-style overlay) already runs inside this
+   PoC's own synthetic site (`par.suitability`, plus an opt-in `terrainAware` building gate).
+   The reader above would compute the same two factors from `field`/`flowField` instead of the
+   PoC's analytic `height()`/`riverDist()` and hand the identical score to the *unchanged*
+   `assignDistricts`/`buildBuildings` consumers — only the site model swaps, not the consumers.
 2. **Faction → tradition/culture pack.** Today `faction` is name+colour only. Add a per-faction
    (or per-region) `tradition` key selecting a morphology pack (medieval-NW-Europe, Roman/
    colonial grid, Islamic, Chinese, …). The PoC already anticipates "tradition packs"

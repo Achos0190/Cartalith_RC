@@ -15,7 +15,7 @@ post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1090 assertions) |
+| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1100 assertions) |
 | Browser driver (screenshots + inspector click-tests, incl. the Roman colonia) | `tests/browser_check.js` |
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
@@ -32,7 +32,10 @@ engine's ~70 functions are culture-independent vs. tradition-supplied, the `Cult
 data schema, the Roman colonia's quantified morphology, and what's explicitly deferred to
 later phases (phased historical growth, negative space, infrastructure layer, Space
 Syntax/graph-theory metrics, settlement hierarchy, a profile-aware validation panel, and
-civilizations 3–18).
+civilizations 3–18) ·
+**`08-terrain-building-suitability.md`** — Cartalith-port groundwork: real-world slope/flood-
+setback research, a two-factor McHarg-style suitability score, and its mapping onto Cartalith
+Gen1's actual terrain fields for the eventual refactor.
 
 ### Civilization profiles (selectable in-app)
 
@@ -198,6 +201,21 @@ differs by more than 8%.
 An **Evidence Ledger** panel lists every `M-*`/`M-ROM-*` register id actually load-bearing for
 the currently generated town (collected from every object's provenance as it's drawn), formalizing
 the assumptions register as in-app, queryable data rather than only a markdown file.
+
+### Terrain / building-suitability groundwork (Cartalith-port preparation, docs/08)
+
+Preliminary, tested groundwork for a future Cartalith Gen1 port — nothing here touches Cartalith
+itself. Every parcel now carries a `[0,1]` terrain-suitability score (`terrainSuitability()`,
+inspectable on any parcel click), combining this engine's existing slope proxy with distance from
+the existing flood-band margin via McHarg's (1969) overlay-analysis method — either factor alone
+can drag the score down. Purely informational by default (`hashModel()` doesn't hash it, so this
+cannot affect cross-version neutrality); an opt-in **"terrain-aware placement (experimental)"**
+checkbox lets the worst-scoring parcels (both too steep and too flood-prone, threshold derived
+from real-world construction-suitability slope bands and riparian-setback standards) go unbuilt
+instead, the same "bare ground" outcome already used for undersized or agrarian-paddock parcels.
+See `docs/08-terrain-building-suitability.md` for the research, the design, and the mapping onto
+Cartalith Gen1's actual terrain fields (`field`, `flowField`, `resistanceField`) for when the
+actual port happens.
 
 The v0.1 app generates a deterministic medieval-pack town from a seed: site (river crossing,
 bay harbour, or open coast) → anchors → least-cost primary routes over a slope/water cost

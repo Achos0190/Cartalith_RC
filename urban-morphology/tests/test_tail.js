@@ -1400,5 +1400,90 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Terrain/building-suitability groundwork (docs/08, M-TER register) ----------
+ * Preparatory work for a future Cartalith Gen1 port — NOT integrated into Cartalith here.
+ * par.suitability is always computed (informational; hashModel() does not hash it, so this
+ * cannot affect the neutrality every other addition in this file is held to); opts.terrainAware
+ * is the separate, default-off switch that lets it actually exclude parcels from building. */
+{
+  // always present, finite, in [0,1] — across several profiles/sites, not just one default case
+  let badCount = 0, checked = 0;
+  for (const culture of ['medieval', 'roman', 'islamic', 'venus', 'palimpsest']) {
+    for (const site of ['river', 'bay', 'landlocked']) {
+      const m = UME.generate(4242, { epochs: 8, pop: 6000, culture, site });
+      for (const p of m.parcels) {
+        checked++;
+        if (typeof p.suitability !== 'number' || !isFinite(p.suitability) || p.suitability < 0 || p.suitability > 1) badCount++;
+      }
+    }
+  }
+  ok(checked > 500 && badCount === 0, `every parcel across ${checked} (culture x site) samples carries a finite suitability score in [0,1] (${badCount} out of range, M-TER-1)`);
+
+  // neutrality: omitting the option and passing an explicit false must agree exactly, and both
+  // must match plain generate() with no other options touched by this feature
+  const noOpt = UME.generate(12345, { epochs: 8, pop: 5000 });
+  const explicitFalse = UME.generate(12345, { epochs: 8, pop: 5000, terrainAware: false });
+  ok(UME.hashModel(noOpt) === UME.hashModel(explicitFalse), 'terrainAware omitted vs. explicit false are byte-identical (neutrality)');
+  ok(noOpt.parcels.every(p => !p.unsuitable), 'no parcel is ever flagged unsuitable when terrainAware is off');
+
+  // suitability correlates with distance from the water: parcels near the water's edge score
+  // measurably lower on average than parcels far from it (independent check via T.distPtSeg
+  // point-to-segment distance against the model's own exposed site.river, not an internal hook).
+  // The combined score is slope x flood, and slope varies independently of river-distance in
+  // this synthetic terrain — so on any ONE seed, a coincidentally flat near-bank / steep far-bank
+  // layout can occasionally flip the comparison (found by testing on a single seed, seed 4242,
+  // before this was broadened); the flood signal is a real, aggregate TENDENCY, not a per-seed
+  // guarantee, so it is checked across several seeds together, the same discipline already used
+  // elsewhere in this file for other legitimately seed-dependent effects (M-PAL-3's shoreline
+  // streets, above).
+  const distToRiver = (river, p) => { let d = Infinity; for (let i = 0; i < river.length - 1; i++) d = Math.min(d, T.distPtSeg(p, river[i], river[i + 1])); return d; };
+  let nearSum = 0, nearN = 0, farSum = 0, farN = 0;
+  for (const seed of [1, 2, 3, 4242, 777, 12345, 999, 55, 88]) {
+    const river = UME.generate(seed, { epochs: 8, pop: 7000, site: 'river' });
+    const withDist = river.parcels.map(p => ({ s: p.suitability, d: distToRiver(river.site.river, T.polyCentroid(p.poly)) })).sort((a, b) => a.d - b.d);
+    const k = Math.floor(withDist.length * 0.2);
+    for (const x of withDist.slice(0, k)) { nearSum += x.s; nearN++; }
+    for (const x of withDist.slice(-k)) { farSum += x.s; farN++; }
+  }
+  const nearAvg = nearSum / nearN, farAvg = farSum / farN;
+  ok(nearAvg < farAvg, `parcels near the water score measurably lower on average than parcels far from it, aggregated across 9 seeds (${nearAvg.toFixed(2)} vs ${farAvg.toFixed(2)}, M-TER-1)`);
+
+  // terrainAware: deterministic, only ever removes buildings (never adds), and is live (actually
+  // changes the output on at least some seed/site) — checked in aggregate since which parcels
+  // cross the threshold is legitimately site/seed-dependent, not a per-generation guarantee
+  const ta1 = UME.generate(12345, { epochs: 8, pop: 7000, terrainAware: true, site: 'coast' });
+  const ta2 = UME.generate(12345, { epochs: 8, pop: 7000, terrainAware: true, site: 'coast' });
+  ok(UME.hashModel(ta1) === UME.hashModel(ta2), 'terrainAware:true generation is deterministic');
+  ok(ta1.terrainAware === true, 'model reports the requested terrainAware option back');
+
+  let everFewer = false, everMore = false, everFlagged = false;
+  for (const seed of [1, 4242, 777, 12345, 999]) {
+    for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+      const off = UME.generate(seed, { epochs: 8, pop: 7000, site });
+      const on = UME.generate(seed, { epochs: 8, pop: 7000, site, terrainAware: true });
+      if (on.buildings.length < off.buildings.length) everFewer = true;
+      if (on.buildings.length > off.buildings.length) everMore = true;
+      if (on.parcels.some(p => p.unsuitable)) everFlagged = true;
+    }
+  }
+  ok(everFewer, 'terrainAware:true reduces building count on at least some seed/site combination (the mechanism is live, not inert)');
+  ok(!everMore, 'terrainAware:true never increases building count on any seed/site combination (it can only exclude, never add)');
+  ok(everFlagged, 'terrainAware:true flags at least some parcels unsuitable across the sampled combinations');
+
+  // safety: excluding a parcel from building can only ever remove geometry, so it cannot
+  // introduce a new water/wall intersection — verified explicitly rather than assumed, matching
+  // this project's own "verify, don't just trust construction" discipline
+  let wetBuildingFails = 0, checkedTA = 0;
+  for (const seed of [4242, 777, 12345, 999]) {
+    for (const site of ['river', 'riverthrough', 'bay', 'coast']) {
+      const m = UME.generate(seed, { epochs: 8, pop: 7500, walls: true, terrainAware: true, site });
+      checkedTA++;
+      if (m.site.waterPoly && m.site.waterPoly.length)
+        for (const b of m.buildings) if (T.pointInPoly(T.polyCentroid(b.poly), m.site.waterPoly)) wetBuildingFails++;
+    }
+  }
+  ok(wetBuildingFails === 0, `terrainAware:true introduces no wet buildings across ${checkedTA} (seed x site) combinations (${wetBuildingFails} failures)`);
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

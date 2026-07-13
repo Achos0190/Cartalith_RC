@@ -143,6 +143,7 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome' } },
     { name: 'palimpsest-souk', set: { culture: 'palimpsest', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto' } },
     { name: 'palimpsest-fortified', set: { culture: 'palimpsest', siteKind: 'riverthrough', pop: '9000', fortified: true, walls: true, faith: 'mosque', civicStyle: 'auto' } },
+    { name: 'terrain-aware-coast', set: { culture: 'medieval', siteKind: 'coast', pop: '9000', fortified: false, walls: true, terrainAware: true } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
@@ -154,13 +155,14 @@ const { chromium } = require(PLAYWRIGHT_DIR);
       const m = window.__UM_MODEL;
       return { site: m.site.kind, culture: m.culture, markets: (m.markets || []).length, civic: !!m.civic,
         harbourDef: m.harbour && m.harbour.defence ? m.harbour.defence.type : null,
-        gates: m.wall.gates.map(g => g.name || (g.water ? 'water' : '?')) };
+        gates: m.wall.gates.map(g => g.name || (g.water ? 'water' : '?')),
+        terrainAware: m.terrainAware, unsuitableParcels: m.parcels.filter(p => p.unsuitable).length };
     });
     console.log('SCENARIO ' + sc.name + ' ' + JSON.stringify(info));
     await page.screenshot({ path: path.join(outDir, `town-${sc.name}.png`) });
   }
-  // reset the culture selector back to medieval so it doesn't leak into any later manual use
-  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; });
+  // reset the culture selector + terrain-aware checkbox so neither leaks into any later manual use
+  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; });
 
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);

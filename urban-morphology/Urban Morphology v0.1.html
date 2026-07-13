@@ -193,6 +193,7 @@ svg.panning{cursor:grabbing}
     <div class="row"><label>Growth epochs</label><input id="epochs" type="number" value="8" min="2" max="14" style="width:52px"></div>
     <div class="row"><label style="flex:0 0 auto"><input id="walls" type="checkbox" checked> city wall</label>
       <label style="margin-left:10px;flex:0 0 auto"><input id="fortified" type="checkbox"> star fort</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="Prototype (docs/08): excludes parcels whose ground is too steep and/or too flood-prone from building, leaving them vacant. Off by default — purely additive, does not change any existing town."><input id="terrainAware" type="checkbox"> terrain-aware placement (experimental)</label></div>
     <div id="status"></div>
   </div>
   <div class="box" id="rulesBox">
@@ -831,6 +832,38 @@ function buildSite(seed,Wm,Hm,kind){
   return {kind,through,noWater,Wm,Hm,river,riverW,waterPoly,riverDist,height,slope,bridgePt,bridgeDir,
     routeEnds:gatesDir,bankSide,isWater,
     harbour:noWater?{idx:-1,pt:null}:{idx:harbourIdx,pt:river[harbourIdx]}};}
+
+/* ---------------- terrain suitability for buildings (Cartalith-port groundwork, docs/08) ----------------
+ * A first, deliberately small terrain-awareness layer, combining two independent physical
+ * constraints into one [0,1] score per point — McHarg's (1969) overlay-analysis method: layer
+ * constraints and combine them, rather than special-case one factor (docs/08 §2). Always
+ * computed and attached to every parcel as `par.suitability` (assignDistricts) — informational
+ * only; hashModel() does not hash it, so this cannot affect the cross-version neutrality every
+ * other addition in this file has been held to. `opts.terrainAware` (default off) is the
+ * separate switch that actually lets the score exclude the worst parcels from building at all
+ * (buildBuildings) — additive and opt-in, the same discipline as GenerationRules (docs/07 §3.4).
+ * Multiplicative, not additive: a flood-prone flat is still bad because it floods, and a dry
+ * steep slope is still bad because it's steep — either factor alone should be able to drag the
+ * score down, so neither can cancel the other out. */
+function terrainSuitability(site,p){
+  // slope: reuses this engine's existing analytic slope() proxy unchanged (already load-bearing
+  // for route costs, M-REG-5) rather than inventing a second terrain signal. The empirical
+  // distribution of slope() near a settlement core is roughly 0.05-0.5 in this engine's own
+  // units (docs/08 §1); real-world construction-suitability slope bands (0-2% ideal, 4-8%
+  // preferred residential, 15%+ costs rise, 25%+ often prohibited outright) motivate the
+  // shape of the falloff below, not a literal unit conversion, since slope() is itself already
+  // a schematic proxy, not a physical grade measurement.
+  const s=Math.min(1,site.slope(p)); // clip the rare coastline isWater() step-discontinuity
+  const slopeScore=Math.exp(-(s*s)/(2*0.3*0.3));
+  // hydrology: reuses the SAME flood-band margin already load-bearing elsewhere in this file
+  // (placeAnchors' market siting, buildWall's wet-ditch feed) rather than a new invented
+  // constant; ~30m+half-channel-width sits comfortably inside the 8-90m+ riparian-setback
+  // range standard in real floodplain regulation (docs/08 §1).
+  const margin=(site.riverW||0)/2+30;
+  const rd=site.isWater(p)?0:site.riverDist(p);
+  const floodScore=Math.max(0,Math.min(1,rd/margin));
+  return slopeScore*floodScore;
+}
 
 /* ---------------- anchors ---------------- */
 function placeAnchors(seed,site){
@@ -2170,6 +2203,7 @@ function assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour){
     const c=polyCentroid(par.poly);
     const dM=V.dist(c,anchors.market);
     const rd=site.riverDist(c);
+    par.suitability=terrainSuitability(site,c); // docs/08: informational by default (M-TER-1)
     let d;
     if(plaza&&distPtSeg(c,plaza.poly[0],plaza.poly[1])<par.depth+22&&dM<120)d='market';
     else if(dM<140)d='market';
@@ -2198,7 +2232,7 @@ function bmap(par,u,v){ // bilinear patch over parcel quad
   return V.lerp(e0,e1,v);}
 function rectPoly(par,u0,u1,v0,v1){
   return [bmap(par,u0,v0),bmap(par,u1,v0),bmap(par,u1,v1),bmap(par,u0,v1)];}
-function buildBuildings(seed,parcels,plaza,anchors,profile){
+function buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware){
   profile=profile||CULTURE_PROFILES.medieval;
   const out=[];let bid=0;
   // radial banding extent for the Venus profile: the max parcel distance from the hub, so the
@@ -2212,6 +2246,15 @@ function buildBuildings(seed,parcels,plaza,anchors,profile){
     const d=par.district;
     if(d==='agrarian'&&r.chance(0.45)){par.empty=true;continue;} // paddocks
     if(par.frontage<3.2||par.depth<6){par.empty=true;continue;}
+    // terrain-aware placement (docs/08, M-TER-2): opt-in only (default false) — a parcel whose
+    // ground is too steep and/or too flood-prone is left unbuilt (a vacant/cleared lot, same
+    // rendering as any other .empty parcel) rather than silently ignoring the terrain, matching
+    // the same additive/opt-in discipline as GenerationRules (docs/07 §3.4). Threshold 0.5: a
+    // parcel is flagged once EITHER factor alone reaches its own "moderate concern" reference
+    // point (slope alone at the ~15%-grade-equivalent reference scores ~0.6; flood alone at
+    // half the setback margin scores 0.5) — either constraint alone can already drag a real
+    // site below this bar, matching the "neither factor can cancel the other out" design (docs/08 §2).
+    if(terrainAware&&par.suitability<0.5){par.empty=true;par.unsuitable=true;continue;}
     // Roman domus/insula grammar (M-ROM-3): the harbour quarter still reuses the warehouse
     // grammar below unchanged (harbour/quay typology is core, not culture-specific, docs/07 §2).
     if(profile.buildingGrammar==='domus-insula'&&d!=='harbour'){
@@ -2697,6 +2740,7 @@ function generate(seed,opts){
   opts=opts||{};
   const profile=resolveProfile(opts.culture);
   const rules=resolveRules(opts.rules); // configurable generation rules (docs/07 §3.4)
+  const terrainAware=!!opts.terrainAware; // opt-in terrain-suitability building gate (docs/08)
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
   // enclosures are optional (default on for the medieval pack); a lake-city profile (Aztec)
@@ -2823,7 +2867,7 @@ function generate(seed,opts){
   const blocks=buildBlocks(g,plaza,site);
   const parcels=buildParcels(seed,g,blocks,anchors,epochs,site,profile,rules);
   assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
-  const buildings=buildBuildings(seed,parcels,plaza,anchors,profile);
+  const buildings=buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware);
   // runs after buildings exist so it can verify-then-reject any candidate segment against the
   // real building set, rather than relying solely on construction to guarantee safety — blocks
   // can be irregular/concave (a grid-founded network reshaped by growAlongFixedEdge), and a plain
@@ -2877,7 +2921,7 @@ function generate(seed,opts){
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,terrainAware,Wm,Hm,
     culture:profile.id,cultureName:profile.name,
     site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
@@ -2996,7 +3040,8 @@ function render(){
     const e=el('path',{d:pd(p.poly),class:'parcel d-'+(p.district||'artisan')},L.parcels);
     reg(e,'Parcel','Parcel '+p.id+' — '+(DISTRICT_INFO[p.district]?DISTRICT_INFO[p.district][0]:p.district),
       {frontage:p.frontage.toFixed(1)+' m',depth:p.depth.toFixed(1)+' m',
-       area:p.area.toFixed(0)+' m²','street age':'epoch '+(model.epochs-p.age)},
+       area:p.area.toFixed(0)+' m²','street age':'epoch '+(model.epochs-p.age),
+       'terrain suitability':typeof p.suitability==='number'?(100*p.suitability).toFixed(0)+'%'+(p.unsuitable?' (left unbuilt)':''):'n/a'},
       p.prov+(p.provDistrict?' — '+p.provDistrict:''));}
 
   // fences
@@ -3536,9 +3581,10 @@ function renderRulesCompare(){
   const pop=parseInt(document.getElementById('pop').value,10)||5000;
   const walls=document.getElementById('walls').checked;
   const fortified=document.getElementById('fortified').checked;
+  const terrainAware=document.getElementById('terrainAware').checked;
   const siteKind=document.getElementById('siteKind').value;
   const culture=document.getElementById('culture').value;
-  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind,culture});
+  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,site:siteKind,culture});
   const avgParcelArea=(m)=>m.parcels.length?m.parcels.reduce((s,p)=>s+p.area,0)/m.parcels.length:0;
   const streetDensity=(m)=>m.metrics.totalLen/(m.pop||1);
   const rows=[
@@ -3591,13 +3637,14 @@ function regen(){
   const pop=parseInt(document.getElementById('pop').value,10)||5000;
   const walls=document.getElementById('walls').checked;
   const fortified=document.getElementById('fortified').checked;
+  const terrainAware=document.getElementById('terrainAware').checked;
   const siteKind=document.getElementById('siteKind').value;
   const harbourDefence=document.getElementById('harbourDefence').value;
   const faith=document.getElementById('faith').value;
   const civicStyle=document.getElementById('civicStyle').value;
   const culture=document.getElementById('culture').value;
   const t0=performance.now();
-  model=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
+  model=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
   const dt=performance.now()-t0;
   render();
   let note='';
