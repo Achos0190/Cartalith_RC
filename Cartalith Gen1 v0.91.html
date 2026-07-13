@@ -1178,9 +1178,9 @@ details.cat-acc[open]>summary{color:var(--accent)}
         <input id="civNHam" type="number" min="0" max="2000" placeholder="auto" style="flex:1;min-width:0"></div>
       <div class="btnrow" style="margin-top:6px">
         <button id="civAutoPopulateBtn" class="accent">Auto-populate world</button>
-        <button id="civClearPlacesBtn" class="al-danger">Clear places</button>
+        <button id="civClearPlacesBtn" class="al-danger">Clear places &amp; routes</button>
       </div>
-      <div class="hint"><b>Auto-populate world</b> places settlements based on terrain suitability and carrying capacity. Fill in any of the count fields to fix how many of each tier are seeded (e.g. Capitals 3, Villages 10, Hamlets 20) — tiers are then assigned best-site-first and the centrality promotion step is skipped so your counts hold; crossroads trade settlements may still add a few. Use <b>Drop place</b> to manually place settlements or POIs; <b>Inspect</b> selects and edits existing places.</div>
+      <div class="hint"><b>Auto-populate world</b> places settlements based on terrain suitability and carrying capacity. Fill in any of the count fields to fix how many of each tier are seeded (e.g. Capitals 3, Villages 10, Hamlets 20) — tiers are then assigned best-site-first and the centrality promotion step is skipped so your counts hold; crossroads trade settlements may still add a few. Use <b>Drop place</b> to manually place settlements or POIs; <b>Inspect</b> selects and edits existing places. <b>Clear places &amp; routes</b> wipes settlements/POIs AND every way/journey with them — a route to a deleted place is meaningless, so nothing is left orphaned on the map.</div>
       <!-- v0.69: opt-in biome carrying-capacity residual (disease burden + extreme-climate friction). Default OFF ⇒ bit-identical. -->
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="civBiomeKChk"> Biome carrying-capacity (disease · climate residual)</label>
       <div class="hint" style="margin-top:2px">Sourced correction to carrying capacity for effects soil/temp/water miss — the <b>rainforest paradox</b> (wet, productive biomes suppressed by pathogen load), arid/cold survival friction, and (v0.77) a <b>wetland/marsh</b> story: productive fish/rice/waterfowl land with high water-managed intensification potential but malaria/flood friction. Off by default; on re-derives carrying capacity, settlement suitability and the <b>Pop density</b> layer. See <code>docs/research/settlement-density.md</code>.</div>
@@ -14284,6 +14284,14 @@ function _civHierarchicalNetwork(places, opts){
     for(const r of runs){
       if(r.length<2) continue;
       const raw=r.map(ci=>({x:((ci%RW)+0.5)/sc, y:(((ci/RW)|0)+0.5)/sc}));
+      /* v0.92 (owner report: "roads nearly miss settlements when zooming in"): a run's cells are
+         downsampled routing-grid indices (cell CENTERS at 1/sc resolution), not the settlement's
+         own coordinate — up to several full-res cells off, invisible until you zoom deep with LOD.
+         Only the run that actually touches the edge's own start/end cell is the settlement's true
+         doorstep (interior runs meet at shared junctions, not a place, and must keep their
+         corridor-consolidated cell positions so shared strokes still line up). */
+      if(r[0]===e.path[0]) raw[0]={x:pa.x,y:pa.y};
+      if(r[r.length-1]===e.path[e.path.length-1]) raw[raw.length-1]={x:pb.x,y:pb.y};
       const sm=_civSmoothPath(raw);
       if(!sm||sm.pts.length<2) continue;
       ways.push({pts:sm.pts,km:sm.km,brks:sm.brks.length?sm.brks:undefined,sea:false,name,type:wtype,aIdx:e.a,bIdx:e.b});
@@ -14332,16 +14340,20 @@ function _civConnectPlaceToNetwork(p){
   const {dist,prev}=roadDijkstra(cost,RW,RH,si%RW,(si/RW)|0,!!state.world);
   const startX=si%RW, startY=(si/RW)|0;
   const tooClose=i=>{ const x=i%RW,y=(i/RW)|0; return Math.abs(x-startX)<=2&&Math.abs(y-startY)<=2; };
-  let best=-1,bd=Infinity;
-  for(const i of roadCells){ if(tooClose(i)) continue; if(dist[i]<bd){ bd=dist[i]; best=i; } }
+  let best=-1,bd=Infinity,bestPlace=null;
+  for(const i of roadCells){ if(tooClose(i)) continue; if(dist[i]<bd){ bd=dist[i]; best=i; bestPlace=null; } }
   if(best<0){   /* no ways yet — connect to the nearest other settlement instead */
     for(const q of state.places){ if(q===p||!q.kind||!CIV_SETTLE_KEYS.has(q.kind)) continue;
       const qi=Math.min(RH-1,Math.round(q.y*sc))*RW+Math.min(RW-1,Math.round(q.x*sc));
-      if(dist[qi]<bd){ bd=dist[qi]; best=qi; } }
+      if(dist[qi]<bd){ bd=dist[qi]; best=qi; bestPlace=q; } }
   }
   if(best<0||!isFinite(bd)){ alert('No reachable road or settlement from here — is this place on a separate landmass?'); return; }
   const raw=[]; let ci=best, guard=RW*RH;
   while(ci!==si&&ci>=0&&guard-->0){ raw.push({x:((ci%RW)+0.5)/sc,y:(((ci/RW)|0)+0.5)/sc}); const pv=prev[ci]; if(pv<0||pv===ci) break; ci=pv; }
+  /* v0.92: when the spur actually lands on another named settlement (no network to join yet), end
+     it at that settlement's exact coordinate rather than its downsampled routing-grid cell centre —
+     same "roads nearly miss settlements when zooming in" fix as _civHierarchicalNetwork/_civMstRoutes. */
+  if(bestPlace && raw.length) raw[0]={x:bestPlace.x,y:bestPlace.y};
   raw.push({x:p.x,y:p.y}); raw.reverse();
   const sm=raw.length>=2?_civSmoothPath(raw):null;
   if(!sm||sm.pts.length<2){ alert('This place is already on the network.'); return; }
@@ -14368,11 +14380,21 @@ function _civSmoothPath(raw){
     const smooth=catmullRomSample(rdpSimplify(r,1.5),3);
     if(smooth.length<2) continue;
     if(pts.length) brks.push(pts.length);
+    const runStart=pts.length;
     for(let k=0;k<smooth.length;k++){
       const p=[Math.round(smooth[k].x),Math.round(smooth[k].y)];
       if(k>0) km+=Math.hypot(p[0]-pts[pts.length-1][0],p[1]-pts[pts.length-1][1])*(state.mapWidthKm||12000)/GW;
       pts.push(p);
     }
+    /* v0.92 (owner report: "roads nearly miss settlements when zooming in"): Math.round() above
+       snaps EVERY point to the nearest grid cell, including the run's own first/last point — up to
+       half a cell of drift that's imperceptible at low zoom but, amplified by LOD zoom (one grid
+       cell can span many screen pixels), visibly leaves the road short of the settlement pin, which
+       is drawn at its exact, usually-fractional, coordinate. Restore full precision at just the
+       run's own endpoints (r[0]/r[last] — whatever the caller supplied, e.g. an exact place
+       coordinate); interior points stay rounded since their precision was never load-bearing. */
+    pts[runStart]=[r[0].x,r[0].y];
+    pts[pts.length-1]=[r[r.length-1].x,r[r.length-1].y];
   }
   return pts.length>=2?{pts,brks,km}:null;
 }
@@ -15956,8 +15978,15 @@ function _civSetTool(tool){
 
   const clearP=document.getElementById('civClearPlacesBtn');
   if(clearP) clearP.onclick=()=>{
-    if(state.places.length && !confirm('Clear all settlements and POIs ('+state.places.length+' place'+(state.places.length===1?'':'s')+')?')) return;
-    state.places=[]; state.roads=null; _civSelectedPlace=null; _civRenderPlaceEditor(); renderNow();
+    /* v0.92 (owner report: clearing places "leaves the routes" — orphaned ways/journeys with no
+       settlement left to connect): ways carry no settlement-id reference (just polylines), so a
+       route to a deleted place doesn't error, it just silently keeps drawing a road to nowhere.
+       Clearing places now also clears civWays/civJourneys, same as civClearRoadsBtn, since a route
+       network with no places is meaningless — one click removes settlements AND their routes. */
+    const hasWays=civWays.length||civJourneys.length;
+    if((state.places.length||hasWays) && !confirm('Clear all settlements/POIs'+(state.places.length?' ('+state.places.length+' place'+(state.places.length===1?'':'s')+')':'')+' and their ways/journeys?')) return;
+    state.places=[]; state.roads=null; civWays=[]; civJourneys=[]; _civSelectedJourneyIdx=-1;
+    _civSelectedPlace=null; _civRenderPlaceEditor(); _civRenderWayList(); _civRenderJourneyList(); _civUpdatePlannerPanel(); renderNow();
   };
 
   const addYearBtn=document.getElementById('civTlAddYearBtn');

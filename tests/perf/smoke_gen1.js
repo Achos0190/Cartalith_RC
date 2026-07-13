@@ -482,6 +482,36 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   R.confirmedWhenNonEmpty = dialogMsg !== null;
   R.placesSurviveDismiss = await page.evaluate(() => state.places.length === 1);
 
+  // v0.92 (owner report: "Clear places... leaves the routes" — ways carry no settlement-id
+  // reference, so a route to a deleted place doesn't error, it just silently keeps drawing a road
+  // to nowhere). Clear places & routes must wipe civWays/civJourneys along with state.places, same
+  // click. If this run's random seed happens to yield zero auto-populated settlements (matches this
+  // suite's existing no-retry convention for auto-populate elsewhere), hadWaysBefore is false and
+  // the assertion below treats the case as vacuously satisfied. Re-seeds the single-test-place
+  // fixture afterward (same shape the block above left behind) since the very next section relies
+  // on state.places[0] existing.
+  const before = await page.evaluate(() => {
+    state.places = [];
+    _civAutoWorld();
+    if (typeof _civAutoRoutes === 'function') _civAutoRoutes();
+    return { places: state.places.length, ways: civWays.length };
+  });
+  let clearAccepted = false;
+  const hAccept = async d => { clearAccepted = true; await d.accept(); };
+  page.on('dialog', hAccept);
+  await page.evaluate(() => document.getElementById('civClearPlacesBtn').click());
+  await page.waitForTimeout(150);
+  page.off('dialog', hAccept);
+  const after = await page.evaluate(() => ({ places: state.places.length, ways: civWays.length, journeys: civJourneys.length }));
+  R.clearPlacesAlsoClearsRoutes = {
+    hadWaysBefore: before.ways > 0,
+    dialogAccepted: clearAccepted,
+    placesCleared: after.places === 0,
+    waysCleared: after.ways === 0,
+    journeysCleared: after.journeys === 0,
+  };
+  await page.evaluate(() => { state.places.push({x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}); });
+
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
   // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
@@ -1059,6 +1089,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('destructive buttons carry .al-danger (>=8)', R.dangerButtons.length >= 8);
   A('Clear places does not prompt when empty', R.noConfirmWhenEmpty === true);
   A('Clear places prompts when non-empty', R.confirmedWhenNonEmpty === true);
+  A('v0.92: Clear places & routes also wipes ways/journeys, not just settlements', !R.clearPlacesAlsoClearsRoutes.hadWaysBefore ||
+    (R.clearPlacesAlsoClearsRoutes.dialogAccepted && R.clearPlacesAlsoClearsRoutes.placesCleared && R.clearPlacesAlsoClearsRoutes.waysCleared && R.clearPlacesAlsoClearsRoutes.journeysCleared));
   A('dismissing the confirm preserves the place', R.placesSurviveDismiss === true);
   A('v0.90: selecting a place opens the editor in the map pop-up (not the sidebar)', R.editorInPopup === true && R.editorNotInInspector === true);
   A('v0.90: the place pop-up is positioned on-screen', R.popupOnScreen === true);

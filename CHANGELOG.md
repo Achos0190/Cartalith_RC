@@ -91,6 +91,32 @@ script-block-2 civ-UI change only), Playwright UI smoke **123 → 130**.
   handling only, never pixels); headless **923** unchanged — these are canvas-interaction/LOD-render
   fixes, invariant #3 in `CLAUDE.md` (cannot be verified headlessly).
 
+**Second same-day follow-up (owner reports)**, Playwright UI smoke **136 → 137**:
+- **"Roads and ways seem to nearly miss settlements when zooming in... clipping to settlements seem
+  slightly off"** — root cause: `_civSmoothPath()` (the shared Catmull-Rom smoothing chokepoint every
+  way builder routes through) called `Math.round()` on **every** point of the finished polyline,
+  including its own first/last point — up to half a grid cell of drift, imperceptible at normal zoom but,
+  amplified by Tiled LOD (one grid cell can span many screen pixels deep in), visibly leaves the road
+  short of the settlement pin (which is drawn at its exact, usually-fractional, coordinate). Fixed by
+  restoring full precision at just each run's own endpoints after rounding (interior points stay
+  rounded — their precision was never load-bearing). `_civHierarchicalNetwork()` (the auto-route/auto-
+  populate network builder) had a second, compounding source: its raw path points are downsampled
+  routing-grid cell centers, not the settlement's own coordinate — fixed by substituting the real place
+  coordinate in for the true first/last run of each edge (interior junction-to-junction runs are left
+  alone, since they legitimately meet at a shared junction, not a settlement, and must keep their
+  corridor-consolidated position so shared strokes still line up). `_civConnectPlaceToNetwork()`'s
+  "no network yet, spur to the nearest other settlement" fallback got the matching fix. Verified two
+  ways: a whole-world probe (auto-populate + auto-routes) shows the median way-endpoint-to-nearest-
+  settlement distance drop to exactly 0; a controlled probe (two real, fractional-coordinate settlements,
+  builders called directly) confirms both `_civHierarchicalNetwork` and `_civMstRoutes` now land exactly
+  on the input coordinate (0.0 grid cells, was up to ~1). Civ layer (block 2) only — headless **923**
+  unchanged, render battery **ALL IDENTICAL to v0.90** (way geometry isn't part of the render battery).
+- **"[Clear places] leaves the routes"** — `civWays`/`civJourneys` carry no settlement-id reference (just
+  polylines/plans), so deleting the settlements they connect doesn't error, it just leaves roads drawn to
+  nowhere. `civClearPlacesBtn` (renamed **"Clear places & routes"**) now clears `civWays`/`civJourneys`
+  too, mirroring `civClearRoadsBtn`'s own clear — one click removes settlements **and** their routes, the
+  same "destroys everything, confirm-gated when non-empty" pattern as the other two Clear buttons.
+
 ### v0.90 (2026-07-12)
 **Owner request: "editing a settlement should open a pop-up in the viewscreen with the settlement
 properties and information."** No engine changes; render battery **ALL IDENTICAL to v0.89**, headless

@@ -49,6 +49,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   Playwright-verified via real interaction (dispatched clicks, opacity pixel-diff), render battery
   still ALL IDENTICAL to v0.90, headless 923 unchanged (canvas-interaction/LOD-render fixes — CLAUDE.md
   invariant #3, not headlessly testable).
+  **Second same-day follow-up**, smoke **136 → 137**: (d) *"roads nearly miss settlements when zooming
+  in"* — `_civSmoothPath()` (every way builder's shared smoothing chokepoint) `Math.round()`ed its own
+  first/last point along with every interior point, up to half a grid cell of drift that Tiled LOD
+  amplifies into a visible gap between a road and the pin it's meant to reach. Fixed by restoring full
+  precision at each run's own endpoints post-round; `_civHierarchicalNetwork()` (the primary auto-
+  route/auto-populate builder) had a second, compounding source — its raw points are downsampled
+  routing-grid cell centers, not the settlement's real coordinate — fixed by substituting the true
+  place coordinate in for each edge's actual first/last run (interior junction-to-junction runs are
+  untouched, on purpose — they meet at a shared junction, not a settlement). Verified via a controlled
+  probe (two real settlements, fractional coordinates, builders called directly): endpoint distance
+  0.0 grid cells post-fix (was up to ~1). (e) *"[Clear places] leaves the routes"* — `civWays`/
+  `civJourneys` carry no settlement-id, so deleting settlements left orphaned roads. `civClearPlacesBtn`
+  (now labeled "Clear places & routes") clears both, mirroring `civClearRoadsBtn`. Civ layer (block 2)
+  only; headless 923 unchanged, render battery ALL IDENTICAL to v0.90 (way geometry isn't in the
+  battery).
 - **v0.90 — owner request: "editing a settlement should open a pop-up in the viewscreen with the
   settlement properties and information"** (no engine changes — script block 2 civ-UI only; render
   battery ALL IDENTICAL to v0.89, headless **923** unchanged, smoke **120 → 123**): the settlement/POI
