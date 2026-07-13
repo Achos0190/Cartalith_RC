@@ -93,21 +93,25 @@ Each addition generalizes a mechanism first proven on Roman/Islamic rather than 
 single profile — the recurring discipline of this architecture:
 
 - **`wallGates.scheme`** grew beyond `'organic'`/`'castrum'`: `'bab'` (Islamic — compass-quadrant
-  naming keyed to the wall centroid, Arabic proper nouns), `'cardinal'` (Chinese/Aztec/Greek/
-  Egyptian — plain North/South/East/West, keyed to the grid maximus axes), `'compass'`
-  (Viking/Celtic/Mesopotamian — the same plain compass naming as `'cardinal'` but keyed to the
-  wall centroid instead of a grid axis, for organic-growth profiles with no maximus to key off),
-  `'byzantine'` (a distinct string whose only job is to block the bastioned trace; no dedicated
-  naming pass). Every scheme string other than `'organic'` blocks the anachronistic gunpowder-era
-  trace italienne regardless of the fortified checkbox — the single anachronism guard added in
-  Phase 1 now does double, triple, quadruple duty unmodified.
+  naming keyed to the wall centroid, Arabic proper nouns), `'cardinal'` (originally Chinese/Aztec/
+  Greek/Egyptian — plain North/South/East/West, keyed to the grid maximus axes; every one of those
+  profiles, plus the later Colonial, has since converted to organic growth and reads gates through
+  `'compass'` instead, §3.6 below — `'cardinal'` remains implemented but is not selected by any
+  shipped profile today), `'compass'` (Viking/Celtic/Mesopotamian originally, joined by Chinese/
+  Greek/Egyptian/Colonial/Industrial post-conversion — the same plain compass naming as `'cardinal'`
+  but keyed to the wall centroid instead of a grid axis, for organic-growth profiles with no maximus
+  to key off), `'byzantine'` (a distinct string whose only job is to block the bastioned trace; no
+  dedicated naming pass). Every scheme string other than `'organic'` blocks the anachronistic
+  gunpowder-era trace italienne regardless of the fortified checkbox — the single anachronism guard
+  added in Phase 1 now does double, triple, quadruple duty unmodified.
 - **`householdMultiplier`** (default 1): generalizes the Roman insula-occupancy fix (M-ROM-7) into
   a per-profile multiplier applied to every built parcel, for traditions whose typical lot is
   bigger than medieval's baseline (fewer, bigger lots per hectare ⇒ fewer discrete households at
-  the same street length). Chinese, Aztec, Greek and Egyptian all converge on the identical value
-  **2.9**, empirically tuned once and then confirmed to transfer unchanged to every later profile
-  sharing the same grid+insula+courtyard-house combination — strong evidence the correction tracks
-  the *mechanism*, not the culture.
+  the same street length). Chinese, Aztec, Greek, Egyptian and (later) Colonial all converged on the
+  identical value **2.9** while they used grid+insula platting — evidence the correction tracked the
+  *insula lot-size mechanism*, not the culture, which cuts the other way too: §3.6 below records how
+  the value stopped applying, and was removed, the moment each of those five profiles converted to
+  organic growth on ordinary strip parcels.
 - **`noWalls`** (Aztec only): forces `walls=false` regardless of the UI checkbox, for a lake-city
   whose defence was the lake/causeways/removable bridges, not a curtain.
 - **`chinampas`** (Aztec only): opts into `buildChinampas()`, the one genuinely new infrastructure
@@ -122,13 +126,17 @@ Core/Culture split still holds after five additional profiles.
 
 ### 3.2 A third planning mode, and the fields added through the rest of the roster
 
-Profiles 9–18 (Maya → Post-Apocalyptic) shipped without needing any further schema growth — every
-one of them resolved to `'organic'` or `'grid'` plus a combination of fields already listed above
+Profiles 9–17 (Maya → Industrial) shipped without needing any further schema growth — every one
+of them resolved to `'organic'` or `'grid'` plus a combination of fields already listed above
 (`noWalls` picked up two more independently-reasoned cases: Frontier's no-fortification-tradition
-and Industrial's defence-obsolete-by-this-era; `factory`/`ruined` are the only genuinely new
-Industrial/Post-Apocalyptic-only flags, both read in exactly one function each, `tagFactory()` and
-`applyDecay()`). The 19th profile, **The Venus Project**, is the first addition since Roman's grid
-to need a structurally new *growth model* rather than a new flag:
+and Industrial's defence-obsolete-by-this-era; `factory` is the only genuinely new Industrial-only
+flag, read in exactly one function, `tagFactory()`). Post-Apocalyptic originally shipped as an
+18th profile reusing Industrial's stock plus a profile-only `ruined` flag gating `applyDecay()` —
+later generalized (docs/03 M-PA register) into a plain `opts.ruined` toggle available over any
+culture, once it became clear `applyDecay()` never actually read `profile` at all: collapse is a
+state a settlement can be found in, not a tradition with its own street plan, so it no longer has
+a dedicated profile entry. The 19th profile, **The Venus Project**, is the first addition since
+Roman's grid to need a structurally new *growth model* rather than a new flag:
 
 - **`planning:'radial'`**: a third mode alongside `'organic'`/`'grid'` — concentric ring streets
   connected by radial spokes to a central hub (`buildRadialStreets()`), rather than an accreted
@@ -287,7 +295,7 @@ runs four small "encroachment" sub-passes per epoch, each keyed to `rules.palimp
 - **`dissolveWardWalls` (M-PAL-2)** flags interior residential blocks with a founding enclosure (a
   Chang'an-style *lifang* ward wall), a fraction already dissolved by this snapshot (Skinner 1977's
   Tang-to-Song "medieval urban revolution," when Chinese ward systems broke down). This is a pure
-  data/render pass — like the Post-Apocalyptic profile's `applyDecay()` before it, it runs once
+  data/render pass — like the `ruined` toggle's `applyDecay()` (docs/03 M-PA), it runs once
   *after* buildings exist and never adds, removes, or moves a street or parcel vertex, so it cannot
   affect topology. It also could not be made safe by construction alone: a per-edge outward offset
   is fine at a convex block corner but proved unreliable at a reflex (concave) vertex — blocks
@@ -343,6 +351,104 @@ both missed before landing on 62%) — realization runs roughly 70–150% of tar
 site kinds at the same settings, a comparable spread to Venus's own ~47–112%, for the same reason: a
 non-organic plan interacts with a bisecting river or open coastline very differently than the
 organic pack does.
+
+### 3.6 Revising six profiles after user feedback: grid → organic, except Roman
+
+Direct user feedback asked a specific historical question — of every profile whose plan is a square
+raster, where in that culture's own development did it build *without* one, before or after the
+raster template was in use? — and then asked for exactly that non-raster version to replace the
+raster one, Roman excepted. Six profiles (Chinese, Aztec, Greek, Egyptian, Colonial, Industrial)
+converted `planning:'grid'`→`'organic'`; Roman is the one profile in the register that keeps its
+grid, unchanged and separately verified byte-identical (hash-compared across 4 seeds × 5 sites with
+`fortified:true`, 0 mismatches) since the conversion touches only the six profile objects, never the
+shared grid/organic growth mechanisms both still call. Full per-profile historical sourcing (Tang
+Chang'an→Song Kaifeng; Tenochtitlan's chinampa periphery; Athens vs. Hippodamian colonies; Amarna's
+Main City vs. its Workmen's Village; Zacatecas/Potosí vs. the 1573 Laws of the Indies; Manchester vs.
+Lowell, MA) lives in docs/03 §K/L/O/P/U/W, each profile's own revision scope note, and the README —
+this section records the mechanism-level, cross-profile consequences instead of repeating them:
+
+- **Three fields changed together, not just `planning`**: each profile also flipped
+  `parcelPattern:'insula'`→`'strip'` and `wallGates.scheme:'cardinal'`→`'compass'` in the same edit,
+  pre-empting two bugs rather than discovering them empirically afterward. `insulaLots()` subdivides
+  a block's axis-aligned bounding box (documented in its own comment as relying on grid blocks being
+  rectangles, the same finding Venus's §3.2 safety note already made) — feeding it an organically-
+  grown, non-rectangular block would silently overhang lots into the street. And the `'cardinal'`
+  gate scheme requires a gate within ~10 units of the wall centroid's own x or y axis (a true grid-
+  maximus alignment) — an organic-growth wall has no such axis, so every converted profile now reads
+  gates through `'compass'` (centroid-angle naming) instead, the same scheme Viking/Celtic/
+  Mesopotamian already used. `'cardinal'` remains implemented in the engine (unremoved, since Roman's
+  own `'castrum'` scheme and the anachronism guard are independent of it) but is no longer selected by
+  any shipped profile.
+- **`householdMultiplier` removed from five of the six, found empirically, not assumed**: Chinese,
+  Aztec, Greek, Egyptian and Colonial had shared the identical `householdMultiplier:2.9` (§3.1) while
+  they used grid+insula platting. Testing population realization immediately after the planning-mode
+  flip (before any other adjustment) showed the multiplier, still in place, over-realized 296–315% of
+  target — the value tracked *insula's* fewer/bigger lots, not the culture or the building grammar, so
+  leaving it on ordinary strip-platted lots massively overcounted households. Removed from all five;
+  confirmed this alone brought every one back to a healthy ~102–109%. This corrects §3.1's original
+  claim that the multiplier "transfers unchanged" across profiles — it doesn't; it tracks
+  `parcelPattern`, and is documented as removed in docs/03 M-CHN-4/M-AZT-4/M-GRK-3/M-EGY-3 and the
+  M-COL revision note.
+- **Industrial needed a second, independent fix**: Industrial never had `householdMultiplier` — its
+  population instead ran through the hardcoded 4× multi-storey-tenement correction in `generate()`'s
+  pop formula (`buildingGrammar==='domus-insula'` ⇒ every `'insula block'`-kind building counts 4
+  households), original to Roman (M-ROM-7) and, until this revision, **ungated on `parcelPattern`
+  entirely**. Left as-is after Industrial's conversion to strip parcels, it over-realized 412% —
+  strip platting produces far more, smaller parcels per hectare than insula did, and the flat 4×
+  multiplier was never designed to apply per-parcel at that density. Fixed by adding
+  `profile.parcelPattern==='insula'` to the formula's `insulaParcels` gate, bringing Industrial to
+  ~109% through ordinary strip density instead (the 4× correction no longer fires for it at all).
+  Verified this added condition changes nothing for Roman — the only other `domus-insula` profile,
+  still on `'insula'` parcels — via the same byte-identical hash comparison noted above.
+- **Safety audit re-run across the conversion**: the standing profile-agnostic wall-crossing/wet-
+  building/wet-parcel audit (§2) ran across the six converted profiles × 5 site kinds × 2 fortified
+  states × 4 seeds (240 combinations) after both population fixes — 0 failures on all three checks,
+  confirming the parcel-pattern change closed the `insulaLots()` risk above rather than merely
+  avoiding it by luck.
+
+### 3.7 Signature games/spectacle buildings: a population-gated monument array, all 19 profiles
+
+Direct user feedback, given alongside §3.6's grid-to-organic conversion: every culture should get
+its own "signature game building" — the Colosseum/Circus-Maximus pairing named as the motivating
+example — not just the six profiles touched above. `buildGames()` (docs/03 M-GAMES register) adds
+`model.games`, an array (usually one entry, sometimes two, sometimes empty) alongside the existing
+`model.civic`/`model.markets`, populated per culture from a new `GAMES_SPEC` table rather than by
+teaching the engine a 17th shape:
+
+- **Two geometry primitives cover all sixteen non-empty entries**: `ellipsePoly` (the roundhouse/
+  dome regular-polygon-for-a-circle technique, M-CEL-2/M-VEN-2, with independent x/y radii for an
+  elongated track) and `orientedRect` (a rectangle closure identical in spirit to `buildCivic`'s own
+  local `rect()`, just parameterized by an explicit direction vector instead of a plaza edge). No
+  bespoke per-culture shape code — an "I"-shaped Mesoamerican ballcourt and a curved-end hippodrome
+  are both simplified to an ellipse, the same "one honest schematic stand-in, reused" pattern this
+  register already uses for the temple rite standing in for a ziggurat/pagoda/pyramid.
+- **Collision safety by the same discipline as the Aztec chinampas/Venus waterway**: a candidate is
+  centred at a bearing/radius beyond the town's own realized extent (the farthest of any parcel,
+  building or wall-ring vertex from the market anchor, whichever reaches furthest), then rejected
+  and retried at another bearing or radius if it fails a map-bounds check, a water check, a live-
+  street-graph crossing check (`edgesNear`+`segInt`, the same pair `grow()` itself uses), or overlaps
+  a monument already placed in the same call (Roman's own amphitheatre-vs-circus case). An empty
+  result — no safe site found in the search budget — is accepted as honest, exactly as `buildCivic`
+  already returns `null` under its own population gate; nothing is ever forced in.
+- **Two profiles honestly get nothing**: Mesopotamian (wrestling/boxing attested only in temple/
+  palace courtyards, no purpose-built venue — the same "documented no-fit, not a gap" treatment
+  already given to Inca's `markets:false`) and Venus (a modern hypothetical with no historical
+  building to cite; Fresco's own designs distribute recreation through the rings rather than
+  concentrating it in one monument, which is itself the honest answer, not an omission).
+- **Palimpsest inherits rather than invents**: resolved to Islamic's own `GAMES_SPEC` entry (the
+  maidan) at build time, the same "inherits whichever mature identity it actually builds" reasoning
+  already applied to its `buildingGrammar`/`wallGates.scheme` (§3.5) — a real per-profile lookup
+  keyed on `profile.id==='palimpsest'`, not a copy-pasted table row.
+- **Roman is the one profile with two monuments, not one** — both the amphitheatre and the circus
+  are independently well-attested, and the circus carries a higher population gate (6000 vs the
+  otherwise-universal 3000) as the rarer, grander undertaking of the pair. This is also the register's
+  live test of the mutual-overlap check above: with two searches run back to back for the same
+  culture, the second (circus) must route around the first (amphitheatre) rather than risk landing
+  on top of it.
+- **Not hashed, by the same reasoning as `civic`/`markets`**: `hashModel()` never touches
+  `model.games`, so this entire register is structurally incapable of affecting the cross-version
+  neutrality every other addition in this project is held to — confirmed by the pre-existing full
+  suite passing unchanged before this feature's own dedicated tests were added on top.
 
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 

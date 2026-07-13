@@ -53,6 +53,7 @@ svg.panning{cursor:grabbing}
 .plaza{fill:#e9ddbd;stroke:#a8916a;stroke-width:.5}
 .market2{fill:#e6d9b6;stroke:#a8916a;stroke-width:.6}
 .townhall{fill:#9a8f6a;stroke:#3a2e18;stroke-width:.6}
+.games{fill:#c2b280;stroke:#5a4a2e;stroke-width:.7}
 .belfry{fill:#6f5a86;stroke:#463758;stroke-width:.5}
 .chain{fill:none;stroke:#4a3a22;stroke-width:1;stroke-dasharray:1.5 2.5}
 .chaintower{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.5}
@@ -146,20 +147,19 @@ svg.panning{cursor:grabbing}
       <option value="roman">Roman (planned colonia)</option>
       <option value="islamic">Islamic (traditional medina)</option>
       <option value="byzantine">Byzantine</option>
-      <option value="chinese">Chinese Imperial (walled capital)</option>
+      <option value="chinese">Chinese Imperial (Song commercial city)</option>
       <option value="aztec">Aztec (lake-city)</option>
       <option value="viking">Viking</option>
       <option value="celtic">Celtic (Iron Age)</option>
-      <option value="greek">Ancient Greek (Hippodamian)</option>
-      <option value="egyptian">Ancient Egyptian</option>
+      <option value="greek">Ancient Greek (Archaic/Classical polis)</option>
+      <option value="egyptian">Ancient Egyptian (Amarna Main City)</option>
       <option value="mesopotamian">Mesopotamian</option>
       <option value="mayan">Maya (Classic Period)</option>
       <option value="inca">Inca (Andean)</option>
       <option value="japanese">Japanese Castle Town</option>
-      <option value="colonial">Colonial (Laws of the Indies)</option>
+      <option value="colonial">Colonial (mining boomtown)</option>
       <option value="frontier">Frontier (Old West)</option>
-      <option value="industrial">Industrial (mill town)</option>
-      <option value="postapoc">Post-Apocalyptic</option>
+      <option value="industrial">Industrial (Manchester-style)</option>
       <option value="venus">The Venus Project (circular city)</option>
       <option value="palimpsest">Levantine Palimpsest (grid-to-souk)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
@@ -194,6 +194,7 @@ svg.panning{cursor:grabbing}
     <div class="row"><label style="flex:0 0 auto"><input id="walls" type="checkbox" checked> city wall</label>
       <label style="margin-left:10px;flex:0 0 auto"><input id="fortified" type="checkbox"> star fort</label></div>
     <div class="row"><label style="flex:0 0 auto" title="Prototype (docs/08): excludes parcels whose ground is too steep and/or too flood-prone from building, leaving them vacant. Off by default — purely additive, does not change any existing town."><input id="terrainAware" type="checkbox"> terrain-aware placement (experimental)</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="A state any settlement can be in, not a civilization of its own (M-PA register): flags a seeded ~35-45% of the already-built stock as ruined and abandoned, on top of whichever culture is selected above."><input id="ruined" type="checkbox"> ruined (post-apocalyptic)</label></div>
     <div id="status"></div>
   </div>
   <div class="box" id="rulesBox">
@@ -290,17 +291,17 @@ const CULTURE_PROFILES={
     defaultFaith:'orthodox',defaultCivic:'auto',markets:true,
     wallGates:{scheme:'byzantine'},orientation:'terrain',civicAnchorLabel:'mese',
     prov:'Organic growth as the medieval pack (the Roman-inherited street plan of an existing city continues to accrete rather than being re-planned), but the rite is the mature Middle Byzantine cross-in-square church — a domed naos on four columns, narthex and apsed bema (M-BYZ-1) — with the civic hall reusing the Roman-derived basilica; never a gunpowder-era bastioned trace (the Byzantine millennium ends, 1453, at the very dawn of that revolution).'},
-  chinese:{id:'chinese',name:'Chinese Imperial (walled capital)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'basilica',markets:false,
-    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'palace',householdMultiplier:2.9,
-    prov:'The Kaogongji tradition (Rites of Zhou, Warring States era): a square/rectangular walled capital on a strict cardinal grid, the palace at the geometric centre facing due south, gates on each side — reuses the grid-growth machinery built for the Roman profile (docs/07 §2) and the universal courtyard-house grammar built for the Islamic profile (the siheyuan is the same "four ranges around a private court" pattern, at every social scale). Civic/temple geometry reuses the existing basilica/temple forms as a schematic stand-in for the palace/temple complex — a distinct pagoda/palace geometry is future work (M-CHN register).'},
+  chinese:{id:'chinese',name:'Chinese Imperial (Song-dynasty commercial city)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'basilica',markets:true,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'palace',
+    prov:'Tang Chang\'an was the Kaogongji ideal (Rites of Zhou) made real — a square/rectangular walled capital on a strict cardinal grid, the palace at the geometric centre facing due south, under a walled ward (li-fang) curfew system. That system broke down through the Tang-to-Song transition: Song cities like Kaifeng shed the walled-ward grid entirely as commerce spilled into the street, the one-official-market restriction was relaxed, and multi-storey houses stood directly on the street rather than hidden inside gated wards — the "medieval urban revolution" (Skinner 1977, the same source already load-bearing for the Levantine Palimpsest profile\'s M-PAL-2). This profile now models that organic, post-transition Song commercial city (M-CHN-1) rather than the earlier planned ideal, reusing the medieval pack\'s own organic growth mechanics and the universal courtyard-house grammar built for the Islamic profile unchanged (the siheyuan is the same "four ranges around a private court" pattern, at every social scale, M-CHN-2); gates read by plain compass quadrant rather than a maximus axis a Song city no longer has (M-CHN-3); civic/temple geometry still reuses the existing basilica/temple forms as a schematic stand-in for the palace/temple complex — a distinct pagoda/palace geometry is future work.'},
   aztec:{id:'aztec',name:'Aztec (lake-city, Tenochtitlan-style)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'temple',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'sacred precinct',
-    householdMultiplier:2.9,chinampas:true,noWalls:true,
-    prov:'A lake-city on the Tenochtitlan model: a cardinal grid of causeways (this engine\'s single reused street network stands in for the historical dual street-and-canal circulation — a genuine simplification, noted honestly rather than modelled as fully distinct infrastructure, docs/07 §7) meeting at a central sacred precinct; and, uniquely to this profile, chinampas — narrow raised-bed garden strips reclaimed from the shallows along the town\'s own shoreline, canals between them (M-AZT-2). No walls in the European sense (the lake itself, causeways and removable bridges were the defence); no separate civic hall (temple-state governance was seated in the sacred precinct itself).'},
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'sacred precinct',
+    chinampas:true,noWalls:true,
+    prov:'A lake-city on the Tenochtitlan model: the sacred precinct and four main causeways had a real cardinal order, but the residential calpulli districts built out over the chinampas grew organically across roughly two centuries of land reclamation (1325-1521) as new raised-bed plots were dredged from the shallows, linked by formal streets, informal footpaths and waterways rather than a uniform module (M-AZT-1) — the strict grid popularly associated with the site is largely the post-conquest Spanish rebuild (Mexico City), not the Mexica city itself. This profile now models that organic residential growth (reusing the medieval pack\'s own organic mechanics; this engine\'s single reused street network still stands in for the historical dual street-and-canal circulation, a genuine simplification noted honestly rather than modelled as fully distinct infrastructure, docs/07 §7), while keeping chinampas — narrow raised-bed garden strips reclaimed from the shallows along the town\'s own shoreline, canals between them (M-AZT-2). No walls in the European sense (the lake itself, causeways and removable bridges were the defence); no separate civic hall (temple-state governance was seated in the sacred precinct itself).'},
   viking:{id:'viking',name:'Viking (Hedeby/Birka-style)',
     planning:'organic',parcelPattern:'strip',buildingGrammar:'longhouse',
     defaultFaith:'shrine',defaultCivic:'none',markets:true,
@@ -311,18 +312,16 @@ const CULTURE_PROFILES={
     defaultFaith:'shrine',defaultCivic:'none',markets:true,
     wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'assembly ground',
     prov:'An Iron Age oppidum: circular wattle-and-daub roundhouses under conical thatched roofs (M-CEL-2), replacing every rectilinear building grammar; organized in quarters for dwellings, corrals and storehouses behind a murus gallicus-style rampart (this engine\'s reused curtain-wall machinery stands in for the timber-laced construction, a documented simplification); no monumental civic hall; never a bastioned trace.'},
-  greek:{id:'greek',name:'Ancient Greek (Hippodamian grid)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+  greek:{id:'greek',name:'Ancient Greek (Archaic/Classical polis)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'temple',defaultCivic:'loggia',markets:true,
-    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'agora',
-    householdMultiplier:2.9,
-    prov:'A Hippodamian-plan polis (Miletus, Priene): a regular orthogonal grid of narrow residential strips crossed by a wider east-west/north-south pair, reusing the grid-growth machinery proven Rome-independent by the Chinese/Aztec profiles (M-GRK-1); housing is the Mediterranean courtyard house shared with Rome/Islam, and the same larger-lot household-size correction as Chinese/Aztec applies (M-GRK-3, identical insula+courtyard-house mechanism); the agora combines market and civic life, so the civic hall is modelled as a colonnaded stoa (this engine\'s existing loggia geometry) rather than the anachronistic Roman basilica (M-GRK-2); a classical temple (already the engine\'s default rite) anchors the acropolis; never a bastioned trace.'},
-  egyptian:{id:'egyptian',name:'Ancient Egyptian (planned town, Amarna-style)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'agora',
+    prov:'Most Greek poleis were never gridded at all: Athens itself, the paradigm case, grew organically for centuries into narrow, winding streets, explicitly contrasted by ancient and modern writers with Hippodamus of Miletus\'s regular grid — a Classical-era (5th c. BC) innovation applied to NEW colonial foundations (Miletus rebuilt after 479 BC, Priene, Rhodes) rather than retrofitted onto existing cities (M-GRK-1). This profile now models that older, far more common organic polis instead of a new colonial foundation, reusing the medieval pack\'s own organic growth mechanics (the grid mechanism itself remains proven Rome-independent via the Chinese/Aztec/Egyptian/Colonial profiles); housing is the Mediterranean courtyard house shared with Rome/Islam, on ordinary strip-platted lots now that this profile is organic — the larger-lot household correction Chinese/Aztec/Egyptian/Colonial once needed for grid/insula lots no longer applies here (M-GRK-3), the same as every other courtyard-house organic profile (Islamic/Byzantine/Mesopotamian); the agora combines market and civic life, so the civic hall is modelled as a colonnaded stoa (this engine\'s existing loggia geometry) rather than the anachronistic Roman basilica (M-GRK-2); a classical temple (already the engine\'s default rite) anchors the acropolis; never a bastioned trace.'},
+  egyptian:{id:'egyptian',name:'Ancient Egyptian (Amarna\'s Main City)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'temple',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'temple precinct',
-    householdMultiplier:2.9,
-    prov:'A planned New Kingdom worker/town settlement (Amarna\'s workers\' village, Deir el-Medina): a small orthogonal grid of standardized terraced courtyard housing behind a single-entrance enclosure wall, reusing the grid-growth and courtyard-house machinery (M-EGY-1) and the same larger-lot household-size correction as Chinese/Aztec/Greek (M-EGY-3, identical insula+courtyard-house mechanism); the temple rite stands in for pylon-form Egyptian temple architecture, the same documented simplification already used for the Chinese pagoda and Aztec pyramid substitutions (M-EGY-2); pharaonic temple-state governance, so no separate civic hall and no independent markets (state/temple redistribution, matching the Roman/Aztec precedent); never a bastioned trace.'},
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'temple precinct',
+    prov:'At Amarna itself, under the same pharaoh, in the same short-lived (~15-year) capital: the state-built Workmen\'s Village was a rigid grid of 72 houses on 5 parallel streets behind a single-entrance enclosure wall — but the much larger Main City next door, where most of the population (elite and commoner alike) actually lived, grew with "a surprising lack of direction," organic and unplanned by comparison (M-EGY-1). This profile now models that Main City instead of the small planned enclave, reusing the medieval pack\'s own organic growth mechanics — the larger-lot household correction this profile once needed for grid/insula lots no longer applies now that housing sits on ordinary strip-platted lots (M-EGY-3), the same as every other courtyard-house organic profile (Islamic/Byzantine/Mesopotamian); the temple rite stands in for pylon-form Egyptian temple architecture, the same documented simplification already used for the Chinese pagoda and Aztec pyramid substitutions (M-EGY-2); pharaonic temple-state governance, so no separate civic hall and no independent markets (state/temple redistribution, matching the Roman/Aztec precedent); never a bastioned trace.'},
   mesopotamian:{id:'mesopotamian',name:'Mesopotamian (Sumerian/Babylonian city)',
     planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'temple',defaultCivic:'none',markets:false,
@@ -343,30 +342,23 @@ const CULTURE_PROFILES={
     defaultFaith:'temple',defaultCivic:'keep',markets:true,
     wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'castle',
     prov:'An Edo-period jokamachi (castle town): deliberately non-gridded, winding streets radiating from the daimyo\'s castle — a defensive irregularity (masugata bent-gate approaches), not an accretive accident, but reusing the same organic growth/T-junction machinery as the medieval pack produces a comparably irregular result (M-JPN-1); merchant/artisan machiya townhouses were narrow-frontage, deep-lot row buildings strikingly similar in plan to the medieval burgage plot — a genuine cross-cultural parallel, so this profile reuses the burgage grammar directly rather than inventing a new one (M-JPN-2); the temple rite stands in for the tera-machi Buddhist temple district (the same documented pagoda-simplification pattern already used for the Chinese profile); a new civic style, the castle keep (tenshu) — a tiered stone-and-timber donjon — reuses the existing basilica/townhall render path (hall + inset "apse" roofline + corner turret markers) rather than new tiered-roof geometry (M-JPN-3); chonin-chi merchant quarters keep the market economy; compass-named gates for the moat/earthen-wall circuit; never a bastioned trace (Japanese castle fortification followed an independent, non-trace-italienne design lineage).'},
-  colonial:{id:'colonial',name:'Colonial (Laws of the Indies grid)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+  colonial:{id:'colonial',name:'Colonial (Spanish American mining boomtown)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'church',defaultCivic:'townhall',markets:true,
-    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'plaza mayor',
-    householdMultiplier:2.9,
-    prov:'A Spanish colonial foundation under the 1573 Laws of the Indies ordinance: a symmetrical grid centred on the plaza mayor, with the church facing the plaza and a cabildo (town council) reusing the existing town-hall geometry, per the ordinance\'s own provisions for public/private building lots (M-COL-1) — a fifth independent grid tradition reusing the same grid-growth machinery as Roman/Chinese/Aztec/Greek/Egyptian; housing is the Mediterranean-derived colonial patio house, the same courtyard-house grammar as Roman/Islamic/Greek (M-COL-2); the church rite (not temple) marks this as the first grid-planning profile built under Christian rather than classical/temple-state auspices; cardinal-named gates for an optional curtain (some colonial ports were walled against raiders — Cartagena, Havana — others were not, so this stays a normal toggle like the base pack, not forced either way).'},
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'plaza mayor',
+    prov:'Philip II\'s 1573 Laws of the Indies mandated a symmetrical grid centred on the plaza mayor — the most complete and widely disseminated 16th-century town-planning ordinance — but many Spanish American settlements never followed it: mining boomtowns like Zacatecas (founded 1546, decades before the ordinance) and Potosi grew spontaneously around a strike site, following ravine and hillside topography rather than a plaza-centred grid, and often stayed that way even after 1573, since roughly 200 towns had already been founded (with varying degrees of order) in the six decades before the Laws were codified (M-COL-1). This profile now models that organic mining-town growth instead of a new ordinance-planned civil foundation, reusing the medieval pack\'s own organic growth mechanics (the grid mechanism itself remains proven general-purpose via Roman/Chinese/Aztec/Greek/Egyptian); housing is the Mediterranean-derived colonial patio house, the same courtyard-house grammar as Roman/Islamic/Greek (M-COL-2); the church rite (not temple) marks this as the first organic profile built under Christian rather than classical/temple-state or Mesoamerican auspices; compass-named gates for an optional curtain (some colonial ports were walled against raiders — Cartagena, Havana — others were not, so this stays a normal toggle like the base pack, not forced either way).'},
   frontier:{id:'frontier',name:'Frontier (American Old West boomtown)',
     planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
     defaultFaith:'church',defaultCivic:'none',markets:false,
     wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'main street',
     noWalls:true,
     prov:'An American frontier boomtown (mining/cattle/rail): rapid, unplanned growth following the trail/rail line and terrain rather than a rigid grid (M-FRO-1); narrow-frontage commercial buildings lining the main street reuse the burgage grammar — the same cross-cultural parallel already established for the Japanese machiya — standing in for the iconic false-front wooden storefront (the tall false facade itself is an unmodelled ornamental detail, a documented simplification, M-FRO-2); no formal market-square institution (commerce ran through the general store, not a chartered market) and no monumental civic hall (formal town government typically lagged years behind the boom); uniquely among this register\'s "no-wall" profiles, this is neither a defensive-alternative case like Aztec\'s lake nor a genuine regional-variation toggle like Maya\'s — frontier boomtowns simply never built fortifications at all, forced off regardless of the checkbox (M-FRO-3); never a bastioned trace.'},
-  industrial:{id:'industrial',name:'Industrial (19th-century mill town)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
+  industrial:{id:'industrial',name:'Industrial (Manchester-style mill town)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'domus-insula',
     defaultFaith:'church',defaultCivic:'townhall',markets:true,
-    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'town square',
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'town square',
     noWalls:true,factory:true,
-    prov:'A 19th-century industrial mill town: a planned grid of dense worker housing, reusing the Roman domus-insula grammar unchanged — its multi-storey insula-block/domus split maps directly onto the historical tenement/mill-owner-villa divide (M-IND-1), so the existing M-ROM-7 household-size correction for insula-block parcels applies automatically with no separate multiplier needed; the town\'s largest warehouse/insula-class building is re-tagged as its factory/mill anchor with a chimney marker (M-IND-2), reusing that building\'s own already-sited footprint rather than new freestanding geometry, so this can never introduce the kind of overlap this register\'s standing audit checks against; no walls — the fortified-city era had largely ended by the industrial revolution (many surviving medieval walls were being demolished in this period, e.g. Vienna\'s Ringstrasse), forced off regardless of the checkbox; never a bastioned trace.'},
-  postapoc:{id:'postapoc',name:'Post-Apocalyptic (collapsed settlement)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
-    defaultFaith:'none',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'compass'},orientation:'cardinal',civicAnchorLabel:'town square',
-    ruined:true,
-    prov:'A collapsed modern/industrial settlement — the real-world referent is shrinking-city and ghost-town depopulation research, not fiction: reuses the Industrial profile\'s planned grid and domus-insula housing stock, since that is the city type imagined to have fallen (M-PA-2); a seeded ~35-45% of the already-built parcel stock is flagged ruined post-generation — abandoned and excluded from the population head-count, but geometrically untouched (M-PA-1). This is a deliberate, load-bearing design choice: an actual physical-rubble model (a breached wall, a road blocked mid-span) would be exactly the "impossible intersection" this project\'s standing audit checks against everywhere else, so full ruin modelling is explicitly deferred rather than implemented, and this profile\'s low population realization is intentional, not a bug. No faith, no civic hall, no markets (organized institutions assumed collapsed with the population); compass-named gates for whatever curtain still stands; never a bastioned trace (a gunpowder-era fortification style would be anachronistically archaic for a fallen modern city — the same anachronism guard applied in the opposite temporal direction from every earlier profile).'},
+    prov:'Grid planning was one choice among several for 19th-century industrialization, not a universal feature of it: Manchester, the archetypal industrial city, grew almost entirely without formal planning — chaotic, market-driven expansion around mills and canals, its population exploding from ~100,000 (1800) to over 500,000 (1851) with no governing system to plat it — in sharp contrast to deliberately platted American company towns like Lowell, MA (M-IND-3). This profile now models that more common organic-growth pattern instead of a planned company-town grid, reusing the Roman domus-insula grammar unchanged — its multi-storey insula-kind/domus split maps directly onto the historical tenement/mill-owner-villa divide (M-IND-1), so the existing M-ROM-7 household-size correction for insula-kind buildings still applies automatically with no separate multiplier needed; the town\'s largest warehouse/insula-class building is re-tagged as its factory/mill anchor with a chimney marker (M-IND-2), reusing that building\'s own already-sited footprint rather than new freestanding geometry, so this can never introduce the kind of overlap this register\'s standing audit checks against; no walls — the fortified-city era had largely ended by the industrial revolution (many surviving medieval walls were being demolished in this period, e.g. Vienna\'s Ringstrasse), forced off regardless of the checkbox; never a bastioned trace.'},
   venus:{id:'venus',name:'The Venus Project (resource-based circular city)',
     planning:'radial',parcelPattern:'strip',buildingGrammar:'venus-mixed',
     defaultFaith:'none',defaultCivic:'dome',markets:true,
@@ -925,19 +917,22 @@ function buildPrimaries(seed,site,anchors,g){
   return routes;}
 
 /* ---------------- grid streets: planned colonia (M-ROM-1) ----------------
- * A planned tradition (Roman colonia; noted for a later phase, Aztec canal cities) does not
- * grow organically at all — it lays a regular module in one act. Two wider "maximus" streets
- * cross at the civic anchor (forum); a regular minor grid at ~50-60 m spacing fills the rest,
- * clipped to the buildable land (never drawn into water). addStreet's snap/split-at-crossing
- * planarity invariant (core engine, unchanged) turns this into proper 4-way city blocks exactly
- * as it does for the organic pack — only the LAYOUT RULE producing the candidate segments
- * differs, per the Core/Culture split (docs/07 §2). */
+ * A planned tradition does not grow organically at all — it lays a regular module in one act.
+ * Two wider "maximus" streets cross at the civic anchor (forum); a regular minor grid at ~50-60 m
+ * spacing fills the rest, clipped to the buildable land (never drawn into water). addStreet's
+ * snap/split-at-crossing planarity invariant (core engine, unchanged) turns this into proper
+ * 4-way city blocks exactly as it does for the organic pack — only the LAYOUT RULE producing the
+ * candidate segments differs, per the Core/Culture split (docs/07 §2). Roman is the only profile
+ * that still calls this today: Chinese, Aztec, Greek, Egyptian, Colonial and Industrial were all
+ * originally modelled this way too, then converted to organic growth per docs/07 §3.6 — the
+ * mechanism itself remains general-purpose (any future planned-grid profile can reuse it
+ * unchanged), it simply has one caller at present rather than seven. */
 function buildGridStreets(seed,site,anchors,g,opts){
   const r=stream(seed,'gridstreets');
   const F=anchors.market; // the civic anchor; labelled 'forum' for this profile (civicAnchorLabel)
-  // minor grid spacing (M-ROM-1 default ~50-60 m); a profile can override it for a finer, denser
-  // secondary grid within the same broad avenue framework (e.g. Chinese hutong/alley lanes are
-  // materially narrower-spaced than a Roman insula grid — M-CHN-4)
+  // minor grid spacing (M-ROM-1 default ~50-60 m); `opts.gridSpacing` lets a profile override it
+  // for a finer or coarser secondary grid within the same broad avenue framework — unused by
+  // Roman itself (the only current caller) but left general-purpose for a future grid profile
   const sp=opts.gridSpacing||[50,60];
   const spacing=r.range(sp[0],sp[1]);
   const half=Math.max(140,Math.min(480,opts.maxRF*0.62)); // minor grid's built extent
@@ -1312,6 +1307,116 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
     out.hall=rect(base,w,d);out.name=pop>=10000?'Town hall':'Guildhall';
     out.belfry={x:base.x+perp.x*(w*0.32),y:base.y+perp.y*(w*0.32)};
     out.prov='Town hall/guildhall on the market square, with a belfry — the communal movement (late 12th–13th c.) made civic self-government a building; a rank marker (M-ADMIN; docs/05 §2.3).';
+  }
+  return out;}
+
+/* Signature games/spectacle building(s) (docs/03 M-GAMES register; docs/07 §3.7): one
+ * population-gated monument per culture (Roman gets its own defining pair), reusing only
+ * existing geometry techniques — the roundhouse/dome regular-polygon-for-an-ellipse trick
+ * (M-CEL-2/M-VEN-2) and an oriented-rectangle closure identical in spirit to buildCivic's own
+ * local rect() — rather than inventing new per-culture shapes. Collision safety follows the
+ * Aztec-chinampa/Venus-waterway precedent: every candidate is generated, range- and
+ * water/street-checked, and a doomed candidate is simply retried at another bearing/radius
+ * rather than forced in; an empty result is an honest, valid outcome (the same discipline
+ * buildCivic already uses when its own gate isn't met). Sized by fixed per-culture ranges, not
+ * scaled to population, matching buildCivic's own hall dimensions. */
+const GAMES_SPEC={
+  medieval:[{kind:'tiltyard',name:'Tiltyard',shape:'rect',w:[60,75],d:[22,28],minPop:3000,
+    prov:'Tiltyard: a fenced tournament list for jousting, attested at Hampton Court, Whitehall and Kenilworth (M-GAMES-1).'}],
+  roman:[{kind:'amphitheatre',name:'Amphitheatre',shape:'ellipse',rx:[34,42],ry:[26,32],minPop:3000,
+    prov:'Amphitheatre: an elliptical arena for gladiatorial games, on the model of the Colosseum, ~189x156 m (M-GAMES-2).'},
+   {kind:'circus',name:'Circus',shape:'ellipse',rx:[85,105],ry:[15,20],minPop:6000,
+    prov:'Circus: an elongated chariot-racing track, on the model of the Circus Maximus, ~621x118 m (M-GAMES-2) — modelled alongside the amphitheatre rather than instead of it, since both are independently well-attested Roman monument types (a higher population gate than the amphitheatre\'s: a circus was the rarer, grander undertaking of the two).'}],
+  islamic:[{kind:'maidan',name:'Maidan',shape:'rect',w:[70,90],d:[20,26],minPop:3000,
+    prov:'Maidan/maydan: a rectangular public square doubling as a polo ground, on the model of Isfahan\'s Naqsh-e Jahan (M-GAMES-3).'}],
+  byzantine:[{kind:'hippodrome',name:'Hippodrome',shape:'ellipse',rx:[70,85],ry:[20,26],minPop:3000,
+    prov:'Hippodrome: an elongated chariot-racing track, on the model of the Hippodrome of Constantinople, ~450x130 m (M-GAMES-4) — the real sphendone is a curved end on an otherwise straight track, simplified here to a full ellipse.'}],
+  chinese:[{kind:'cuju',name:'Cuju ground',shape:'rect',w:[45,60],d:[24,30],minPop:3000,
+    prov:'Cuju/polo ground: a marked field for cuju (an early form of football) and imperial polo (jiju), attested in Song-era art (M-GAMES-5) — a marked-out field rather than a monumental structure, an honest lower-confidence entry.'}],
+  aztec:[{kind:'tlachtli',name:'Ballcourt',shape:'ellipse',rx:[26,34],ry:[8,11],minPop:3000,
+    prov:'Tlachtli: the Mesoamerican ballgame court, sited in the sacred precinct (M-GAMES-6) — the real court is a distinctive "I" shape flanked by sloping walls, simplified here to an elongated ellipse, the same schematic-stand-in honesty pattern already used for the temple/pyramid substitution.'}],
+  viking:[{kind:'knattleikr',name:'Knattleikr field',shape:'ellipse',rx:[20,26],ry:[16,20],minPop:3000,
+    prov:'Knattleikr: a ball game played at assembly (þing) sites; no purpose-built structure is archaeologically attested, only an open field (M-GAMES-7) — the weakest-evidence entry in this register, modelled as a plain field rather than a monument, flagged low confidence rather than silently invented.'}],
+  celtic:[{kind:'tailteann',name:'Tailteann assembly ground',shape:'ellipse',rx:[22,28],ry:[19,24],minPop:3000,
+    prov:'The Tailteann Games (Óenach Tailteann), an ancient Gaelic athletic/funeral-games festival held at Teltown, Co. Meath, with a real circular embanked assembly ground (~85 m) attested archaeologically (M-GAMES-8) — modelled as an earthwork ground, not a masonry building.'}],
+  greek:[{kind:'stadion',name:'Stadium',shape:'rect',w:[85,100],d:[13,16],minPop:3000,
+    prov:'Stadion: a footrace track, on the model of the stadium at Olympia, ~192x28.5 m (M-GAMES-9).'}],
+  egyptian:[{kind:'hebsed',name:'Heb-Sed court',shape:'rect',w:[55,65],d:[10,13],minPop:3000,
+    prov:'Heb-Sed court: a long narrow ceremonial-running court flanked by dummy chapels, on the model of Djoser\'s Step Pyramid complex at Saqqara, ~95x18 m (M-GAMES-10) — Amarna\'s own Gem-pa-Aten rebuilt this form, though its remains are fragmentary; the type itself is solid.'}],
+  mesopotamian:[],
+  mayan:[{kind:'pitz',name:'Ballcourt',shape:'ellipse',rx:[20,28],ry:[7,9],minPop:3000,
+    prov:'Pok-ta-pok/pitz: the Mesoamerican ballgame court, independently attested at Maya sites (M-GAMES-11) — sized toward the typical range rather than the exceptional 168x70 m Great Ballcourt at Chichen Itza, itself simplified to an elongated ellipse (see Aztec, M-GAMES-6).'}],
+  inca:[{kind:'ushnu',name:'Ushnu platform',shape:'platform',w:[14,18],d:[10,13],minPop:3000,
+    prov:'Ushnu: a stepped ceremonial platform in the Huacaypata plaza used for state ritual — NOT a competitive-games building (no true sport architecture is attested for the Inca); included honestly as the closest real analogue, modelled distinctly smaller and plainer than every arena elsewhere in this register (M-GAMES-12).'}],
+  japanese:[{kind:'dohyo',name:'Sumo grounds',shape:'ellipse',rx:[24,30],ry:[20,25],minPop:3000,
+    prov:'Sumo grounds: the dohyō ring (a mere ~4.6 m circle in reality) sits at the centre of a much larger Edo-period kanjin-zumo tournament enclosure — modelled at the enclosure\'s scale, not the ring\'s own tiny footprint, for visibility (M-GAMES-13).'}],
+  colonial:[{kind:'plazadetoros',name:'Bullring',shape:'ellipse',rx:[24,30],ry:[20,25],minPop:3000,
+    prov:'Plaza de toros: bullfighting is a well-attested colonial tradition, but purpose-built circular rings (Lima\'s Acho, 1766; Mexico City, 1880) postdate this profile\'s 16th-century mining-boomtown setting by two centuries — early colonial bullfights used the plaza mayor itself. Modelled here as a flagged anachronism rather than silently presented as period-correct (M-GAMES-14).'}],
+  frontier:[{kind:'racetrack',name:'Racetrack',shape:'ellipse',rx:[55,70],ry:[16,20],minPop:3000,
+    prov:'Horse-racing track: frontier fairgrounds hosted informal racing from the 1840s on — a track, not a monumental building, consistent with this profile\'s low-investment, speed-over-permanence character (M-GAMES-15).'}],
+  industrial:[{kind:'cricket',name:'Cricket ground',shape:'ellipse',rx:[38,46],ry:[32,38],minPop:3000,
+    prov:'Cricket ground: Manchester\'s own Old Trafford cricket ground (Manchester Cricket Club, 1857) predates the association-football stadiums that arrived slightly later in the Victorian/Edwardian era — the period-correct choice for this profile\'s mid-19th-century mill-town setting (M-GAMES-16).'}],
+  venus:[],
+};
+function ellipsePoly(center,rx,ry,sides){
+  const poly=[];
+  for(let k=0;k<sides;k++){const a=2*Math.PI*k/sides;poly.push({x:center.x+Math.cos(a)*rx,y:center.y+Math.sin(a)*ry});}
+  return poly;}
+function orientedRect(center,along,w,d){ // along: unit vector for the w-axis; its perpendicular carries d
+  const perp=V.rot90(along);
+  return [V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,-d/2)),
+    V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,-d/2)),
+    V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,d/2)),
+    V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,d/2))];}
+function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile){
+  // Palimpsest is a composite, not an independent tradition: it inherits whichever mature
+  // identity it actually builds (Islamic housing/gates today, docs/07 §3.5), so its games
+  // building is the same inherited maidan rather than a bespoke entry of its own.
+  const specs=profile.id==='palimpsest'?GAMES_SPEC.islamic:GAMES_SPEC[profile.id];
+  if(!specs||!specs.length)return [];
+  const r=stream(seed,'games');
+  let builtR=0;
+  for(const p of parcels)for(const v of p.poly)builtR=Math.max(builtR,V.dist(v,anchors.market));
+  if(wallState.ring)for(const v of wallState.ring)builtR=Math.max(builtR,V.dist(v,anchors.market));
+  const out=[],placedAt=[];
+  let gid=0;
+  for(const spec of specs){
+    if(popTarget<spec.minPop)continue;
+    const rx=spec.shape==='ellipse'?r.range(spec.rx[0],spec.rx[1]):null;
+    const ry=spec.shape==='ellipse'?r.range(spec.ry[0],spec.ry[1]):null;
+    const w=spec.shape!=='ellipse'?r.range(spec.w[0],spec.w[1]):null;
+    const d=spec.shape!=='ellipse'?r.range(spec.d[0],spec.d[1]):null;
+    const half=Math.max(rx||w/2,ry||d/2);
+    const margin=25,nAng=16,a0=r.u()*Math.PI*2;
+    let found=null;
+    for(const extra of [0,90,180,280]){
+      if(found)break;
+      const candR=builtR+half+40+extra;
+      for(let i=0;i<nAng;i++){
+        const ang=a0+i*(2*Math.PI/nAng);
+        const center={x:anchors.market.x+Math.cos(ang)*candR,y:anchors.market.y+Math.sin(ang)*candR};
+        if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
+        if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+40))continue;
+        let poly;
+        if(spec.shape==='ellipse')poly=ellipsePoly(center,rx,ry,22);
+        else{const radial=V.norm({x:Math.cos(ang),y:Math.sin(ang)});poly=orientedRect(center,V.rot90(radial),w,d);}
+        if(poly.some(v=>v.x<margin||v.y<margin||v.x>site.Wm-margin||v.y>site.Hm-margin))continue;
+        if(poly.some(v=>site.isWater(v)))continue;
+        let crosses=false;
+        for(let k=0;k<poly.length&&!crosses;k++){
+          const A=poly[k],B=poly[(k+1)%poly.length];
+          for(const eid of edgesNear(g,A,B)){
+            const e=g.edges[eid];if(!e||!e.alive)continue;
+            if(segInt(A,B,g.nodes[e.a],g.nodes[e.b])){crosses=true;break;}}}
+        if(crosses)continue;
+        found={center,poly};break;
+      }
+    }
+    if(!found)continue; // no safe site found: an honest omission, never forced in
+    placedAt.push({center:found.center,half});
+    let inner=null;
+    if(spec.shape==='platform')inner=insetPoly(ensureCCW(found.poly),[Math.min(w,d)*0.22])||null;
+    out.push({id:'games'+(gid++),kind:spec.kind,name:spec.name,poly:found.poly,inner,center:found.center,prov:spec.prov});
   }
   return out;}
 
@@ -2612,14 +2717,18 @@ function tagFactory(buildings){
   best.prov='Factory/mill: the town\'s largest warehouse/insula-class building repurposed as its defining industrial anchor, marked with a chimney stack (M-IND-2) — reuses that building\'s own already-sited footprint rather than new freestanding geometry.';
 }
 
-/* Post-collapse decay pass (M-PA-1), the Post-Apocalyptic profile's one new mechanism: flags a
- * deterministic seeded fraction of already-built, non-churchyard parcels (and their buildings)
- * as ruined — abandoned and uninhabited, but not removed or altered geometrically. This is
- * deliberately a data/render-only overlay, not a physical-rubble model: an actual breached wall
- * or a road blocked mid-span would be exactly the "impossible intersection" this project audits
- * against elsewhere, so full ruin modelling (breached walls, blocked streets, reclaimed blocks)
- * is explicitly deferred rather than implemented — this pass can never introduce one, because it
- * never moves or removes a single vertex of already-validated geometry. */
+/* Post-collapse decay pass (M-PA-1): flags a deterministic seeded fraction of already-built,
+ * non-churchyard parcels (and their buildings) as ruined — abandoned and uninhabited, but not
+ * removed or altered geometrically. Deliberately profile-agnostic: "ruined" is a STATE any
+ * settlement can be found in (a collapsed Roman colonia, a collapsed Aztec lake-city, a
+ * collapsed medieval town), not a civilization of its own, so this reads only parcels/buildings
+ * and is gated purely by the opts.ruined toggle in generate() — never by which culture is
+ * selected (docs/03 M-PA register). Deliberately a data/render-only overlay, not a physical-
+ * rubble model: an actual breached wall or a road blocked mid-span would be exactly the
+ * "impossible intersection" this project audits against elsewhere, so full ruin modelling
+ * (breached walls, blocked streets, reclaimed blocks) is explicitly deferred rather than
+ * implemented — this pass can never introduce one, because it never moves or removes a single
+ * vertex of already-validated geometry. */
 function applyDecay(seed,parcels,buildings){
   const r=stream(seed,'decay');
   const frac=r.range(0.35,0.45); // M-PA-1: roughly a third to a half of the built stock abandoned
@@ -2741,6 +2850,11 @@ function generate(seed,opts){
   const profile=resolveProfile(opts.culture);
   const rules=resolveRules(opts.rules); // configurable generation rules (docs/07 §3.4)
   const terrainAware=!!opts.terrainAware; // opt-in terrain-suitability building gate (docs/08)
+  // ruined (M-PA register): a STATE any settlement can be found in, not a civilization of its
+  // own — applyDecay() was always profile-agnostic (it reads only parcels/buildings, never
+  // profile), so this is a plain opt-in toggle over whichever culture is selected, the same
+  // additive discipline as terrainAware/GenerationRules, not a dedicated 'postapoc' profile.
+  const ruined=!!opts.ruined;
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
   // enclosures are optional (default on for the medieval pack); a lake-city profile (Aztec)
@@ -2875,7 +2989,7 @@ function generate(seed,opts){
   // own audit: a small residual of segments still crossed a building until this verify step).
   if(profile.planning==='palimpsest')dissolveWardWalls(seed,blocks,anchors,parcels,buildings,rules.palimpsest);
   if(profile.factory)tagFactory(buildings);
-  if(profile.ruined)applyDecay(seed,parcels,buildings);
+  if(ruined)applyDecay(seed,parcels,buildings);
   const faith=opts.faith||profile.defaultFaith;
   // hamlets have no church/chapel; a religious building can also be turned off ('none')
   const hamlet=popTarget<600;
@@ -2884,20 +2998,31 @@ function generate(seed,opts){
   // occupancy per built parcel (M-DEN-2): a multi-storey insula apartment block (3-5 storeys,
   // M-ROM-3) houses several times what a single-family domus or medieval house does — counting
   // it as one household like the others would badly undercount a colonia's real density (M-ROM-7).
-  // More generally, any profile whose typical lot is simply BIGGER than the medieval strip-parcel
-  // baseline (fewer, larger lots per hectare at the same street length) needs a household-size
+  // More generally, a profile whose typical lot is simply BIGGER than the medieval strip-parcel
+  // baseline (fewer, larger lots per hectare at the same street length) can need a household-size
   // correction too, even without Roman's multi-storey reason — e.g. a Chinese siheyuan compound
-  // usually housed an extended, multi-generational family, not a nuclear one (M-CHN-4).
+  // usually housed an extended, multi-generational family, not a nuclear one (M-CHN-4) — but this
+  // only holds while the profile actually USES the bigger insula-pattern lot: several profiles
+  // that formerly paired courtyard-house-family grammars with insula parcels were converted to
+  // organic/strip platting (docs/03 M-CHN/M-AZT/M-GRK/M-EGY/M-COL), and their `householdMultiplier`
+  // was removed at the same time — a strip-platted lot is already the same size as every other
+  // organic profile's, so it needs no correction, the same reasoning that already applied to
+  // Islamic/Byzantine/Mesopotamian's own courtyard houses on strip parcels all along.
   // uniformHousing (Venus Project) also produces 'insula block'-kind buildings on every parcel,
   // but that's a single standardized modular apartment, not Rome's specific 3-5 storey tenement
   // (M-ROM-7's actual justification for the 4x multiplier below) — excluded here so it falls
   // through to the plain householdMult path instead of quadruple-counting every household.
-  const insulaParcels=(profile.buildingGrammar==='domus-insula'&&!profile.uniformHousing)
+  // Industrial reuses domus-insula's multi-storey tenement form but, per the same conversion
+  // above, now grows it on strip parcels too — the 4x multiplier was calibrated for the FEWER,
+  // BIGGER lots insula platting produces, so it is gated on parcelPattern as well: strip platting
+  // already produces enough separate parcels per hectare that the multi-storey correction would
+  // double-count households the same way it would for a converted courtyard-house profile.
+  const insulaParcels=(profile.buildingGrammar==='domus-insula'&&!profile.uniformHousing&&profile.parcelPattern==='insula')
     ?new Set(buildings.filter(b=>b.kind==='insula block').map(b=>b.parcel)):null;
   const householdMult=profile.householdMultiplier||1;
   // a ruined parcel's structure still stands (M-PA-1) but nobody lives there — excluded from the
-  // head-count; for every profile without applyDecay, p.ruined is always undefined, so this
-  // filter is unchanged from every other profile's behaviour (a no-op false||undefined check)
+  // head-count; with the ruined toggle off (the default), p.ruined is always undefined for every
+  // parcel, so this filter is a no-op false||undefined check, unchanged from every prior version
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard&&!p.ruined)
     .reduce((s,p)=>s+(insulaParcels&&insulaParcels.has(p.id)?5.2*4:5.2*householdMult),0));
   // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN).
@@ -2906,6 +3031,7 @@ function generate(seed,opts){
   // medieval market thresholds under a different name.
   const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
+  const games=buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
   if(profile.chinampas)details.push(...buildChinampas(seed,site,anchors,wallState,maxRF));
   // when the star fort is built canal-fed (M-VEN-3), the fort's own wet-moat rendering already
@@ -2921,11 +3047,11 @@ function generate(seed,opts){
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,terrainAware,Wm,Hm,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,terrainAware,ruined,Wm,Hm,
     culture:profile.id,cultureName:profile.name,
     site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
-    anchors,plaza,harbour,markets,civic,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
+    anchors,plaza,harbour,markets,civic,games,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
     wall:wallState,blocks,parcels,buildings,churches,details,pop,metrics,through:site.through};}
 
 /* stable serialization + FNV hash for determinism goldens */
@@ -3228,6 +3354,12 @@ function render(){
     if(model.civic.belfry)el('circle',{cx:model.civic.belfry.x,cy:model.civic.belfry.y,r:2.2,class:'belfry'},L.buildings);
     if(model.civic.dome)el('circle',{cx:model.civic.center.x,cy:model.civic.center.y,r:3.4,class:'civicdome'},L.buildings);}
 
+  // signature games/spectacle building(s) (docs/03 M-GAMES register)
+  for(const gm of model.games||[]){
+    const ge=el('path',{d:pd(gm.poly),class:'games'},L.buildings);
+    reg(ge,'Games building',gm.name,{},gm.prov);
+    if(gm.inner)el('path',{d:pd(gm.inner),class:'games'},L.buildings);}
+
   // details: trees, wells, cross
   for(const d of model.details){
     if(d.kind==='tree'){
@@ -3256,6 +3388,8 @@ function render(){
     el('text',{x:mk.center.x,y:mk.center.y-12,class:'lbl','text-anchor':'middle'},L.labels).textContent=mk.name;
   if(model.civic)
     el('text',{x:model.civic.center.x,y:model.civic.center.y-11,class:'lbl','text-anchor':'middle'},L.labels).textContent=model.civic.name;
+  for(const gm of model.games||[])
+    el('text',{x:gm.center.x,y:gm.center.y-12,class:'lbl','text-anchor':'middle'},L.labels).textContent=gm.name;
   for(const gt of model.wall.gates||[])
     el('text',{x:gt.pt.x,y:gt.pt.y-10,class:'lbl','text-anchor':'middle'},L.labels).textContent=gt.water?'':(gt.name||'Gate');
   // scale bar
@@ -3582,9 +3716,10 @@ function renderRulesCompare(){
   const walls=document.getElementById('walls').checked;
   const fortified=document.getElementById('fortified').checked;
   const terrainAware=document.getElementById('terrainAware').checked;
+  const ruined=document.getElementById('ruined').checked;
   const siteKind=document.getElementById('siteKind').value;
   const culture=document.getElementById('culture').value;
-  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,site:siteKind,culture});
+  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,site:siteKind,culture});
   const avgParcelArea=(m)=>m.parcels.length?m.parcels.reduce((s,p)=>s+p.area,0)/m.parcels.length:0;
   const streetDensity=(m)=>m.metrics.totalLen/(m.pop||1);
   const rows=[
@@ -3638,13 +3773,14 @@ function regen(){
   const walls=document.getElementById('walls').checked;
   const fortified=document.getElementById('fortified').checked;
   const terrainAware=document.getElementById('terrainAware').checked;
+  const ruined=document.getElementById('ruined').checked;
   const siteKind=document.getElementById('siteKind').value;
   const harbourDefence=document.getElementById('harbourDefence').value;
   const faith=document.getElementById('faith').value;
   const civicStyle=document.getElementById('civicStyle').value;
   const culture=document.getElementById('culture').value;
   const t0=performance.now();
-  model=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
+  model=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
   const dt=performance.now()-t0;
   render();
   let note='';

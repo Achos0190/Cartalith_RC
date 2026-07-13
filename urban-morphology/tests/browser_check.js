@@ -138,12 +138,19 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'colonial-town', set: { culture: 'colonial', siteKind: 'coast', pop: '6000', fortified: false, walls: true, faith: 'church', civicStyle: 'townhall' } },
     { name: 'frontier-boomtown', set: { culture: 'frontier', siteKind: 'landlocked', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'none' } },
     { name: 'industrial-milltown', set: { culture: 'industrial', siteKind: 'river', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'townhall' } },
-    { name: 'postapoc-ruins', set: { culture: 'postapoc', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'none' } },
-    { name: 'venus-circular-city', set: { culture: 'venus', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome' } },
-    { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome' } },
-    { name: 'palimpsest-souk', set: { culture: 'palimpsest', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto' } },
-    { name: 'palimpsest-fortified', set: { culture: 'palimpsest', siteKind: 'riverthrough', pop: '9000', fortified: true, walls: true, faith: 'mosque', civicStyle: 'auto' } },
-    { name: 'terrain-aware-coast', set: { culture: 'medieval', siteKind: 'coast', pop: '9000', fortified: false, walls: true, terrainAware: true } },
+    { name: 'ruined-medieval', set: { culture: 'medieval', siteKind: 'river', pop: '6000', fortified: false, walls: true, ruined: true } },
+    { name: 'ruined-roman', set: { culture: 'roman', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica', ruined: true } },
+    // every scenario below runs after the two 'ruined' ones above and must explicitly reset the
+    // checkbox back to false: the loop below only ever sets fields a scenario's own `set` object
+    // mentions, so an unlisted checkbox silently keeps whatever the previous scenario left it at
+    // (found by generating output and noticing venus/palimpsest/terrain-aware all reported
+    // ruined:true despite none of them being about ruination — the same discipline this project
+    // holds itself to everywhere else, not assumed from the loop's own description).
+    { name: 'venus-circular-city', set: { culture: 'venus', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome', ruined: false } },
+    { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome', ruined: false } },
+    { name: 'palimpsest-souk', set: { culture: 'palimpsest', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto', ruined: false } },
+    { name: 'palimpsest-fortified', set: { culture: 'palimpsest', siteKind: 'riverthrough', pop: '9000', fortified: true, walls: true, faith: 'mosque', civicStyle: 'auto', ruined: false } },
+    { name: 'terrain-aware-coast', set: { culture: 'medieval', siteKind: 'coast', pop: '9000', fortified: false, walls: true, terrainAware: true, ruined: false } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
@@ -156,13 +163,15 @@ const { chromium } = require(PLAYWRIGHT_DIR);
       return { site: m.site.kind, culture: m.culture, markets: (m.markets || []).length, civic: !!m.civic,
         harbourDef: m.harbour && m.harbour.defence ? m.harbour.defence.type : null,
         gates: m.wall.gates.map(g => g.name || (g.water ? 'water' : '?')),
-        terrainAware: m.terrainAware, unsuitableParcels: m.parcels.filter(p => p.unsuitable).length };
+        terrainAware: m.terrainAware, unsuitableParcels: m.parcels.filter(p => p.unsuitable).length,
+        ruined: m.ruined, ruinedBuildings: m.buildings.filter(b => b.ruined).length,
+        games: (m.games || []).map(x => x.kind) };
     });
     console.log('SCENARIO ' + sc.name + ' ' + JSON.stringify(info));
     await page.screenshot({ path: path.join(outDir, `town-${sc.name}.png`) });
   }
   // reset the culture selector + terrain-aware checkbox so neither leaks into any later manual use
-  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; });
+  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; document.getElementById('ruined').checked = false; });
 
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);
