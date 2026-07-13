@@ -9,10 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.90.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.91.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.91 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.89` are kept and never edited.
+  (v0.92 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.90` are kept and never edited.
+- **v0.91 — owner /goal: "…how in explore the timeline should work. Currently it works, bit
+  rather clunky"** (no engine changes — script block 2 civ-UI only; render battery ALL IDENTICAL
+  to v0.90, headless **923** unchanged, smoke **123 → 130**): the second half of the v0.90 /goal
+  request. Chosen direction (`AskUserQuestion`): **"one home, real time-scale."** (1) **One
+  home** — timeline authoring (Add year + pills), scrubbing (slider + Animate) and the v0.85
+  collapse/recovery simulator, previously split across Civilization → Polity (the controls) and
+  Explore → Timeline (a second, synced read-only slider), now all live in Explore → Timeline;
+  Simulate sits behind its own nested `<details>` so the common path stays uncluttered. Every
+  moved element kept its id, so only markup moved — click/input handlers are untouched. The old
+  duplicate slider (`#civTlSlider`) is retired; `#explTimelineSlider` is the only one now.
+  (2) **Real time-scale** — `_civWireYearSlider()` used `slider.max = snapshotCount-1` and
+  `slider.value = <array index>`, so uneven year gaps rendered as evenly-spaced ticks. Now
+  `min`/`max`/`value` are the actual recorded years, with a `<datalist>` giving proportional tick
+  marks (screenshot-verified at 3× zoom); dragging still snaps to the nearest recorded year
+  (no interpolation model between discrete snapshots exists). (3) Fixed a latent gating bug while
+  moving the markup: the Explore Timeline section used to hide itself until `civTimeline.length>0`,
+  which would have made it impossible to add the *first* year from Explore — it's now always
+  visible, only the slider+playback row gates on `length>1`.
 - **v0.90 — owner request: "editing a settlement should open a pop-up in the viewscreen with the
   settlement properties and information"** (no engine changes — script block 2 civ-UI only; render
   battery ALL IDENTICAL to v0.89, headless **923** unchanged, smoke **120 → 123**): the settlement/POI
@@ -396,7 +414,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.91), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -420,20 +438,9 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **Queued next (owner, 2026-07-12): Explore timeline rework.** The settlement-interface half of the
-  owner's 2026-07-12 request ("editing a settlement should open a pop-up… with the settlement properties
-  and information") **shipped in v0.90** (see above). The timeline half is still open — owner's chosen
-  direction (from an `AskUserQuestion` pass): **"one home, real time-scale"** — merge simulate + scrub +
-  author into a single Explore-tab control (no more tab-switching to Civilization→Polity to run a
-  simulation, then back to Explore to scrub it), and switch the slider from index-based ticks (currently
-  evenly spaced regardless of actual year gaps) to a real proportional year-scale. Current architecture
-  (for the next session): one data structure `civTimeline` (array of `{year,territory,places,ways}`
-  snapshots, `civAddYear`/`civGotoYear`/`_civBuildTimelineUI` ~13417–13469) written by BOTH manual
-  authoring and the v0.85 mechanistic collapse/recovery simulator (`_civRunCollapseSimulation`→
-  `_civSimulateTimeline`, ~14498–14830); two separate slider widgets (`#civTlSlider` in Civilization→
-  Polity, `#explTimelineSlider` behind Explore's funnel FAB → `<details id="explTimelineSection">`) kept
-  in sync via a shared rebuild function (`_civWireYearSlider`, ~15670). Design before building, per the
-  working rules.
+- **The owner's 2026-07-12 /goal (settlement pop-up + Explore timeline rework) is now fully shipped**
+  across v0.90 (settlement editor → map pop-up) and v0.91 (timeline: one home, real time-scale — see
+  above). No queued follow-up on either; nothing else outstanding from that request.
 - The queued work tracked at the end of the pre-merge era (browser passes above) plus whatever
   the user asks next. Check `docs/ROADMAP.md` for the long arcs; recent `CHANGELOG.md` entries
   state per-feature follow-ups (e.g. cross-tile seam editing is the one genuinely open LOD item).

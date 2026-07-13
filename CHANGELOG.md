@@ -12,6 +12,51 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.91 (2026-07-13)
+**Owner request (/goal): "…how in explore the timeline should work. Currently it works, bit rather
+clunky."** Chosen direction from an `AskUserQuestion` pass: **"one home, real time-scale."** No engine
+changes; render battery **ALL IDENTICAL to v0.90**, headless **923** unchanged (block 1 untouched —
+script-block-2 civ-UI change only), Playwright UI smoke **123 → 130**.
+- **One home.** Timeline authoring (Add year + era pills), scrubbing (the year slider + Animate
+  playback) and the v0.85 collapse/recovery simulator used to be split across two tabs: the controls
+  lived in Generate → Civilization → Polity, while Explore → Timeline (behind the filter funnel) held
+  only a second, synced *read* slider. Running a simulation meant switching to Polity, configuring and
+  clicking Simulate, then switching back to Explore to scrub the result. All three now live in one
+  place — Explore → Timeline — with Simulate tucked behind its own `<details>` disclosure so the
+  common add/scrub/filter path stays uncluttered. Civilization → Polity keeps only territory painting
+  (Auto-polity/Clear territory, unrelated to the timeline) and points to Explore in its hint text. The
+  old duplicate slider (`#civTlSlider`/`#civTlSliderRow`) is gone — `#explTimelineSlider` is the only
+  one now. Every element kept its id (`civTlYear`, `civTlAddYearBtn`, `civTimelinePanel`, `civSim*`),
+  so the physical move only touched markup — none of the click/input handlers changed.
+- **Real time-scale.** `_civWireYearSlider()` used to set `slider.max = sortedSnapshots.length-1` and
+  `slider.value = <array index of the current year>` — an index range, not a year range, so three
+  recorded years at 500 BC / 1200 AD / 1250 AD rendered as three evenly-spaced ticks regardless of the
+  1700-year gap vs. the 50-year gap between them. Now `slider.min`/`slider.max`/`slider.value` are the
+  actual recorded years, and a `<datalist id="explTimelineTicks">` (one `<option>` per snapshot,
+  `list="explTimelineTicks"` on the slider) gives the browser's native tick marks at their true
+  proportional positions — visually confirmed via Playwright screenshot at 3× device scale: two ticks
+  cluster near one end for two close years, two cluster near the other end for another close pair, with
+  a long empty span between, exactly matching the underlying year gaps. There's still no interpolation
+  model between snapshots (each is a discrete territory/places/ways state), so dragging **snaps to the
+  nearest recorded year** on release of the pointer (found via linear scan over the sorted snapshot
+  list) — only the position-to-year *mapping* changed, not the discrete-history semantics. The
+  `_civTlDragSrc` guard (prevents `_civBuildTimelineUI()`'s rebuild from resetting `slider.value` mid-
+  drag) is retained even with only one slider now, since the same async-rebuild race is still possible
+  from Simulate or Add-year running while a drag is in progress.
+- **Gating fix, not just a move.** The Explore Timeline `<details>` used to hide itself entirely until
+  `civTimeline.length > 0` — which would have made it impossible to *start* authoring from Explore
+  (there's no way to add the first year from a section that's hidden until a year exists). It's now
+  always open/visible; only the slider+playback row (`#explTimelineSliderRow`) is gated on
+  `civTimeline.length > 1` (nothing to scrub between below that), matching the old Polity-side slider
+  row's gating threshold exactly.
+- Verification: smoke assertions cover the single-home consolidation (old slider gone, Add
+  year/pills/Simulate all found inside `#explTimelineSection`, Polity no longer duplicates them), the
+  slider-row visibility gate at 1 vs. 2+ recorded years, the real year-value min/max (not a `0..count-1`
+  index), the datalist tick years, and nearest-year snapping in both directions on drag. Browser-
+  verified via Playwright: the merged popover layout (Add year → pills → slider → filters → Simulate
+  disclosure) screenshotted in both collapsed and Simulate-expanded states, and the proportional tick
+  spacing screenshotted at 3× zoom on a slider with two clustered-then-distant year pairs.
+
 ### v0.90 (2026-07-12)
 **Owner request: "editing a settlement should open a pop-up in the viewscreen with the settlement
 properties and information."** No engine changes; render battery **ALL IDENTICAL to v0.89**, headless

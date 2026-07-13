@@ -723,6 +723,40 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { noPhantomZero, overwriteGuarded };
   });
 
+  // ---- v0.91 (owner request: "one home, real time-scale") ----
+  // Authoring (Add year/pills), scrubbing (slider+playback) and the collapse/recovery simulator all
+  // live in Explore → Timeline now — Civilization → Polity no longer has its own copy, and the old
+  // index-based slider (min=0, max=snapshot-count-1) was replaced with a real year-value scale.
+  R.timelineOneHome = await page.evaluate(() => {
+    const singleHome = !document.getElementById('civTlSlider') && !document.getElementById('civTlSliderRow');
+    const sec = document.getElementById('explTimelineSection');
+    const controlsInExplore = !!(sec && sec.querySelector('#civTlYear') && sec.querySelector('#civTlAddYearBtn')
+      && sec.querySelector('#civTimelinePanel') && sec.querySelector('#civSimulateBtn') && sec.querySelector('#explTimelineSlider'));
+    const polity = [...document.querySelectorAll('#genCiv details.cat-acc')].find(d => {
+      const s = d.querySelector('summary'); return s && s.textContent.trim() === 'Polity';
+    });
+    const controlsNotInPolity = !!polity && !polity.querySelector('#civTlYear') && !polity.querySelector('#civSimulateBtn');
+
+    civTimeline.length = 0; civYear = 0;
+    civAddYear(10);
+    const sliderHiddenAt1 = getComputedStyle(document.getElementById('explTimelineSliderRow')).display === 'none';
+    civAddYear(1000);
+    const slider = document.getElementById('explTimelineSlider'), dlist = document.getElementById('explTimelineTicks');
+    const sliderShownAt2 = getComputedStyle(document.getElementById('explTimelineSliderRow')).display !== 'none';
+    const realScale = +slider.min === 10 && +slider.max === 1000;   // was min=0/max=1 (an index range)
+    const ticksAtRealYears = [...dlist.querySelectorAll('option')].map(o => +o.value).sort((a, b) => a - b).join(',') === '10,1000';
+
+    slider.value = 950; slider.dispatchEvent(new Event('input'));   // closer to 1000 than to 10
+    const snappedNearest = +slider.value === 1000 && civYear === 1000;
+    slider.value = 300; slider.dispatchEvent(new Event('input'));   // closer to 10 than to 1000
+    const snappedToOther = +slider.value === 10 && civYear === 10;
+
+    civTimeline.length = 0; state.places = []; civWays = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof renderNow === 'function') renderNow();
+    return { singleHome, controlsInExplore, controlsNotInPolity, sliderHiddenAt1, sliderShownAt2, realScale, ticksAtRealYears, snappedNearest, snappedToOther };
+  });
+
   // ---- v0.86: climate redraw, theme switch, credits modal, popover scroll containment ----
   const canvasHash86 = () => page.evaluate(() => { const c = document.getElementById('view');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 2166136261;
@@ -996,6 +1030,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.85 fix: saturated-destination overflow re-flows while system headroom remains (doc §5)', R.collapseSim.overflowReflows);
   A('v0.85 fix: empty-timeline simulation conjures no phantom year-0 era', R.collapseSimUI2.noPhantomZero);
   A('v0.85 fix: overwriting authored timeline years is confirm-guarded (dismiss aborts)', R.collapseSimUI2.overwriteGuarded);
+  A('v0.91: the old Polity-section slider is gone — one slider now, in Explore', R.timelineOneHome.singleHome);
+  A('v0.91: Add year / pills / Simulate all live inside Explore → Timeline', R.timelineOneHome.controlsInExplore);
+  A('v0.91: Civilization → Polity no longer duplicates the timeline/simulate controls', R.timelineOneHome.controlsNotInPolity);
+  A('v0.91: the slider+playback row is hidden with <2 recorded years, shown with >=2', R.timelineOneHome.sliderHiddenAt1 && R.timelineOneHome.sliderShownAt2);
+  A('v0.91: slider min/max are the real recorded years, not a 0..count-1 index', R.timelineOneHome.realScale);
+  A('v0.91: tick marks (datalist) sit at the real recorded years', R.timelineOneHome.ticksAtRealYears);
+  A('v0.91: dragging the slider snaps to the nearest recorded year on both sides', R.timelineOneHome.snappedNearest && R.timelineOneHome.snappedToOther);
   A('v0.86: "Simulate weather" repaints the map (climate bake-cache keyed on _climGen)', R.climateRedraw.changed);
   A('v0.86: theme switch flips :root[data-theme]=light, persists, and toggles back to dark', R.theme.wentLight && R.theme.stored === 'light' && R.theme.backToDark && R.theme.startDark);
   A('v0.86: credits modal opens (3 principle sections + Strahler/gravity/V1.915 citations)', R.credits.open && R.credits.sections === 3 && R.credits.hasStrahler && R.credits.hasGravity && R.credits.hasV1915);
