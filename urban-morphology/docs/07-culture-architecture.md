@@ -152,25 +152,61 @@ to need a structurally new *growth model* rather than a new flag:
   independent of `parcelPattern` by design, so `'domus-insula'` still works unchanged on strip
   parcels — a combination no earlier profile happened to need, but the schema supported it with no
   code changes, confirming those two fields really were orthogonal all along.
-- **`uniformHousing`** (Venus only): forces the domus/insula split's `isDomus` decision to `false`
-  unconditionally, so every parcel gets the standardized modular-apartment building rather than an
-  elite/mass split — modelling a moneyless, automation-based economy with no housing hierarchy.
-  Caught one real population bug during development: the pop-count formula applies a **4x**
-  occupancy multiplier to any parcel whose building kind is `'insula block'`, correctly reflecting
-  Rome's actual multi-storey tenement (M-ROM-7) — but `uniformHousing` puts *every* parcel in that
-  bucket, so the unmodified formula quadruple-counted the entire town (a first pass realized
-  180-550% of target population). Fixed by excluding `uniformHousing` profiles from that multiplier
-  entirely (`insulaParcels` stays `null`), since Venus's uniform building isn't specified as a
-  multi-storey tenement — the correct modelling choice, not just a numeric patch.
 - **`waterway`** (Venus only): opts into `buildWaterway()`, a circular irrigation-canal ring in the
   same spirit as the Aztec chinampas — the one genuinely new infrastructure detail for this profile.
   Drawn at a radius beyond the outermost built ring, i.e. entirely outside the street network's
   reach, so — like the chinampas before it — it can never overlap a building or parcel **by
-  construction**, not merely by a runtime check (verified empirically: 0 crossings across 30 seed x
-  site combinations).
+  construction**, not merely by a runtime check.
 - **`'dome'` civic style**: the first civic hall that isn't a rectangle re-skin — a circular drum
   (reusing the roundhouse's polygon technique again) with a colonnade ring and a dome marker,
   standing in for Fresco's Center for Resource Management.
+
+### 3.3 Revising Venus after user feedback: fusion over literal reconstruction
+
+The first Venus cut (§3.2 above) over-literalized Fresco's plans: two bare rings, `markets:false`,
+`defaultFaith:'none'`, `noWalls:true`, and a `uniformHousing` flag collapsing every parcel to one
+building kind. Direct user feedback ("a lot looks European," and specifically on Venus: "at the
+spokes there are often... circular buildings... concentric circles for roads at regular intervals...
+roads in between seem to cross... need for amenities and logistics... mix it with medieval Europe
+and Asian/Japanese styles... keep the medieval wall and star fort ideas") drove a substantial rework,
+documented here because it changes several of the fields above and the underlying schema decisions:
+
+- **`uniformHousing` removed, replaced by `buildingGrammar:'venus-mixed'`** (docs/03 M-VEN-5): a
+  genuinely new grammar (not a flag on `'domus-insula'`) that dispatches per parcel by distance-from-
+  hub — circular pavilions in the inner band, logistics warehouses in the outer band, and a seeded
+  blend of modular apartment / Asian courtyard house / Japanese machiya through the residential
+  rings. This is the first building grammar that mixes *multiple* building kinds within one profile
+  rather than picking one kind (or an isDomus-style binary split) for the whole town.
+- **More rings, plus cross-spokes** (`buildRadialStreets` reworked): 5 concentric rings (was 2) plus
+  12 intermediate cross-spokes spanning the outer band, matching the user's "concentric circles at
+  regular intervals... roads in between seem to cross" description of Fresco's actual renders more
+  closely. A denser mesh packs far more buildable frontage into the same radius, so the built radius
+  was tuned down to compensate — realized population would otherwise have reached 160-240% of
+  target for the identical settings that used to realize ~85-115%.
+- **`markets:true`** (was `false`): the brief explicitly asked for amenity/logistics richness: this
+  now reuses the ordinary market-scaling mechanism unchanged, alongside the outer logistics ring.
+- **`noWalls`/`defaultWalls:false`** (was a forced-off `noWalls` case): walls and the star fort are
+  now a genuine optional toggle reusing the medieval wall/fort machinery unchanged
+  (`wallGates.scheme:'organic'`, so the anachronism guard permits the trace) — unwalled by default,
+  but a real choice. This is the first profile whose UI wiring sets a *default* checkbox state
+  (`profile.defaultWalls`) on culture-select rather than forcing behavior in the engine.
+- **The waterway becomes the fort's wet moat** (`applyStarFort`'s new `opts.wetMoat` parameter):
+  when fortified, the irrigation canal feeds a wet ditch around the bastions even on a landlocked
+  site (`canalFed`), and the separate decorative ring is suppressed so it doesn't render twice.
+- **A real bug found while re-enabling walls, directly on-topic for this project's standing
+  "impossible intersection" discipline**: `buildRadialStreets`' original `land()` check validated
+  only a spoke's two *endpoints* before drawing it — a straight spoke can have both endpoints on dry
+  ground and still clip through open water in between (the market anchor sits close to the river by
+  design, so several of 12 evenly-spaced spokes pass near-tangent to the bank). Confirmed
+  empirically: 4 of 12 spokes on a river site crossed real water despite both endpoints testing dry.
+  Fixed by sampling 12 points along each spoke's *entire length* (`landSeg()`) rather than just its
+  endpoints — the same "check the whole footprint, not one point" principle already applied to
+  wet-parcel/building checks elsewhere in this register, now extended to street-segment validity.
+  A second, smaller finding from the same debugging pass: only edges tagged `cls:'primary'` ever
+  receive a gate from `buildWall`'s gate-placement loop — the original spokes were all `'street'`-
+  class, so a fortified Venus town could end up with **zero land gates** at all. Fixed by tagging
+  only the 12 primary spokes `'primary'` (rings and cross-spokes stay `'street'`, and cross-spokes
+  now stop one ring short of the boundary so they never need a gate in the first place).
 
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 

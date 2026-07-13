@@ -144,15 +144,19 @@ civilizations 3–18).
   since an actual breached-wall/blocked-road model would be exactly the kind of "impossible
   intersection" this project's standing audit checks against everywhere else (M-PA-1/2).
 - **The Venus Project (resource-based circular city)** — Jacque Fresco's circular-city concept,
-  the first genuinely new *growth model* since the grid: concentric ring streets connected by
-  radial spokes to a domed central hub (the Center for Resource Management), reusing the
-  roundhouse's polygon-for-a-circle technique at city scale. No money and no market squares (a
-  resource-based economy), no religious buildings (Fresco's explicitly secular social vision), no
-  walls at all (a postulated post-conflict society), and a circular irrigation waterway — the one
-  genuinely new infrastructure detail, drawn entirely beyond the built rings' reach so it can never
-  overlap a building by construction, the same defensive pattern as the Aztec chinampas. Every
-  parcel gets the same standardized modular-apartment building (`uniformHousing`) rather than the
-  usual elite/mass split — modelling a society with no housing hierarchy (M-VEN register).
+  the first genuinely new *growth model* since the grid: several concentric ring streets at regular
+  intervals plus radial and intermediate cross-spokes, converging on a domed central hub (the
+  Center for Resource Management), reusing the roundhouse's polygon-for-a-circle technique at city
+  scale. Deliberately mixed, per direct design feedback, with medieval-European amenity/logistics
+  richness and Asian/Japanese residential typologies rather than reconstructed as a sparse, uniform
+  circle: circular pavilions cluster at the hub/inner rings, the residential rings blend the
+  standardized modular apartment with an Asian-influenced courtyard house and a Japanese machiya
+  rowhouse, market squares scale with rank, and the outermost ring carries logistics warehouses. No
+  religious buildings (Fresco's explicitly secular social vision). Walls and the bastioned star fort
+  are a genuine optional toggle reusing the medieval fortification machinery unchanged — unwalled
+  by default, but not forced off; when fortified, the circular irrigation waterway supplies the
+  fort's wet moat (even on a landlocked site) instead of standing alone outside the curtain
+  (M-VEN register).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

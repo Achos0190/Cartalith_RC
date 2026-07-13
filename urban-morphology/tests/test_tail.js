@@ -1178,8 +1178,8 @@ for (const site of ['river', 'landlocked']) {
 
 /* ---------- The Venus Project civilization profile (docs/03, M-VEN register) ---------- */
 {
-  const ve = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'venus' });
-  const ve2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'venus' });
+  const ve = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'venus' });
+  const ve2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'venus' });
   ok(ve.culture === 'venus', 'venus profile resolves');
   ok(UME.hashModel(ve) === UME.hashModel(ve2), 'venus generation deterministic');
   ok(ve.parcels.length > 150, `venus circular city is a substantial settlement (${ve.parcels.length} parcels)`);
@@ -1194,20 +1194,26 @@ for (const site of ['river', 'landlocked']) {
   const maxD = Math.max(...dists);
   ok(maxD < 500, `venus buildings stay within a bounded radius of the central hub, unlike unbounded organic/grid growth (max ${maxD.toFixed(0)}m, M-VEN-1)`);
 
-  // uniformHousing (M-VEN-4): every built parcel gets the standardized modular-apartment kind —
-  // never the elite domus split (atrium/peristyle ranges), unlike roman/industrial/postapoc
+  // blended fabric (M-VEN-5): circular pavilions, the standardized modular apartment, an
+  // Asian-influenced courtyard house and a Japanese machiya rowhouse all coexist — a deliberate
+  // fusion, not a single uniform grammar (the profile no longer forces uniformHousing)
   const veKinds = new Set(ve.buildings.map(b => b.kind));
-  ok(veKinds.has('insula block'), 'venus buildings use the standardized modular-apartment kind');
-  ok(!veKinds.has('atrium range') && !veKinds.has('peristyle range'), 'venus has no elite domus split — uniformHousing forces every parcel to the same building (M-VEN-4)');
+  ok(veKinds.has('pavilion'), 'venus buildings include circular pavilions at the hub/inner rings (M-VEN-5)');
+  ok(veKinds.has('modular apartment'), 'venus buildings include the standardized modular apartment (M-VEN-5)');
+  ok(veKinds.has('machiya'), 'venus buildings include the Japanese machiya rowhouse, mixed into the residential fabric (M-VEN-5)');
+  ok(veKinds.has('street range') || veKinds.has('single-room house'), 'venus buildings include the Asian-influenced courtyard house, mixed into the residential fabric (M-VEN-5)');
+  ok(veKinds.has('warehouse'), 'venus buildings include logistics warehouses on the outermost ring (M-VEN-5)');
 
   // domed central hub (M-VEN-2), not the roman basilica or any rectangular civic hall
   ok(ve.civic && ve.civic.style === 'dome' && ve.civic.dome === true, 'venus civic hall is the domed Center for Resource Management (M-VEN-2)');
   ok(ve.civic.name === 'Center for Resource Management', 'venus civic hall is explicitly named for Fresco\'s cybernated resource-management hub');
 
   // circular irrigation waterway (M-VEN-3): present on every site kind (a constructed feature,
-  // unlike the aztec chinampas which need a natural shoreline), and never overlapping a building
+  // unlike the aztec chinampas which need a natural shoreline), and never overlapping a building;
+  // always closes as a full circle within the map (no more straight clipped termination)
   ok(ve.details.some(d => d.kind === 'waterway'), `venus profile grows a circular irrigation waterway (${ve.details.filter(d=>d.kind==='waterway').length} arc(s), M-VEN-3)`);
   for (const ww of ve.details.filter(d => d.kind === 'waterway')) {
+    ok(ww.poly.length > 20, 'venus waterway is a fully-closed many-sided circle, not a clipped partial arc (M-VEN-3)');
     for (const b of ve.buildings) {
       let crosses = false;
       for (let i = 0; i < ww.poly.length - 1 && !crosses; i++)
@@ -1217,13 +1223,27 @@ for (const site of ['river', 'landlocked']) {
     }
   }
 
-  // no religion, no civic-hall-independent markets, no walls at all — even when requested
+  // amenities: markets and civic hall are both real (M-VEN-5) — a resource-based economy per the
+  // brief still carries amenity/logistics richness, not the "no markets at all" reading of the
+  // original profile; no religion, matching Fresco's secular, science-based social vision
   ok(ve.churches.length === 0, 'venus profile has no religious buildings (secular, science-based social vision, M-VEN-4)');
-  ok(ve.markets.length === 0, 'venus profile has no specialised market squares (moneyless resource-based economy, M-VEN-4)');
+  ok(ve.markets.length > 0, 'venus profile keeps amenity/market squares — blended medieval-European richness, not a purely marketless economy (M-VEN-5)');
+
+  // walls + star fort are now a genuine, unwalled-by-default optional toggle (M-VEN-1), reusing
+  // the medieval wall/fort machinery unchanged rather than forcing walls off entirely
+  ok(!ve.wall.ring, 'venus defaults to unwalled (defaultWalls:false) when the walls option is off');
+  const veWalled = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'venus' });
+  ok(!!veWalled.wall.ring, 'venus can be walled on request — walls are a real optional toggle, not forced off');
   const vef = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'venus' });
-  ok(!vef.wall.ring && vef.wall.gates.length === 0 && !vef.fortified, 'venus profile never builds any wall at all, even when fortified is requested (a fourth distinct noWalls reasoning)');
-  const ve3 = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'venus' });
-  ok(UME.hashModel(ve) === UME.hashModel(ve3), 'the walls checkbox has no effect on the venus profile (forced off either way)');
+  ok(vef.fortified && vef.wall.style === 'bastioned', 'venus can get a full bastioned star fort on request (M-VEN-1)');
+
+  // the circular irrigation canal feeds the star fort's wet moat even on a landlocked site
+  // (M-VEN-3) — and the separate decorative waterway ring is suppressed to avoid a duplicate
+  const vefLandlocked = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'venus', site: 'landlocked' });
+  ok(vefLandlocked.wall.fort && vefLandlocked.wall.fort.wetDitch && vefLandlocked.wall.fort.canalFed,
+    'venus star fort on a landlocked site still gets a WET moat, canal-fed by the irrigation ring (M-VEN-3)');
+  ok(vefLandlocked.details.filter(d => d.kind === 'waterway').length === 0,
+    'the decorative waterway ring is suppressed when the fort already renders it as the canal-fed moat (no duplicate ring)');
 
   for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
     const v1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'venus', site });

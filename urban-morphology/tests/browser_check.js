@@ -140,6 +140,7 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'industrial-milltown', set: { culture: 'industrial', siteKind: 'river', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'townhall' } },
     { name: 'postapoc-ruins', set: { culture: 'postapoc', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'none' } },
     { name: 'venus-circular-city', set: { culture: 'venus', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome' } },
+    { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
