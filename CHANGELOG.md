@@ -12,6 +12,74 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.92 (2026-07-13)
+**Owner /goal: "carry out the reported fixes [from the save-export architecture audit], then analyze
+why the program is so slow when zooming in even when tiles are baked."** Two independent pieces of
+work. No engine changes; render battery **ALL IDENTICAL to v0.91** (the LOD-view perf fix is entirely
+inside `_lodOn`-gated `drawLODView()`, never the default render path); headless **923** unchanged;
+Playwright UI smoke **137 → 144**.
+
+**Part 1 — the audit's fixes (`docs/research/save-export-architecture-audit.md` §5), scoped by the
+owner as "show me the audit first" → "carry out the reported fixes," compatibility break accepted:**
+- **§5A1 — skip the redundant flat bake for a finalized world.** `exportZip()` used to unconditionally
+  bake a fresh `map.png`/`tiles/*` from scratch on every export, even when the Atlas pyramid
+  (`bakeAllTiles`, triggered by "Bake ALL levels & finalize world") already covers the whole map at
+  every baked level — three independent renders of the same terrain, the exact "double data" the
+  audit flagged. `state.finalized` is a precise, already-existing signal for "the atlas is complete"
+  (it's only ever set true *after* `bakeAllTiles` finishes without throwing), so the flat bake is now
+  skipped whenever it's true, leaving the chunked atlas as the sole map imagery for that export
+  (documented in the export hint text and `README.txt`). Non-finalized exports are unchanged.
+- **§5A2 — layer preview PNGs are opt-in.** The 4 `layers/*.png` reference images (biome/hillshade/
+  temperature/rainfall) baked unconditionally on every export even though nothing reads them back on
+  `Load project .zip` — now behind a new **"Layer preview PNGs"** checkbox next to Export, same footing
+  as the existing opt-in channel atlas.
+- **§5B/§5C — "Tiles & LOD" split into three labeled sections.** The one accordion that bundled the
+  live zoom renderer, the Atlas bake cache, and the standalone region-export flow under one label (a
+  likely source of the "double data under different names" read, since "Atlas" was nested two levels
+  inside "Tiles & LOD" rather than being its own thing) is now three top-level sections: **Tiled LOD
+  view**, **Atlas cache** (with the chunk-debug overlay nested inside it, where it actually belongs —
+  it visualizes atlas bake state), and **Region export**. Every element id is unchanged from the old
+  combined accordion, so no click/input handler changed — pure markup + copy.
+- Verified: a real `exportZip()` call (entries captured via a monkey-patched `zipStore()`, not a
+  download round-trip) confirms `map.png` present/absent exactly as expected for non-finalized/
+  finalized worlds and `layers/*.png` present only when the new checkbox is ticked; the three new
+  section labels exist and every pre-existing element id still resolves.
+
+**Part 2 — "why is zooming in slow even when tiles are baked" (the deeper question, investigated with
+real profiling, not guesswork):**
+- **Root cause, found via `performance.now()` instrumentation in a real headless-Chromium pass**: the
+  TILE overlay layer (the sharp, refined/baked detail — `drawLODView()` step 2) correctly serves from
+  the Atlas when baked, exactly as intended. But it draws *on top of* an "instant overview" backdrop
+  (step 1) that is rebuilt from scratch on **every** frame that isn't an exact pan-reuse hit — which
+  includes every single zoom-level change, always — via the same expensive per-pixel colorization
+  pipeline used for real tiles, run over the **entire `GW×GH` canvas** (not just the small visible tile
+  area). Measured at a modest 1024px-wide world: 287ms resampling (`amplifyRegion`) + 651ms full-canvas
+  colorization (`renderBiomeTileRGBA`) ≈ **940ms per zoom step** — and this backdrop is built straight
+  from `field`, never consulting `_atlasBaked`/`_atlasImg` at all, so **baking made no measurable
+  difference** to it (a baked-vs-unbaked A/B at the same zoom level: ~1101ms vs ~739ms cold, both far
+  above the ~1ms warm/cached case — same order of magnitude either way). This directly explains the
+  owner's report: the atlas *is* being retrieved correctly for the sharp layer, but the dominant cost
+  users actually feel while zooming was never atlas-eligible work at all.
+- **Fix**: since the overview is already explicitly documented as deliberately low-fidelity ("the
+  coarse world... upscaled with **NO** procedural detail" — real detail comes from the tile overlay
+  drawn on top of it), render it at a quarter resolution in each dimension (`amplifyRegion`/
+  `composeTileEdits`/the color pass all already take independent output-resolution params — no
+  signature changes needed) and let `drawImage`'s own bitmap scaling stretch it to fill the canvas,
+  exactly like the tile overlay already stretches its own tile canvases to their screen rects. Cuts
+  the backdrop's pixel count (and thus its cost, which scales with it) by ~16×.
+- **Measured result**: the same profiling pass, same world, post-fix: a full `drawLODView()` call for
+  an overview rebuild dropped from **655ms → 53ms** (12.3×); the isolated "overview-only, tile canvases
+  and atlas still warm" case (the truest measure of what a mid-zoom-gesture frame actually pays) went
+  **1186ms → 71ms (16.6×)**. A visual regression check (screenshots of the same deep-zoom, un-refined
+  coastal spot before/after) confirmed the character of the backdrop — soft, blob-textured, already
+  "no procedural detail" by design — is unchanged; the downscale doesn't look meaningfully different
+  from the pre-fix full-resolution interpolation at that same fidelity level, since both were already
+  coarse placeholders standing in until the sharp tile overlay covers the same ground.
+- Zero effect on the default (non-LOD) render path or bit-identity — the whole fix lives inside
+  `drawLODView()`, reached only when `_lodOn`. Verified with a permanent smoke-suite regression guard
+  (an isolated overview-rebuild timing assertion, thresholded well below the old ~940-1200ms baseline)
+  plus the full existing LOD/atlas/opacity/click-info suite, all green.
+
 ### v0.91 (2026-07-13)
 **Owner request (/goal): "…how in explore the timeline should work. Currently it works, bit rather
 clunky."** Chosen direction from an `AskUserQuestion` pass: **"one home, real time-scale."** No engine

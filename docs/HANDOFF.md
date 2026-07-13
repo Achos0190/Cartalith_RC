@@ -9,10 +9,38 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.91.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.92.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.92 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.90` are kept and never edited.
+  (v0.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.91` are kept and never edited.
+- **v0.92 — owner /goal: "carry out the [save-export audit's] reported fixes, then analyze why
+  the program is so slow when zooming in even when tiles are baked"** (render battery ALL
+  IDENTICAL to v0.91, headless **923** unchanged, smoke **137 → 144**). Two parts:
+  (1) **audit fixes** (`docs/research/save-export-architecture-audit.md` §5, compatibility break
+  accepted per owner): `exportZip()` now skips the redundant `map.png`/`tiles/*` flat bake when
+  `state.finalized` (the Atlas pyramid already covers the whole map at every baked level — a
+  precise signal, only ever true after `bakeAllTiles` finishes clean); the 4 `layers/*.png`
+  preview PNGs are now opt-in (a new checkbox, same footing as the existing channel-atlas
+  checkbox) instead of unconditional; the "Tiles & LOD" accordion (which buried "Atlas" two
+  levels deep and bundled three unrelated features under one label) is split into three
+  top-level sections — **Tiled LOD view** / **Atlas cache** / **Region export** — same element
+  ids throughout, markup-only. (2) **the deeper question, root-caused with real profiling**: the
+  reported "slow when zooming even with tiles baked" was real, but not the mechanism the owner
+  suspected — the sharp TILE overlay correctly serves from the atlas when baked, but it draws on
+  top of an "instant overview" backdrop that's rebuilt from scratch (full `GW×GH` canvas, the same
+  expensive per-pixel colorization used for real tiles) on every zoom-level change, *always*,
+  because it's built straight from `field` and never consults the atlas at all — measured **~940ms
+  per zoom step at a modest 1024px world, unaffected by bake state** (baked vs. unbaked timings
+  were the same order of magnitude). Since that backdrop is already documented as deliberately
+  low-fidelity ("NO procedural detail"), rendering it at quarter resolution and letting the canvas
+  stretch it (no signature changes needed — the resample/colorize functions already take
+  independent output-resolution params) cut a full overview rebuild from **655ms → 53ms (12.3×)**,
+  and the isolated backdrop-only cost (tile canvases + atlas already warm — the truest measure of
+  a mid-zoom-gesture frame) from **1186ms → 71ms (16.6×)**. Visually verified unchanged character
+  (screenshots of the same deep-zoom unrefined spot, before/after) since the backdrop was already
+  a coarse placeholder standing in until the sharp tile overlay covers the same ground. Locked in
+  with a permanent smoke-suite timing regression guard. See `CHANGELOG.md` for the full profiling
+  numbers and reasoning.
 - **v0.91 — owner /goal: "…how in explore the timeline should work. Currently it works, bit
   rather clunky"** (no engine changes — script block 2 civ-UI only; render battery ALL IDENTICAL
   to v0.90, headless **923** unchanged, smoke **123 → 130**): the second half of the v0.90 /goal
@@ -447,7 +475,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.91), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.92), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -471,21 +499,26 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **Queued decision (owner, 2026-07-13): save/export architecture restructuring.** Owner asked to audit
-  the codebase for "double data under different names" in the save file and in how Tiles & LOD / Atlas /
-  Layers / World are used, "for efficiency gains and a smoother UI/UX." Read-only audit delivered —
-  `docs/research/save-export-architecture-audit.md` — no code changed yet (owner explicitly asked for the
-  audit before scoping any change; confirmed backward compatibility with old saves can break when a
-  restructuring pass does happen). Verdict: the real bloat is `exportZip()` writing overlapping map
-  imagery from **three independent code paths** for the same terrain (`layers/*.png` previews,
-  `map.png`/`tiles/*` fresh bake, and the embedded Atlas pyramid) — genuinely trimmable. "Tiles & LOD" vs
-  "Atlas" vs "Layers" vs "World" is a separate, lower-risk **naming/IA** issue (Atlas is nested *inside*
-  Tiles & LOD, not a sibling; Layers is a pure view-selector with no storage) — a markup-only fix, zero
-  format risk. `biome_raster.bin` vs `biome_baked.bin` (the owner's own example) turned out to be **two
-  genuinely different classifiers for two different consumers, not duplication** — flagged in the audit so
-  a future pass doesn't collapse them by mistake. Next session: get the owner's scope pick (save-size trim
-  vs. UI rename vs. both — the audit's §5 lists ranked, independently-shippable options) before writing
-  any code, per the "confirm design before building" rule.
+- **Save/export architecture restructuring — SHIPPED in v0.92.** `docs/research/save-export-architecture-
+  audit.md` (read-only audit, 2026-07-13) found the real bloat was `exportZip()` writing overlapping map
+  imagery from three independent code paths for the same terrain, and a separate, lower-risk naming/IA
+  muddle in "Tiles & LOD" burying "Atlas" two levels deep. Owner's /goal ("carry out the reported fixes")
+  shipped both: the audit's §5A (skip the redundant flat bake for a finalized world; make the 4
+  `layers/*.png` previews opt-in) and §5B/C (split into Tiled LOD view / Atlas cache / Region export). See
+  the v0.92 CHANGELOG entry for the full list. `biome_raster.bin` vs `biome_baked.bin` (the owner's own
+  "double data" example) is intentionally **not** touched — the audit found they're two genuinely
+  different classifiers for two different consumers, not duplication. Nothing queued from this thread.
+- **LOD zoom performance — root-caused and fixed in v0.92.** Same /goal, second half: "why is zooming in
+  slow even when tiles are baked." Real answer (found via `performance.now()` profiling, not guesswork):
+  the sharp tile overlay *does* correctly serve from the atlas when baked — the actual bottleneck was the
+  "instant overview" backdrop underneath it, rebuilt at full `GW×GH` resolution through the same expensive
+  per-pixel colorizer on every zoom step, never consulting the atlas at all (~940ms/step measured,
+  identical whether baked or not). Fixed by rendering that (already-documented-as-low-fidelity) backdrop
+  at quarter resolution and letting the canvas stretch it — 12.3–16.6× faster in the same profiling pass,
+  visually unchanged at that fidelity level. Locked in with a permanent smoke-suite timing guard. Nothing
+  queued — if the owner reports zooming still feels slow after this, the next place to look is the TILE
+  overlay's own per-tile colorization cost (not yet profiled in isolation) or the debug-overlay vector
+  drawing pass (`drawLODDebugOverlays`), not the overview backdrop this fix already addressed.
 - **The owner's 2026-07-12 /goal (settlement pop-up + Explore timeline rework) is now fully shipped**
   across v0.90 (settlement editor → map pop-up) and v0.91 (timeline: one home, real time-scale — see
   above). No queued follow-up on either; nothing else outstanding from that request.

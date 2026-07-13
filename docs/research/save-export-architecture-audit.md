@@ -142,32 +142,39 @@ a single-purpose export for the same downstream editor).
 
 ---
 
-## 5. Options for a restructuring pass (not yet built — owner to prioritize)
+## 5. Options for a restructuring pass — **shipped in v0.92**
 
-All of these are additive/subtractive to `exportZip()` only; none require a `loadZip()` change beyond
-graceful-missing-file handling it already has (every `z['...']` read is already `if`-guarded). Owner
-confirmed backward compatibility is not a blocker.
+All of these were additive/subtractive to `exportZip()` only; no `loadZip()` change was needed beyond the
+graceful-missing-file handling it already had (every `z['...']` read was already `if`-guarded). Owner
+confirmed backward compatibility was not a blocker, then said "carry out the reported fixes" — A1, A2, B
+below shipped as described; A3/C were the not-chosen alternates, noted for the record.
 
-**A. Collapse the three-way map-imagery overlap (§2c) — biggest size win.**
-Concretely: since the Atlas pyramid (when populated) already contains the full LOD-viewable render at
-every baked level, `map.png`/`tiles/*` only earns its cost when *nothing* has been baked yet (i.e., it's
-covering for an empty atlas). Options, not mutually exclusive:
-  - A1. Skip `map.png`/`tiles/*` entirely when the Atlas has ≥1 baked chunk for this world (the atlas
-    already carries an equivalent-or-better render); keep it as the fallback when the atlas is empty.
-  - A2. Drop the 4 `layers/*.png` preview files by default, behind an opt-in checkbox next to Export
-    (mirrors how the channel atlas is already opt-in) — they're the smallest piece but also the most
-    purely decorative (nothing reads them back on import).
-  - A3. Leave both, but make BOTH opt-in checkboxes in the Export form (current behavior: unconditional).
+**A. Collapse the three-way map-imagery overlap (§2c) — biggest size win. SHIPPED (A1 + A2).**
+  - **A1 (shipped)** — `exportZip()` now skips `map.png`/`tiles/*` entirely whenever `state.finalized` is
+    true (a precise signal: it's only ever set after `bakeAllTiles` finishes without throwing, meaning the
+    Atlas pyramid is complete from z=0 through the chosen depth — strictly more information than any flat
+    bake, just chunked instead of flat). Non-finalized exports are unchanged (still bake fresh, since the
+    atlas may be empty or sparse there).
+  - **A2 (shipped)** — the 4 `layers/*.png` preview files are now behind a new opt-in checkbox
+    (`#layersPreviewChk`), same footing as the pre-existing channel-atlas checkbox, instead of baking
+    unconditionally on every export.
+  - A3 (not chosen — superseded by shipping A1+A2 directly) — "leave both unconditional, just add
+    checkboxes for both" was the more conservative alternative; the owner's "carry out the reported fixes"
+    directive was read as authorizing the smarter default (A1's atlas-aware skip) over the purely manual
+    opt-in-only version.
 
-**B. Tiles & LOD → three clearly-separated sections.** Split the one `<details>` at L1064 into three
-top-level ones ("Tiled LOD view," "Atlas cache," "Region export"), each with copy that doesn't reuse the
-word "tile" for three different things. Zero data/format risk — pure markup + a `docs`/`CLAUDE.md` pass
-so future sessions stop treating "Atlas" as a sibling of "Tiles & LOD" in their own mental model.
+**B. Tiles & LOD → three clearly-separated sections. SHIPPED.** The one `<details>` that used to bundle
+live view / atlas / region-export under one "Tiles & LOD" label is now three top-level sections — **Tiled
+LOD view**, **Atlas cache** (with the chunk-debug overlay correctly nested inside it now, since it
+visualizes atlas bake state), and **Region export**. Every element id carried over unchanged from the old
+combined accordion, so no click/input handler needed to change — markup + copy only, verified via a smoke
+assertion that every old id still resolves post-split.
 
-**C. Rename "atlas" occurrences for clarity** (§3) — e.g. keep "Atlas" for the UI accordion / IndexedDB
-cache, call the zip-embedded copy "baked tiles" or similar in comments/manifests, so grep and code review
-don't conflate "the cache" and "its serialization" as one thing.
+**C. Rename "atlas" occurrences for clarity** (§3) — **not done this pass.** The UI-level rename (B) was
+enough to resolve the practical confusion the owner reported; a code-comment/manifest-level rename of
+every internal "atlas" reference was judged lower value for the risk of touching working code paths with
+no behavior change to show for it. Left as a candidate for a future pure-comment pass if it comes up again.
 
-No recommendation forced here — owner asked for the audit before deciding scope; A is the only one with
-a real save-size payoff, B/C are pure clarity and can land independently/first since they carry no
-compatibility risk at all.
+See `CHANGELOG.md`'s v0.92 entry for the exact diffs, verification (a real `exportZip()` call with
+`zipStore()` monkey-patched to capture entries, confirming the map.png/layers gating behaves exactly as
+specified above), and the smoke-suite assertions that lock all of this in.

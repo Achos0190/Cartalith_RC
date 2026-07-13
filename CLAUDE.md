@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.91**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.92**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.91.html` | **Current** unified tool (~15.7k lines, 3 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.90.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.92.html` | **Current** unified tool (~15.7k lines, 3 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.91.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports |

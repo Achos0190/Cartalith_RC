@@ -392,8 +392,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.evaluate(() => { state.finalized = false; applyFinalizedUI(); });
   R.phaseOff = await page.evaluate(() => document.body.classList.contains('phase-explore'));
   // v0.74: finalize control promoted to the FIRST block of Generate → World (id=finalizeSec),
-  //        out of the collapsed Tiles & LOD → Atlas accordion. Checked while not finalized so the
-  //        bake button is visible (applyFinalizedUI hides it once finalized).
+  //        out of the collapsed Atlas cache accordion (v0.92: split out of the old single
+  //        "Tiles & LOD" accordion). Checked while not finalized so the bake button is visible
+  //        (applyFinalizedUI hides it once finalized).
   R.finalizeTop = await page.evaluate(() => {
     const gw = document.getElementById('genWorld');
     const bab = document.getElementById('bakeAllBtn');
@@ -598,6 +599,54 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     noExportBtnInSidebar: !document.getElementById('atlasExportBtn'),
     packStillInAssetsLibrary: !!document.getElementById('alImportPackBtn') && !!document.getElementById('alExportBtn')
   }));
+
+  // v0.92 (save-export-architecture-audit.md §5A): exportZip() now (1) only includes layers/*.png when
+  // the new opt-in checkbox is ticked (previously unconditional) and (2) skips the redundant map.png/
+  // tiles bake for a FINALIZED world (whose Atlas pyramid already covers the whole map at every baked
+  // level). Verified by capturing the real entries array zipStore() receives — monkey-patched around a
+  // real exportZip() call, since trusting a browser download would need base64-roundtripping the whole
+  // zip through page.evaluate for no extra confidence. Only one of the two calls below (the first) pays
+  // for the real per-pixel map bake; the second is the finalized skip-bake fast path.
+  R.exportTrim = await page.evaluate(async () => {
+    const capture = async () => {
+      let names = null;
+      const orig = zipStore;
+      zipStore = (entries) => { names = entries.map(e => e.name); return orig(entries); };
+      try { await exportZip(); } finally { zipStore = orig; }
+      return names;
+    };
+    document.getElementById('bakeRes').value = '2048';
+    document.getElementById('bakeTiles').checked = false;
+    const lp = document.getElementById('layersPreviewChk');
+    lp.checked = false; setFinalized(false);
+    const namesDefault = await capture();
+    lp.checked = true; setFinalized(true);
+    const namesFinalizedWithLayers = await capture();
+    lp.checked = false; setFinalized(false);
+    return {
+      noLayersByDefault: !namesDefault.includes('layers/biome.png'),
+      mapPngWhenNotFinalized: namesDefault.includes('map.png'),
+      layersWhenChecked: ['layers/biome.png', 'layers/hillshade.png', 'layers/temperature.png', 'layers/rainfall.png'].every(n => namesFinalizedWithLayers.includes(n)),
+      noMapPngWhenFinalized: !namesFinalizedWithLayers.includes('map.png') && !namesFinalizedWithLayers.some(n => n.startsWith('tiles/')),
+    };
+  });
+
+  // v0.92 (save-export-architecture-audit.md §5B): the old single "Tiles & LOD" accordion (which
+  // bundled the live zoom view, the Atlas bake cache, and the standalone region-export flow under one
+  // label) is now three separately-labeled top-level sections. All element ids from the old accordion
+  // must still resolve (no JS wiring changed) and none of the summaries should still read "Tiles & LOD".
+  R.tilesLodSplit = await page.evaluate(() => {
+    const summaries = [...document.querySelectorAll('#genWorld > .sec > details.cat-acc > summary, #genWorld details.cat-acc > summary')].map(s => s.textContent.trim());
+    const idsPresent = ['lodChk', 'lodAutoChk', 'zoomDetailR', 'lodTileSeg', 'lodLevels', 'lodRefineBtn', 'lodBurnChk', 'lodMicroChk',
+      'lodBakeBtn', 'lodClearAtlasBtn', 'atlasStat', 'lodDbgSeg',
+      'refCols', 'refRows', 'refSize', 'refGzip', 'lodShowGrid', 'regionBtn', 'refineBtn'].every(id => !!document.getElementById(id));
+    return {
+      hasThreeLabels: summaries.includes('Tiled LOD view') && summaries.includes('Atlas cache') && summaries.includes('Region export'),
+      noOldCombinedLabel: !summaries.includes('Tiles & LOD'),
+      allIdsStillResolve: idsPresent,
+    };
+  });
+
   await page.click('#assetsHeaderBtn');
   await page.waitForTimeout(250);
   R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
@@ -1012,6 +1061,31 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { settleOk, wildOk, hadSettleSeed: !!(_settleSeeds && _settleSeeds.length), hadWildRegion: !!rec };
   });
 
+  // v0.92 fix (owner report: "slow when zooming in even when tiles are baked" — profiling with
+  // tests/perf found the bottleneck: drawLODView()'s "instant overview" backdrop was rebuilt at full
+  // GW×GH resolution through the same expensive per-pixel colorization used for real tiles, on EVERY
+  // zoom-level change (any frame that isn't an exact pan-reuse hit) -- ~940ms measured at a modest
+  // 1024px world, unaffected by whether the Atlas had anything baked (the backdrop is built straight
+  // from `field`, never consults the atlas). Fixed by rendering the backdrop at a quarter resolution
+  // and letting the canvas stretch it (deliberately low-fidelity already -- "NO procedural detail" --
+  // so downscaling it further is imperceptible once the sharp tile overlay covers the same area).
+  // Regression guard: an overview rebuild (new zoom level, atlas baked, tile canvases still warm so
+  // ONLY the backdrop is being timed) must stay well under the old ~940-1200ms baseline.
+  R.lodOverviewPerf = await page.evaluate(async () => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; state.debug = 'off';
+    _lodZoom = 6; applyView(); renderNow();   // settle at a starting zoom level
+    const n = await bakeAllTiles(2, () => {});   // small pyramid so this stays fast to set up
+    setFinalized(true);
+    _lodZoom = 8; applyView(); renderNow();   // move to a new (now-baked) zoom level once, populate caches
+    _lodOverviewPrev = null;   // invalidate ONLY the overview-reuse cache (simulates a tiny pan/zoom
+                                // step) -- tile canvases and the atlas stay warm, isolating backdrop cost
+    const t0 = performance.now();
+    renderNow();
+    const overviewRebuildMs = performance.now() - t0;
+    state.debug = 'off'; _lodOn = false; setFinalized(false); _lodZoom = 1; applyView(); renderNow();
+    return { overviewRebuildMs, chunksBaked: n };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1111,6 +1185,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
   A('v0.88: standalone atlas import/export retired; File → Export .zip is the sole 100% round-trip', R.atlasStandaloneGone.noImportBtnInFileMenu && R.atlasStandaloneGone.noEmbedCheckbox && R.atlasStandaloneGone.noExportBtnInSidebar);
   A('v0.88: dedicated asset-pack import/export stays in the Assets Library menu', R.atlasStandaloneGone.packStillInAssetsLibrary === true);
+  A('v0.92: layers/*.png previews are opt-in (off by default), not unconditional', R.exportTrim.noLayersByDefault);
+  A('v0.92: layers/*.png previews appear when the new checkbox is ticked', R.exportTrim.layersWhenChecked);
+  A('v0.92: map.png still bakes for a non-finalized export (unchanged default behavior)', R.exportTrim.mapPngWhenNotFinalized);
+  A('v0.92: map.png/tiles skipped for a finalized export (Atlas pyramid already covers the map)', R.exportTrim.noMapPngWhenFinalized);
+  A('v0.92: "Tiles & LOD" split into three labeled sections (Tiled LOD view / Atlas cache / Region export)', R.tilesLodSplit.hasThreeLabels && R.tilesLodSplit.noOldCombinedLabel);
+  A('v0.92: every id from the old combined accordion still resolves after the split', R.tilesLodSplit.allIdsStillResolve);
   A('v0.88: LOD zoom cap reaches a ≤5km view span at the default 800km map width', R.lodZoomDeep.reachesFiveKm === true && R.lodZoomDeep.maxZoom >= 160);
   A('v0.88: scale bar reading shrinks as LOD zoom deepens (was frozen at the full map width)', R.lodZoomDeep.labelChanged === true && R.lodZoomDeep.spanIn < R.lodZoomDeep.spanOut);
   A('v0.89: every info-layer stays tiled while LOD is on (renderNow never falls through to the full un-zoomed pixel loop)', R.lodInfoLayers.neverFullPixelLoop === true);
@@ -1119,6 +1199,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.91 fix: the opacity slider still affects the map while Tiled LOD is on', R.lodOpacity.differsWithOpacity === true);
   A('v0.91 fix: settlement click-to-info works under Tiled LOD', R.lodClickInfo.settleOk === true);
   A('v0.91 fix: wildlife click-to-info works under Tiled LOD', R.lodClickInfo.wildOk === true);
+  A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now quarter-res)', R.lodOverviewPerf.overviewRebuildMs < 400);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
