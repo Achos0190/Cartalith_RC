@@ -120,6 +120,58 @@ None of these fields touch the core engine's geometry kernel, graph, or environm
 each is read only inside the specific function whose behaviour it's meant to vary, confirming the
 Core/Culture split still holds after five additional profiles.
 
+### 3.2 A third planning mode, and the fields added through the rest of the roster
+
+Profiles 9–18 (Maya → Post-Apocalyptic) shipped without needing any further schema growth — every
+one of them resolved to `'organic'` or `'grid'` plus a combination of fields already listed above
+(`noWalls` picked up two more independently-reasoned cases: Frontier's no-fortification-tradition
+and Industrial's defence-obsolete-by-this-era; `factory`/`ruined` are the only genuinely new
+Industrial/Post-Apocalyptic-only flags, both read in exactly one function each, `tagFactory()` and
+`applyDecay()`). The 19th profile, **The Venus Project**, is the first addition since Roman's grid
+to need a structurally new *growth model* rather than a new flag:
+
+- **`planning:'radial'`**: a third mode alongside `'organic'`/`'grid'` — concentric ring streets
+  connected by radial spokes to a central hub (`buildRadialStreets()`), rather than an accreted
+  tangle or a rectilinear module. Reuses the roundhouse building grammar's regular-polygon-for-a-
+  circle technique (docs/03 M-CEL-2) at city scale for each ring, and — critically — needed *no
+  change at all* to the core engine's planar-face block detector or to `assignDistricts()` (already
+  keyed to distance-from-anchor with no cardinal-direction assumption, so it reads the rings as
+  concentric zones for free) or to the epoch/grid dispatch pattern beyond one more `else if` arm.
+  This is the strongest evidence yet for the Core/Culture split's central claim: a fundamentally
+  different city *shape* was addable by supplying a different street-layout function and nothing
+  else downstream.
+- **A parcelPattern/buildingGrammar safety finding worth recording**: `insulaLots()` (the
+  `'insula'` parcel pattern) subdivides a block's **axis-aligned bounding box**, documented in its
+  own comment as relying on grid blocks being rectangles — it does not validate lot corners against
+  the true block polygon. Feeding it a curved wedge-shaped ring block would silently produce lots
+  overhanging into the street or an adjacent wedge, exactly the kind of impossible intersection
+  this project's standing audit exists to catch. Venus therefore pairs `planning:'radial'` with
+  `parcelPattern:'strip'` instead — the bisector-based method is shape-aware (it works from each
+  block vertex's own bisector, ray-cast-capped against the *true* opposite boundary) and already
+  carries the wet-corner and bowtie-quad guards fixed earlier in this project. `buildingGrammar` is
+  independent of `parcelPattern` by design, so `'domus-insula'` still works unchanged on strip
+  parcels — a combination no earlier profile happened to need, but the schema supported it with no
+  code changes, confirming those two fields really were orthogonal all along.
+- **`uniformHousing`** (Venus only): forces the domus/insula split's `isDomus` decision to `false`
+  unconditionally, so every parcel gets the standardized modular-apartment building rather than an
+  elite/mass split — modelling a moneyless, automation-based economy with no housing hierarchy.
+  Caught one real population bug during development: the pop-count formula applies a **4x**
+  occupancy multiplier to any parcel whose building kind is `'insula block'`, correctly reflecting
+  Rome's actual multi-storey tenement (M-ROM-7) — but `uniformHousing` puts *every* parcel in that
+  bucket, so the unmodified formula quadruple-counted the entire town (a first pass realized
+  180-550% of target population). Fixed by excluding `uniformHousing` profiles from that multiplier
+  entirely (`insulaParcels` stays `null`), since Venus's uniform building isn't specified as a
+  multi-storey tenement — the correct modelling choice, not just a numeric patch.
+- **`waterway`** (Venus only): opts into `buildWaterway()`, a circular irrigation-canal ring in the
+  same spirit as the Aztec chinampas — the one genuinely new infrastructure detail for this profile.
+  Drawn at a radius beyond the outermost built ring, i.e. entirely outside the street network's
+  reach, so — like the chinampas before it — it can never overlap a building or parcel **by
+  construction**, not merely by a runtime check (verified empirically: 0 crossings across 30 seed x
+  site combinations).
+- **`'dome'` civic style**: the first civic hall that isn't a rectangle re-skin — a circular drum
+  (reusing the roundhouse's polygon technique again) with a colonnade ring and a dome marker,
+  standing in for Fresco's Center for Resource Management.
+
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 
 | Quantity | Value | Source |

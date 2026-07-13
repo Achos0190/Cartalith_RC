@@ -143,6 +143,16 @@ civilizations 3–18).
   never moves or removes a single vertex of already-validated geometry — a deliberate choice,
   since an actual breached-wall/blocked-road model would be exactly the kind of "impossible
   intersection" this project's standing audit checks against everywhere else (M-PA-1/2).
+- **The Venus Project (resource-based circular city)** — Jacque Fresco's circular-city concept,
+  the first genuinely new *growth model* since the grid: concentric ring streets connected by
+  radial spokes to a domed central hub (the Center for Resource Management), reusing the
+  roundhouse's polygon-for-a-circle technique at city scale. No money and no market squares (a
+  resource-based economy), no religious buildings (Fresco's explicitly secular social vision), no
+  walls at all (a postulated post-conflict society), and a circular irrigation waterway — the one
+  genuinely new infrastructure detail, drawn entirely beyond the built rings' reach so it can never
+  overlap a building by construction, the same defensive pattern as the Aztec chinampas. Every
+  parcel gets the same standardized modular-apartment building (`uniformHousing`) rather than the
+  usual elite/mass split — modelling a society with no housing hierarchy (M-VEN register).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

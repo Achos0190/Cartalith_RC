@@ -1176,5 +1176,61 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- The Venus Project civilization profile (docs/03, M-VEN register) ---------- */
+{
+  const ve = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'venus' });
+  const ve2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'venus' });
+  ok(ve.culture === 'venus', 'venus profile resolves');
+  ok(UME.hashModel(ve) === UME.hashModel(ve2), 'venus generation deterministic');
+  ok(ve.parcels.length > 150, `venus circular city is a substantial settlement (${ve.parcels.length} parcels)`);
+  ok(ve.pop > 6000 * 0.35, `venus population realizes a meaningful share of target despite the new planning mode's site-dependent variance (${ve.pop}/6000)`);
+
+  // genuinely new planning mode (M-VEN-1): every building stays within a bounded radius of the
+  // central hub, unlike the organic pack's unbounded exploratory sprawl or the grid pack's
+  // maximus-through-routes continuing to the map edge — the defining structural signature of a
+  // closed concentric-ring city rather than a re-skin of either existing growth model.
+  const C = ve.anchors.market;
+  const dists = ve.buildings.map(b => { const c = UME._test.polyCentroid(b.poly); return Math.hypot(c.x - C.x, c.y - C.y); });
+  const maxD = Math.max(...dists);
+  ok(maxD < 500, `venus buildings stay within a bounded radius of the central hub, unlike unbounded organic/grid growth (max ${maxD.toFixed(0)}m, M-VEN-1)`);
+
+  // uniformHousing (M-VEN-4): every built parcel gets the standardized modular-apartment kind —
+  // never the elite domus split (atrium/peristyle ranges), unlike roman/industrial/postapoc
+  const veKinds = new Set(ve.buildings.map(b => b.kind));
+  ok(veKinds.has('insula block'), 'venus buildings use the standardized modular-apartment kind');
+  ok(!veKinds.has('atrium range') && !veKinds.has('peristyle range'), 'venus has no elite domus split — uniformHousing forces every parcel to the same building (M-VEN-4)');
+
+  // domed central hub (M-VEN-2), not the roman basilica or any rectangular civic hall
+  ok(ve.civic && ve.civic.style === 'dome' && ve.civic.dome === true, 'venus civic hall is the domed Center for Resource Management (M-VEN-2)');
+  ok(ve.civic.name === 'Center for Resource Management', 'venus civic hall is explicitly named for Fresco\'s cybernated resource-management hub');
+
+  // circular irrigation waterway (M-VEN-3): present on every site kind (a constructed feature,
+  // unlike the aztec chinampas which need a natural shoreline), and never overlapping a building
+  ok(ve.details.some(d => d.kind === 'waterway'), `venus profile grows a circular irrigation waterway (${ve.details.filter(d=>d.kind==='waterway').length} arc(s), M-VEN-3)`);
+  for (const ww of ve.details.filter(d => d.kind === 'waterway')) {
+    for (const b of ve.buildings) {
+      let crosses = false;
+      for (let i = 0; i < ww.poly.length - 1 && !crosses; i++)
+        for (let j = 0; j < b.poly.length && !crosses; j++)
+          if (UME._test.segInt(ww.poly[i], ww.poly[i+1], b.poly[j], b.poly[(j+1)%b.poly.length])) crosses = true;
+      ok(!crosses, `venus waterway never crosses a building (${b.id})`);
+    }
+  }
+
+  // no religion, no civic-hall-independent markets, no walls at all — even when requested
+  ok(ve.churches.length === 0, 'venus profile has no religious buildings (secular, science-based social vision, M-VEN-4)');
+  ok(ve.markets.length === 0, 'venus profile has no specialised market squares (moneyless resource-based economy, M-VEN-4)');
+  const vef = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'venus' });
+  ok(!vef.wall.ring && vef.wall.gates.length === 0 && !vef.fortified, 'venus profile never builds any wall at all, even when fortified is requested (a fourth distinct noWalls reasoning)');
+  const ve3 = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'venus' });
+  ok(UME.hashModel(ve) === UME.hashModel(ve3), 'the walls checkbox has no effect on the venus profile (forced off either way)');
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const v1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'venus', site });
+    const v2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'venus', site });
+    ok(v1.parcels.length > 100 && UME.hashModel(v1) === UME.hashModel(v2), `venus circular city on '${site}' site: substantial + deterministic (${v1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

@@ -106,6 +106,8 @@ svg.panning{cursor:grabbing}
 .fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
 .field{fill:none;stroke:#cbbd92;stroke-width:.55;opacity:.9}
 .chinampa{fill:#c3d6a8;stroke:#8a9e6a;stroke-width:.6;opacity:.85}
+.civicdome{fill:#5c7a8a;stroke:#2e4a54;stroke-width:.6}
+.waterway{fill:none;stroke:#8fa39e;stroke-width:5;opacity:.75}
 .fieldedge{fill:none;stroke:#b3a276;stroke-width:.6;opacity:.8}
 .grave{fill:#8d8d7a}
 .lbl{font:italic 10px Georgia,serif;fill:#5c4a28;pointer-events:none}
@@ -141,7 +143,8 @@ svg.panning{cursor:grabbing}
       <option value="colonial">Colonial (Laws of the Indies)</option>
       <option value="frontier">Frontier (Old West)</option>
       <option value="industrial">Industrial (mill town)</option>
-      <option value="postapoc">Post-Apocalyptic</option></select></div>
+      <option value="postapoc">Post-Apocalyptic</option>
+      <option value="venus">The Venus Project (circular city)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -322,7 +325,13 @@ const CULTURE_PROFILES={
     defaultFaith:'none',defaultCivic:'none',markets:false,
     wallGates:{scheme:'compass'},orientation:'cardinal',civicAnchorLabel:'town square',
     ruined:true,
-    prov:'A collapsed modern/industrial settlement — the real-world referent is shrinking-city and ghost-town depopulation research, not fiction: reuses the Industrial profile\'s planned grid and domus-insula housing stock, since that is the city type imagined to have fallen (M-PA-2); a seeded ~35-45% of the already-built parcel stock is flagged ruined post-generation — abandoned and excluded from the population head-count, but geometrically untouched (M-PA-1). This is a deliberate, load-bearing design choice: an actual physical-rubble model (a breached wall, a road blocked mid-span) would be exactly the "impossible intersection" this project\'s standing audit checks against everywhere else, so full ruin modelling is explicitly deferred rather than implemented, and this profile\'s low population realization is intentional, not a bug. No faith, no civic hall, no markets (organized institutions assumed collapsed with the population); compass-named gates for whatever curtain still stands; never a bastioned trace (a gunpowder-era fortification style would be anachronistically archaic for a fallen modern city — the same anachronism guard applied in the opposite temporal direction from every earlier profile).'}
+    prov:'A collapsed modern/industrial settlement — the real-world referent is shrinking-city and ghost-town depopulation research, not fiction: reuses the Industrial profile\'s planned grid and domus-insula housing stock, since that is the city type imagined to have fallen (M-PA-2); a seeded ~35-45% of the already-built parcel stock is flagged ruined post-generation — abandoned and excluded from the population head-count, but geometrically untouched (M-PA-1). This is a deliberate, load-bearing design choice: an actual physical-rubble model (a breached wall, a road blocked mid-span) would be exactly the "impossible intersection" this project\'s standing audit checks against everywhere else, so full ruin modelling is explicitly deferred rather than implemented, and this profile\'s low population realization is intentional, not a bug. No faith, no civic hall, no markets (organized institutions assumed collapsed with the population); compass-named gates for whatever curtain still stands; never a bastioned trace (a gunpowder-era fortification style would be anachronistically archaic for a fallen modern city — the same anachronism guard applied in the opposite temporal direction from every earlier profile).'},
+  venus:{id:'venus',name:'The Venus Project (resource-based circular city)',
+    planning:'radial',parcelPattern:'strip',buildingGrammar:'domus-insula',
+    defaultFaith:'none',defaultCivic:'dome',markets:false,
+    wallGates:{scheme:'compass'},orientation:'radial',civicAnchorLabel:'Center for Resource Management',
+    noWalls:true,uniformHousing:true,waterway:true,
+    prov:'Jacque Fresco\'s Venus Project circular city (thevenusproject.com/resource-based-economy/environment/circular-city): concentric rings — an institutional/research ring, a green belt, and a residential ring of standardized modular housing — connected by radial spokes to a domed central hub, the Center for Resource Management (M-VEN-2), rather than any accreted tangle or rectilinear module; a genuinely new planning mode (M-VEN-1), not a re-skin of the grid or organic models, using the shape-aware bisector parcel method rather than the bounding-box-based insula method since this profile\'s wedge-shaped ring blocks need lot boundaries that respect the true (curved) block outline. A resource-based, moneyless economy (no markets, M-VEN-4) with automation replacing a wealth hierarchy, so every parcel gets the uniform modular-apartment building instead of the usual elite/mass split (the new `uniformHousing` flag, generalizing the same M-ROM-7 mechanism the opposite way — collapsing the split rather than tuning its multiplier); no religious institution modelled, matching Fresco\'s explicitly secular, science-based social philosophy (defaultFaith none, M-VEN-4); no walls at all — a postulated post-scarcity, post-conflict society has no fortification concept, a fourth distinct noWalls reasoning after Aztec\'s lake-defence, Frontier\'s no-fortification-tradition and Industrial\'s defence-obsolete-by-this-era reasons (Post-Apocalyptic, by contrast, keeps a plain curtain wall — never forced off); a circular irrigation waterway encircles the built city beyond the last residential ring, the one genuinely new infrastructure detail for this profile, in the same spirit as the Aztec chinampas (M-VEN-3) — placed entirely beyond the street network\'s reach, so it can never overlap a building or parcel by construction, not just by a runtime check.'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -817,6 +826,67 @@ function buildGridStreets(seed,site,anchors,g,opts){
     addAxis(F.x+i*spacing,'v','street',4.5,minorExtent,'Minor cardo: regular colonial grid street (M-ROM-1).');}
   return {forum:F,spacing};}
 
+/* ---------------- radial streets: concentric-ring city (Venus Project, M-VEN-1) ----------------
+ * A third planning mode, genuinely different from both 'organic' (accreted tangle) and 'grid'
+ * (rectilinear module): concentric ring streets connected by radial spokes to a central hub.
+ * Reuses the roundhouse building grammar's regular-polygon-approximates-a-circle technique
+ * (docs/03 M-CEL-2) at city scale for each ring, and leans on the core engine's unchanged
+ * planar-face block detector to turn ring x spoke crossings into annular-wedge blocks exactly as
+ * buildGridStreets' own comment describes for the rectilinear case — only the LAYOUT RULE
+ * differs (docs/07 §2). Distance-based district assignment (assignDistricts, keyed to distance
+ * from anchors.market with no cardinal-direction assumption) needs no change at all to read this
+ * as concentric zones — market-adjacent parcels ring the hub, agrarian/suburb parcels fall
+ * outside the built rings, exactly matching Fresco's concentric-zone concept for free. */
+function buildRadialStreets(seed,site,anchors,g,opts){
+  const C=anchors.market;
+  const maxRF=opts.maxRF;
+  const spokes=12; // evenly-spaced radial streets, the spine of the concentric-zone city
+  const rings=[
+    {radius:Math.max(50,maxRF*0.32),sides:20,cls:'street',w:5},   // institutional/research ring
+    {radius:Math.max(110,maxRF*0.62),sides:28,cls:'primary',w:6.5}]; // outermost built (residential) ring
+  const land=(p)=>!site.isWater(p)&&site.riverDist(p)>(site.riverW?site.riverW/2+8:0)&&
+    p.x>25&&p.y>25&&p.x<site.Wm-25&&p.y<site.Hm-25;
+  const provRing='Ring street: a concentric circuit linking the radial spokes, reusing the roundhouse\'s regular-polygon-for-a-circle technique at city scale (M-VEN-1).';
+  const provSpoke='Radial spoke: a straight route from the central Resource Management hub to the outermost ring — the spine of the concentric-zone city (M-VEN-1).';
+  for(const ring of rings){
+    const pts=[];
+    for(let k=0;k<=ring.sides;k++){
+      const a=2*Math.PI*k/ring.sides;
+      pts.push({x:C.x+Math.cos(a)*ring.radius,y:C.y+Math.sin(a)*ring.radius});}
+    // split into contiguous on-land runs so a ring never gets drawn uncapped across water
+    let run=[];
+    const flush=()=>{if(run.length>1)addPolylineStreet(g,run,ring.cls,ring.w,0,provRing);run=[];};
+    for(const p of pts){if(land(p))run.push(p);else flush();}
+    flush();}
+  const outer=rings[rings.length-1].radius;
+  for(let i=0;i<spokes;i++){
+    const a=2*Math.PI*i/spokes;
+    const p0={x:C.x+Math.cos(a)*14,y:C.y+Math.sin(a)*14};
+    const p1={x:C.x+Math.cos(a)*outer,y:C.y+Math.sin(a)*outer};
+    if(!land(p1))continue;
+    addStreet(g,p0.x,p0.y,p1.x,p1.y,'street',5,0,provSpoke);}
+  return {center:C,rings:rings.map(rg=>rg.radius),spokes};}
+
+/* ---------------- circular waterway: Venus Project irrigation canal (M-VEN-3) ----------------
+ * The one genuinely new infrastructure detail for this profile, in the same spirit as the Aztec
+ * chinampas (docs/07 §3.1): a closed decorative ring drawn beyond the outermost built ring's
+ * radius, i.e. entirely outside the street network's reach — so it can never overlap a building
+ * or parcel BY CONSTRUCTION (no block/parcel/building geometry is ever generated out there in the
+ * first place), the same defensive pattern already proven for the Industrial/Post-Apocalyptic
+ * profiles' new mechanisms. Never a parcel or building, so it carries none of the "must not sit
+ * in water" invariant that applies to built fabric — sitting past the built city is the point. */
+function buildWaterway(seed,site,anchors,radius){
+  const C=anchors.market,sides=56;
+  const onMap=(p)=>p.x>8&&p.y>8&&p.x<site.Wm-8&&p.y<site.Hm-8;
+  const runs=[];let run=[];
+  for(let k=0;k<=sides;k++){
+    const a=2*Math.PI*k/sides;
+    const p={x:C.x+Math.cos(a)*radius,y:C.y+Math.sin(a)*radius};
+    if(onMap(p))run.push(p);else{if(run.length>3)runs.push(run);run=[];}}
+  if(run.length>3)runs.push(run);
+  return runs.map(pts=>({kind:'waterway',poly:pts,
+    prov:'Circular irrigation waterway: encircles the built city beyond the residential ring, drawing on and returning to the agricultural belt it borders (M-VEN-3).'}));}
+
 /* ---------------- plaza: widened market street (M-DEN-6, additive mode) ---------------- */
 function buildPlaza(seed,site,anchors,g){
   const r=stream(seed,'plaza');
@@ -1047,6 +1117,15 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
     out.apse=rect(base,w*0.52,d*0.52);
     out.columns=out.hall.slice();
     out.prov='Castle keep (tenshu): a tiered stone-and-timber donjon at the jokamachi\'s core, the daimyo\'s seat of military and administrative authority (M-JPN-3).';
+  }else if(style==='dome'){
+    // circular drum + dome, reusing the roundhouse's regular-polygon-for-a-circle technique
+    // (M-CEL-2) rather than the rectangular rect() helper — the first civic hall that isn't a
+    // rectangle re-skin, matching the roundhouse's own precedent for building grammars.
+    const rad=r.range(9,13),nSides=16,hall=[];
+    for(let k=0;k<nSides;k++){const a=2*Math.PI*k/nSides;hall.push({x:base.x+Math.cos(a)*rad,y:base.y+Math.sin(a)*rad});}
+    out.hall=hall;out.name='Center for Resource Management';out.dome=true;
+    for(let k=0;k<12;k++){const a=2*Math.PI*k/12;out.columns.push({x:base.x+Math.cos(a)*rad*0.82,y:base.y+Math.sin(a)*rad*0.82});}
+    out.prov='Center for Resource Management: a domed circular hub housing the cybernated system coordinating resource management, education, health and communications at the centre of the circular city (M-VEN-2).';
   }else{
     const w=r.range(15,21),d=r.range(9,13);
     out.hall=rect(base,w,d);out.name=pop>=10000?'Town hall':'Guildhall';
@@ -1852,7 +1931,10 @@ function buildBuildings(seed,parcels,plaza,anchors,profile){
     // Roman domus/insula grammar (M-ROM-3): the harbour quarter still reuses the warehouse
     // grammar below unchanged (harbour/quay typology is core, not culture-specific, docs/07 §2).
     if(profile.buildingGrammar==='domus-insula'&&d!=='harbour'){
-      const isDomus=(d==='market'||d==='burgher')&&par.frontage>=15&&par.depth>=20&&r.chance(0.45);
+      // uniformHousing (Venus Project, M-VEN-4): a moneyless, automation-based economy has no
+      // elite/mass housing split to model — every parcel gets the standardized modular-apartment
+      // building instead, so isDomus is forced false rather than tuned to a different rate.
+      const isDomus=!profile.uniformHousing&&(d==='market'||d==='burgher')&&par.frontage>=15&&par.depth>=20&&r.chance(0.45);
       const rects=isDomus?[
         {u0:0,u1:1,v0:0,v1:0.28,kind:'atrium range'},
         {u0:0,u1:0.3,v0:0.26,v1:0.78,kind:'wing'},
@@ -2316,6 +2398,12 @@ function generate(seed,opts){
     if(site.through)addRiverBridges(seed,site,anchors,g,2);
     if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified});
     plaza=buildPlaza(seed,site,anchors,g);
+  }else if(profile.planning==='radial'){
+    buildRadialStreets(seed,site,anchors,g,{maxRF});
+    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
+    if(site.through)addRiverBridges(seed,site,anchors,g,2);
+    if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified});
+    plaza=buildPlaza(seed,site,anchors,g);
   }else{
     buildPrimaries(seed,site,anchors,g);
     plaza=buildPlaza(seed,site,anchors,g);
@@ -2389,7 +2477,11 @@ function generate(seed,opts){
   // baseline (fewer, larger lots per hectare at the same street length) needs a household-size
   // correction too, even without Roman's multi-storey reason — e.g. a Chinese siheyuan compound
   // usually housed an extended, multi-generational family, not a nuclear one (M-CHN-4).
-  const insulaParcels=profile.buildingGrammar==='domus-insula'
+  // uniformHousing (Venus Project) also produces 'insula block'-kind buildings on every parcel,
+  // but that's a single standardized modular apartment, not Rome's specific 3-5 storey tenement
+  // (M-ROM-7's actual justification for the 4x multiplier below) — excluded here so it falls
+  // through to the plain householdMult path instead of quadruple-counting every household.
+  const insulaParcels=(profile.buildingGrammar==='domus-insula'&&!profile.uniformHousing)
     ?new Set(buildings.filter(b=>b.kind==='insula block').map(b=>b.parcel)):null;
   const householdMult=profile.householdMultiplier||1;
   // a ruined parcel's structure still stands (M-PA-1) but nobody lives there — excluded from the
@@ -2405,6 +2497,7 @@ function generate(seed,opts){
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
   if(profile.chinampas)details.push(...buildChinampas(seed,site,anchors,wallState,maxRF));
+  if(profile.waterway)details.push(...buildWaterway(seed,site,anchors,maxRF*0.95));
   // Islamic-family cul-de-sac encroachment (M-ISL-2, no-op for profiles without deadEndBias):
   // runs AFTER blocks/parcels/buildings are built from the full graph, so privatizing a lane
   // closes THROUGH ACCESS only — it does not retroactively delete the dwellings that already
@@ -2502,6 +2595,9 @@ function render(){
   for(const d of model.details)if(d.kind==='chinampa'){
     const e=el('path',{d:pd(d.poly),class:'chinampa'},L.blocks);
     reg(e,'Chinampa','Chinampa (raised-bed garden)',{},d.prov);}
+  for(const d of model.details)if(d.kind==='waterway'){
+    const e=el('path',{d:pd(d.poly),class:'waterway'},L.fields);
+    reg(e,'Waterway','Circular irrigation waterway',{},d.prov);}
 
   // blocks
   for(const b of model.blocks){
@@ -2703,7 +2799,8 @@ function render(){
     reg(cv,'Civic hall',model.civic.name,{},model.civic.prov);
     if(model.civic.apse)el('path',{d:pd(model.civic.apse),class:'townhall'},L.buildings);
     for(const co of model.civic.columns||[])el('circle',{cx:co.x,cy:co.y,r:0.85,class:'templecol'},L.buildings);
-    if(model.civic.belfry)el('circle',{cx:model.civic.belfry.x,cy:model.civic.belfry.y,r:2.2,class:'belfry'},L.buildings);}
+    if(model.civic.belfry)el('circle',{cx:model.civic.belfry.x,cy:model.civic.belfry.y,r:2.2,class:'belfry'},L.buildings);
+    if(model.civic.dome)el('circle',{cx:model.civic.center.x,cy:model.civic.center.y,r:3.4,class:'civicdome'},L.buildings);}
 
   // details: trees, wells, cross
   for(const d of model.details){
@@ -2856,6 +2953,8 @@ function renderLegend(){
     <span><span class="chip" style="background:#9aa96e;border-radius:50%"></span>Tree</span>`;
   if(model.details.some(d=>d.kind==='chinampa'))
     html+=`<span><span class="chip" style="background:#c3d6a8;border-color:#8a9e6a"></span>Chinampa</span>`;
+  if(model.details.some(d=>d.kind==='waterway'))
+    html+=`<span><span class="chip" style="background:#8fa39e"></span>Waterway</span>`;
   if(model.buildings.some(b=>b.kind==='factory'))
     html+=`<span><span class="chip" style="background:#4a453c"></span>Factory/mill</span>`;
   if(model.buildings.some(b=>b.ruined))
