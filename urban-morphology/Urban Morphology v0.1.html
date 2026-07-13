@@ -126,7 +126,12 @@ svg.panning{cursor:grabbing}
       <option value="islamic">Islamic (traditional medina)</option>
       <option value="byzantine">Byzantine</option>
       <option value="chinese">Chinese Imperial (walled capital)</option>
-      <option value="aztec">Aztec (lake-city)</option></select></div>
+      <option value="aztec">Aztec (lake-city)</option>
+      <option value="viking">Viking</option>
+      <option value="celtic">Celtic (Iron Age)</option>
+      <option value="greek">Ancient Greek (Hippodamian)</option>
+      <option value="egyptian">Ancient Egyptian</option>
+      <option value="mesopotamian">Mesopotamian</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -240,7 +245,34 @@ const CULTURE_PROFILES={
     defaultFaith:'temple',defaultCivic:'none',markets:false,
     wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'sacred precinct',
     householdMultiplier:2.9,chinampas:true,noWalls:true,
-    prov:'A lake-city on the Tenochtitlan model: a cardinal grid of causeways (this engine\'s single reused street network stands in for the historical dual street-and-canal circulation — a genuine simplification, noted honestly rather than modelled as fully distinct infrastructure, docs/07 §7) meeting at a central sacred precinct; and, uniquely to this profile, chinampas — narrow raised-bed garden strips reclaimed from the shallows along the town\'s own shoreline, canals between them (M-AZT-2). No walls in the European sense (the lake itself, causeways and removable bridges were the defence); no separate civic hall (temple-state governance was seated in the sacred precinct itself).'}
+    prov:'A lake-city on the Tenochtitlan model: a cardinal grid of causeways (this engine\'s single reused street network stands in for the historical dual street-and-canal circulation — a genuine simplification, noted honestly rather than modelled as fully distinct infrastructure, docs/07 §7) meeting at a central sacred precinct; and, uniquely to this profile, chinampas — narrow raised-bed garden strips reclaimed from the shallows along the town\'s own shoreline, canals between them (M-AZT-2). No walls in the European sense (the lake itself, causeways and removable bridges were the defence); no separate civic hall (temple-state governance was seated in the sacred precinct itself).'},
+  viking:{id:'viking',name:'Viking (Hedeby/Birka-style)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'longhouse',
+    defaultFaith:'shrine',defaultCivic:'none',markets:true,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'assembly ground',
+    prov:'An organic trading town on the Hedeby/Birka model: dense timber longhouses (~10-20 m by ~5 m) housing an extended household under one roof (M-VIK-1), enclosed by a semicircular/oval earthwork rampart with a small number of gates; no monumental civic hall (communal decisions were made at the þing, an open assembly ground, not a building); never a bastioned trace (the Viking Age ends c.1050, well before trace italienne).'},
+  celtic:{id:'celtic',name:'Celtic (Iron Age oppidum)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'roundhouse',
+    defaultFaith:'shrine',defaultCivic:'none',markets:true,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'assembly ground',
+    prov:'An Iron Age oppidum: circular wattle-and-daub roundhouses under conical thatched roofs (M-CEL-2), replacing every rectilinear building grammar; organized in quarters for dwellings, corrals and storehouses behind a murus gallicus-style rampart (this engine\'s reused curtain-wall machinery stands in for the timber-laced construction, a documented simplification); no monumental civic hall; never a bastioned trace.'},
+  greek:{id:'greek',name:'Ancient Greek (Hippodamian grid)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'loggia',markets:true,
+    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'agora',
+    householdMultiplier:2.9,
+    prov:'A Hippodamian-plan polis (Miletus, Priene): a regular orthogonal grid of narrow residential strips crossed by a wider east-west/north-south pair, reusing the grid-growth machinery proven Rome-independent by the Chinese/Aztec profiles (M-GRK-1); housing is the Mediterranean courtyard house shared with Rome/Islam, and the same larger-lot household-size correction as Chinese/Aztec applies (M-GRK-3, identical insula+courtyard-house mechanism); the agora combines market and civic life, so the civic hall is modelled as a colonnaded stoa (this engine\'s existing loggia geometry) rather than the anachronistic Roman basilica (M-GRK-2); a classical temple (already the engine\'s default rite) anchors the acropolis; never a bastioned trace.'},
+  egyptian:{id:'egyptian',name:'Ancient Egyptian (planned town, Amarna-style)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'none',markets:false,
+    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'temple precinct',
+    householdMultiplier:2.9,
+    prov:'A planned New Kingdom worker/town settlement (Amarna\'s workers\' village, Deir el-Medina): a small orthogonal grid of standardized terraced courtyard housing behind a single-entrance enclosure wall, reusing the grid-growth and courtyard-house machinery (M-EGY-1) and the same larger-lot household-size correction as Chinese/Aztec/Greek (M-EGY-3, identical insula+courtyard-house mechanism); the temple rite stands in for pylon-form Egyptian temple architecture, the same documented simplification already used for the Chinese pagoda and Aztec pyramid substitutions (M-EGY-2); pharaonic temple-state governance, so no separate civic hall and no independent markets (state/temple redistribution, matching the Roman/Aztec precedent); never a bastioned trace.'},
+  mesopotamian:{id:'mesopotamian',name:'Mesopotamian (Sumerian/Babylonian city)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'none',markets:false,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'temple precinct',
+    prov:'A Sumerian/Babylonian city (Ur, Nineveh): organic, dense, winding-laned growth around a walled temple-palace citadel mound, unlike the planned traditions above (M-MES-1); housing is the well-attested Mesopotamian courtyard house (excavated at Ur); the temple rite stands in for the stepped mudbrick ziggurat, the same documented simplification pattern as Chinese/Aztec/Egyptian (M-MES-2); temple-palace governance, so no separate civic hall and no independent markets (redistributive temple/palace economy); never a bastioned trace.'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -1811,6 +1843,33 @@ function buildBuildings(seed,parcels,plaza,anchors,profile){
       par.built=true;
       continue;
     }
+    // Viking longhouse grammar (M-VIK-1): a single long, narrow rectangular hall spanning most
+    // of the plot's frontage — no courtyard, no wings, the plain accretive-quarter form.
+    if(profile.buildingGrammar==='longhouse'&&d!=='harbour'){
+      const poly=rectPoly(par,0.06,0.94,0.08,Math.min(0.85,10/Math.max(par.depth,1)+0.08));
+      if(Math.abs(polyArea(poly))>=9){
+        const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
+        let ridge=wU>=wV?[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)]:[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+        const ins=0.14;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
+        out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:'longhouse',district:d,age:0,courtyard:false,
+          prov:'Longhouse: a rectangular timber-framed hall (~10-20 m by ~5 m, Hedeby), wattle-and-daub walls and a turf roof, housing an extended household plus its granary/workshop under one roof (M-VIK-1).'});}
+      par.built=true;
+      continue;
+    }
+    // Celtic roundhouse grammar (M-CEL-2): a circular timber-and-daub dwelling with a conical
+    // thatched roof — the standard Iron Age house form, replacing every rectilinear grammar.
+    if(profile.buildingGrammar==='roundhouse'&&d!=='harbour'){
+      const cx=(par.F0.x+par.F1.x+par.B0.x+par.B1.x)/4,cy=(par.F0.y+par.F1.y+par.B0.y+par.B1.y)/4;
+      const rad=Math.max(2.2,Math.min(7,Math.min(par.frontage,par.depth)/2-0.8));
+      const nSides=10,poly=[];
+      for(let k=0;k<nSides;k++){const a=2*Math.PI*k/nSides;poly.push({x:cx+Math.cos(a)*rad,y:cy+Math.sin(a)*rad});}
+      if(Math.abs(polyArea(poly))>=9){
+        out.push({id:'bld'+(bid++),poly,ridge:[{x:cx-rad*0.4,y:cy},{x:cx+rad*0.4,y:cy}],
+          parcel:par.id,kind:'roundhouse',district:d,age:0,courtyard:false,
+          prov:'Roundhouse: a circular wattle-and-daub dwelling under a conical thatched roof, the standard Celtic Iron Age house form (M-CEL-2).'});}
+      par.built=true;
+      continue;
+    }
     const rects=[]; // in (u,v) space
     const isWare=d==='harbour';
     // warehouses run deep to the plot tail (goods storage); houses stop at roof-span depth
@@ -2203,6 +2262,17 @@ function generate(seed,opts){
       if(gt.water)continue;
       if(Math.abs(gt.pt.y-F.y)<10)gt.name=gt.pt.x>=F.x?'East Gate':'West Gate';
       else if(Math.abs(gt.pt.x-F.x)<10)gt.name=gt.pt.y<F.y?'North Gate':'South Gate';}
+  }
+  // Compass gate scheme: a generic quadrant-from-centroid naming (same technique as Bab, M-ISL-4)
+  // for organic-growth traditions whose historical record doesn't hand us a specific naming
+  // convention to cite — plain "North/South/East/West Gate" rather than inventing period-flavoured
+  // proper nouns that would overclaim a sourced tradition (docs/07 §2 pattern, reused generically).
+  if(profile.wallGates.scheme==='compass'&&wallState.gates&&wallState.gates.length){
+    const C=wallState.centroid||polyCentroid(wallState.ring);
+    for(const gt of wallState.gates){
+      if(gt.water)continue;
+      const ang=Math.atan2(gt.pt.y-C.y,gt.pt.x-C.x)*180/Math.PI;
+      gt.name=(ang>-45&&ang<=45)?'East Gate':(ang>45&&ang<=135)?'South Gate':(ang>135||ang<=-135)?'West Gate':'North Gate';}
   }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
   removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)

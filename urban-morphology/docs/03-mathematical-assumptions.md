@@ -198,6 +198,47 @@ Scope note: worship/civic geometry reuses the existing temple/basilica forms as 
 
 Scope note: worship reuses the existing temple form (raised platform + colonnade) as a schematic stand-in for a Mesoamerican stepped pyramid (e.g. the Templo Mayor); a distinct stepped-pyramid geometry is future work. No civic hall (Aztec governance was seated in the sacred precinct itself, matching the temple-state model — the same `defaultCivic:'none'` mechanism already used for the mosque rite).
 
+## M. Viking morphology (M-VIK)
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-VIK-1 | Longhouse | a single rectangular timber-framed hall, **~10-20 m long by ~5 m wide**, wattle-and-daub or plank walls under a turf/thatch roof, housing an extended household plus its granary/workshop under one roof (no internal building-grammar subdivision into wings/courtyard, unlike Roman/Islamic) | m | General Hedeby/Birka archaeology (Viking Age trading-town excavations) | M | New `buildingGrammar:'longhouse'` — a single `rectPoly` footprint per parcel rather than the multi-range domus/courtyard grammars, the simplest building grammar added so far. |
+| M-VIK-2 | Organic growth, no civic hall | dense organic street growth (reuses the medieval epoch-loop `grow()` unchanged) around a semicircular/oval earthwork rampart with few gates; no monumental civic hall — communal decisions were made at the **þing**, an open assembly ground, not inside a building | – | General Viking Age political-assembly literature (þing/thing) | M | `defaultCivic:'none'`, `civicAnchorLabel:'assembly ground'` — reuses the existing "no civic hall" mechanism (already used for the mosque rite and Aztec) rather than inventing a new building type for a function that was, historically, not architectural. |
+| M-VIK-3 | Gate naming, no bastion | gates named by plain compass quadrant (reusing the new generic `'compass'` scheme, M-CEL-3 below); never a bastioned trace — the Viking Age ends c. 1050, over four centuries before the trace italienne (c. 1500) | – | General fortification-revolution chronology (shared with every other pre-1500 profile) | H | Anachronism guard: any `wallGates.scheme` other than `'organic'` blocks the bastioned trace regardless of the UI checkbox (docs/07 §2 pattern, applied identically here). |
+
+## N. Celtic morphology (M-CEL)
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-CEL-1 | Murus gallicus rampart | Iron Age oppida were typically enclosed by a timber-laced earth-and-stone rampart (*murus gallicus*), not a masonry curtain | – | General Iron Age oppidum archaeology | M | This engine's existing curtain-wall machinery stands in for the timber-laced construction — a documented simplification (same honesty pattern as the temple/pyramid/pagoda stand-ins), noted rather than modelled as a distinct wall cross-section. |
+| M-CEL-2 | Roundhouse | a circular wattle-and-daub dwelling, **~4.4-14 m diameter** (this engine clamps 2.2-7 m radius to parcel size), under a conical thatched roof — the standard Iron Age British/Gaulish house form, replacing every rectilinear building grammar used elsewhere | m | General Iron Age roundhouse archaeology (near-universal circular-house tradition in this period/region) | M | New `buildingGrammar:'roundhouse'` — computed directly from the parcel's corner centroid as a regular polygon approximation, the first building grammar that does *not* reuse `rectPoly` (a genuinely different footprint shape, not a rectangle re-skin). |
+| M-CEL-3 | Compass gate scheme (generic) | gates named by plain compass quadrant (North/South/East/West Gate) keyed to the wall's own centroid, for organic-growth traditions with no grid-maximus axis and no period-specific proper-noun convention to draw on | – | Internal convention, generalizing M-CHN-3's cardinal-gate idea to organic (non-grid) circuits | M | New `'compass'` `wallGates.scheme` — reuses the Bab-scheme centroid-angle technique (M-ISL-4) but with generic names instead of Arabic proper nouns, avoiding inventing period-flavored naming this engine has no source for; shared by Viking and Celtic. |
+
+## O. Ancient Greek morphology (M-GRK)
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-GRK-1 | Hippodamian grid | a regular orthogonal grid of narrow residential strips crossed by a wider east-west/north-south pair (Miletus, Priene) — planned in one act, not accreted | – | General Hippodamian-plan literature (Miletus/Priene town plans) | H (principle) | Reuses the grid-growth machinery built for Roman and independently reused by Chinese/Aztec (docs/07 §2) — a third, older and culturally unrelated planned-grid tradition, further evidence the mechanism is genuinely general-purpose rather than Rome-specific. |
+| M-GRK-2 | Stoa as civic hall | the agora combined market and civic life; no equivalent to the Roman basilica existed in the same form — a colonnaded stoa is the closer civic analogue | – | General classical-agora literature | M | `defaultCivic:'loggia'` set explicitly (not `'auto'`, which would resolve the temple rite to the anachronistic Roman basilica) — reuses the existing loggia geometry as a defensible stand-in rather than inventing new stoa geometry. |
+| M-GRK-3 | Household-size correction | shares the Chinese/Aztec profiles' `householdMultiplier` (2.9) since it uses the identical grid+insula+courtyard-house mechanism | ratio | Derived from M-CHN-4, empirically matched | L (PoC convention, same honesty flag as M-CHN-4/M-AZT-4) | Without the multiplier this profile realized only ~29% of target population (1732/6000) — an unmultiplied insula-grid town undercounts households by the same lot-size effect documented for Chinese; applying 2.9 restored ~84% realization, matching Chinese exactly. |
+
+## P. Ancient Egyptian morphology (M-EGY)
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-EGY-1 | Planned worker town | small orthogonal grid of standardized terraced courtyard housing behind a single-entrance enclosure wall (Amarna workers' village, ~70 m square; Deir el-Medina) | m | General New Kingdom planned-settlement archaeology (Amarna/Deir el-Medina) | H (principle) | Reuses the grid-growth and courtyard-house machinery unchanged — the same mechanism generalized to a fourth, independently-sourced planned tradition. |
+| M-EGY-2 | Temple stand-in | the temple rite (colonnaded cella on a podium) stands in for pylon-form Egyptian temple architecture | – | General Egyptian temple architecture (pylon gateways, hypostyle halls) | L (documented simplification) | Same honesty pattern already used for the Chinese pagoda and Aztec pyramid substitutions — noted rather than silently claimed as authentic. |
+| M-EGY-3 | Household-size correction | shares the Chinese/Aztec/Greek `householdMultiplier` (2.9), identical grid+insula+courtyard-house mechanism | ratio | Derived from M-CHN-4, empirically matched | L (PoC convention) | Same undercount/fix pattern as Greek (M-GRK-3) — both profiles use the exact same planning/parcel/building combination and needed the identical correction. |
+
+## Q. Mesopotamian morphology (M-MES)
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-MES-1 | Organic growth around a citadel | Mesopotamian cities (Ur, Nineveh) grew organically — dense, winding-laned fabric — around a walled temple-palace citadel mound, rather than a planned grid | – | General Mesopotamian urbanism literature ("the internal layout... was organic and contained dense architecture, winding lanes and streets") | M | Uses `planning:'organic'` (reuses the medieval epoch-loop growth unchanged) — the only Bronze/Iron Age Near Eastern profile modelled as organic rather than gridded, a deliberate contrast with the planned Egyptian/Greek profiles above. |
+| M-MES-2 | Courtyard house + ziggurat stand-in | housing is the well-attested Mesopotamian courtyard house (excavated at Ur); the temple rite stands in for the stepped mudbrick ziggurat | – | General Mesopotamian domestic-archaeology literature (Ur courtyard houses) | M (housing) / L (temple stand-in, documented simplification) | Reuses the universal courtyard-house grammar unchanged; the ziggurat substitution follows the same honesty pattern as Chinese/Aztec/Egyptian. |
+
+Scope note (M/N/O/P/Q): none of these five profiles get a household-size correction beyond what's stated above — Viking and Celtic use `parcelPattern:'strip'` (the same density as medieval, realized ~102% of target with no multiplier needed), while Mesopotamian also uses `'strip'` despite its courtyard-house grammar (realized ~102% without a multiplier, unlike the insula-grid profiles) since strip-platted lots stay medieval-sized regardless of the building grammar placed on them.
+
 ---
 
 ## Usage contract

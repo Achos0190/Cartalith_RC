@@ -87,6 +87,39 @@ The Roman profile:
 function that used to hard-code medieval behaviour now reads its choice off the resolved profile
 object passed down the call chain — never a global, never a second hidden branch.
 
+### 3.1 Schema fields added while shipping profiles 3–8 (Islamic → Mesopotamian)
+
+Each addition generalizes a mechanism first proven on Roman/Islamic rather than special-casing a
+single profile — the recurring discipline of this architecture:
+
+- **`wallGates.scheme`** grew beyond `'organic'`/`'castrum'`: `'bab'` (Islamic — compass-quadrant
+  naming keyed to the wall centroid, Arabic proper nouns), `'cardinal'` (Chinese/Aztec/Greek/
+  Egyptian — plain North/South/East/West, keyed to the grid maximus axes), `'compass'`
+  (Viking/Celtic/Mesopotamian — the same plain compass naming as `'cardinal'` but keyed to the
+  wall centroid instead of a grid axis, for organic-growth profiles with no maximus to key off),
+  `'byzantine'` (a distinct string whose only job is to block the bastioned trace; no dedicated
+  naming pass). Every scheme string other than `'organic'` blocks the anachronistic gunpowder-era
+  trace italienne regardless of the fortified checkbox — the single anachronism guard added in
+  Phase 1 now does double, triple, quadruple duty unmodified.
+- **`householdMultiplier`** (default 1): generalizes the Roman insula-occupancy fix (M-ROM-7) into
+  a per-profile multiplier applied to every built parcel, for traditions whose typical lot is
+  bigger than medieval's baseline (fewer, bigger lots per hectare ⇒ fewer discrete households at
+  the same street length). Chinese, Aztec, Greek and Egyptian all converge on the identical value
+  **2.9**, empirically tuned once and then confirmed to transfer unchanged to every later profile
+  sharing the same grid+insula+courtyard-house combination — strong evidence the correction tracks
+  the *mechanism*, not the culture.
+- **`noWalls`** (Aztec only): forces `walls=false` regardless of the UI checkbox, for a lake-city
+  whose defence was the lake/causeways/removable bridges, not a curtain.
+- **`chinampas`** (Aztec only): opts into `buildChinampas()`, the one genuinely new infrastructure
+  layer added in this batch (reclaimed garden strips grown into the water along the shoreline).
+- **`deadEndBias`** (Islamic only): fraction of minor street edges `privatizeAlleys()` closes into
+  cul-de-sacs post-construction (never a bridge edge — BFS-verified reachable-without-it before
+  closing), modelling the historical encroachment process without ever deleting building frontage.
+
+None of these fields touch the core engine's geometry kernel, graph, or environment/site code —
+each is read only inside the specific function whose behaviour it's meant to vary, confirming the
+Core/Culture split still holds after five additional profiles.
+
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 
 | Quantity | Value | Source |

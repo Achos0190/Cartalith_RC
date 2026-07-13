@@ -779,5 +779,173 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Viking civilization profile (docs/03, M-VIK register) ---------- */
+{
+  const vik = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'viking' });
+  const vik2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'viking' });
+  ok(vik.culture === 'viking', 'viking profile resolves');
+  ok(UME.hashModel(vik) === UME.hashModel(vik2), 'viking generation deterministic');
+  ok(vik.parcels.length > 150, `viking trading town is a substantial settlement (${vik.parcels.length} parcels)`);
+  ok(vik.pop > 6000 * 0.85 && vik.pop < 6000 * 1.2, `viking strip parcels realize standard density, no multiplier needed (${vik.pop}/6000)`);
+
+  // longhouse grammar: single rectangular hall per parcel, not any multi-range grammar
+  const vikKinds = new Set(vik.buildings.map(b => b.kind));
+  ok(vikKinds.has('longhouse'), 'viking buildings use the new longhouse grammar');
+  ok(!['main', 'wing', 'rear range', 'street range', 'insula block', 'domus'].some(k => vikKinds.has(k)), 'viking longhouse replaces every multi-range building grammar');
+
+  // no civic hall (þing assembly, not a building); markets kept; compass gates; never a bastioned trace
+  ok(!vik.civic, 'viking profile has no civic hall (communal þing assembly, defaultCivic none)');
+  ok(vik.markets.length > 0, 'viking profile keeps markets (trading-town economy)');
+  const vikf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'viking' });
+  ok(!vikf.fortified && vikf.wall.style === 'curtain', 'viking profile never gets a bastioned trace, even when requested');
+  ok(vikf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${vikf.wall.gates.map(g=>g.name).join(', ')}, M-VIK-3)`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const v1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'viking', site });
+    const v2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'viking', site });
+    ok(v1.parcels.length > 100 && UME.hashModel(v1) === UME.hashModel(v2), `viking town on '${site}' site: substantial + deterministic (${v1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Celtic civilization profile (docs/03, M-CEL register) ---------- */
+{
+  const cel = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'celtic' });
+  const cel2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'celtic' });
+  ok(cel.culture === 'celtic', 'celtic profile resolves');
+  ok(UME.hashModel(cel) === UME.hashModel(cel2), 'celtic generation deterministic');
+  ok(cel.parcels.length > 150, `celtic oppidum is a substantial settlement (${cel.parcels.length} parcels)`);
+  ok(cel.pop > 6000 * 0.85 && cel.pop < 6000 * 1.2, `celtic strip parcels realize standard density, no multiplier needed (${cel.pop}/6000)`);
+
+  // roundhouse grammar: the first building shape that is not a rectPoly reuse (circular polygon)
+  const celKinds = new Set(cel.buildings.map(b => b.kind));
+  ok(celKinds.has('roundhouse'), 'celtic buildings use the new roundhouse grammar');
+  const round = cel.buildings.find(b => b.kind === 'roundhouse');
+  ok(round.poly.length >= 8, `roundhouse is a many-sided polygon approximation of a circle, not a rectangle (${round.poly.length} vertices)`);
+
+  ok(!cel.civic, 'celtic profile has no civic hall (assembly-ground governance, defaultCivic none)');
+  ok(cel.markets.length > 0, 'celtic profile keeps markets');
+  const celf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'celtic' });
+  ok(!celf.fortified && celf.wall.style === 'curtain', 'celtic profile never gets a bastioned trace, even when requested (murus gallicus stands in for the timber-laced rampart)');
+  ok(celf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${celf.wall.gates.map(g=>g.name).join(', ')}, M-CEL-3)`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const c1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'celtic', site });
+    const c2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'celtic', site });
+    ok(c1.parcels.length > 100 && UME.hashModel(c1) === UME.hashModel(c2), `celtic oppidum on '${site}' site: substantial + deterministic (${c1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Ancient Greek civilization profile (docs/03, M-GRK register) ---------- */
+{
+  const grk = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'greek' });
+  const grk2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'greek' });
+  ok(grk.culture === 'greek', 'greek profile resolves');
+  ok(UME.hashModel(grk) === UME.hashModel(grk2), 'greek generation deterministic');
+  ok(grk.parcels.length > 150, `greek polis is a substantial town (${grk.parcels.length} parcels)`);
+
+  // Hippodamian grid: reuses the roman/chinese/aztec grid-growth machinery, a third independent
+  // planned-grid tradition (M-GRK-1)
+  let axisG = 0, totalG = 0;
+  for (const e of grk.graph.edges) {
+    const a = grk.graph.nodes[e.a], b = grk.graph.nodes[e.b];
+    const len = Math.hypot(b.x - a.x, b.y - a.y); if (len < 3) continue;
+    let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x)) * 180 / Math.PI; ang = ang % 90;
+    totalG++; if (Math.min(ang, 90 - ang) < 4) axisG++;
+  }
+  ok(axisG / totalG > 0.85, `greek polis reuses the axis-aligned Hippodamian grid model (${(axisG/totalG*100).toFixed(0)}%, M-GRK-1)`);
+
+  // courtyard-house grammar reused (mediterranean tradition shared with rome/islam)
+  const grkKinds = new Set(grk.buildings.map(b => b.kind));
+  ok([...grkKinds].some(k => k === 'street range' || k === 'single-room house'), 'greek buildings reuse the mediterranean courtyard-house grammar');
+
+  // household-size correction needed for the insula-grid mechanism (M-GRK-3)
+  ok(grk.pop > 6000 * 0.7, `greek household-size correction realizes a substantial share of target population (${grk.pop}/6000, M-GRK-3)`);
+
+  // stoa civic hall (loggia geometry stands in), not the anachronistic roman basilica
+  ok(grk.civic && grk.civic.style === 'loggia', 'greek civic hall is the colonnaded stoa (loggia geometry), not the roman basilica (M-GRK-2)');
+  ok(grk.markets.length > 0, 'greek profile keeps the agora market economy');
+
+  const grkf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'greek' });
+  ok(!grkf.fortified && grkf.wall.style === 'curtain', 'greek profile never gets a bastioned trace, even when requested');
+  ok(grkf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `cardinal gate scheme names land gates (${grkf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const g1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'greek', site });
+    const g2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'greek', site });
+    ok(g1.parcels.length > 100 && UME.hashModel(g1) === UME.hashModel(g2), `greek polis on '${site}' site: substantial + deterministic (${g1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Ancient Egyptian civilization profile (docs/03, M-EGY register) ---------- */
+{
+  const egy = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'egyptian' });
+  const egy2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'egyptian' });
+  ok(egy.culture === 'egyptian', 'egyptian profile resolves');
+  ok(UME.hashModel(egy) === UME.hashModel(egy2), 'egyptian generation deterministic');
+  ok(egy.parcels.length > 150, `egyptian planned town is a substantial settlement (${egy.parcels.length} parcels)`);
+
+  let axisE = 0, totalE = 0;
+  for (const e of egy.graph.edges) {
+    const a = egy.graph.nodes[e.a], b = egy.graph.nodes[e.b];
+    const len = Math.hypot(b.x - a.x, b.y - a.y); if (len < 3) continue;
+    let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x)) * 180 / Math.PI; ang = ang % 90;
+    totalE++; if (Math.min(ang, 90 - ang) < 4) axisE++;
+  }
+  ok(axisE / totalE > 0.85, `egyptian planned town reuses the axis-aligned grid model (${(axisE/totalE*100).toFixed(0)}%, M-EGY-1)`);
+
+  const egyKinds = new Set(egy.buildings.map(b => b.kind));
+  ok([...egyKinds].some(k => k === 'street range' || k === 'single-room house'), 'egyptian buildings reuse the courtyard-house grammar');
+  ok(egy.pop > 6000 * 0.7, `egyptian household-size correction realizes a substantial share of target population (${egy.pop}/6000, M-EGY-3)`);
+
+  // temple-state governance: no civic hall, no independent markets (M-EGY reasoning matches roman/aztec)
+  ok(!egy.civic, 'egyptian profile has no civic hall (pharaonic temple-state governance)');
+  ok(egy.markets.length === 0, 'egyptian profile has no specialised market squares (state/temple redistribution)');
+
+  const egyf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'egyptian' });
+  ok(!egyf.fortified && egyf.wall.style === 'curtain', 'egyptian profile never gets a bastioned trace, even when requested');
+  ok(egyf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `cardinal gate scheme names land gates (${egyf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const e1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'egyptian', site });
+    const e2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'egyptian', site });
+    ok(e1.parcels.length > 100 && UME.hashModel(e1) === UME.hashModel(e2), `egyptian town on '${site}' site: substantial + deterministic (${e1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Mesopotamian civilization profile (docs/03, M-MES register) ---------- */
+{
+  const mes = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'mesopotamian' });
+  const mes2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'mesopotamian' });
+  ok(mes.culture === 'mesopotamian', 'mesopotamian profile resolves');
+  ok(UME.hashModel(mes) === UME.hashModel(mes2), 'mesopotamian generation deterministic');
+  ok(mes.parcels.length > 150, `mesopotamian city is a substantial settlement (${mes.parcels.length} parcels)`);
+  ok(mes.pop > 6000 * 0.85 && mes.pop < 6000 * 1.2, `mesopotamian strip parcels realize standard density despite the courtyard-house grammar, no multiplier needed (${mes.pop}/6000)`);
+
+  // organic growth (M-MES-1): NOT axis-dominated, unlike every planned-grid profile above
+  let axisM = 0, totalM = 0;
+  for (const e of mes.graph.edges) {
+    const a = mes.graph.nodes[e.a], b = mes.graph.nodes[e.b];
+    const len = Math.hypot(b.x - a.x, b.y - a.y); if (len < 3) continue;
+    let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x)) * 180 / Math.PI; ang = ang % 90;
+    totalM++; if (Math.min(ang, 90 - ang) < 4) axisM++;
+  }
+  ok(axisM / totalM < 0.85, `mesopotamian city is organically grown, not grid-planned (${(axisM/totalM*100).toFixed(0)}% axis-aligned, M-MES-1)`);
+
+  const mesKinds = new Set(mes.buildings.map(b => b.kind));
+  ok([...mesKinds].some(k => k === 'street range' || k === 'single-room house'), 'mesopotamian buildings reuse the courtyard-house grammar (M-MES-2)');
+  ok(!mes.civic, 'mesopotamian profile has no civic hall (temple-palace citadel governance)');
+  ok(mes.markets.length === 0, 'mesopotamian profile has no specialised market squares (redistributive temple/palace economy)');
+
+  const mesf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'mesopotamian' });
+  ok(!mesf.fortified && mesf.wall.style === 'curtain', 'mesopotamian profile never gets a bastioned trace, even when requested');
+  ok(mesf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${mesf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const m1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'mesopotamian', site });
+    const m2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'mesopotamian', site });
+    ok(m1.parcels.length > 100 && UME.hashModel(m1) === UME.hashModel(m2), `mesopotamian city on '${site}' site: substantial + deterministic (${m1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

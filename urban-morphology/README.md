@@ -82,6 +82,31 @@ civilizations 3–18).
   European-style wall (the lake, causeways and their removable bridges were the defence,
   M-AZT-3 — forced off regardless of the walls checkbox); no civic hall (temple-state
   governance seated in the sacred precinct itself).
+- **Viking (Hedeby/Birka-style)** — organic growth like the medieval pack, but housing is a
+  new **longhouse** grammar (a single ~10–20 m timber hall per parcel, M-VIK-1) rather than any
+  multi-range building; no civic hall (communal decisions were made at the open-air **þing**,
+  not a building); gates named by plain compass quadrant via a new generic `'compass'` scheme;
+  never a bastioned trace (the Viking Age ends c. 1050).
+- **Celtic (Iron Age oppidum)** — organic growth with a new **roundhouse** grammar — the first
+  building shape that isn't a rectangle re-skin, a circular polygon sized to the parcel
+  (M-CEL-2); the curtain wall stands in for a timber-laced *murus gallicus* rampart; no civic
+  hall; compass-quadrant gates (shared `'compass'` scheme with Viking); never a bastioned trace.
+- **Ancient Greek (Hippodamian grid)** — a third, independently-sourced planned-grid tradition
+  (Miletus/Priene), proving the Roman grid-growth machinery generalizes beyond Rome/China/the
+  Aztec; the Mediterranean courtyard house shared with Rome/Islam; the agora's civic function
+  is modelled as a colonnaded **stoa** (the existing loggia geometry) rather than the
+  anachronistic Roman basilica (M-GRK-2); shares Chinese/Aztec's household-size correction
+  (M-GRK-3).
+- **Ancient Egyptian (planned town, Amarna-style)** — a fourth planned-grid tradition, modelled
+  on New Kingdom worker settlements (Amarna's workers' village, Deir el-Medina): standardized
+  terraced courtyard housing behind a single-entrance enclosure; temple-state governance (no
+  civic hall, no independent markets); the temple rite stands in for pylon-form Egyptian temple
+  architecture, a documented simplification (M-EGY-2).
+- **Mesopotamian (Sumerian/Babylonian city)** — the one Bronze/Iron Age Near Eastern profile
+  modelled as **organic** growth rather than a planned grid (Ur/Nineveh's dense, winding-laned
+  fabric around a walled temple-palace citadel, M-MES-1); the well-attested Mesopotamian
+  courtyard house; the temple rite stands in for the stepped mudbrick ziggurat (M-MES-2);
+  temple-palace governance (no civic hall, no independent markets).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

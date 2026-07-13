@@ -127,6 +127,11 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'byzantine-city', set: { culture: 'byzantine', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'orthodox', civicStyle: 'auto' } },
     { name: 'chinese-capital', set: { culture: 'chinese', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica' } },
     { name: 'aztec-lakecity', set: { culture: 'aztec', siteKind: 'bay', pop: '7000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
+    { name: 'viking-town', set: { culture: 'viking', siteKind: 'bay', pop: '6000', fortified: false, walls: true, faith: 'shrine', civicStyle: 'none' } },
+    { name: 'celtic-oppidum', set: { culture: 'celtic', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'shrine', civicStyle: 'none' } },
+    { name: 'greek-polis', set: { culture: 'greek', siteKind: 'coast', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'loggia' } },
+    { name: 'egyptian-town', set: { culture: 'egyptian', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
+    { name: 'mesopotamian-city', set: { culture: 'mesopotamian', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
