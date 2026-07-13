@@ -31,6 +31,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   moving the markup: the Explore Timeline section used to hide itself until `civTimeline.length>0`,
   which would have made it impossible to add the *first* year from Explore — it's now always
   visible, only the slider+playback row gates on `length>1`.
+  **Same-day follow-up (owner reports, live QA on the shipped v0.91)**, smoke **130 → 136**:
+  (a) *"I dont see the timeline menu in explore"* — the first cut buried Timeline inside the filter
+  funnel's collapsed popover alongside Polity/Settlements/Roads, which reads as a filter, not an
+  editing surface, and was genuinely easy to miss. Moved to `#explTimelineSection`, a plain
+  always-visible `.sec` with its own `<h2>`, same footing as Info/Journeys — no funnel click needed.
+  (b) *"layer views arent responding to opacity anymore"* — a real regression from this session's own
+  v0.89 work: generalizing `drawLODView()` to tile every debug view means `renderNow()`'s LOD early-
+  return now always fires before the opacity-blend code, so the slider went inert under Tiled LOD for
+  all ~29 views. Fixed by blending the affordance tile against the ordinary base tile
+  (`renderBiomeTileRGBA`/`renderHeightTileRGBA`) inside `drawLODView()` itself, skipped at alpha=1 for
+  zero added cost; `_lodRenderKey()` gained `debugOpacity` so the tile caches invalidate when the
+  slider moves. (c) *"settlement/wildlife ones arent clickable...anymore"* — a gap explicitly flagged
+  as a known follow-up in the v0.89 CHANGELOG: click-to-inspect was gated `!_lodOn` outright since
+  `evtToGrid()` assumes the canvas shows the full world, untrue under LOD. New `evtToGridLOD(e)` (the
+  inverse of v0.90's `_civPlaceScreenPos`) replaces the block with a correct reprojection. All three
+  Playwright-verified via real interaction (dispatched clicks, opacity pixel-diff), render battery
+  still ALL IDENTICAL to v0.90, headless 923 unchanged (canvas-interaction/LOD-render fixes — CLAUDE.md
+  invariant #3, not headlessly testable).
 - **v0.90 — owner request: "editing a settlement should open a pop-up in the viewscreen with the
   settlement properties and information"** (no engine changes — script block 2 civ-UI only; render
   battery ALL IDENTICAL to v0.89, headless **923** unchanged, smoke **120 → 123**): the settlement/POI

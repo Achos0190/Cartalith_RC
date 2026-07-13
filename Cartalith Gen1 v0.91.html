@@ -473,8 +473,11 @@ details.cat-acc[open]>summary{color:var(--accent)}
          the flat map and the draped 3D relief. -->
     <div id="viewDimSeg" class="seg viewdim"><button data-dim="2d" class="on">2D</button><button data-dim="3d">3D</button></div>
     <!-- Explore map-filter funnel (mirrors Cartalith V1.915's floating layers funnel) — the Polity/
-         Settlements/Roads/Timeline filter groups live in this click-to-reveal popover instead of the
-         Explore sidebar, so the map stays uncluttered until filtering is actually wanted. -->
+         Settlements/Roads filter groups live in this click-to-reveal popover instead of the Explore
+         sidebar, so the map stays uncluttered until filtering is actually wanted. v0.91: Timeline
+         moved OUT of here into its own visible #explorePanel section (see below) — it's an editing
+         surface (Add year/Simulate), not a filter, and hiding it behind this funnel icon made it hard
+         to find (owner report: "I dont see the timeline menu in explore"). -->
     <div class="map-filter-fab" id="explFilterFab" style="display:none">
       <button type="button" id="explFilterBtn" class="funnel-btn" title="Filter map layers" aria-label="Filter map layers" aria-expanded="false">
         <svg class="funnel-glyph" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 2.5h13l-5 6v4l-3 1.5v-5.5z" fill="currentColor"/></svg>
@@ -506,79 +509,6 @@ details.cat-acc[open]>summary{color:var(--accent)}
         <div class="hint">Turn roads off entirely, or hide individual road/way types.</div>
       </div>
       </details><!-- end Roads cat-acc -->
-
-      <!-- v0.91 (owner request: "one home, real time-scale"): authoring (Add year/pills), scrubbing
-           (slider+playback) and the collapse/recovery simulator are ALL here now — no more switching
-           to Generate → Civilization → Polity to run a sim, then back to Explore to scrub it. The
-           section itself is always open (adding the first year has to start somewhere); only the
-           slider/playback row is gated on having ≥2 recorded years (see _civBuildExploreTimelineUI). -->
-      <details class="cat-acc" id="explTimelineSection">
-      <summary>Timeline</summary>
-      <div class="sec">
-        <div class="sublabel">Add year</div>
-        <div class="row">
-          <input id="civTlYear" type="number" min="-9999" max="9999" value="100" style="width:70px" aria-label="Timeline year">
-          <button id="civTlAddYearBtn" style="flex:1">Add year</button>
-        </div>
-        <div id="civTimelinePanel" style="margin-top:6px"></div>
-        <div class="hint">Each year stores a snapshot of the territory paint plus which settlements/roads existed then. Negative years are BC. Tap a pill (or its ✕) to jump to/remove that era.</div>
-
-        <!-- v0.91: real time-scale — min/max/value are actual years (not a snapshot-count index),
-             and the datalist gives proportional tick marks, so uneven gaps between recorded years
-             render as uneven gaps on the slider instead of evenly-spaced ticks (see _civWireYearSlider). -->
-        <div id="explTimelineSliderRow" style="display:none;margin-top:10px">
-          <div class="row">
-            <span id="explTlMinYear" style="font-size:.75rem;color:var(--muted)"></span>
-            <input id="explTimelineSlider" type="range" min="0" max="0" step="1" value="0" style="flex:1" list="explTimelineTicks" aria-label="Timeline year slider">
-            <datalist id="explTimelineTicks"></datalist>
-            <span id="explTlMaxYear" style="font-size:.75rem;color:var(--muted)"></span>
-          </div>
-          <div class="hint" style="margin-top:2px">Active year: <b id="explTlActiveYear">—</b></div>
-          <div class="btnrow" style="margin-top:6px"><button id="explTlPlayBtn">▶ Animate</button></div>
-        </div>
-
-        <label class="chk" style="margin-top:8px"><input type="checkbox" id="explTlExistOnly"> Show only objects existing in selected year</label>
-        <label class="chk"><input type="checkbox" id="explTlGhost"> Ghost removed objects</label>
-        <label class="chk"><input type="checkbox" id="explTlHighlight"> Highlight new objects</label>
-        <div class="hint">Ghost/highlight compare the selected year against the previous recorded year.</div>
-
-        <!-- v0.85: mechanistic collapse/recovery timeline (docs/research/collapse-timeline-dynamics.md).
-             Runs a year-stepped mortality+migration (or logistic regrowth) simulation and writes ONE
-             civTimeline entry per step — the pills/slider above and the existence filter + ghost/
-             highlight overlay work on the result with no changes, exactly as if each step had been
-             authored by hand via "Add year". Never touches state.places/civWays (same rule as every
-             other timeline entry — it writes history, not the live editable world). Tucked behind its
-             own disclosure so the common add/scrub/filter path stays uncluttered. -->
-        <details class="acc" style="margin-top:10px">
-        <summary>Simulate collapse / recovery</summary>
-        <div style="margin-top:6px">
-          <div class="row"><label for="civSimMode">Mode</label>
-            <select id="civSimMode" style="flex:1">
-              <option value="collapse" selected>Collapse (decline + migration)</option>
-              <option value="recovery">Recovery (regrowth)</option>
-            </select></div>
-          <div class="row" id="civSimCharRow"><label for="civSimCharacter">Character</label>
-            <select id="civSimCharacter" style="flex:1">
-              <option value="mixed" selected>Mixed (default)</option>
-              <option value="trade">Trade collapse — exchange hubs fall hardest</option>
-              <option value="disease">Disease — dense/connected settlements fall first</option>
-              <option value="conflict">Conflict — undefended settlements fall first</option>
-            </select></div>
-          <div class="row" id="civSimSeverityRow"><label for="civSimSeverity">Severity</label>
-            <input type="range" id="civSimSeverity" min="0" max="100" step="1" value="50"><span class="val" id="civSimSeverityV">50%</span></div>
-          <div class="row" id="civSimRateRow" style="display:none"><label for="civSimRate">Regrowth rate</label>
-            <input type="range" id="civSimRate" min="1" max="30" step="1" value="10"><span class="val" id="civSimRateV">1.0%/yr</span></div>
-          <div class="row"><label for="civSimStartYear">Start year</label>
-            <input type="number" id="civSimStartYear" value="0" style="flex:1" aria-label="Simulation start year"></div>
-          <div class="row"><label>Duration / step</label>
-            <input type="number" id="civSimDuration" min="1" value="100" style="flex:1;min-width:0" aria-label="Duration in years">
-            <input type="number" id="civSimStepYears" min="1" value="10" style="flex:1;min-width:0" aria-label="Step size in years"></div>
-          <div class="btnrow" style="margin-top:6px"><button id="civSimulateBtn" class="accent">Simulate</button></div>
-          <div class="hint" id="civSimOut" style="margin-top:2px">Runs a year-by-year simulation from the CURRENT settlements and writes one timeline entry per step, so you can scrub the collapse (or recovery) exactly like manually-authored history. <b>Collapse</b>: each settlement's stress (trade-network loss, density/connectivity exposure, or undefended exposure — set by <b>Character</b>) drives excess mortality and out-migration each step; survivors redistribute to reachable settlements by a gravity model (closer + more headroom + fortified = more attractive); a nucleus that shrinks below its tier's floor demotes (a city can collapse into a fortified village in its own ruins) or is abandoned outright. <b>Recovery</b>: logistic regrowth toward each settlement's full catchment capacity. See <code>docs/research/collapse-timeline-dynamics.md</code>.</div>
-        </div>
-        </details><!-- end Simulate acc -->
-      </div>
-      </details><!-- end Timeline cat-acc -->
 
       </div><!-- end explFilterPopover -->
     </div><!-- end explFilterFab -->
@@ -1499,8 +1429,10 @@ details.cat-acc[open]>summary{color:var(--accent)}
     <!-- ══ EXPLORE ══ -->
     <div id="explorePanel" style="display:none">
 
-    <!-- Polity/Settlements/Roads/Timeline filters moved to a floating funnel button on the map
-         (canvas-wrap, #explFilterFab) — same element IDs, so all existing filter wiring is unchanged. -->
+    <!-- Polity/Settlements/Roads filters moved to a floating funnel button on the map (canvas-wrap,
+         #explFilterFab) — same element IDs, so all existing filter wiring is unchanged. v0.91:
+         Timeline is NOT in that funnel — see #explTimelineSection below, a plain always-visible sidebar
+         section like Info/Journeys, since it's an editing surface, not a filter. -->
 
     <!-- v0.66: Explore is the planning/reading phase — its own tools are Info and Route
          (same [data-civtool] wiring as the Generate branches' palettes). -->
@@ -1513,6 +1445,80 @@ details.cat-acc[open]>summary{color:var(--accent)}
       <div class="btnrow" id="civRouteCommitRow" style="margin-top:6px"><button id="civCommitRouteBtn">✓ Commit route</button></div>
       <div class="hint">Draw a planned <b>Route</b> (journey) with the <b>Route</b> tool — click waypoints on the map, then tap <b>✓ Commit route</b> (desktop: Esc also works) to finish. <b>Info</b> reads out settlement &amp; ecology details for any clicked cell. The Journey planner below sets transport mode, terrain and group conditions.</div>
     </div>
+
+    <!-- v0.91 (owner request: "one home, real time-scale"; owner report: the funnel-hidden version
+         was "I dont see the timeline menu in explore" — moved out to a plain, always-visible sidebar
+         section, same footing as Info/Journeys below, not tucked behind the filter funnel icon).
+         Authoring (Add year/pills), scrubbing (slider+playback) and the collapse/recovery simulator
+         are ALL here now — no more switching to Generate → Civilization → Polity to run a sim, then
+         back to Explore to scrub it. The section itself is always visible (adding the first year has
+         to start somewhere); only the slider/playback row is gated on having ≥2 recorded years (see
+         _civBuildExploreTimelineUI). -->
+    <div class="sec" id="explTimelineSection">
+      <h2>Timeline</h2>
+      <div class="sublabel">Add year</div>
+      <div class="row">
+        <input id="civTlYear" type="number" min="-9999" max="9999" value="100" style="width:70px" aria-label="Timeline year">
+        <button id="civTlAddYearBtn" style="flex:1">Add year</button>
+      </div>
+      <div id="civTimelinePanel" style="margin-top:6px"></div>
+      <div class="hint">Each year stores a snapshot of the territory paint plus which settlements/roads existed then. Negative years are BC. Tap a pill (or its ✕) to jump to/remove that era.</div>
+
+      <!-- v0.91: real time-scale — min/max/value are actual years (not a snapshot-count index),
+           and the datalist gives proportional tick marks, so uneven gaps between recorded years
+           render as uneven gaps on the slider instead of evenly-spaced ticks (see _civWireYearSlider). -->
+      <div id="explTimelineSliderRow" style="display:none;margin-top:10px">
+        <div class="row">
+          <span id="explTlMinYear" style="font-size:.75rem;color:var(--muted)"></span>
+          <input id="explTimelineSlider" type="range" min="0" max="0" step="1" value="0" style="flex:1" list="explTimelineTicks" aria-label="Timeline year slider">
+          <datalist id="explTimelineTicks"></datalist>
+          <span id="explTlMaxYear" style="font-size:.75rem;color:var(--muted)"></span>
+        </div>
+        <div class="hint" style="margin-top:2px">Active year: <b id="explTlActiveYear">—</b></div>
+        <div class="btnrow" style="margin-top:6px"><button id="explTlPlayBtn">▶ Animate</button></div>
+      </div>
+
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="explTlExistOnly"> Show only objects existing in selected year</label>
+      <label class="chk"><input type="checkbox" id="explTlGhost"> Ghost removed objects</label>
+      <label class="chk"><input type="checkbox" id="explTlHighlight"> Highlight new objects</label>
+      <div class="hint">Ghost/highlight compare the selected year against the previous recorded year.</div>
+
+      <!-- v0.85: mechanistic collapse/recovery timeline (docs/research/collapse-timeline-dynamics.md).
+           Runs a year-stepped mortality+migration (or logistic regrowth) simulation and writes ONE
+           civTimeline entry per step — the pills/slider above and the existence filter + ghost/
+           highlight overlay work on the result with no changes, exactly as if each step had been
+           authored by hand via "Add year". Never touches state.places/civWays (same rule as every
+           other timeline entry — it writes history, not the live editable world). Tucked behind its
+           own disclosure so the common add/scrub/filter path stays uncluttered. -->
+      <details class="acc" style="margin-top:10px">
+      <summary>Simulate collapse / recovery</summary>
+      <div style="margin-top:6px">
+        <div class="row"><label for="civSimMode">Mode</label>
+          <select id="civSimMode" style="flex:1">
+            <option value="collapse" selected>Collapse (decline + migration)</option>
+            <option value="recovery">Recovery (regrowth)</option>
+          </select></div>
+        <div class="row" id="civSimCharRow"><label for="civSimCharacter">Character</label>
+          <select id="civSimCharacter" style="flex:1">
+            <option value="mixed" selected>Mixed (default)</option>
+            <option value="trade">Trade collapse — exchange hubs fall hardest</option>
+            <option value="disease">Disease — dense/connected settlements fall first</option>
+            <option value="conflict">Conflict — undefended settlements fall first</option>
+          </select></div>
+        <div class="row" id="civSimSeverityRow"><label for="civSimSeverity">Severity</label>
+          <input type="range" id="civSimSeverity" min="0" max="100" step="1" value="50"><span class="val" id="civSimSeverityV">50%</span></div>
+        <div class="row" id="civSimRateRow" style="display:none"><label for="civSimRate">Regrowth rate</label>
+          <input type="range" id="civSimRate" min="1" max="30" step="1" value="10"><span class="val" id="civSimRateV">1.0%/yr</span></div>
+        <div class="row"><label for="civSimStartYear">Start year</label>
+          <input type="number" id="civSimStartYear" value="0" style="flex:1" aria-label="Simulation start year"></div>
+        <div class="row"><label>Duration / step</label>
+          <input type="number" id="civSimDuration" min="1" value="100" style="flex:1;min-width:0" aria-label="Duration in years">
+          <input type="number" id="civSimStepYears" min="1" value="10" style="flex:1;min-width:0" aria-label="Step size in years"></div>
+        <div class="btnrow" style="margin-top:6px"><button id="civSimulateBtn" class="accent">Simulate</button></div>
+        <div class="hint" id="civSimOut" style="margin-top:2px">Runs a year-by-year simulation from the CURRENT settlements and writes one timeline entry per step, so you can scrub the collapse (or recovery) exactly like manually-authored history. <b>Collapse</b>: each settlement's stress (trade-network loss, density/connectivity exposure, or undefended exposure — set by <b>Character</b>) drives excess mortality and out-migration each step; survivors redistribute to reachable settlements by a gravity model (closer + more headroom + fortified = more attractive); a nucleus that shrinks below its tier's floor demotes (a city can collapse into a fortified village in its own ruins) or is abandoned outright. <b>Recovery</b>: logistic regrowth toward each settlement's full catchment capacity. See <code>docs/research/collapse-timeline-dynamics.md</code>.</div>
+      </div>
+      </details><!-- end Simulate acc -->
+    </div><!-- end explTimelineSection -->
 
     <div class="sec" id="civInfoSec" style="display:none">
       <h2>🔍 Info</h2>
@@ -6888,6 +6894,17 @@ function updateUndoUI(){
    returns the POST-transform rect, so the client→grid mapping stays correct at any
    scale — provided the transform sits on the shared .canvas-stack wrapper. */
 function evtToGrid(e){ const r=view.getBoundingClientRect(); return [(e.clientX-r.left)/r.width*GW, (e.clientY-r.top)/r.height*GH]; }
+/* v0.91 fix (owner report: settle/wildlife click-info "arent clickable... anymore"): evtToGrid assumes
+   the whole GW×GH world fills the canvas, which is only true off LOD — while _lodOn, the canvas shows
+   just lodViewRect()'s sub-rectangle, so evtToGrid mapped every click to the wrong world cell and the
+   settle/wildlife hit-tests (calibrated to a small grid-unit radius) never found their marker. This is
+   the same forward-projection math as _civPlaceScreenPos (v0.90), inverted: screen px → the LOD view
+   rect's world-coord span, falling back to the plain mapping off LOD. */
+function evtToGridLOD(e){
+  if(!_lodOn) return evtToGrid(e);
+  const v=lodViewRect(), r=view.getBoundingClientRect(), span=v.x1-v.x0, spanY=v.y1-v.y0;
+  return [ v.x0+(e.clientX-r.left)/r.width*span, v.y0+(e.clientY-r.top)/r.height*spanY ];
+}
 let panMode=false, panDrag=null;       // pan toggle (✋ / middle-drag / space) + active drag
 let regionSelMode=false, regionDrag=null, regionSel=null;   // region-refine selection (transient — never serialized)
 /* v0.100: dashed preview of the export tile grid on the main canvas (drawn on vctx in GW×GH coords, like plate arrows). */
@@ -7102,15 +7119,15 @@ view.addEventListener('click',e=>{
       : {x:gx,y:gy,fam:_carIconArmed.fam,slot:_carIconArmed.slot,scale:1};
     state.mapIcons.push(icon); _carSelectIcon(icon); renderNow(); return;
   }
-  if(state.debug==='wildlife'&&!_lodOn&&_wildlife){   /* v0.143: click an ecoregion marker → fauna breakdown */
-    const [gx,gy]=evtToGrid(e); let best=null,bd=1e18;
+  if(state.debug==='wildlife'&&_wildlife){   /* v0.143: click an ecoregion marker → fauna breakdown; v0.91: LOD-aware (evtToGridLOD) */
+    const [gx,gy]=evtToGridLOD(e); let best=null,bd=1e18;
     for(const rec of _wildlife.regions){ if(rec.cells<_wildlife.markerMin)continue; const dx=rec.cx-gx,dy=rec.cy-gy,d=dx*dx+dy*dy; if(d<bd){bd=d;best=rec;} }
     const hitR=Math.max(8,GW/40);
     if(best&&bd<=hitR*hitR) showWildInfo(best,e.clientX,e.clientY); else hideWildInfo();
     return;
   }
-  if(state.debug!=='settle'||_lodOn||!_settleSeeds||!_settleSeeds.length){ return; }
-  const [gx,gy]=evtToGrid(e); let best=null,bd=1e18;
+  if(state.debug!=='settle'||!_settleSeeds||!_settleSeeds.length){ return; }   /* v0.91: LOD-aware (evtToGridLOD) */
+  const [gx,gy]=evtToGridLOD(e); let best=null,bd=1e18;
   for(const s of _settleSeeds){ const dx=s.x-gx,dy=s.y-gy,d=dx*dx+dy*dy; if(d<bd){bd=d;best=s;} }
   const hitR=Math.max(6,GW/55);
   if(best&&bd<=hitR*hitR) showSettleInfo(best.x,best.y,e.clientX,e.clientY); else hideSettleInfo();
@@ -8305,8 +8322,11 @@ let _lodTileCanvasCache=new Map(); const LOD_TILE_CANVAS_MAX=24;
 let _lodOverviewPrev=null;   /* {canvas,x0,y0,x1,y1,z,key} — last fully-rendered overview */
 let _lodEditGen=0;           /* bumped on any tile-edit mutation so caches never serve stale edits */
 function _lodRenderKey(){
-  /* v0.86: _climGen included so a climate recompute (rain feeds the biome raster) re-bakes LOD tiles too. */
-  return _fieldGen+'|'+(typeof _climGen!=='undefined'?_climGen:0)+'|'+(typeof _paintGen!=='undefined'?_paintGen:0)+'|'+_lodGen+'|'+_lodEditGen+'|'+state.mode+'|'+state.debug+'|'+state.seaLevel+'|'+state.exag+'|'+state.sunAz+'|'+(state.viz?JSON.stringify(state.viz):'');
+  /* v0.86: _climGen included so a climate recompute (rain feeds the biome raster) re-bakes LOD tiles too.
+     v0.91: debugOpacity included — the opacity blend below is keyed off it, so dragging the slider must
+     invalidate the tile/overview caches or the LOD view would stay frozen at whatever alpha rendered first
+     (the same class of bug the v0.86 climate-redraw fix and v0.88 scale-bar fix closed). */
+  return _fieldGen+'|'+(typeof _climGen!=='undefined'?_climGen:0)+'|'+(typeof _paintGen!=='undefined'?_paintGen:0)+'|'+_lodGen+'|'+_lodEditGen+'|'+state.mode+'|'+state.debug+'|'+(state.debugOpacity==null?1:state.debugOpacity)+'|'+state.seaLevel+'|'+state.exag+'|'+state.sunAz+'|'+(state.viz?JSON.stringify(state.viz):'');
 }
 function _lodTileCacheGet(k){ if(!_lodTileCanvasCache.has(k)) return null; const v=_lodTileCanvasCache.get(k); _lodTileCanvasCache.delete(k); _lodTileCanvasCache.set(k,v); return v; }
 function _lodTileCacheSet(k,cv){ _lodTileCanvasCache.set(k,cv); while(_lodTileCanvasCache.size>LOD_TILE_CANVAS_MAX){ const old=_lodTileCanvasCache.keys().next().value; _lodTileCanvasCache.delete(old); } }
@@ -8323,8 +8343,28 @@ function drawLODView(){
     const dbgCtx=aff?debugTileContext(dbg):null;
     const biome=(state.mode==='biome');
     _splatK=(biome&&!aff&&assetPack&&assetPack.texAny)?(state.viz.splat||0):0;
-    const tileRGBA=(data,w,h,bx,by,bw,bh)=> aff?renderAffordanceTileRGBA(data,w,h,{x:bx,y:by,w:bw,h:bh},dbg,dbgCtx)
-      : biome?renderBiomeTileRGBA(data,w,h,{x:bx,y:by,w:bw,h:bh}):renderHeightTileRGBA(data,w,h);
+    /* v0.91 fix (owner report: "layer views arent responding to opacity anymore"): v0.89 generalized
+       drawLODView to tile every debug view (previously only lith/soil/water did — everything else fell
+       through to the normal renderNow pixel loop, which DOES apply the opacity blend at _dbgAlpha<1), so
+       every view now takes the early-return at the top of renderNow and the opacity slider silently did
+       nothing. Mirrors the non-LOD blend (`bc+(r-bc)*_dbgAlpha`) exactly, just at tile granularity: the
+       base tile (the same renderBiomeTileRGBA/renderHeightTileRGBA the non-debug LOD path already uses)
+       is the "terrain reads through" target. Skipped entirely at alpha=1 (default) — zero extra cost and
+       byte-identical to the pre-fix path. */
+    const baseTileRGBA=(data,w,h,bx,by,bw,bh)=> biome?renderBiomeTileRGBA(data,w,h,{x:bx,y:by,w:bw,h:bh}):renderHeightTileRGBA(data,w,h);
+    const _dbgAlpha=(state.debugOpacity==null?1:state.debugOpacity);
+    const tileRGBA=(data,w,h,bx,by,bw,bh)=>{
+      if(!aff) return baseTileRGBA(data,w,h,bx,by,bw,bh);
+      const out=renderAffordanceTileRGBA(data,w,h,{x:bx,y:by,w:bw,h:bh},dbg,dbgCtx);
+      if(_dbgAlpha>=1) return out;
+      const base=baseTileRGBA(data,w,h,bx,by,bw,bh);
+      for(let p=0;p<out.length;p+=4){
+        out[p]  =base[p]  +(out[p]  -base[p])  *_dbgAlpha;
+        out[p+1]=base[p+1]+(out[p+1]-base[p+1])*_dbgAlpha;
+        out[p+2]=base[p+2]+(out[p+2]-base[p+2])*_dbgAlpha;
+      }
+      return out;
+    };
     const rk=_lodRenderKey();
     /* 1) instant overview: the coarse world for the visible region, upscaled with NO procedural detail.
        v0.134: compose ALL overlapping edit-deltas into it. v0.71: during a same-zoom pan, reuse the last

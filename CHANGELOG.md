@@ -57,6 +57,40 @@ script-block-2 civ-UI change only), Playwright UI smoke **123 → 130**.
   disclosure) screenshotted in both collapsed and Simulate-expanded states, and the proportional tick
   spacing screenshotted at 3× zoom on a slider with two clustered-then-distant year pairs.
 
+**Same-day follow-up fixes (owner reports)**, Playwright UI smoke **130 → 136**:
+- **"I dont see the timeline menu in explore"** — the first cut above put Timeline behind the filter
+  funnel's collapsed popover, alongside Polity/Settlements/Roads. That reads as a *filter* control, not
+  the primary editing surface it had just become, and was easy to miss entirely — especially since the
+  section stayed collapsed by default. Moved out to `#explTimelineSection`, a plain always-visible
+  `.sec` in the Explore sidebar with its own `<h2>Timeline</h2>`, same footing as Info/Journeys below
+  it — no funnel click, no `<details>` to expand. The filter funnel keeps only the genuine layer-
+  visibility filters (Polity/Settlements/Roads).
+- **"the layer views arent responding to opacity anymore"** — a real regression from this session's
+  own v0.89 work: generalizing `drawLODView()` to tile *every* debug view (previously only lith/soil/
+  water did) means `renderNow()`'s LOD early-return now fires unconditionally, before the opacity-blend
+  code below it ever runs — so the opacity slider went silently inert for all ~29 debug views whenever
+  Tiled LOD was on (previously most views fell through to the un-tiled path, which does blend). Fixed
+  by threading the same blend (`base + (debug−base)×alpha`) into the LOD tile path itself: `drawLODView`
+  now renders the ordinary base tile (`renderBiomeTileRGBA`/`renderHeightTileRGBA` — the same functions
+  already used for `dbg==='off'`) alongside the affordance tile and blends them per-pixel, skipped
+  entirely at alpha=1 (default) for zero added cost. `_lodRenderKey()` gained `state.debugOpacity` so
+  the tile/overview caches actually invalidate when the slider moves (else the view would've stayed
+  frozen at whichever alpha rendered first — the same class of bug the v0.86 climate-redraw and v0.88
+  scale-bar fixes closed).
+- **"the settlement/wildlife ones arent clickable for their information anymore"** — a pre-existing gap
+  explicitly flagged as a known follow-up in the v0.89 CHANGELOG entry, now fixed: the settle/wildlife
+  click-to-inspect handlers were gated `!_lodOn` outright because `evtToGrid()` assumes the canvas
+  always shows the full `GW×GH` world, which is only true off LOD. New `evtToGridLOD(e)` — the inverse
+  of v0.90's `_civPlaceScreenPos` forward projection, reprojecting through `lodViewRect()`'s sub-region
+  instead of the whole world when `_lodOn` — replaces the outright block, so the click handlers now work
+  under Tiled LOD instead of being disabled by it.
+- All three verified with real Playwright interaction (not just DOM presence): a dispatched click at the
+  marker's actual LOD screen position opens `#settleInfo`/`#wildInfo`, and the same debug view at 100%
+  vs. 30% opacity paints measurably different pixels while `_lodOn`. Render battery still **ALL
+  IDENTICAL to v0.90** (the opacity blend is skipped at the default alpha=1; the click fix changes event
+  handling only, never pixels); headless **923** unchanged — these are canvas-interaction/LOD-render
+  fixes, invariant #3 in `CLAUDE.md` (cannot be verified headlessly).
+
 ### v0.90 (2026-07-12)
 **Owner request: "editing a settlement should open a pop-up in the viewscreen with the settlement
 properties and information."** No engine changes; render battery **ALL IDENTICAL to v0.89**, headless

@@ -757,6 +757,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { singleHome, controlsInExplore, controlsNotInPolity, sliderHiddenAt1, sliderShownAt2, realScale, ticksAtRealYears, snappedNearest, snappedToOther };
   });
 
+  // ---- v0.91 fix (owner report: "I dont see the timeline menu in explore") ----
+  // The first cut of v0.91 buried Timeline inside the filter funnel's collapsed popover, which reads
+  // as a filter control, not an editing surface, and is easy to miss entirely. Timeline is now a
+  // plain always-visible Explore sidebar section (same footing as Info/Journeys) — reachable without
+  // opening the funnel or expanding any <details>.
+  await page.evaluate(() => document.querySelector('[data-tab="explore"]').click());
+  await page.waitForTimeout(150);
+  R.timelineDiscoverable = await page.evaluate(() => {
+    const sec = document.getElementById('explTimelineSection');
+    const fab = document.getElementById('explFilterFab');
+    const notInFunnel = !!(sec && fab && !fab.contains(sec));
+    const inExplorePanel = !!(sec && document.getElementById('explorePanel').contains(sec));
+    const r = sec ? sec.getBoundingClientRect() : null;
+    const visibleWithoutClicks = !!(r && r.width > 0 && r.height > 0 && getComputedStyle(sec).display !== 'none');
+    const hasHeading = !!(sec && sec.querySelector('h2') && /timeline/i.test(sec.querySelector('h2').textContent));
+    return { notInFunnel, inExplorePanel, visibleWithoutClicks, hasHeading };
+  });
+
   // ---- v0.86: climate redraw, theme switch, credits modal, popover scroll containment ----
   const canvasHash86 = () => page.evaluate(() => { const c = document.getElementById('view');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 2166136261;
@@ -908,6 +926,62 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { neverFullPixelLoop: after === before, errors, differsFromOverview };
   });
 
+  // v0.91 fix (owner report: "layer views arent responding to opacity anymore"): v0.89's LOD
+  // generalization made drawLODView() tile EVERY debug view, so renderNow()'s LOD early-return now
+  // always fires before the opacity blend — the slider went silently inert whenever LOD was on.
+  // Regression check: the same debug view, same zoom, opacity 100% vs 30%, must paint differently.
+  R.lodOpacity = await page.evaluate(() => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; state.debug = 'temp';
+    state.debugOpacity = 1; applyView(); renderNow();
+    const full = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+    state.debugOpacity = 0.3; applyView(); renderNow();
+    const dim = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+    let same = true;
+    for (let i = 0; i < full.length; i += 4 * 29) { if (full[i] !== dim[i] || full[i+1] !== dim[i+1] || full[i+2] !== dim[i+2]) { same = false; break; } }
+    state.debugOpacity = 1; state.debug = 'off'; _lodOn = false; applyView(); renderNow();
+    return { differsWithOpacity: !same };
+  });
+
+  // v0.91 fix (owner report: settle/wildlife "arent clickable for their information anymore" — a
+  // pre-existing gap flagged as a known follow-up in the v0.89 CHANGELOG entry: evtToGrid() assumed
+  // the canvas always shows the full GW×GH world, which is only true off LOD, so every click-to-info
+  // hit-test was gated out entirely (`!_lodOn`) rather than reprojected. evtToGridLOD() (mirrors
+  // _civPlaceScreenPos's forward math, inverted) fixes the mapping; the click handlers now run under
+  // LOD instead of being blocked. Drives an actual mouse click at the marker's real LOD screen
+  // position (via _civPlaceScreenPos) and checks the info popup opens — if auto-populate's random
+  // seed happens to produce no settlements/wildlife regions this run, that half is vacuously true
+  // (matches this suite's existing no-retry convention for auto-populate elsewhere in this file). */
+  R.lodClickInfo = await page.evaluate(() => {
+    _civAutoWorld();
+    let settleOk = true, wildOk = true;
+    state.debug = 'settle'; _lodOn = true; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2;
+    applyView(); renderNow();
+    if (_settleSeeds && _settleSeeds.length) {
+      const s = _settleSeeds[0];
+      _lodZoom = 3; _lodCx = s.x; _lodCy = s.y; applyView(); renderNow();
+      const [sx, sy] = _civPlaceScreenPos(s.x, s.y);
+      hideSettleInfo();
+      const ev = new MouseEvent('click', { clientX: sx, clientY: sy, bubbles: true });
+      view.dispatchEvent(ev);
+      settleOk = document.getElementById('settleInfo').style.display === 'block';
+    }
+    state.debug = 'wildlife'; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
+    const wild = (typeof currentWildlife === 'function') ? currentWildlife() : null;
+    const rec = wild ? wild.regions.find(r => r.cells >= wild.markerMin) : null;
+    if (rec) {
+      _lodZoom = 3; _lodCx = rec.cx; _lodCy = rec.cy; applyView(); renderNow();
+      const [wx, wy] = _civPlaceScreenPos(rec.cx, rec.cy);
+      hideWildInfo();
+      const ev = new MouseEvent('click', { clientX: wx, clientY: wy, bubbles: true });
+      view.dispatchEvent(ev);
+      wildOk = document.getElementById('wildInfo').style.display === 'block';
+    }
+    state.debug = 'off'; _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    state.places = []; state.roads = null;
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    return { settleOk, wildOk, hadSettleSeed: !!(_settleSeeds && _settleSeeds.length), hadWildRegion: !!rec };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1010,6 +1084,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.89: every info-layer stays tiled while LOD is on (renderNow never falls through to the full un-zoomed pixel loop)', R.lodInfoLayers.neverFullPixelLoop === true);
   A('v0.89: LOD-zoomed info layers + their reprojected overlays render without errors', R.lodInfoLayers.errors.length === 0);
   A('v0.89: LOD-zoomed info-layer tiles genuinely differ from the whole-map render (not a stretched copy)', R.lodInfoLayers.differsFromOverview === true);
+  A('v0.91 fix: the opacity slider still affects the map while Tiled LOD is on', R.lodOpacity.differsWithOpacity === true);
+  A('v0.91 fix: settlement click-to-info works under Tiled LOD', R.lodClickInfo.settleOk === true);
+  A('v0.91 fix: wildlife click-to-info works under Tiled LOD', R.lodClickInfo.wildOk === true);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
@@ -1037,6 +1114,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.91: slider min/max are the real recorded years, not a 0..count-1 index', R.timelineOneHome.realScale);
   A('v0.91: tick marks (datalist) sit at the real recorded years', R.timelineOneHome.ticksAtRealYears);
   A('v0.91: dragging the slider snaps to the nearest recorded year on both sides', R.timelineOneHome.snappedNearest && R.timelineOneHome.snappedToOther);
+  A('v0.91 fix: Timeline is not hidden inside the filter funnel popover', R.timelineDiscoverable.notInFunnel && R.timelineDiscoverable.inExplorePanel);
+  A('v0.91 fix: Timeline is visible in Explore with no clicks (not behind a closed funnel/details)', R.timelineDiscoverable.visibleWithoutClicks);
+  A('v0.91 fix: Timeline section has its own heading, like Info/Journeys', R.timelineDiscoverable.hasHeading);
   A('v0.86: "Simulate weather" repaints the map (climate bake-cache keyed on _climGen)', R.climateRedraw.changed);
   A('v0.86: theme switch flips :root[data-theme]=light, persists, and toggles back to dark', R.theme.wentLight && R.theme.stored === 'light' && R.theme.backToDark && R.theme.startDark);
   A('v0.86: credits modal opens (3 principle sections + Strahler/gravity/V1.915 citations)', R.credits.open && R.credits.sections === 3 && R.credits.hasStrahler && R.credits.hasGravity && R.credits.hasV1915);
