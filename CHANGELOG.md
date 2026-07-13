@@ -14,10 +14,11 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ### v0.92 (2026-07-13)
 **Owner /goal: "carry out the reported fixes [from the save-export architecture audit], then analyze
-why the program is so slow when zooming in even when tiles are baked."** Two independent pieces of
-work. No engine changes; render battery **ALL IDENTICAL to v0.91** (the LOD-view perf fix is entirely
-inside `_lodOn`-gated `drawLODView()`, never the default render path); headless **923** unchanged;
-Playwright UI smoke **137 → 144**.
+why the program is so slow when zooming in even when tiles are baked."** Followed same-day by an owner
+bug report on the resulting fix ("aspect ratio goes weird... lakes are blocky/pixilated again on their
+edges" — Part 3 below). Three pieces of work. No engine changes; render battery **ALL IDENTICAL to
+v0.91** (every change is entirely inside `_lodOn`-gated `drawLODView()`, never the default render
+path); headless **923** unchanged; Playwright UI smoke **137 → 146**.
 
 **Part 1 — the audit's fixes (`docs/research/save-export-architecture-audit.md` §5), scoped by the
 owner as "show me the audit first" → "carry out the reported fixes," compatibility break accepted:**
@@ -79,6 +80,40 @@ real profiling, not guesswork):**
   `drawLODView()`, reached only when `_lodOn`. Verified with a permanent smoke-suite regression guard
   (an isolated overview-rebuild timing assertion, thresholded well below the old ~940-1200ms baseline)
   plus the full existing LOD/atlas/opacity/click-info suite, all green.
+
+**Part 3 — follow-up owner bug report, same day: "Aspect ratio goes weird when using the Tiled LOD
+view and the lakes are blocky/pixilated again on their edges."** The Part 2 fix above shipped a flat
+`/4` downscale for the overview backdrop; this traded too much quality for the perf win.
+- **Diagnosis, via fixed-seed screenshot A/B (not guesswork)**: a Playwright probe generated the same
+  world (`state.tect.seed` pinned) at the pre-fix full resolution, the shipped `/4`, and intermediate
+  ratios, then cropped identical world-coordinates across each render. Small lakes — anything that
+  isn't the ocean coastline — get **no sub-pixel smoothing at all**: `buildCoastSDF` only distance-
+  transforms the sea-level threshold (`fld[i]<sea`), so a lake sitting above sea level (a crater lake,
+  an inland basin) is a hard per-pixel classification. At full resolution that hard edge is invisible
+  (each step is one native pixel). At `/4` a lake that spans 8–12 native pixels collapses to 2–3 source
+  samples before `drawImage` stretches it back out 4×, turning an invisible single-pixel stair-step
+  into a visibly faceted diamond/blob. The "aspect ratio weird" wording is the same artifact described
+  differently — a round shape's *local* aspect gets mangled by the quantization — not a canvas/CSS
+  distortion (canvas width/height, CSS rect, and `lodViewRect()` aspect ratios all measured ~1.56
+  consistently across every zoom level tested, so the *global* aspect ratio was never actually wrong).
+- **Why a gentler ratio isn't the fix**: doubling to `/2` restores near-full-res lake quality at a
+  1024px world (~110-125ms, still comfortably fast) — but a *ratio's* output pixel count (what the
+  render cost is actually proportional to) grows with the world, so the same `/2` at a 2048px world
+  regresses back to ~420-440ms, reproducing the original "slow when zooming" complaint at any working
+  resolution above the one it was tuned against.
+- **Fix**: replace the ratio with a **fixed 512px target output width** — `ovScale=min(1,
+  512/GW)`, `OVW/OVH = round(GW·ovScale), round(GH·ovScale)`. This decouples the overview's cost from
+  the world's resolution entirely (output pixel count is now bounded, not proportional): measured
+  **~100-130ms at both 1024px and 2048px** working resolutions (vs. ~940-1200ms pre-Part-2 and
+  ~420-440ms for the rejected flat-`/2` alternative at 2048px), while a world already ≤512px wide gets
+  **zero downscale** — full quality at effectively no extra cost, since it was already cheap. Aspect
+  ratio is preserved exactly (both dimensions scaled by the identical factor).
+- Same fixed-seed screenshot comparison confirmed the 512px-cap overview is visually close to the
+  full-resolution original — lake shapes stay round, coastlines stay smooth — matching the flat-`/2`
+  quality bar while holding the flat-`/4`'s bounded-cost property at any resolution.
+- New smoke-suite regression guards: the overview canvas is asserted to be exactly 512px wide (not
+  256px, the old `/4` value) at the existing 1024px test world, and its aspect ratio is asserted to
+  match `GW/GH`. Existing perf/bit-identity/headless batteries unaffected (all green).
 
 ### v0.91 (2026-07-13)
 **Owner request (/goal): "…how in explore the timeline should work. Currently it works, bit rather

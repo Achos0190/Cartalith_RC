@@ -1066,9 +1066,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // GW×GH resolution through the same expensive per-pixel colorization used for real tiles, on EVERY
   // zoom-level change (any frame that isn't an exact pan-reuse hit) -- ~940ms measured at a modest
   // 1024px world, unaffected by whether the Atlas had anything baked (the backdrop is built straight
-  // from `field`, never consults the atlas). Fixed by rendering the backdrop at a quarter resolution
-  // and letting the canvas stretch it (deliberately low-fidelity already -- "NO procedural detail" --
-  // so downscaling it further is imperceptible once the sharp tile overlay covers the same area).
+  // from `field`, never consults the atlas). First fix downscaled it by a flat /4 ratio; a follow-up
+  // owner report ("lakes are blocky/pixilated again", "aspect ratio goes weird") traced to that ratio
+  // starving small water bodies of source samples (lakes get no coastSDF smoothing, unlike the ocean
+  // edge) -- fixed by capping the overview to a fixed 512px target width instead of a ratio, which
+  // bounds render cost independent of world resolution (measured ~100-130ms at both 1024px and 2048px)
+  // while spending full resolution on worlds already <=512px wide.
   // Regression guard: an overview rebuild (new zoom level, atlas baked, tile canvases still warm so
   // ONLY the backdrop is being timed) must stay well under the old ~940-1200ms baseline.
   R.lodOverviewPerf = await page.evaluate(async () => {
@@ -1082,8 +1085,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const t0 = performance.now();
     renderNow();
     const overviewRebuildMs = performance.now() - t0;
+    // v0.92 follow-up: overview canvas should be capped to the 512px target width (not GW itself,
+    // and not a naive GW/4) -- this is the direct behavioral guard for the blocky-lakes regression.
+    const overviewW = _lodOverviewPrev && _lodOverviewPrev.canvas.width;
+    const overviewH = _lodOverviewPrev && _lodOverviewPrev.canvas.height;
     state.debug = 'off'; _lodOn = false; setFinalized(false); _lodZoom = 1; applyView(); renderNow();
-    return { overviewRebuildMs, chunksBaked: n };
+    return { overviewRebuildMs, chunksBaked: n, overviewW, overviewH, GW, GH };
   });
 
   await browser.close();
@@ -1199,7 +1206,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.91 fix: the opacity slider still affects the map while Tiled LOD is on', R.lodOpacity.differsWithOpacity === true);
   A('v0.91 fix: settlement click-to-info works under Tiled LOD', R.lodClickInfo.settleOk === true);
   A('v0.91 fix: wildlife click-to-info works under Tiled LOD', R.lodClickInfo.wildOk === true);
-  A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now quarter-res)', R.lodOverviewPerf.overviewRebuildMs < 400);
+  A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now capped to a 512px target width)', R.lodOverviewPerf.overviewRebuildMs < 400);
+  A('v0.92 follow-up fix: overview canvas is capped at 512px wide, not a flat GW/4 (was 256px at this 1024px world → blocky lakes)', R.lodOverviewPerf.overviewW === 512);
+  A('v0.92 follow-up fix: overview canvas keeps GW/GH aspect ratio', Math.abs(R.lodOverviewPerf.overviewW / R.lodOverviewPerf.overviewH - R.lodOverviewPerf.GW / R.lodOverviewPerf.GH) < 0.01);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

@@ -8394,13 +8394,26 @@ function drawLODView(){
        not, since this backdrop is built straight from `field` and never consults the atlas at all. The
        measured baked-vs-unbaked timings were statistically the same (~1.1s either way) — baking speeds
        up the SHARP tile overlay in step 2 below, but never touched this backdrop, which is what a
-       continuous zoom/pan gesture actually redraws on almost every frame. Since the overview is already
-       documented as deliberately low-fidelity ("NO procedural detail" — real detail comes from the tile
-       overlay drawn on top), rendering it at a quarter resolution and letting the GPU's own image scaling
-       stretch it to fill the canvas cuts both sub-costs by ~16× (pixel count ∝ cost) for a look that's
-       indistinguishable at this fidelity level — confirmed sub-frame-budget in the same profiling pass. */
+       continuous zoom/pan gesture actually redraws on almost every frame.
+       v0.92 follow-up fix (owner report: "aspect ratio goes weird ... lakes are blocky/pixilated again on
+       their edges") — the first cut above downscaled by a flat /4 ratio, which starved small water bodies
+       (lakes; anything not on the SDF-smoothed ocean coastline — buildCoastSDF only treats the sea-level
+       threshold, lakes get a hard per-pixel classification) of enough source samples to read as round: an
+       8-12px lake shrinks to 2-3px, and a 4× nearest-adjacent upscale turns that into a visibly faceted
+       blob (screenshots confirmed: full-res lakes are round, /4 lakes are jagged diamonds — the "aspect
+       ratio weird" report is the same artifact, a round shape's local aspect getting mangled by the
+       quantization, not a canvas/CSS distortion — canvas/viewRect aspect ratios all checked out at ~1.56
+       consistently). A flat ratio also scales the wrong way: doubling to /2 fixed quality at a 1024px
+       world (~110ms, still well under budget) but reverts to ~440ms at 2048px, since a ratio's *output*
+       pixel count (what the cost is actually proportional to) grows with the world instead of staying
+       bounded. Capping the overview to a fixed target width instead decouples cost from world resolution
+       (output pixel count is bounded ⇒ cost is bounded, ~110-125ms measured at both 1024px and 2048px)
+       while spending the full available quality budget on smaller worlds instead of leaving it on the
+       table (a 512px world gets zero downscale at all). Confirmed sub-frame-budget and visually
+       near-indistinguishable from full-res at the tested sizes in the same profiling pass. */
     const span=v.x1-v.x0, spanY=v.y1-v.y0;
-    const OVW=Math.max(64,Math.round(GW/4)), OVH=Math.max(48,Math.round(GH/4));
+    const OV_TARGET_W=512, ovScale=Math.min(1, OV_TARGET_W/GW);
+    const OVW=Math.max(64,Math.round(GW*ovScale)), OVH=Math.max(48,Math.round(GH*ovScale));
     const prev=_lodOverviewPrev;
     if(prev && prev.key===rk && prev.z===v.z && Math.abs((prev.x1-prev.x0)-span)<1e-9 && Math.abs((prev.y1-prev.y0)-spanY)<1e-9){
       const dx=(prev.x0-v.x0)/span*GW, dy=(prev.y0-v.y0)/spanY*GH;

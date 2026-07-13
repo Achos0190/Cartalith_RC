@@ -14,8 +14,9 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
   (v0.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.91` are kept and never edited.
 - **v0.92 — owner /goal: "carry out the [save-export audit's] reported fixes, then analyze why
-  the program is so slow when zooming in even when tiles are baked"** (render battery ALL
-  IDENTICAL to v0.91, headless **923** unchanged, smoke **137 → 144**). Two parts:
+  the program is so slow when zooming in even when tiles are baked"**, followed same-day by a
+  bug report on the resulting fix (render battery ALL IDENTICAL to v0.91, headless **923**
+  unchanged, smoke **137 → 146**). Three parts:
   (1) **audit fixes** (`docs/research/save-export-architecture-audit.md` §5, compatibility break
   accepted per owner): `exportZip()` now skips the redundant `map.png`/`tiles/*` flat bake when
   `state.finalized` (the Atlas pyramid already covers the whole map at every baked level — a
@@ -40,7 +41,19 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   (screenshots of the same deep-zoom unrefined spot, before/after) since the backdrop was already
   a coarse placeholder standing in until the sharp tile overlay covers the same ground. Locked in
   with a permanent smoke-suite timing regression guard. See `CHANGELOG.md` for the full profiling
-  numbers and reasoning.
+  numbers and reasoning. (3) **Follow-up bug report — "aspect ratio goes weird ... lakes are
+  blocky/pixilated again on their edges."** The quarter-res downscale from part (2) starved small
+  lakes (no `_coastSDF` smoothing — that only covers the ocean's sea-level threshold) of source
+  samples: an 8-12px lake shrinks to 2-3px, and the 4× upscale turns an invisible native-res
+  stair-step into a visibly faceted blob. "Aspect ratio weird" is the same artifact described
+  differently — a round shape's *local* aspect getting mangled, not a canvas/CSS distortion (every
+  measured aspect ratio checked out at ~1.56 consistently). A flat `/2` ratio fixes quality at
+  1024px but re-regresses to ~420-440ms at 2048px, since a ratio's cost scales with the world.
+  Fixed instead with a **512px fixed target output width** (`ovScale=min(1,512/GW)`), which bounds
+  the overview's cost independent of world resolution (~100-130ms measured at both 1024px and
+  2048px) while spending full resolution on worlds already ≤512px wide. Verified with fixed-seed
+  screenshot A/Bs (lake shapes back to round, matching full-res) and two new smoke-suite
+  regression guards (overview canvas width == 512px at the 1024px test world; aspect preserved).
 - **v0.91 — owner /goal: "…how in explore the timeline should work. Currently it works, bit
   rather clunky"** (no engine changes — script block 2 civ-UI only; render battery ALL IDENTICAL
   to v0.90, headless **923** unchanged, smoke **123 → 130**): the second half of the v0.90 /goal
@@ -508,17 +521,22 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   the v0.92 CHANGELOG entry for the full list. `biome_raster.bin` vs `biome_baked.bin` (the owner's own
   "double data" example) is intentionally **not** touched — the audit found they're two genuinely
   different classifiers for two different consumers, not duplication. Nothing queued from this thread.
-- **LOD zoom performance — root-caused and fixed in v0.92.** Same /goal, second half: "why is zooming in
-  slow even when tiles are baked." Real answer (found via `performance.now()` profiling, not guesswork):
-  the sharp tile overlay *does* correctly serve from the atlas when baked — the actual bottleneck was the
-  "instant overview" backdrop underneath it, rebuilt at full `GW×GH` resolution through the same expensive
-  per-pixel colorizer on every zoom step, never consulting the atlas at all (~940ms/step measured,
-  identical whether baked or not). Fixed by rendering that (already-documented-as-low-fidelity) backdrop
-  at quarter resolution and letting the canvas stretch it — 12.3–16.6× faster in the same profiling pass,
-  visually unchanged at that fidelity level. Locked in with a permanent smoke-suite timing guard. Nothing
-  queued — if the owner reports zooming still feels slow after this, the next place to look is the TILE
-  overlay's own per-tile colorization cost (not yet profiled in isolation) or the debug-overlay vector
-  drawing pass (`drawLODDebugOverlays`), not the overview backdrop this fix already addressed.
+- **LOD zoom performance — root-caused and fixed in v0.92, then quality-corrected same day.** Same
+  /goal, second half: "why is zooming in slow even when tiles are baked." Real answer (found via
+  `performance.now()` profiling, not guesswork): the sharp tile overlay *does* correctly serve from the
+  atlas when baked — the actual bottleneck was the "instant overview" backdrop underneath it, rebuilt at
+  full `GW×GH` resolution through the same expensive per-pixel colorizer on every zoom step, never
+  consulting the atlas at all (~940ms/step measured, identical whether baked or not). First fix rendered
+  that backdrop at a flat quarter resolution (12.3-16.6× faster) — but this starved small lakes (no
+  `_coastSDF` smoothing outside the ocean coastline) of samples, reported back same-day as "lakes are
+  blocky/pixilated again" + "aspect ratio goes weird" (the same artifact, described two ways). Replaced
+  the flat ratio with a **512px fixed target output width**, which bounds the overview's cost
+  independent of world resolution (~100-130ms at both 1024px and 2048px, vs. the rejected flat-`/2`
+  alternative's ~420-440ms at 2048px) while giving small worlds full resolution. Both fixes locked in
+  with permanent smoke-suite regression guards (timing + overview-canvas-size/aspect). Nothing queued —
+  if the owner reports zooming still feels slow after this, the next place to look is the TILE overlay's
+  own per-tile colorization cost (not yet profiled in isolation) or the debug-overlay vector drawing pass
+  (`drawLODDebugOverlays`), not the overview backdrop these fixes already addressed.
 - **The owner's 2026-07-12 /goal (settlement pop-up + Explore timeline rework) is now fully shipped**
   across v0.90 (settlement editor → map pop-up) and v0.91 (timeline: one home, real time-scale — see
   above). No queued follow-up on either; nothing else outstanding from that request.
