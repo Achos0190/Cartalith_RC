@@ -157,9 +157,41 @@ civilizations 3–18).
   by default, but not forced off; when fortified, the circular irrigation waterway supplies the
   fort's wet moat (even on a landlocked site) instead of standing alone outside the curtain
   (M-VEN register).
+- **Levantine Palimpsest (Aleppo/Damascus, grid-to-souk)** — a fourth planning mode,
+  `planning:'palimpsest'`: a Hellenistic/Roman colonia grid (`buildGridStreets`, unchanged —
+  literally the Roman profile's own founding act) founded once and never re-planned, but
+  organically transformed over centuries by four small encroachment sub-passes instead of
+  organic growth's exploration: colonnaded avenues progressively narrow into an enclosed souk
+  (road width only, never the centerline — Sauvaget's Damascus/Aleppo studies, M-PAL-1);
+  interior residential wards carry a founding enclosure, a share of which has already dissolved
+  by this snapshot (Skinner's Tang-to-Song "medieval urban revolution," M-PAL-2, a pure
+  data/render pass, verified against every real building rather than trusted by construction);
+  secondary streets grow along the shoreline rather than the founding grid's orientation where
+  the site has one (Kaifeng's post-flood HGIS pattern, M-PAL-3); and the existing back-lane
+  mechanism recurs at increasing density as the fabric matures (Conzen's burgage cycle,
+  M-PAL-4). Housing and gates read the mature Islamic-period identity the plan ended at
+  (courtyard houses, Bab-scheme gate names), not the Roman one it started from. Encroachment
+  intensity is a tunable per-profile parameter (`rules.palimpsest`), not a fixed universal curve,
+  since real cities encroached at different times and rates (Jacobs 2009, M-PAL-5).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.
+
+### Generation Rules (configurable parameters, not hardcoded constants)
+
+The **Generation Rules** panel externalizes ~17 street/parcel-growth constants that used to be
+inline literals in `grow()`/`buildParcels()`/`privatizeAlleys()` as user-configurable sliders,
+orthogonal to the civilization profile: branch-angle jitter, exploration share/decay, segment-length
+distribution, dead-end bias, subdivision cap, and more (docs/07 §3.4). `generate()` with no `rules`
+option remains byte-identical to every prior version — this is additive, not a behavior change.
+Two meta-sliders, **Wildness** and **Plot Chaos** (0–2, 1.0 = baseline), each derive several of
+those individual fields from one number, so a user can dial "how organic vs. planned" or "how
+chaotic the parcels are" without touching 17 sliders directly. Five built-in presets (Planned Grid,
+Classical Town, Organic Medieval, Medina, Wild Frontier) span that spectrum; profiles can be
+created/duplicated/renamed/saved/deleted (persisted to `localStorage`) or exported/imported as
+JSON. Every slider change triggers a debounced live-preview regeneration, and a comparison table
+shows the current town's morphometrics against the default profile's, highlighting anything that
+differs by more than 8%.
 
 An **Evidence Ledger** panel lists every `M-*`/`M-ROM-*` register id actually load-bearing for
 the currently generated town (collected from every object's provenance as it's drawn), formalizing

@@ -319,6 +319,43 @@ Scope note (fortification): walls and the star fort are now a genuine optional t
 
 Scope note (population): realization varies more by site kind for this profile than any other (~47-112% of target across the five site kinds at the same settings) because a circular plan interacts very differently with a bisecting river or an open coastline than an organic or rectilinear plan does — an honest, explicable geometric interaction, not a tuning bug.
 
+## Z. Levantine Palimpsest morphology (M-PAL) — see docs/07-culture-architecture.md §3.5
+
+A fourth planning mode (`planning:'palimpsest'`): a Hellenistic/Roman colonia grid, founded once
+exactly like the Roman profile, then never re-planned but organically transformed over centuries —
+a genuinely different *process* from `'organic'`/`'grid'`/`'radial'`, not just a different final
+shape.
+
+| ID | Quantity | Value | Units | Source | Conf. | Justification |
+|----|----------|-------|-------|--------|-------|---------------|
+| M-PAL-1 | Colonnade narrowing into an enclosed souk | shopkeepers progressively build stalls into a colonnaded avenue's road reservation until it becomes an enclosed, winding souk — the street *alignment* survives (Damascus's Via Recta is walkable on the same line two thousand years later), only the drawn width degrades | – | Sauvaget 1934 (*Le plan de Damas*) / 1941 (*Alep*) — the foundational studies of grid-to-souk transformation in Levantine cities | M (the transformation is well-established; the exact narrowing rate per epoch is a schematic PoC convention, not a sourced figure) | `narrowColonnades()` only ever writes `e.w`, never `e.a`/`e.b` — narrowing a width can only shrink the drawn road casing, never move a centerline or junction, so this pass cannot introduce a new road/wall or road/building intersection by construction. Encroachment is a per-edge deterministic roll (`colonnadeNarrowShare`), not universal, per Jacobs 2009 (below). |
+| M-PAL-2 | Ward-wall dissolution | Chinese cities' Tang-dynasty enclosed-ward (*lifang*) system broke down through the Tang-to-Song transition as commerce spilled past ward gates into the street — the "medieval urban revolution" | – | Skinner 1977 (ed., *The City in Late Imperial China*) | M (the historical process is well-attested; applying it to a Levantine-founded plan is a deliberate cross-tradition synthesis, declared as such, not a claim about Damascus/Aleppo specifically having had Chinese-style ward walls) | `dissolveWardWalls()` is a pure data/render pass — like M-PA-1's `applyDecay()`, it runs once after buildings exist and never adds, removes, or moves a street or parcel vertex. Drawn as independent per-edge segments, each individually verified against every real building in its block and dropped (not drawn) on any overlap — verification, not construction, is what makes this safe (early inset-polygon attempts logged tens of thousands of overlaps at concave block corners before this fix). |
+| M-PAL-3 | Post-disaster streets track the surviving fixed edge | after Kaifeng's catastrophic floods, new streets in the historic GIS record follow the surviving canals/watercourses directly rather than the original Northern Song grid's orientation | – | Historical GIS reconstruction of Kaifeng's post-flood street pattern (HGIS scholarship on Song-to-Qing Kaifeng) | L (the qualitative finding — post-disaster streets reorient to a fixed surviving edge — is attested; the specific rate/count reproduced here is a schematic PoC convention) | `growAlongFixedEdge()` reuses the organic router's own multi-point land-validation discipline (`landSeg`, matching the Venus `buildRadialStreets` fix, docs/07 §3.3) rather than the router itself. A no-op by construction on a landlocked site. Legitimately probabilistic per generation (see Jacobs 2009 note below), so tested in aggregate across many seeds, not for every single generation. |
+| M-PAL-4 | Burgage-cycle pseudo-streets, recurring at increasing density | a plot subject to sustained economic pressure is repeatedly subdivided and re-serviced by a new pseudo-street across "several plot-cycles," not just once | – | Conzen 1960 (*Alnwick, Northumberland: a study in town-plan analysis*) | M | Reuses `lanePass` (the existing oversized-block interior-lane mechanism) unchanged, just with a lower area floor (`rules.palimpsest.subdivisionPressure`) so blocks too small for the universal pass still fragment further as encroachment pressure rises — the mechanism already existed for every profile, it only needed a tunable threshold instead of one fixed constant. |
+| M-PAL-5 | Encroachment intensity varies city-to-city, not on a fixed universal curve | encroachment onto colonnaded streets and ward-wall dissolution began at different times and proceeded at different rates in different cities | – | Jacobs 2009 (Jill Jacobs / Levantine urban-history scholarship on encroachment variability) | L | Justifies exposing encroachment intensity as a tunable per-profile `rules.palimpsest` group rather than hardcoding one universal narrowing/dissolution rate — the same configurable-parameters discipline as the Generation Rules system generally (docs/07 §3.4), applied to this profile's own mechanism. |
+
+Scope note (founding act): the founding grid is `buildGridStreets` called unchanged — byte-for-byte
+the same function the Roman profile uses — because the historical referents (Aleppo, Damascus,
+Palmyra) *were* Hellenistic/Roman colonia foundations before their centuries of encroachment. Only
+the radius differs (62% of the organic pack's target radius, tuned empirically the same way Venus's
+ring radius was, for the same reason: a strip-parcel pattern on a grid-founded network packs more
+buildable frontage into a given extent than Roman's own insula parcels do).
+
+Scope note (population): realization runs roughly ~70-150% of target across the five site kinds at
+the same settings — a comparable spread to Venus's own ~47-112%, and for the same reason: a
+non-organic plan interacts with a bisecting river or open coastline very differently than the
+organic pack does.
+
+Scope note (bugs found only by inspecting generated output): `growAlongFixedEdge` (M-PAL-3) shipped
+as a complete, silent no-op — it never added a single street, on any site kind or seed — until three
+compounding issues were found by actually generating towns and counting the result rather than
+trusting the construction: its own safety margin was stricter than the offset its own input points
+were placed at; candidate points were drawn from the entire map perimeter rather than restricted to
+the built town's vicinity, so most candidates became disconnected floating segments deleted by the
+graph's own largest-component pruning; and a bay/coast shoreline's finer point sampling meant most
+candidate segments were shorter than the pass's minimum-length floor. All three are now fixed and
+covered by a dedicated regression test asserting a nonzero aggregate count across many seeds/sites.
+
 ---
 
 ## Usage contract

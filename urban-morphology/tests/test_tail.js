@@ -1252,5 +1252,145 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- GenerationRules system (docs/07 §3.4) ---------- */
+{
+  // resolveRules(): no argument reproduces DEFAULT_RULES exactly; a partial merges per-group
+  const d1 = UME.resolveRules();
+  ok(JSON.stringify(d1) === JSON.stringify(UME.DEFAULT_RULES), 'resolveRules() with no argument reproduces DEFAULT_RULES exactly');
+  const merged = UME.resolveRules({ street: { branchAngleJitter: 0.5 } });
+  ok(merged.street.branchAngleJitter === 0.5, 'resolveRules(partial) overrides only the given field');
+  ok(merged.street.continuationJitter === UME.DEFAULT_RULES.street.continuationJitter,
+    'resolveRules(partial) leaves every other field in the same group untouched');
+  ok(merged.parcels.subdivisionCap === UME.DEFAULT_RULES.parcels.subdivisionCap,
+    'resolveRules(partial) leaves an entirely unmentioned group untouched');
+
+  // cloneRules(): deep, independent copy — mutating the clone must never reach DEFAULT_RULES
+  const clone = UME.cloneRules(UME.resolveRules());
+  clone.street.branchAngleJitter = 999;
+  ok(UME.DEFAULT_RULES.street.branchAngleJitter === 0.26,
+    'cloneRules produces an independent deep copy (mutating the clone never reaches DEFAULT_RULES itself)');
+
+  // byte-neutrality: generate() with no rules option and generate() with explicit default rules
+  // must agree exactly — the same cross-version discipline this project already holds itself to
+  // for profiles (docs/07 Phase 1), now extended to cover the rules-threading refactor itself
+  const noRules = UME.generate(12345, { epochs: 8, pop: 5000 });
+  const explicitDefaultRules = UME.generate(12345, { epochs: 8, pop: 5000, rules: UME.resolveRules() });
+  ok(UME.hashModel(noRules) === UME.hashModel(explicitDefaultRules),
+    'generate() with no rules option is byte-identical to generate() with explicit default rules (neutrality)');
+
+  // custom rules genuinely change the output, deterministically
+  const wild = UME.resolveRules(); UME.applyWildness(wild, 1.9); UME.applyPlotChaos(wild, 1.9);
+  const wildModel1 = UME.generate(12345, { epochs: 8, pop: 5000, rules: wild });
+  const wildModel2 = UME.generate(12345, { epochs: 8, pop: 5000, rules: wild });
+  ok(UME.hashModel(wildModel1) === UME.hashModel(wildModel2), 'custom-rules generation is still deterministic for a fixed seed');
+  ok(UME.hashModel(wildModel1) !== UME.hashModel(noRules), 'custom rules genuinely change the generated town vs. defaults');
+
+  // applyWildness: derived values move monotonically with the slider, clamp at the documented
+  // extremes, and record the raw slider value itself on meta.wildness (read back by the UI panel)
+  const lo = UME.resolveRules(); UME.applyWildness(lo, 0);
+  const hi = UME.resolveRules(); UME.applyWildness(hi, 2);
+  ok(lo.street.branchAngleJitter < UME.DEFAULT_RULES.street.branchAngleJitter,
+    'applyWildness(0) reduces branch angle jitter below the baseline');
+  ok(hi.street.branchAngleJitter > UME.DEFAULT_RULES.street.branchAngleJitter,
+    'applyWildness(2) increases branch angle jitter above the baseline');
+  ok(lo.street.branchAngleJitter >= 0.15 && hi.street.branchAngleJitter <= 0.70,
+    'applyWildness clamps branchAngleJitter to its documented [0.15,0.70] range at both extremes');
+  ok(lo.street.pierceChance > hi.street.pierceChance,
+    'applyWildness inversely derives pierceChance (a wilder town relies less on deliberate piercing)');
+  ok(lo.meta.wildness === 0 && hi.meta.wildness === 2, 'applyWildness records the raw slider value on meta.wildness');
+
+  // applyPlotChaos: subdivisionCap floors/ceilings at its documented [1,4] integer range
+  const cLo = UME.resolveRules(); UME.applyPlotChaos(cLo, 0);
+  const cHi = UME.resolveRules(); UME.applyPlotChaos(cHi, 2);
+  ok(cLo.parcels.subdivisionCap === 1, 'applyPlotChaos(0) floors subdivisionCap at 1');
+  ok(cHi.parcels.subdivisionCap === 4, 'applyPlotChaos(2) caps subdivisionCap at its documented maximum of 4');
+  ok(cLo.parcels.frontageWidthVariance < cHi.parcels.frontageWidthVariance,
+    'applyPlotChaos increases frontage width variance with the slider');
+}
+
+/* ---------- Levantine Palimpsest civilization profile (docs/03, M-PAL register) ---------- */
+{
+  const pa = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'palimpsest' });
+  const pa2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'palimpsest' });
+  ok(pa.culture === 'palimpsest', 'palimpsest profile resolves');
+  ok(UME.hashModel(pa) === UME.hashModel(pa2), 'palimpsest generation deterministic');
+  ok(pa.parcels.length > 150, `palimpsest town is a substantial settlement (${pa.parcels.length} parcels)`);
+  ok(pa.pop > 6000 * 0.35, `palimpsest population realizes a meaningful share of target despite the founded-then-encroached mode's site-dependent variance (${pa.pop}/6000)`);
+
+  // the founding act reuses buildGridStreets unchanged (M-PAL): narrowColonnades tags every
+  // encroaching edge with its founding width, so a nonempty foundedW set is direct evidence the
+  // grid-founding act actually ran before any encroachment was applied
+  const foundingEdges = pa.graph.edges.filter(e => e.alive && e.foundedW !== undefined);
+  ok(foundingEdges.length > 0, `palimpsest founding colonnades are tracked (foundedW set on ${foundingEdges.length} edges), confirming the grid-founding act ran (M-PAL-1)`);
+
+  // narrowColonnades (M-PAL-1): road-RESERVATION narrowing only — some founded edges end up
+  // narrower than they were founded, none ever below the 1.8 m footpath floor, and the edge count
+  // (street graph topology) is completely unaffected since only e.w changes, never a or b
+  const narrowed = pa.graph.edges.filter(e => e.alive && e.foundedW !== undefined && e.w < e.foundedW - 1e-6);
+  ok(narrowed.length > 0, `palimpsest narrows some colonnaded streets below their founding width (${narrowed.length} edges, M-PAL-1)`);
+  ok(pa.graph.edges.every(e => e.foundedW === undefined || e.w >= 1.8 - 1e-6), 'narrowed colonnades never shrink below the 1.8 m footpath floor (M-PAL-1)');
+
+  // growAlongFixedEdge (M-PAL-3) + dissolveWardWalls (M-PAL-2), audited together across many
+  // (seed x site x fortified) combinations — mirrors the standing profile-agnostic audit's own
+  // discipline (checked across MULTIPLE seeds, not one), but also covers blk.wardWall, a model
+  // field the generic audit doesn't know about, and the shoreline-growth pass, which is
+  // legitimately probabilistic per-generation (Jacobs 2009: encroachment began at different
+  // times/rates in different cities) so it is asserted in aggregate, not per single generation
+  const palSeeds = [4242, 777, 12345, 999, 55, 88];
+  const palSites = ['river', 'riverthrough', 'bay', 'coast', 'landlocked'];
+  let shoreEdgesTotal = 0, shoreEdgesLandlocked = 0, wardWallBlocks = 0, wardWallOverlapFailures = 0, combosChecked = 0;
+  for (const site of palSites) {
+    for (const fortified of [false, true]) {
+      for (const seed of palSeeds) {
+        const m = UME.generate(seed, { epochs: 8, pop: 7500, walls: true, fortified, culture: 'palimpsest', site });
+        combosChecked++;
+        const shoreEdges = m.graph.edges.filter(e => e.alive && e.prov && /Kaifeng post-flood/.test(e.prov));
+        shoreEdgesTotal += shoreEdges.length;
+        if (site === 'landlocked') shoreEdgesLandlocked += shoreEdges.length;
+
+        const parBlock = new Map(m.parcels.map(p => [p.id, p.block]));
+        const byBlock = new Map();
+        for (const b of m.buildings) {
+          const bl = parBlock.get(b.parcel); if (bl === undefined) continue;
+          let arr = byBlock.get(bl); if (!arr) { arr = []; byBlock.set(bl, arr); }
+          arr.push(b);
+        }
+        for (const blk of m.blocks) {
+          if (!blk.wardWall) continue;
+          wardWallBlocks++;
+          const near = byBlock.get(blk.id) || [];
+          for (const [sa, sb] of blk.wardWall.segs)
+            for (const b of near)
+              for (let j = 0; j < b.poly.length; j++)
+                if (T.segInt(sa, sb, b.poly[j], b.poly[(j + 1) % b.poly.length])) wardWallOverlapFailures++;
+        }
+      }
+    }
+  }
+  ok(shoreEdgesTotal > 0, `palimpsest grows secondary streets along a fixed shoreline edge, aggregated across ${combosChecked} (site x fortified x seed) combinations (${shoreEdgesTotal} edges, M-PAL-3)`);
+  ok(shoreEdgesLandlocked === 0, 'growAlongFixedEdge is a strict no-op on a landlocked site (there is no fixed edge to grow along)');
+  ok(wardWallBlocks > 0, `palimpsest flags some interior blocks with a founding ward wall across the same ${combosChecked} combinations (${wardWallBlocks} block instances, M-PAL-2)`);
+  ok(wardWallOverlapFailures === 0, `no ward-wall segment ever crosses a real building, across ${combosChecked} combinations (${wardWallOverlapFailures} failures, M-PAL-2)`);
+
+  // Bab-scheme gates (M-ISL-4 pattern, reused): every non-water land gate gets the mature
+  // Islamic-period Arabic naming, not the Roman one the founding grid started from
+  const paWalled = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, culture: 'palimpsest' });
+  ok(!!paWalled.wall.ring, 'palimpsest can be walled on request');
+  const landGates = paWalled.wall.gates.filter(g => !g.water);
+  ok(landGates.length > 0 && landGates.every(g => /^Bab /.test(g.name)),
+    `palimpsest land gates all use the Bab-scheme Arabic naming (${landGates.map(g => g.name).join(', ')})`);
+
+  // civic anchor is the souk (market square), not a monumental hall — the same "governance was
+  // not a monumental civic building" precedent already established for the Islamic profile
+  ok(pa.civic === null, 'palimpsest has no monumental civic hall (auto + mosque faith resolves to none, like the Islamic profile) — the souk is the real civic anchor');
+  ok(pa.markets.length > 0, 'palimpsest keeps market squares (the souk itself, M-PAL register)');
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const p1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'palimpsest', site });
+    const p2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'palimpsest', site });
+    ok(p1.parcels.length > 100 && UME.hashModel(p1) === UME.hashModel(p2), `palimpsest town on '${site}' site: substantial + deterministic (${p1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

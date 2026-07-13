@@ -141,6 +141,8 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'postapoc-ruins', set: { culture: 'postapoc', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'none' } },
     { name: 'venus-circular-city', set: { culture: 'venus', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome' } },
     { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome' } },
+    { name: 'palimpsest-souk', set: { culture: 'palimpsest', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto' } },
+    { name: 'palimpsest-fortified', set: { culture: 'palimpsest', siteKind: 'riverthrough', pop: '9000', fortified: true, walls: true, faith: 'mosque', civicStyle: 'auto' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {

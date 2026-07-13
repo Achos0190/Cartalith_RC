@@ -208,6 +208,138 @@ documented here because it changes several of the fields above and the underlyin
   only the 12 primary spokes `'primary'` (rings and cross-spokes stay `'street'`, and cross-spokes
   now stop one ring short of the boundary so they never need a gate in the first place).
 
+### 3.4 Generation Rules: configurable parameters instead of hardcoded constants
+
+Every profile from Roman onward customizes behavior through new `CultureProfile` *fields* — but the
+arithmetic those fields feed into (branch-angle jitter, exploration decay, segment-length
+distribution, frontage/depth variance, subdivision caps…) remained hardcoded literals inside
+`grow()`/`buildParcels()`/`privatizeAlleys()`. That's fine for adding a new civilization, but it
+means no one can dial "how organic vs. planned" or "how chaotic the parcels are" without editing
+engine code. `GenerationRules` (`DEFAULT_RULES`, `resolveRules`, `cloneRules`,
+`applyWildness`/`applyPlotChaos`) externalizes those literals as a user-configurable, still-typed
+parameter object, orthogonal to `CultureProfile`:
+
+- **`DEFAULT_RULES`** groups every externalized value under `street` (14 fields — jitter, exploration
+  share/decay/floor, segment-length median/variance, pierce chance, junction-angle limit, market
+  gradient decay, parallel-street spacing, dead-end bias, bridgehead distance/probability),
+  `parcels` (frontage/depth variance, subdivision cap), `palimpsest` (§3.5 below), and `meta`
+  (`wildness`, `plotChaos` — UI sliders only, read by no engine code path). Every value reproduces
+  the literal it replaces exactly, so `generate()` with no `rules` option is **byte-identical** to
+  every prior version — the same cross-version neutrality discipline this project already holds
+  itself to for profiles, now proven by a dedicated test (`generate()` with no `rules` key hashes
+  identically to `generate()` with an explicit `resolveRules()` default).
+- **`resolveRules(partial)`** clones `DEFAULT_RULES` and `Object.assign`s each group present in
+  `partial` onto the matching clone group — a caller can override one field in one group without
+  reconstructing the rest. **`cloneRules(r)`** is a plain JSON round-trip: deep and fully independent,
+  which matters because `resolveRules` and the meta-slider functions below all mutate their return
+  value in place — if `resolveRules` ever returned a reference into `DEFAULT_RULES` instead of a
+  fresh clone, the *first* `applyWildness` call anywhere in the app would permanently corrupt the
+  engine's own defaults for the rest of the session. (Guarded by a dedicated regression test.)
+- **`applyWildness(rules, w)` / `applyPlotChaos(rules, c)`** are UI-side compound sliders, `w,c∈[0,2]`,
+  `1.0` = baseline: a single number derives several underlying fields via clamped formulas — e.g.
+  `branchAngleJitter = clamp(0.26·w, 0.15, 0.70)`, while `pierceChance` is derived *inversely*
+  (`clamp(0.10·(2−w), 0, 0.15)`: a wilder town relies less on deliberately piercing through
+  obstacles, more on organic wandering around them). These functions are a convenience layer only —
+  they compute values into the same `street`/`parcels` fields `generate()` already reads, never a
+  separate code path, so the individual fields remain the single source of truth.
+- **The Rules panel** (`#rulesBox`, HTML app-shell block): a profile selector (Default / 5 built-in
+  presets / any locally-saved profile), CRUD buttons (New/Duplicate/Rename/Save/Delete/Reset) backed
+  by `localStorage['um_rules_profiles_v1']`, JSON export (Blob + temporary download anchor) and
+  import (`FileReader`), per-parameter sliders for all 17 `street`/`parcels` fields, the two
+  meta-sliders, and a live comparison table (current vs. default: nodes/dead-ends/block size/parcel
+  count/street density/parcel size, highlighting any metric that differs by more than 8%). Every
+  slider `input` event triggers a 150 ms-debounced call to the existing `regen()` — reusing the
+  already-fast (30–200 ms) full generation+render pipeline rather than building a separate
+  lightweight preview renderer, since debouncing alone keeps the UI responsive while dragging.
+- **Five built-in presets** span the wildness/chaos spectrum documented below; each is a partial
+  object resolved through `resolveRules`, so a preset only needs to state the fields it actually
+  wants to move:
+
+  | Preset | wildness | plotChaos | Character |
+  |---|---|---|---|
+  | Planned Grid | 0.2 | 0.2 | Minimal jitter, low pierce-chance ceiling raised, tight parallel spacing — a rigid module. |
+  | Classical Town | 0.55 | 0.5 | A humanized grid: noticeably more regular than Organic Medieval, still far from rigid. |
+  | Organic Medieval | 1.3 | 1.1 | The engine's own historical default character, slightly exaggerated. |
+  | Medina | 1.4 | 1.8 | High dead-end bias, zero deliberate piercing, the highest subdivision cap — a dense, maze-like fabric. |
+  | Wild Frontier | 1.9 | 1.0 | Maximum exploration and segment-length variance, long/likely bridgeheads — sprawling and improvisational. |
+
+### 3.5 Palimpsest: a fourth planning mode — founded once, never re-planned
+
+`'organic'`, `'grid'`, and `'radial'` each model a city whose plan is consistent with its whole
+history: it either grows organically from the start, or it is planned once and stays legible as
+that plan forever. Aleppo and Damascus (Sauvaget 1934/1941) show a genuinely different pattern: a
+Hellenistic/Roman colonia **founded once** on a cardo/decumanus grid — exactly the Roman profile's
+own founding act — that was **never formally re-planned**, yet transformed almost beyond
+recognition over the following centuries as the grid was encroached on, subdivided, and partially
+fossilized in place. `planning:'palimpsest'` models the *process*, not just a final shape: it calls
+`buildGridStreets` unchanged for the founding act (byte-for-byte the same function Roman uses), then
+runs four small "encroachment" sub-passes per epoch, each keyed to `rules.palimpsest` rather than to
+`grow()`'s organic exploration:
+
+- **`narrowColonnades` (M-PAL-1)** shrinks a colonnaded avenue's drawn width toward a footpath floor
+  (1.8 m) as encroachment pressure rises, but only ever touches `e.w` — the alignment (`e.a`/`e.b`)
+  never moves. This is a deliberate, load-bearing safety property, not an incidental one: since
+  block-insetting reads edge width at the moment blocks are computed, narrowing a width can only
+  ever shrink the drawn road *casing*, never move a centerline or a junction, so this sub-pass
+  cannot introduce a new road/wall or road/building intersection **by construction** — mirroring
+  Damascus's Via Recta, walkable on the same alignment two thousand years after it stopped being a
+  colonnaded Roman street.
+- **`dissolveWardWalls` (M-PAL-2)** flags interior residential blocks with a founding enclosure (a
+  Chang'an-style *lifang* ward wall), a fraction already dissolved by this snapshot (Skinner 1977's
+  Tang-to-Song "medieval urban revolution," when Chinese ward systems broke down). This is a pure
+  data/render pass — like the Post-Apocalyptic profile's `applyDecay()` before it, it runs once
+  *after* buildings exist and never adds, removes, or moves a street or parcel vertex, so it cannot
+  affect topology. It also could not be made safe by construction alone: a per-edge outward offset
+  is fine at a convex block corner but proved unreliable at a reflex (concave) vertex — blocks
+  reshaped by `growAlongFixedEdge` are not always clean rectangles, and mitering a corner outward at
+  a concave vertex needs a full sign-aware corner solve that this project's own audit found unsafe in
+  practice (early attempts logged tens of thousands of building/wall-segment overlaps). The shipped
+  version instead **verifies then rejects**: each candidate wall segment is checked against every
+  real building in that specific block, and silently dropped (not drawn) if it crosses one —
+  correctness by verification, the same discipline already used for this project's wet-parcel and
+  bowtie-quad guards, now applied to a rendering feature instead of a growth one.
+- **`growAlongFixedEdge` (M-PAL-3)** grows a handful of secondary streets that track the site's
+  shoreline/riverbank directly, rather than the founding grid's orientation — the Kaifeng
+  post-flood HGIS finding that new streets after a disaster followed the surviving canals, not the
+  original plan. A no-op by construction on a landlocked site (there is no fixed edge to grow
+  along). **Found only by generating output and inspecting it, not by construction** — three
+  compounding bugs made this pass a complete no-op on every site and seed until fixed: (1) its own
+  land-safety margin (`riverDist > riverW/2+6`) was *stricter* than the offset `townBank` itself
+  places points at (`riverW/2+5` river-side, ~5 m flat on a bay/coast shore), so every candidate
+  failed the land check by construction; (2) candidate bank points were drawn uniformly from the
+  *entire* map perimeter, so a typical pick landed far from the built town, `attachPoint`'s snap
+  radius missed every existing node, and the resulting floating component was deleted by
+  `pruneLargest` moments later — candidates are now restricted to bank points within the same 520 m
+  radius the other M-PAL passes already use; (3) a bay/coast shoreline is sampled far more finely
+  than a river's, so most adjacent-point segments were shorter than the old 20 m minimum-length
+  floor and were discarded before the land check ever ran (floor lowered to 8 m). Because the
+  underlying mechanism is legitimately probabilistic per generation — Jacobs (2009): encroachment
+  began at different times/rates in different cities, so not every generated town needs to show
+  every M-PAL feature to the same degree — this is tested in aggregate across many seeds/sites, not
+  asserted for every single generation.
+- **`lanePass` reused at increased intensity (M-PAL-4)**: the existing "oversized block gets an
+  interior back lane" mechanism (previously a fixed 12,000 m² area floor) already *is* Conzen's
+  (1960) burgage-cycle pseudo-street pattern — it just needed a tunable threshold instead of one
+  hardcoded for every profile. Palimpsest re-runs it with a lower floor scaled by
+  `rules.palimpsest.subdivisionPressure`, so blocks too small for the universal pass still fragment
+  further as the fabric matures, standing in for the strip-parcel pattern's existing age-driven
+  grant-then-subdivide cycle running through "several plot-cycles."
+
+**Housing and gates read the mature identity the plan ended at, not the one it started from**:
+`buildingGrammar:'courtyard-house'` (reusing the Islamic/Chinese courtyard grammar) and
+`wallGates:{scheme:'bab'}` (the same Arabic gate-naming Islamic uses) — a Palimpsest town founded as
+a Roman colonia is walled and inhabited like the Islamic-period city it became, not the one it was
+laid out as.
+
+**Population/extent calibration** follows the same finding as Venus (§3.3): a strip-parcel pattern
+on a grid-founded network packs more buildable frontage into a given radius than Roman's own insula
+parcels do at the same extent, so `buildGridStreets`'s founding radius is scaled to 62% of the
+organic pack's target radius (tuned empirically the same way Venus's ring radius was — 100% and 55%
+both missed before landing on 62%) — realization runs roughly 70–150% of target across the five
+site kinds at the same settings, a comparable spread to Venus's own ~47–112%, for the same reason: a
+non-organic plan interacts with a bisecting river or open coastline very differently than the
+organic pack does.
+
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 
 | Quantity | Value | Source |
