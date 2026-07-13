@@ -329,7 +329,11 @@ runs four small "encroachment" sub-passes per epoch, each keyed to `rules.palimp
 `buildingGrammar:'courtyard-house'` (reusing the Islamic/Chinese courtyard grammar) and
 `wallGates:{scheme:'bab'}` (the same Arabic gate-naming Islamic uses) — a Palimpsest town founded as
 a Roman colonia is walled and inhabited like the Islamic-period city it became, not the one it was
-laid out as.
+laid out as. This has one more consequence, worth stating explicitly since it is easy to expect the
+opposite: **never a bastioned trace**, however large the requested population — `fortified` only
+ever becomes true when `profile.wallGates.scheme==='organic'` (the anachronism guard, §2), and `bab`
+is not on that list, exactly like Islamic. A city that ends at a mature Islamic-period identity
+would not also carry a Renaissance-era European star fort.
 
 **Population/extent calibration** follows the same finding as Venus (§3.3): a strip-parcel pattern
 on a grid-founded network packs more buildable frontage into a given radius than Roman's own insula

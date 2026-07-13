@@ -1380,6 +1380,14 @@ for (const site of ['river', 'landlocked']) {
   ok(landGates.length > 0 && landGates.every(g => /^Bab /.test(g.name)),
     `palimpsest land gates all use the Bab-scheme Arabic naming (${landGates.map(g => g.name).join(', ')})`);
 
+  // never a bastioned trace, however requested or however large the population — the same
+  // anachronism guard already applied to Roman/Islamic/etc.: only wallGates.scheme:'organic'
+  // ever unlocks the gunpowder-era trace italienne, and palimpsest ends at the mature Islamic-
+  // period identity (scheme:'bab'), so it is blocked for the same reason Islamic is
+  const paFortReq = UME.generate(12345, { epochs: 8, pop: 12000, walls: true, fortified: true, culture: 'palimpsest', site: 'riverthrough' });
+  ok(paFortReq.fortRequested && !paFortReq.fortified && paFortReq.wall.style === 'curtain',
+    'palimpsest never gets a bastioned trace even when requested with ample population, matching the Islamic-period identity it ends at (M-FOR-4 anachronism guard)');
+
   // civic anchor is the souk (market square), not a monumental hall — the same "governance was
   // not a monumental civic building" precedent already established for the Islamic profile
   ok(pa.civic === null, 'palimpsest has no monumental civic hall (auto + mosque faith resolves to none, like the Islamic profile) — the souk is the real civic anchor');

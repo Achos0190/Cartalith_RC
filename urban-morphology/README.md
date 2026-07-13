@@ -15,7 +15,7 @@ post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (247 assertions) |
+| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1090 assertions) |
 | Browser driver (screenshots + inspector click-tests, incl. the Roman colonia) | `tests/browser_check.js` |
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
@@ -172,7 +172,9 @@ civilizations 3–18).
   M-PAL-4). Housing and gates read the mature Islamic-period identity the plan ended at
   (courtyard houses, Bab-scheme gate names), not the Roman one it started from. Encroachment
   intensity is a tunable per-profile parameter (`rules.palimpsest`), not a fixed universal curve,
-  since real cities encroached at different times and rates (Jacobs 2009, M-PAL-5).
+  since real cities encroached at different times and rates (Jacobs 2009, M-PAL-5); never a
+  bastioned trace, however large the requested population (same anachronism guard as Roman/
+  Islamic — `bab` is not on the `scheme:'organic'` allowlist that alone unlocks it).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

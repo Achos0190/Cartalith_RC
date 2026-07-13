@@ -334,6 +334,13 @@ shape.
 | M-PAL-4 | Burgage-cycle pseudo-streets, recurring at increasing density | a plot subject to sustained economic pressure is repeatedly subdivided and re-serviced by a new pseudo-street across "several plot-cycles," not just once | – | Conzen 1960 (*Alnwick, Northumberland: a study in town-plan analysis*) | M | Reuses `lanePass` (the existing oversized-block interior-lane mechanism) unchanged, just with a lower area floor (`rules.palimpsest.subdivisionPressure`) so blocks too small for the universal pass still fragment further as encroachment pressure rises — the mechanism already existed for every profile, it only needed a tunable threshold instead of one fixed constant. |
 | M-PAL-5 | Encroachment intensity varies city-to-city, not on a fixed universal curve | encroachment onto colonnaded streets and ward-wall dissolution began at different times and proceeded at different rates in different cities | – | Jacobs 2009 (Jill Jacobs / Levantine urban-history scholarship on encroachment variability) | L | Justifies exposing encroachment intensity as a tunable per-profile `rules.palimpsest` group rather than hardcoding one universal narrowing/dissolution rate — the same configurable-parameters discipline as the Generation Rules system generally (docs/07 §3.4), applied to this profile's own mechanism. |
 
+Scope note (fortification): never a bastioned trace, however large the requested population —
+`wallGates:{scheme:'bab'}` is not on the `scheme==='organic'` allowlist that alone unlocks the
+gunpowder-era trace italienne (M-FOR-4), the same anachronism guard already applied to Roman,
+Islamic, and every other non-Venus profile. This follows directly from ending at the mature
+Islamic-period identity: a city walled and gated like the Islamic-period city it became would not
+also carry a Renaissance-era European star fort.
+
 Scope note (founding act): the founding grid is `buildGridStreets` called unchanged — byte-for-byte
 the same function the Roman profile uses — because the historical referents (Aleppo, Damascus,
 Palmyra) *were* Hellenistic/Roman colonia foundations before their centuries of encroachment. Only

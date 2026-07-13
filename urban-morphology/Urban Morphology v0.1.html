@@ -3601,9 +3601,12 @@ function regen(){
   const dt=performance.now()-t0;
   render();
   let note='';
-  if(model.fortRequested&&!model.fortified)
-    note=` — ⚠ star fort needs pop ≥ ${model.fortMin.toLocaleString()} (a strategic town, not a hamlet); built a curtain wall`;
-  else if(model.fortified)note=' — bastioned trace';
+  if(model.fortRequested&&!model.fortified){
+    if(!model.walls)note=' — ⚠ star fort requires the city wall option; built without one';
+    else if(model.popTarget<model.fortMin)
+      note=` — ⚠ star fort needs pop ≥ ${model.fortMin.toLocaleString()} (a strategic town, not a hamlet); built a curtain wall`;
+    else note=' — ⚠ this civilization\'s wall tradition has no bastioned trace (anachronism guard); built a curtain wall';
+  }else if(model.fortified)note=' — bastioned trace';
   document.getElementById('status').textContent=
     `generated in ${dt.toFixed(0)} ms — realized ~${model.pop.toLocaleString()} of target `+
     `${model.popTarget.toLocaleString()} inhabitants${note} — hash ${UME.hashModel(model).toString(16)}`;
