@@ -28,14 +28,19 @@ amenities switch on as population and connectivity grow ·
 parameters (kind/pop/traits/specialisation/faction/civWays) onto this generator's inputs, with
 the gaps to close for a future refactor into the Cartalith line ·
 **`07-culture-architecture.md`** — the Core Engine / Culture Profile split: which of the
-engine's ~70 functions are culture-independent vs. tradition-supplied, the `CultureProfile`
+engine's ~115 functions are culture-independent vs. tradition-supplied, the `CultureProfile`
 data schema, the Roman colonia's quantified morphology, and what's explicitly deferred to
 later phases (phased historical growth, negative space, infrastructure layer, Space
 Syntax/graph-theory metrics, settlement hierarchy, a profile-aware validation panel, and
 civilizations 3–18) ·
 **`08-terrain-building-suitability.md`** — Cartalith-port groundwork: real-world slope/flood-
 setback research, a two-factor McHarg-style suitability score, and its mapping onto Cartalith
-Gen1's actual terrain fields for the eventual refactor.
+Gen1's actual terrain fields for the eventual refactor ·
+**`09-refactoring-function-inventory.md`** — the complete function-by-function port plan: every
+one of the 115 engine functions (plus the ~35 app-shell ones) tagged reuse/rename/adapt/discard
+against a direct read of `Cartalith Gen1 v0.85.html`, two verified naming collisions
+(`generate`/`render`), one free win (`mulberry32` already exists in Gen1, byte-equivalent), and a
+six-phase migration order.
 
 ### Civilization profiles (selectable in-app)
 

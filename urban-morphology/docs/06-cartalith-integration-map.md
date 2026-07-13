@@ -14,6 +14,11 @@ new data modelling.
 > §1.2 below, now with the fuller field list `08-terrain-building-suitability.md` maps against.
 > When the merge happens the new file follows the two-digit-minor rule. This project stays
 > isolated until then.
+>
+> **See also:** `09-refactoring-function-inventory.md` takes this document's parameter mapping
+> and architecture sketch (§4 below) down to the level of every individual function in the
+> engine — what reuses unchanged, what needs to be renamed to clear two real naming collisions
+> confirmed directly against v0.85 (`generate`, `render`), and a six-phase migration order.
 
 ---
 
