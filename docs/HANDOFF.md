@@ -471,6 +471,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Queued decision (owner, 2026-07-13): save/export architecture restructuring.** Owner asked to audit
+  the codebase for "double data under different names" in the save file and in how Tiles & LOD / Atlas /
+  Layers / World are used, "for efficiency gains and a smoother UI/UX." Read-only audit delivered —
+  `docs/research/save-export-architecture-audit.md` — no code changed yet (owner explicitly asked for the
+  audit before scoping any change; confirmed backward compatibility with old saves can break when a
+  restructuring pass does happen). Verdict: the real bloat is `exportZip()` writing overlapping map
+  imagery from **three independent code paths** for the same terrain (`layers/*.png` previews,
+  `map.png`/`tiles/*` fresh bake, and the embedded Atlas pyramid) — genuinely trimmable. "Tiles & LOD" vs
+  "Atlas" vs "Layers" vs "World" is a separate, lower-risk **naming/IA** issue (Atlas is nested *inside*
+  Tiles & LOD, not a sibling; Layers is a pure view-selector with no storage) — a markup-only fix, zero
+  format risk. `biome_raster.bin` vs `biome_baked.bin` (the owner's own example) turned out to be **two
+  genuinely different classifiers for two different consumers, not duplication** — flagged in the audit so
+  a future pass doesn't collapse them by mistake. Next session: get the owner's scope pick (save-size trim
+  vs. UI rename vs. both — the audit's §5 lists ranked, independently-shippable options) before writing
+  any code, per the "confirm design before building" rule.
 - **The owner's 2026-07-12 /goal (settlement pop-up + Explore timeline rework) is now fully shipped**
   across v0.90 (settlement editor → map pop-up) and v0.91 (timeline: one home, real time-scale — see
   above). No queued follow-up on either; nothing else outstanding from that request.
