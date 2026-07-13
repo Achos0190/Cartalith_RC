@@ -1038,5 +1038,143 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Colonial civilization profile (docs/03, M-COL register) ---------- */
+{
+  const col = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'colonial' });
+  const col2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'colonial' });
+  ok(col.culture === 'colonial', 'colonial profile resolves');
+  ok(UME.hashModel(col) === UME.hashModel(col2), 'colonial generation deterministic');
+  ok(col.parcels.length > 150, `colonial town is a substantial settlement (${col.parcels.length} parcels)`);
+
+  let axisC = 0, totalC = 0;
+  for (const e of col.graph.edges) {
+    const a = col.graph.nodes[e.a], b = col.graph.nodes[e.b];
+    const len = Math.hypot(b.x - a.x, b.y - a.y); if (len < 3) continue;
+    let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x)) * 180 / Math.PI; ang = ang % 90;
+    totalC++; if (Math.min(ang, 90 - ang) < 4) axisC++;
+  }
+  ok(axisC / totalC > 0.85, `colonial town reuses the axis-aligned Laws-of-the-Indies grid model (${(axisC/totalC*100).toFixed(0)}%, M-COL-1)`);
+
+  const colKinds = new Set(col.buildings.map(b => b.kind));
+  ok([...colKinds].some(k => k === 'street range' || k === 'single-room house'), 'colonial buildings reuse the courtyard-house grammar (patio house, M-COL-2)');
+  ok(col.pop > 6000 * 0.7, `colonial household-size correction realizes a substantial share of target population (${col.pop}/6000)`);
+  ok(col.civic && col.civic.style === 'townhall', 'colonial civic hall is the cabildo (reuses the townhall style)');
+  ok(col.markets.length > 0, 'colonial profile keeps the plaza mayor market economy');
+
+  const colf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'colonial' });
+  ok(!colf.fortified && colf.wall.style === 'curtain', 'colonial profile never gets a bastioned trace, even when requested');
+  ok(colf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `cardinal gate scheme names land gates (${colf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const c1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'colonial', site });
+    const c2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'colonial', site });
+    ok(c1.parcels.length > 100 && UME.hashModel(c1) === UME.hashModel(c2), `colonial town on '${site}' site: substantial + deterministic (${c1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Frontier civilization profile (docs/03, M-FRO register) ---------- */
+{
+  const fro = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'frontier' });
+  const fro2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'frontier' });
+  ok(fro.culture === 'frontier', 'frontier profile resolves');
+  ok(UME.hashModel(fro) === UME.hashModel(fro2), 'frontier generation deterministic');
+  ok(fro.parcels.length > 150, `frontier boomtown is a substantial settlement (${fro.parcels.length} parcels)`);
+  ok(fro.pop > 6000 * 0.85 && fro.pop < 6000 * 1.25, `frontier strip parcels realize standard density, no multiplier needed (${fro.pop}/6000)`);
+
+  const froKinds = new Set(fro.buildings.map(b => b.kind));
+  ok(['main', 'wing', 'rear range'].some(k => froKinds.has(k)), 'frontier buildings reuse the burgage grammar (false-front storefront stand-in, M-FRO-2)');
+  ok(!fro.civic, 'frontier profile has no civic hall (formal government lagged the boom)');
+  ok(fro.markets.length === 0, 'frontier profile has no market-square institution (commerce ran through the general store)');
+
+  // never a wall at all (M-FRO-3) — distinct from aztec's defensive-alternative and maya's
+  // genuine optional-toggle: frontier boomtowns simply never fortified, forced off either way
+  ok(!fro.wall.ring && fro.wall.gates.length === 0, 'frontier profile never builds a wall, even when requested');
+  const fro3 = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'frontier' });
+  ok(UME.hashModel(fro) === UME.hashModel(fro3), 'the walls checkbox has no effect on the frontier profile (forced off either way)');
+  const frof = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'frontier' });
+  ok(!frof.fortified, 'frontier profile never gets a bastioned trace, even when requested');
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const f1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'frontier', site });
+    const f2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'frontier', site });
+    ok(f1.parcels.length > 100 && UME.hashModel(f1) === UME.hashModel(f2), `frontier boomtown on '${site}' site: substantial + deterministic (${f1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Industrial civilization profile (docs/03, M-IND register) ---------- */
+{
+  const ind = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'industrial' });
+  const ind2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'industrial' });
+  ok(ind.culture === 'industrial', 'industrial profile resolves');
+  ok(UME.hashModel(ind) === UME.hashModel(ind2), 'industrial generation deterministic');
+  ok(ind.parcels.length > 150, `industrial mill town is a substantial settlement (${ind.parcels.length} parcels)`);
+  ok(ind.pop > 6000 * 0.85, `industrial domus-insula grammar reuses the roman M-ROM-7 correction automatically, no separate multiplier needed (${ind.pop}/6000)`);
+
+  // reuses the roman domus-insula grammar: tenement/insula-block vs. mill-owner domus split
+  const indKinds = new Set(ind.buildings.map(b => b.kind));
+  ok(indKinds.has('insula block') && (indKinds.has('atrium range') || indKinds.has('peristyle range')), 'industrial buildings reuse the domus-insula grammar (tenement/mill-owner-villa split, M-IND-1)');
+
+  // factory: the town's largest warehouse/insula-class building re-tagged, not new geometry
+  const factory = ind.buildings.find(b => b.kind === 'factory');
+  ok(!!factory, `industrial profile tags a factory/mill anchor (M-IND-2)`);
+  ok(factory && factory.chimney && isFinite(factory.chimney.x) && isFinite(factory.chimney.y), 'factory has a finite chimney marker point');
+  // the factory's footprint is one of the buildings the ordinary pipeline already placed and
+  // validated (same parcel-containment/no-self-intersection guarantees as every other building) —
+  // proof the factory can never introduce a new impossible intersection
+  ok(ind.parcels.some(p => p.id === factory.parcel), 'the factory sits on an already-validated parcel from the ordinary pipeline (no freestanding new geometry)');
+
+  ok(ind.civic && ind.civic.style === 'townhall', 'industrial civic hall reuses the townhall style');
+  ok(ind.markets.length > 0, 'industrial profile keeps a market economy');
+  ok(!ind.wall.ring && ind.wall.gates.length === 0, 'industrial profile never builds a wall (the fortified-city era had ended), even when requested');
+  const indf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'industrial' });
+  ok(!indf.fortified, 'industrial profile never gets a bastioned trace, even when requested');
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const i1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'industrial', site });
+    const i2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'industrial', site });
+    ok(i1.parcels.length > 100 && UME.hashModel(i1) === UME.hashModel(i2), `industrial mill town on '${site}' site: substantial + deterministic (${i1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Post-Apocalyptic civilization profile (docs/03, M-PA register) ---------- */
+{
+  const pa = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'postapoc' });
+  const pa2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'postapoc' });
+  const ind0 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'industrial' });
+  ok(pa.culture === 'postapoc', 'postapoc profile resolves');
+  ok(UME.hashModel(pa) === UME.hashModel(pa2), 'postapoc generation deterministic');
+  ok(pa.parcels.length > 150, `postapoc settlement is a substantial footprint (${pa.parcels.length} parcels)`);
+
+  // reuses the industrial profile's exact grid + domus-insula housing stock (M-PA-2) — same
+  // building-kind vocabulary, just without the factory tag (that's industrial-specific)
+  const paKinds = new Set(pa.buildings.map(b => b.kind));
+  ok(paKinds.has('insula block') && (paKinds.has('atrium range') || paKinds.has('peristyle range')), 'postapoc buildings reuse the industrial domus-insula housing stock (M-PA-2)');
+  ok(!paKinds.has('factory'), 'postapoc profile does not tag a factory (that flag is industrial-specific, not inherited)');
+
+  // the defining, load-bearing mechanism: a real fraction of the built stock is ruined and
+  // deliberately excluded from the population head-count — intentionally low realization, not a bug
+  const ruinedBuildings = pa.buildings.filter(b => b.ruined);
+  const ruinedParcels = pa.parcels.filter(p => p.ruined);
+  ok(ruinedParcels.length > 0 && ruinedBuildings.length > 0, `postapoc profile flags a real fraction of the built stock ruined (${ruinedParcels.length} parcels, ${ruinedBuildings.length} buildings, M-PA-1)`);
+  ok(pa.pop < ind0.pop * 0.85, `postapoc population is intentionally, substantially lower than the identical un-ruined industrial baseline at the same settings (${pa.pop} vs ${ind0.pop}) — decay excludes ruins from the head-count, not a realization bug`);
+
+  // ruined buildings are a pure data/render overlay — still geometrically valid, still sitting on
+  // an ordinary already-validated parcel, never a moved or removed vertex (the whole point of
+  // deferring physical ruin modelling rather than actually breaching walls/blocking roads)
+  ok(ruinedBuildings.every(b => Math.abs(UME._test.polyArea(b.poly)) > 1), 'every ruined building still has valid, non-degenerate geometry');
+  ok(!pa.civic, 'postapoc profile has no civic hall (institutions collapsed with the population)');
+  ok(pa.markets.length === 0, 'postapoc profile has no market economy');
+
+  const paf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'postapoc' });
+  ok(!paf.fortified && paf.wall.style === 'curtain', 'postapoc profile never gets a bastioned trace, even when requested (anachronistically archaic for a fallen modern city)');
+  ok(paf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${paf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const p1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'postapoc', site });
+    const p2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'postapoc', site });
+    ok(p1.parcels.length > 100 && UME.hashModel(p1) === UME.hashModel(p2), `postapoc settlement on '${site}' site: substantial + deterministic (${p1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

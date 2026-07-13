@@ -135,6 +135,10 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'mayan-city', set: { culture: 'mayan', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
     { name: 'inca-city', set: { culture: 'inca', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
     { name: 'japanese-castletown', set: { culture: 'japanese', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'keep' } },
+    { name: 'colonial-town', set: { culture: 'colonial', siteKind: 'coast', pop: '6000', fortified: false, walls: true, faith: 'church', civicStyle: 'townhall' } },
+    { name: 'frontier-boomtown', set: { culture: 'frontier', siteKind: 'landlocked', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'none' } },
+    { name: 'industrial-milltown', set: { culture: 'industrial', siteKind: 'river', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'townhall' } },
+    { name: 'postapoc-ruins', set: { culture: 'postapoc', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'none' } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {

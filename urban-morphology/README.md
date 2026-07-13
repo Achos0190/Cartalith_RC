@@ -123,6 +123,26 @@ civilizations 3–18).
   directly, a genuine cross-cultural parallel (M-JPN-2); a new civic style, the **castle keep**
   (*tenshu*), reuses the existing basilica/townhall render path — an inset roofline and
   corner-turret markers — rather than new tiered-roof geometry (M-JPN-3).
+- **Colonial (Laws of the Indies)** — a fifth independent grid tradition, this time from a
+  literal 1573 royal planning ordinance rather than an inferred pattern: plaza mayor, church
+  facing the plaza, cabildo (reuses the townhall style); the first grid profile with
+  `defaultFaith:'church'` rather than `'temple'` (M-COL-1/2).
+- **Frontier (American Old West boomtown)** — unplanned, terrain-led main-street growth; the
+  narrow-frontage burgage grammar stands in for the iconic false-front wooden storefront
+  (M-FRO-2); never fortified at all — a third, distinct reasoning for the `noWalls` mechanism
+  (Aztec: alternative defence; Frontier: no defence tradition, M-FRO-3).
+- **Industrial (19th-century mill town)** — reuses the Roman **domus-insula** grammar unchanged:
+  the tenement/mill-owner-villa split maps directly onto the historical insula-block/domus
+  divide, so the existing household-size correction applies with no new code; the one new
+  mechanism, `tagFactory()`, re-tags the town's own largest warehouse/insula-class building as
+  its factory/mill anchor with a chimney marker — reusing already-validated geometry rather than
+  sitting new freestanding geometry that would need its own collision-safety proof (M-IND-1/2).
+- **Post-Apocalyptic (collapsed settlement)** — reuses the Industrial profile's grid and housing
+  stock as the city type imagined to have fallen; its one new mechanism, `applyDecay()`, flags a
+  seeded ~35–45% of the built stock as ruined and excludes it from the population count, but
+  never moves or removes a single vertex of already-validated geometry — a deliberate choice,
+  since an actual breached-wall/blocked-road model would be exactly the kind of "impossible
+  intersection" this project's standing audit checks against everywhere else (M-PA-1/2).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.

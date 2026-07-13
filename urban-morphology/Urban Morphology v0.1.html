@@ -79,6 +79,9 @@ svg.panning{cursor:grabbing}
 .minaret{fill:#5c7a63;stroke:#3a4a3a;stroke-width:.5}
 .spire{fill:#6f5a86;stroke:#463758;stroke-width:.5}
 .ridge{stroke:#f6e9db;stroke-width:.55;fill:none;opacity:.75}
+.bld.ruined{fill:#9a9184;stroke:#4a453c;stroke-width:.5;stroke-dasharray:1.4 1;opacity:.6}
+.ridge.ruined{opacity:.3}
+.chimney{fill:#4a453c;stroke:#2a271f;stroke-width:.4}
 .roadcase{fill:none;stroke:#6d5a37;stroke-linecap:round;stroke-linejoin:round}
 .roadfill{fill:none;stroke:#f8f3e4;stroke-linecap:round;stroke-linejoin:round}
 .roadfill.lane{stroke:#efe8d2}
@@ -134,7 +137,11 @@ svg.panning{cursor:grabbing}
       <option value="mesopotamian">Mesopotamian</option>
       <option value="mayan">Maya (Classic Period)</option>
       <option value="inca">Inca (Andean)</option>
-      <option value="japanese">Japanese Castle Town</option></select></div>
+      <option value="japanese">Japanese Castle Town</option>
+      <option value="colonial">Colonial (Laws of the Indies)</option>
+      <option value="frontier">Frontier (Old West)</option>
+      <option value="industrial">Industrial (mill town)</option>
+      <option value="postapoc">Post-Apocalyptic</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -291,7 +298,31 @@ const CULTURE_PROFILES={
     planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
     defaultFaith:'temple',defaultCivic:'keep',markets:true,
     wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'castle',
-    prov:'An Edo-period jokamachi (castle town): deliberately non-gridded, winding streets radiating from the daimyo\'s castle — a defensive irregularity (masugata bent-gate approaches), not an accretive accident, but reusing the same organic growth/T-junction machinery as the medieval pack produces a comparably irregular result (M-JPN-1); merchant/artisan machiya townhouses were narrow-frontage, deep-lot row buildings strikingly similar in plan to the medieval burgage plot — a genuine cross-cultural parallel, so this profile reuses the burgage grammar directly rather than inventing a new one (M-JPN-2); the temple rite stands in for the tera-machi Buddhist temple district (the same documented pagoda-simplification pattern already used for the Chinese profile); a new civic style, the castle keep (tenshu) — a tiered stone-and-timber donjon — reuses the existing basilica/townhall render path (hall + inset "apse" roofline + corner turret markers) rather than new tiered-roof geometry (M-JPN-3); chonin-chi merchant quarters keep the market economy; compass-named gates for the moat/earthen-wall circuit; never a bastioned trace (Japanese castle fortification followed an independent, non-trace-italienne design lineage).'}
+    prov:'An Edo-period jokamachi (castle town): deliberately non-gridded, winding streets radiating from the daimyo\'s castle — a defensive irregularity (masugata bent-gate approaches), not an accretive accident, but reusing the same organic growth/T-junction machinery as the medieval pack produces a comparably irregular result (M-JPN-1); merchant/artisan machiya townhouses were narrow-frontage, deep-lot row buildings strikingly similar in plan to the medieval burgage plot — a genuine cross-cultural parallel, so this profile reuses the burgage grammar directly rather than inventing a new one (M-JPN-2); the temple rite stands in for the tera-machi Buddhist temple district (the same documented pagoda-simplification pattern already used for the Chinese profile); a new civic style, the castle keep (tenshu) — a tiered stone-and-timber donjon — reuses the existing basilica/townhall render path (hall + inset "apse" roofline + corner turret markers) rather than new tiered-roof geometry (M-JPN-3); chonin-chi merchant quarters keep the market economy; compass-named gates for the moat/earthen-wall circuit; never a bastioned trace (Japanese castle fortification followed an independent, non-trace-italienne design lineage).'},
+  colonial:{id:'colonial',name:'Colonial (Laws of the Indies grid)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'courtyard-house',
+    defaultFaith:'church',defaultCivic:'townhall',markets:true,
+    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'plaza mayor',
+    householdMultiplier:2.9,
+    prov:'A Spanish colonial foundation under the 1573 Laws of the Indies ordinance: a symmetrical grid centred on the plaza mayor, with the church facing the plaza and a cabildo (town council) reusing the existing town-hall geometry, per the ordinance\'s own provisions for public/private building lots (M-COL-1) — a fifth independent grid tradition reusing the same grid-growth machinery as Roman/Chinese/Aztec/Greek/Egyptian; housing is the Mediterranean-derived colonial patio house, the same courtyard-house grammar as Roman/Islamic/Greek (M-COL-2); the church rite (not temple) marks this as the first grid-planning profile built under Christian rather than classical/temple-state auspices; cardinal-named gates for an optional curtain (some colonial ports were walled against raiders — Cartagena, Havana — others were not, so this stays a normal toggle like the base pack, not forced either way).'},
+  frontier:{id:'frontier',name:'Frontier (American Old West boomtown)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
+    defaultFaith:'church',defaultCivic:'none',markets:false,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'main street',
+    noWalls:true,
+    prov:'An American frontier boomtown (mining/cattle/rail): rapid, unplanned growth following the trail/rail line and terrain rather than a rigid grid (M-FRO-1); narrow-frontage commercial buildings lining the main street reuse the burgage grammar — the same cross-cultural parallel already established for the Japanese machiya — standing in for the iconic false-front wooden storefront (the tall false facade itself is an unmodelled ornamental detail, a documented simplification, M-FRO-2); no formal market-square institution (commerce ran through the general store, not a chartered market) and no monumental civic hall (formal town government typically lagged years behind the boom); uniquely among this register\'s "no-wall" profiles, this is neither a defensive-alternative case like Aztec\'s lake nor a genuine regional-variation toggle like Maya\'s — frontier boomtowns simply never built fortifications at all, forced off regardless of the checkbox (M-FRO-3); never a bastioned trace.'},
+  industrial:{id:'industrial',name:'Industrial (19th-century mill town)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
+    defaultFaith:'church',defaultCivic:'townhall',markets:true,
+    wallGates:{scheme:'cardinal'},orientation:'cardinal',civicAnchorLabel:'town square',
+    noWalls:true,factory:true,
+    prov:'A 19th-century industrial mill town: a planned grid of dense worker housing, reusing the Roman domus-insula grammar unchanged — its multi-storey insula-block/domus split maps directly onto the historical tenement/mill-owner-villa divide (M-IND-1), so the existing M-ROM-7 household-size correction for insula-block parcels applies automatically with no separate multiplier needed; the town\'s largest warehouse/insula-class building is re-tagged as its factory/mill anchor with a chimney marker (M-IND-2), reusing that building\'s own already-sited footprint rather than new freestanding geometry, so this can never introduce the kind of overlap this register\'s standing audit checks against; no walls — the fortified-city era had largely ended by the industrial revolution (many surviving medieval walls were being demolished in this period, e.g. Vienna\'s Ringstrasse), forced off regardless of the checkbox; never a bastioned trace.'},
+  postapoc:{id:'postapoc',name:'Post-Apocalyptic (collapsed settlement)',
+    planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
+    defaultFaith:'none',defaultCivic:'none',markets:false,
+    wallGates:{scheme:'compass'},orientation:'cardinal',civicAnchorLabel:'town square',
+    ruined:true,
+    prov:'A collapsed modern/industrial settlement — the real-world referent is shrinking-city and ghost-town depopulation research, not fiction: reuses the Industrial profile\'s planned grid and domus-insula housing stock, since that is the city type imagined to have fallen (M-PA-2); a seeded ~35-45% of the already-built parcel stock is flagged ruined post-generation — abandoned and excluded from the population head-count, but geometrically untouched (M-PA-1). This is a deliberate, load-bearing design choice: an actual physical-rubble model (a breached wall, a road blocked mid-span) would be exactly the "impossible intersection" this project\'s standing audit checks against everywhere else, so full ruin modelling is explicitly deferred rather than implemented, and this profile\'s low population realization is intentional, not a bug. No faith, no civic hall, no markets (organized institutions assumed collapsed with the population); compass-named gates for whatever curtain still stands; never a bastioned trace (a gunpowder-era fortification style would be anachronistically archaic for a fallen modern city — the same anachronism guard applied in the opposite temporal direction from every earlier profile).'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -2105,6 +2136,42 @@ function buildChinampas(seed,site,anchors,wallState,maxRF){
       if(details.length>220)return details;}}
   return details;}
 
+/* Factory/mill (M-IND-2), the Industrial profile's one new building type: rather than siting a
+ * new freestanding footprint (and risking exactly the kind of overlap this project audits
+ * against), it re-tags the town's own largest already-placed warehouse/insula-block building —
+ * reusing its collision-safe footprint outright — as the mill anchor, with a chimney marker
+ * offset from its own centroid. Mutates buildings in place; a no-op if none exist. */
+function tagFactory(buildings){
+  const cands=buildings.filter(b=>b.kind==='warehouse'||b.kind==='insula block');
+  if(!cands.length)return;
+  let best=cands[0],bestArea=Math.abs(polyArea(best.poly));
+  for(const b of cands){const a=Math.abs(polyArea(b.poly));if(a>bestArea){best=b;bestArea=a;}}
+  best.kind='factory';
+  const c=polyCentroid(best.poly);
+  const edge=V.sub(best.poly[1],best.poly[0]);
+  const along=V.norm(edge);if(!isFinite(along.x))along={x:1,y:0};
+  best.chimney={x:c.x+along.x*bestArea**0.5*0.28,y:c.y+along.y*bestArea**0.5*0.28};
+  best.prov='Factory/mill: the town\'s largest warehouse/insula-class building repurposed as its defining industrial anchor, marked with a chimney stack (M-IND-2) — reuses that building\'s own already-sited footprint rather than new freestanding geometry.';
+}
+
+/* Post-collapse decay pass (M-PA-1), the Post-Apocalyptic profile's one new mechanism: flags a
+ * deterministic seeded fraction of already-built, non-churchyard parcels (and their buildings)
+ * as ruined — abandoned and uninhabited, but not removed or altered geometrically. This is
+ * deliberately a data/render-only overlay, not a physical-rubble model: an actual breached wall
+ * or a road blocked mid-span would be exactly the "impossible intersection" this project audits
+ * against elsewhere, so full ruin modelling (breached walls, blocked streets, reclaimed blocks)
+ * is explicitly deferred rather than implemented — this pass can never introduce one, because it
+ * never moves or removes a single vertex of already-validated geometry. */
+function applyDecay(seed,parcels,buildings){
+  const r=stream(seed,'decay');
+  const frac=r.range(0.35,0.45); // M-PA-1: roughly a third to a half of the built stock abandoned
+  for(const p of parcels){
+    if(!p.built||p.churchyard)continue;
+    if(r.chance(frac))p.ruined=true;}
+  const ruinedIds=new Set(parcels.filter(p=>p.ruined).map(p=>p.id));
+  for(const b of buildings)if(ruinedIds.has(b.parcel))b.ruined=true;
+}
+
 function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour){
   const r=stream(seed,'details');
   const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
@@ -2308,6 +2375,8 @@ function generate(seed,opts){
   const parcels=buildParcels(seed,g,blocks,anchors,epochs,site,profile);
   assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
   const buildings=buildBuildings(seed,parcels,plaza,anchors,profile);
+  if(profile.factory)tagFactory(buildings);
+  if(profile.ruined)applyDecay(seed,parcels,buildings);
   const faith=opts.faith||profile.defaultFaith;
   // hamlets have no church/chapel; a religious building can also be turned off ('none')
   const hamlet=popTarget<600;
@@ -2323,7 +2392,10 @@ function generate(seed,opts){
   const insulaParcels=profile.buildingGrammar==='domus-insula'
     ?new Set(buildings.filter(b=>b.kind==='insula block').map(b=>b.parcel)):null;
   const householdMult=profile.householdMultiplier||1;
-  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard)
+  // a ruined parcel's structure still stands (M-PA-1) but nobody lives there — excluded from the
+  // head-count; for every profile without applyDecay, p.ruined is always undefined, so this
+  // filter is unchanged from every other profile's behaviour (a no-op false||undefined check)
+  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard&&!p.ruined)
     .reduce((s,p)=>s+(insulaParcels&&insulaParcels.has(p.id)?5.2*4:5.2*householdMult),0));
   // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN).
   // Markets are a medieval-specific economy (M-AMEN-1); a profile without them (e.g. Roman, whose
@@ -2604,14 +2676,17 @@ function render(){
   // buildings
   const BLD_TITLE={main:'House (main range)',wing:'Rear wing','rear range':'Rear range',
     warehouse:'Warehouse','atrium range':'Domus (atrium range)','peristyle range':'Domus (peristyle range)',
-    'insula block':'Insula (apartment block)'};
+    'insula block':'Insula (apartment block)','street range':'Courtyard house (street range)',
+    'single-room house':'Single-room house',longhouse:'Longhouse',roundhouse:'Roundhouse',
+    factory:'Factory/mill'};
   for(const b of model.buildings){
-    const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')},L.buildings);
-    el('path',{d:pl(b.ridge),class:'ridge'},L.buildings);
-    reg(e,'Building',BLD_TITLE[b.kind]||'Outbuilding',
+    const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')+(b.ruined?' ruined':'')},L.buildings);
+    el('path',{d:pl(b.ridge),class:'ridge'+(b.ruined?' ruined':'')},L.buildings);
+    if(b.chimney)el('circle',{cx:b.chimney.x,cy:b.chimney.y,r:1.6,class:'chimney'},L.buildings);
+    reg(e,'Building',(b.ruined?'Ruined ':'')+(BLD_TITLE[b.kind]||'Outbuilding'),
       {district:DISTRICT_INFO[b.district]?DISTRICT_INFO[b.district][0]:b.district,
        footprint:Math.abs(polyAreaApp(b.poly)).toFixed(0)+' m²',
-       courtyard:b.courtyard?'yes (M-BLD-3)':'no'},b.prov);}
+       courtyard:b.courtyard?'yes (M-BLD-3)':'no'},b.prov+(b.ruined?' Abandoned and uninhabited since the collapse (M-PA-1), though the structure still stands.':''));}
   for(const ch of model.churches||[]){
     const wc=(ch.faith==='temple'||ch.faith==='shrine')?'temple':ch.faith==='mosque'?'mosque':'church';
     for(const op of ch.open||[])el('path',{d:pd(op),class:wc==='mosque'?'sahn':'podium'},L.buildings);
@@ -2781,6 +2856,10 @@ function renderLegend(){
     <span><span class="chip" style="background:#9aa96e;border-radius:50%"></span>Tree</span>`;
   if(model.details.some(d=>d.kind==='chinampa'))
     html+=`<span><span class="chip" style="background:#c3d6a8;border-color:#8a9e6a"></span>Chinampa</span>`;
+  if(model.buildings.some(b=>b.kind==='factory'))
+    html+=`<span><span class="chip" style="background:#4a453c"></span>Factory/mill</span>`;
+  if(model.buildings.some(b=>b.ruined))
+    html+=`<span><span class="chip" style="background:#9a9184;border-color:#4a453c"></span>Ruin</span>`;
   lg.innerHTML=html;}
 
 /* ---------- camera ---------- */
