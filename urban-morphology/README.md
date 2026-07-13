@@ -192,28 +192,40 @@ Gen1's actual terrain fields for the eventual refactor.
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.
 
-### Signature games/spectacle buildings (docs/03 M-GAMES register, docs/07 §3.7)
+### Signature games/spectacle buildings (docs/03 M-GAMES register, docs/07 §3.7-3.8)
 
 A population-gated monument (`model.games`) for every profile — the Colosseum/Circus Maximus
-pairing named as the motivating example — reusing only two existing geometry techniques (the
-roundhouse/dome regular-polygon ellipse and an oriented-rectangle closure in the spirit of
-`buildCivic`'s own `rect()`), never a bespoke per-culture shape: Medieval **tiltyard** ·
-Roman **amphitheatre + circus** (the one profile with two, both independently well-attested) ·
-Islamic **maidan** · Byzantine **hippodrome** · Chinese **cuju/polo ground** · Aztec **tlachtli
-ballcourt** · Viking **knattleikr field** (weakest evidence in the register, flagged rather than
-invented) · Celtic **Tailteann assembly ground** · Greek **stadion** · Egyptian **Heb-Sed court** ·
-Maya **pitz ballcourt** · Inca **ushnu platform** (honestly ceremonial, not a games building — no
-true sport architecture is attested for the Inca) · Japanese **sumo grounds** · Colonial
-**bullring** (a flagged anachronism — real rings postdate this profile's setting by two centuries)
-· Frontier **racetrack** · Industrial **cricket ground** (Manchester's own Old Trafford, 1857).
-Mesopotamian and Venus honestly get none — no purpose-built venue is attested for the former, and
-the latter's own design already distributes recreation through its rings rather than centralizing
-it — and Palimpsest inherits Islamic's maidan rather than a bespoke entry, the same "mature
-identity" reasoning its housing/gates already follow. Every candidate is sited beyond the town's
-own realized extent and validated against map bounds, water, the live street graph and every
-already-placed monument before being accepted; a doomed candidate is retried elsewhere rather than
-forced in, and `hashModel()` never hashes `model.games`, so the feature cannot affect cross-version
-neutrality.
+pairing named as the motivating example — reusing four geometry techniques (the roundhouse/dome
+regular-polygon ellipse; an oriented-rectangle closure in the spirit of `buildCivic`'s own `rect()`;
+a discorectangle/"stadium shape" — straight sides, semicircular turns — for anything raced around a
+turn; and an "I"/dogbone polygon for Mesoamerican ballcourts), never a bespoke per-culture shape:
+Medieval **tiltyard** · Roman **amphitheatre + circus** (the one profile with two, both
+independently well-attested) · Islamic **maidan** · Byzantine **hippodrome** · Chinese **cuju/polo
+ground** · Aztec **tlachtli ballcourt** · Viking **knattleikr field** (weakest evidence in the
+register, flagged rather than invented) · Celtic **Tailteann assembly ground** · Greek **stadion** ·
+Egyptian **Heb-Sed court** · Maya **pitz ballcourt** · Inca **ushnu platform** (honestly ceremonial,
+not a games building — no true sport architecture is attested for the Inca) · Japanese **sumo
+grounds** · Colonial **bullring** (a flagged anachronism — real rings postdate this profile's
+setting by two centuries) · Frontier **racetrack** · Industrial **cricket ground** (Manchester's own
+Old Trafford, 1857). Mesopotamian and Venus honestly get none — no purpose-built venue is attested
+for the former, and the latter's own design already distributes recreation through its rings rather
+than centralizing it — and Palimpsest inherits Islamic's maidan rather than a bespoke entry, the
+same "mature identity" reasoning its housing/gates already follow.
+
+Each entry also carries a **siting** mode, revised after direct review ("stuff for entertainment
+isn't in the city, check historical placement") flagged the first cut's blanket extramural siting
+as historically wrong for most of the register. A dedicated research pass found 10 of the 16
+non-empty entries were genuinely intramural — immediately beside the main square or palace
+(Islamic, Byzantine, Chinese, Aztec, Egyptian, Maya, Inca, Japanese, Colonial, and even ordinary
+medieval jousting, staged in the town's own marketplace rather than a dedicated palace tiltyard) —
+while only Roman (both monuments, true to a *provincial* colonia specifically), Viking, Celtic,
+Greek, Frontier and Industrial were confirmed genuinely extramural. `'plaza'`-sited entries search
+an expanding ring centred on the plaza (starting just outside its own footprint, and — since this
+zone isn't safe by construction the way the far periphery is — checked against every real parcel,
+not just water/streets); `'peripheral'` entries keep the original beyond-the-built-radius search,
+safe from any parcel by construction. Both modes retry a doomed candidate elsewhere rather than
+forcing one in, both fall back gracefully to an empty result if no safe site turns up, and
+`hashModel()` never hashes `model.games`, so none of this can affect cross-version neutrality.
 
 ### Generation Rules (configurable parameters, not hardcoded constants)
 

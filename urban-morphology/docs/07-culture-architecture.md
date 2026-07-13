@@ -415,21 +415,24 @@ example — not just the six profiles touched above. `buildGames()` (docs/03 M-G
 `model.civic`/`model.markets`, populated per culture from a new `GAMES_SPEC` table rather than by
 teaching the engine a 17th shape:
 
-- **Two geometry primitives cover all sixteen non-empty entries**: `ellipsePoly` (the roundhouse/
-  dome regular-polygon-for-a-circle technique, M-CEL-2/M-VEN-2, with independent x/y radii for an
-  elongated track) and `orientedRect` (a rectangle closure identical in spirit to `buildCivic`'s own
-  local `rect()`, just parameterized by an explicit direction vector instead of a plaza edge). No
-  bespoke per-culture shape code — an "I"-shaped Mesoamerican ballcourt and a curved-end hippodrome
-  are both simplified to an ellipse, the same "one honest schematic stand-in, reused" pattern this
-  register already uses for the temple rite standing in for a ziggurat/pagoda/pyramid.
-- **Collision safety by the same discipline as the Aztec chinampas/Venus waterway**: a candidate is
-  centred at a bearing/radius beyond the town's own realized extent (the farthest of any parcel,
-  building or wall-ring vertex from the market anchor, whichever reaches furthest), then rejected
-  and retried at another bearing or radius if it fails a map-bounds check, a water check, a live-
-  street-graph crossing check (`edgesNear`+`segInt`, the same pair `grow()` itself uses), or overlaps
-  a monument already placed in the same call (Roman's own amphitheatre-vs-circus case). An empty
-  result — no safe site found in the search budget — is accepted as honest, exactly as `buildCivic`
-  already returns `null` under its own population gate; nothing is ever forced in.
+- **Four geometry primitives cover all sixteen non-empty entries**: `ellipsePoly` (the roundhouse/
+  dome regular-polygon-for-a-circle technique, M-CEL-2/M-VEN-2, with independent x/y radii for a
+  near-circular arena), `orientedRect` (a rectangle closure identical in spirit to `buildCivic`'s own
+  local `rect()`, just parameterized by an explicit direction vector instead of a plaza edge),
+  `stadiumPoly` (a discorectangle — straight sides plus a semicircular cap at each end — for anything
+  raced around a turn: circus, hippodrome, racetrack) and `ballcourtPoly` (an "I"/dogbone polygon —
+  narrow alley, wide end-zones — for the Mesoamerican ballcourt type). The latter two were added in a
+  shape-accuracy revision after a first cut used a plain ellipse for all of them; still no bespoke
+  per-culture shape code, just two more reused primitives alongside the original two.
+- **Two siting modes, not one — added after a placement-accuracy revision (§3.8 below)**:
+  `'peripheral'` (beyond the town's own realized extent — the farthest of any parcel, building or
+  wall-ring vertex from the market anchor — retried at another bearing/radius on any water/street/
+  monument collision, safe from overlapping real parcels *by construction*) and `'plaza'` (an
+  expanding ring search centred on the plaza, starting just outside its own footprint, additionally
+  checked against every real parcel since this zone is *not* safe by construction the way the
+  periphery is). A doomed candidate under either mode is retried elsewhere; an empty result — no
+  safe site found in the search budget — is accepted as honest, exactly as `buildCivic` already
+  returns `null` under its own population gate; nothing is ever forced in.
 - **Two profiles honestly get nothing**: Mesopotamian (wrestling/boxing attested only in temple/
   palace courtyards, no purpose-built venue — the same "documented no-fit, not a gap" treatment
   already given to Inca's `markets:false`) and Venus (a modern hypothetical with no historical
@@ -440,15 +443,65 @@ teaching the engine a 17th shape:
   already applied to its `buildingGrammar`/`wallGates.scheme` (§3.5) — a real per-profile lookup
   keyed on `profile.id==='palimpsest'`, not a copy-pasted table row.
 - **Roman is the one profile with two monuments, not one** — both the amphitheatre and the circus
-  are independently well-attested, and the circus carries a higher population gate (6000 vs the
-  otherwise-universal 3000) as the rarer, grander undertaking of the pair. This is also the register's
-  live test of the mutual-overlap check above: with two searches run back to back for the same
+  are independently well-attested (and both, per §3.8's research, genuinely peripheral for a
+  provincial colonia specifically), and the circus carries a higher population gate (6000 vs the
+  otherwise-universal 3000) as the rarer, grander undertaking of the pair. This is also the
+  register's live test of the mutual-overlap check: with two searches run back to back for the same
   culture, the second (circus) must route around the first (amphitheatre) rather than risk landing
   on top of it.
 - **Not hashed, by the same reasoning as `civic`/`markets`**: `hashModel()` never touches
   `model.games`, so this entire register is structurally incapable of affecting the cross-version
   neutrality every other addition in this project is held to — confirmed by the pre-existing full
   suite passing unchanged before this feature's own dedicated tests were added on top.
+
+### 3.8 Revising games buildings after direct review: historical placement and shape accuracy
+
+Direct review of the shipped feature — "stuff for entertainment isn't in the city, check historical
+placement and make the shape more theoretically correct" — caught two real problems in §3.7's first
+cut, both found by generating output and actually looking at it, not assumed correct from the
+mechanism's own description:
+
+- **Every entry was sited peripherally, reasoning only from collision safety.** The `'peripheral'`
+  search is safe *by construction* (a candidate beyond the town's own realized extent cannot overlap
+  any real parcel, the same guarantee the Aztec chinampas/Venus waterway already rely on), which is
+  why the first cut used it universally — but safety and historical accuracy are different
+  questions, and nobody had separately checked the second one. A dedicated research pass (docs/03
+  M-GAMES register, full source list) found 10 of the 16 non-empty entries were genuinely
+  intramural, immediately beside the main square or palace complex: Islamic (Naqsh-e Jahan is
+  Isfahan's own centre), Byzantine (the Hippodrome adjoined the Great Palace), Chinese, Aztec,
+  Egyptian, Maya, Inca (literally the centre of Cusco's main plaza), Japanese, Colonial, and — a genuine
+  surprise given how thoroughly medieval tournaments are associated with dedicated palace
+  tiltyards — ordinary-town jousting too (Damen 2016: staged directly in the marketplace; Whitehall/
+  Hampton Court were the palace-specific exception). Only Roman (both monuments — a provincial
+  colonia's amphitheatre/circus were typically extramural even though Rome's own were not), Viking,
+  Celtic, Greek, Frontier and Industrial confirmed out as genuinely peripheral.
+- **The first fix attempted was itself unsafe, found only by testing it.** The obvious fix — site
+  the ten reclassified entries on the plaza's far edge, mirroring how `buildCivic` already attaches
+  to the plaza's near edge — failed on every single candidate, on every edge, for every plaza-sited
+  profile tested. `buildPlaza` forms the market square by widening an *existing* through-street
+  (`buildPrimaries`' own nearest-primary-edge-to-market), and that original edge keeps running live
+  down the new square's middle — the plaza polygon was never actually clear ground the way it looks.
+  `buildCivic` happens not to trip over this (its own offset from the plaza edge is small enough to
+  usually dodge it, and it was never checked for this failure mode), but a fixed-edge attachment for
+  a bigger, more varied set of shapes could not assume the same luck. Confirmed by adding temporary
+  instrumentation and observing the actual `segInt` hits against the surviving through-street, not by
+  further reasoning about the geometry in the abstract.
+- **The shipped fix**: an expanding-ring search centred on the plaza (or the market anchor, on a
+  profile with no plaza) — starting just outside the plaza's own footprint and widening across four
+  radius tiers, the same "candidate, check, retry elsewhere" discipline as the peripheral search —
+  additionally checked against every real parcel (a cheap bounding-circle pre-filter over a
+  precomputed per-parcel centroid+radius, then a full edge-crossing/containment check only for the
+  few candidates that survive the filter), since this zone is not safe by construction the way the
+  far periphery is. Falls back to the original peripheral search if the ring search exhausts its
+  budget. Re-verified across all 19 profiles at multiple sites/seeds: plaza-sited entries now land
+  60-90 m from the plaza centre (inside the walls) versus 600-720 m for the confirmed-peripheral
+  ones — a real, measured separation, not just a label on the data.
+- **Shape accuracy**: `stadiumPoly` (discorectangle) replaced a plain ellipse for the circus,
+  hippodrome and racetrack — the straight sides are the genuinely distinguishing feature of a track
+  raced around a turn that a smooth ellipse elides. `ballcourtPoly` (an actual narrow-alley/wide-
+  end-zone "I" polygon) replaced a plain elongated ellipse for the Aztec/Maya ballcourts, matching
+  the "I" shape this register's own `prov` text had described in words since the first cut but never
+  actually modelled in the geometry until this revision.
 
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 

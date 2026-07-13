@@ -394,27 +394,33 @@ Preparatory only — no Cartalith Gen1 file is touched by this register entry or
 ## AA. Signature games/spectacle buildings (M-GAMES register) — see docs/07 §3.7
 
 A population-gated monument (`buildGames()`), reusing the roundhouse/dome regular-polygon-for-an-
-ellipse technique (M-CEL-2/M-VEN-2) and an oriented-rectangle closure in the same spirit as
-`buildCivic`'s own local `rect()` — no new per-culture geometry, only new data (`GAMES_SPEC`).
+ellipse technique (M-CEL-2/M-VEN-2), an oriented-rectangle closure in the same spirit as
+`buildCivic`'s own local `rect()`, a discorectangle ("stadium shape": straight sides + semicircular
+caps) for tracks raced around a turn, and an "I"/dogbone polygon for Mesoamerican ballcourts — no
+new geometry beyond these four reused/added primitives, only new data (`GAMES_SPEC`). Each entry
+also carries a **siting** mode, `'plaza'` (adjacent to the town's own market square, inside the
+walls) or `'peripheral'` (beyond the built-up area) — added after a first cut of this register sited
+*every* entry peripherally, which a direct review flagged as historically wrong for most of them
+(see the placement-revision scope note below).
 
-| ID | Quantity | Value | Units | Source | Conf. | Justification |
-|----|----------|-------|-------|--------|-------|---------------|
-| M-GAMES-1 | Medieval tiltyard | fenced tournament list, elongated rectangle ~2.6:1 | – | [Tiltyard – Wikipedia](https://en.wikipedia.org/wiki/Tiltyard) (Hampton Court, Whitehall, Kenilworth) | H | Modelled as an oriented rectangle, tangential to the town rather than pointing straight at the market. |
-| M-GAMES-2 | Roman amphitheatre + circus | ellipse ~1.2:1 (amphitheatre, ~189x156 m) and ~5.3:1 (circus, ~621x118 m) | m | [Britannica – Colosseum](https://www.britannica.com/topic/Colosseum); [Circus Maximus – Wikipedia](https://en.wikipedia.org/wiki/Circus_Maximus) | H | The one profile with two monuments, not one — both independently well-attested, matching the brief's own example ("colosseum or the horse track"). The circus carries a higher population gate (6000 vs 3000) as the rarer, grander undertaking; mutual overlap between the two is checked the same way as overlap with streets/water. |
-| M-GAMES-3 | Islamic maidan | rectangular multi-use square/polo ground ~3.5:1 | – | [Britannica – Maydan-e Emam](https://www.britannica.com/topic/Maydan-e-Emam) (Isfahan's Naqsh-e Jahan; UNESCO listing) | H | Best attested in Persianate cities specifically; generalized to the profile broadly, the same scope this profile's other fields already take. Also inherited by Palimpsest (scope note below). |
-| M-GAMES-4 | Byzantine hippodrome | elongated track ~3.5:1 | m | [World History Encyclopedia – Hippodrome of Constantinople](https://www.worldhistory.org/article/1158/the-hippodrome-of-constantinople/) | H | The real sphendone (curved end) is simplified to a full ellipse — a documented simplification, not a claim of an authentic U-shaped track. |
-| M-GAMES-5 | Chinese cuju/polo ground | rectangular marked field ~2:1 | – | [FIFA Museum – Origins: Cuju in China](https://editorial.fifamuseum.com/en/read/origins-cuju-in-china/) | M | A marked field, not monumental masonry — a lower-confidence rectangle entry, flagged rather than inflated to match its neighbours. |
-| M-GAMES-6 | Aztec ballcourt (tlachtli) | elongated ellipse ~3:1 | – | [Britannica – tlachtli](https://www.britannica.com/sports/tlachtli) | H | The real court is a distinctive "I" shape flanked by sloping walls; simplified to an elongated ellipse, the same schematic-stand-in pattern already used for the temple/pyramid substitution (M-AZT). |
-| M-GAMES-7 | Viking knattleikr field | open field, ~1.3:1 | – | [Knattleikr – Wikipedia](https://en.wikipedia.org/wiki/Knattleikr); Hurstwic.org | L | No purpose-built structure is archaeologically attested — the weakest-evidence entry in this register, kept as a plain field marker (not styled as a monument) rather than silently invented or silently dropped. |
-| M-GAMES-8 | Celtic Tailteann assembly ground | circular earthwork, ~1.1:1 | m | [Tailteann Games (ancient) – Wikipedia](https://en.wikipedia.org/wiki/Tailteann_Games_(ancient)) | M | A real, specific, named festival (Óenach Tailteann, Teltown, Co. Meath) with an attested circular embanked ground (~85 m) — modelled as an earthwork, not a masonry building. |
-| M-GAMES-9 | Greek stadion | elongated rectangle ~6.7:1 (~192x28.5 m) | m | [Stadium at Olympia – Wikipedia](https://en.wikipedia.org/wiki/Stadium_at_Olympia) | H | |
-| M-GAMES-10 | Egyptian Heb-Sed court | elongated rectangle ~5.3:1 (~95x18 m) | m | World History Encyclopedia (Step Pyramid of Djoser); Met Museum essay on Akhenaten | M/H | The type (a jubilee ritual-running course flanked by dummy chapels) is solid; Amarna's own instance (Gem-pa-Aten) is fragmentary/reconstructed, hence M rather than H. |
-| M-GAMES-11 | Maya ballcourt (pitz/pok-ta-pok) | elongated ellipse ~2.4:1 | – | [Met Museum – The Mesoamerican Ballgame](https://www.metmuseum.org/essays/the-mesoamerican-ballgame) | H | Independently attested at Maya sites, the same ballgame tradition as Aztec (M-GAMES-6) with its own citation; sized toward the typical range, not the exceptional 168x70 m Chichen Itza outlier. |
-| M-GAMES-12 | Inca ushnu platform | small stepped platform, NOT a games building | – | [Smarthistory – What is an Inka ushnu?](https://smarthistory.org/what-is-an-inka-ushnu/) | M (honest ceremonial-not-sport caveat) | No true sport architecture is attested for the Inca; the ushnu (a ceremonial dais in the Huacaypata plaza) is the closest real analogue, modelled distinctly smaller/plainer (a stepped platform via `insetPoly`, not an arena) than every other entry in this register so it can never be mistaken for a spectator venue. |
-| M-GAMES-13 | Japanese sumo grounds | ellipse ~1.15:1, modelled at tournament-enclosure scale | – | [Dohyō – Wikipedia](https://en.wikipedia.org/wiki/Dohy%C5%8D) | H (sumo) | The real dohyō ring is a mere ~4.6 m circle; modelled instead at the scale of the surrounding Edo-period kanjin-zumo tournament enclosure so it remains visible at city scale — an honest choice of scale, not a claim about the ring's own size. |
-| M-GAMES-14 | Colonial bullring | ellipse ~1.15:1 | – | [Plaza de toros de Acho – Wikipedia](https://en.wikipedia.org/wiki/Plaza_de_toros_de_Acho) | M (flagged anachronism) | Purpose-built circular rings (Lima's Acho, 1766; Mexico City, 1880) postdate this profile's 16th-century mining-boomtown setting by two centuries — early colonial bullfights used the plaza mayor itself. Modelled anyway for consistency with every other profile in this register, but flagged rather than presented as period-correct. |
-| M-GAMES-15 | Frontier racetrack | elongated ellipse ~3.5:1 | – | Tennessee Encyclopedia — "Early Horse Racing Tracks" | M | A track, not a monumental building — attested from the 1840s, consistent with this profile's low-investment, speed-over-permanence character (M-FRO). |
-| M-GAMES-16 | Industrial cricket ground | ellipse ~1.15:1, larger scale | – | [Old Trafford (area) – Wikipedia](https://en.wikipedia.org/wiki/Old_Trafford_(area)) | M/H | Manchester's own Old Trafford cricket ground (Manchester Cricket Club, 1857) predates the association-football stadiums that arrived slightly later in the Victorian/Edwardian era — the period-correct choice for this profile's mid-19th-century setting. |
+| ID | Quantity | Value | Siting | Source | Conf. | Justification |
+|----|----------|-------|--------|--------|-------|---------------|
+| M-GAMES-1 | Medieval tiltyard | rectangle ~3:1 | plaza | [Tiltyard – Wikipedia](https://en.wikipedia.org/wiki/Tiltyard) (Hampton Court/Whitehall/Kenilworth); Damen 2016 (*Urban History* 43(1), Brussels tournaments) | H | For an ordinary town (not a royal palace), tournaments were staged directly in the marketplace (Brussels' Grote Markt, also Lille/Cambrai) — dedicated palace tiltyards were the exception, not the norm. |
+| M-GAMES-2 | Roman amphitheatre + circus | ellipse ~1.2:1 (amphitheatre, ~189x156 m); discorectangle ~5.3:1 (circus, ~621x118 m) | peripheral (both) | Katherine Welch, *The Roman Amphitheatre* (2007); John Humphrey, *Roman Circuses* (1986) | H | Provincial colonia amphitheatres typically stood at the town's edge or were built into the wall circuit (Trier, Tarragona); provincial circuses (Mérida, Córdoba, Arles) stood extramural, sometimes 0.3-1.5 km out, simply owing to their footprint — intramural cases (Rome itself, Tarraco, Thessalonica) were the exception. The circus's discorectangle shape (straight sides, semicircular turns) replaces an earlier ellipse-only cut of this register. |
+| M-GAMES-3 | Islamic maidan | rectangle ~2.5:1, scaled to fit beside this engine's own market square | plaza | [Britannica – Maydan-e Emam](https://www.britannica.com/topic/Maydan-e-Emam); UNESCO listing | H | Naqsh-e Jahan is the literal centre of Safavid Isfahan, gated directly into the Grand Bazaar and facing the Shah Mosque/Ali Qapu palace. Also inherited by Palimpsest (scope note below). |
+| M-GAMES-4 | Byzantine hippodrome | discorectangle ~3:1, scaled to fit beside the market square | plaza | World History Encyclopedia, "The Hippodrome of Constantinople" | H | Adjoined the Great Palace at Constantinople's core, linked to the imperial box by a private passage — about as intramural as a monument can be. |
+| M-GAMES-5 | Chinese cuju/polo ground | rectangle ~1.9:1 | plaza | Wikipedia, "Daming Palace" (Hanguang Hall polo stele, 831 CE); Charles Benn, *China's Golden Age* (2002) | M | Tang polo grounds were built within imperial palace compounds, and ordinary Chang'an city wards also held open polo/cuju fields — never an out-of-town facility; a marked field rather than monumental masonry, a lower-confidence entry regardless of siting. |
+| M-GAMES-6 | Aztec ballcourt (tlachtli) | "I"/dogbone polygon ~2.7:1 | plaza | Wikipedia/World History Encyclopedia, "Templo Mayor" | H | Tenochtitlan's principal ballcourt stood inside the walled sacred precinct beside the Templo Mayor. Now modelled as an actual narrow-alley/wide-end-zone polygon, replacing an earlier elongated-ellipse simplification. |
+| M-GAMES-7 | Viking knattleikr field | ellipse ~1.3:1 | peripheral | Wikipedia, "Knattleikr"; Hurstwic.org; *Egils saga* | L | Viking-age Scandinavia/Iceland had few real towns; the game was played on open fields or frozen lakes, often near a þing site (Þingvellir) rather than inside a settlement — the weakest-evidence entry in this register. |
+| M-GAMES-8 | Celtic Tailteann assembly ground | circular earthwork ~1.1:1 | peripheral | Wikipedia, "Tailteann Games (ancient)" | M | Teltown, Co. Meath was itself an earthwork assembly ground, not a town — a periodic pan-regional gathering tied to no single settlement, confirming the original peripheral treatment. |
+| M-GAMES-9 | Greek stadion | rectangle ~6.7:1 (~192x28.5 m) | peripheral | Wikipedia, "Stadium at Olympia"; "Panathenaic Stadium" | H | Olympia's stadium sits east of the sanctuary, separated from the temples by the Echo Stoa; Athens' Panathenaic Stadium was *extra muros* across the Ilissos — outside or at the physical edge of the sacred/urban core was the norm (Delphi's hilltop siting the exception). |
+| M-GAMES-10 | Egyptian Heb-Sed court | rectangle ~4.2:1 | plaza | Smarthistory, "Step Pyramid complex at Saqqara" | M/H | Djoser's court sits within his own enclosure wall as a stone facsimile of the royal palace, and the live jubilee rites took place within the capital's palace precinct, not open desert — the type is solid, this specific complex being a mortuary replica the only caveat. |
+| M-GAMES-11 | Maya ballcourt (pitz/pok-ta-pok) | "I"/dogbone polygon ~2.5:1 | plaza | Met Museum, "The Mesoamerican Ballgame" | H | Maya ballcourts occupy prime space in the main plaza/ceremonial core beside major temples (Tikal, Copán, Monte Albán); sized toward the typical range, not the exceptional 168x70 m Chichen Itza outlier. |
+| M-GAMES-12 | Inca ushnu platform | small stepped platform, NOT a games building | plaza | Wikipedia, "Ushnu"; "Plaza de Armas (Cusco)" | M (honest ceremonial-not-sport caveat) | Stood at the literal centre of Huacaypata, Cusco's main plaza (a colonial fountain later occupied the same spot) — no true sport architecture is attested for the Inca; modelled distinctly smaller/plainer than every arena in this register so it can never be mistaken for a spectator venue. |
+| M-GAMES-13 | Japanese sumo grounds | ellipse ~1.15:1, modelled at tournament-enclosure scale | plaza | Wikipedia, "Ekō-in"; Edo-Tokyo Digital Museum (Tokyo Metropolitan Library) | H | Edo kanjin-zumo was staged at urban temple/shrine precincts (Ekō-in, Tomioka Hachiman, Yushima Tenjin), all within the city; the real dohyō ring is a mere ~4.6 m circle, modelled instead at the enclosure's scale for visibility. |
+| M-GAMES-14 | Colonial bullring | ellipse ~1.15:1 | plaza | Wikipedia, "Bullfighting"; Library of Congress blog, "¡Olé! Spain and Its 'Fiesta Nacional'" | M (flagged anachronism) | Early colonial bullfights (mounted, aristocratic) were held in the open plaza mayor itself with temporary wooden barriers; permanent circular rings (Lima's Acho, 1766) postdate this profile's setting by two centuries — modelled as a modest ring beside the plaza mayor, the temporary-barrier arena the plaza actually hosted. |
+| M-GAMES-15 | Frontier racetrack | discorectangle ~3.5:1 | peripheral | Wikipedia, "Montana State Fairgrounds Racetrack" (Helena, 1870, "on the outskirts") | M | A track, not a monumental building, sited at a town's edge or beyond it, consistent with this profile's low-investment character. Discorectangle shape replaces an earlier ellipse-only cut of this register. |
+| M-GAMES-16 | Industrial cricket ground | ellipse ~1.15:1, larger scale | peripheral | Wikipedia, "Old Trafford Cricket Ground" | M/H | Manchester Cricket Club's 1857 ground was leased countryside meadow "out in the country," footpath access only, roughly two miles from the city centre — suburbanization enveloped it only later. |
 
 Scope note (no entry: Mesopotamian, Venus): Mesopotamian wrestling/boxing is attested in art but
 performed in temple/palace courtyards, not a purpose-built venue (Penn Museum, "Trials of
@@ -429,14 +435,35 @@ Scope note (Palimpsest): not an independent tradition — `buildGames` resolves 
 actually builds" reasoning already applied to its `buildingGrammar`/`wallGates.scheme` (M-PAL,
 docs/07 §3.5).
 
-Scope note (siting mechanism): every candidate is generated at a bearing/radius beyond the town's
-own realized extent (parcels, buildings and the wall ring, whichever reaches furthest from the
-market anchor) and validated against map bounds, water, the live street graph, and every previously
-placed monument in the same call — a doomed candidate is retried at another bearing or radius
-rather than forced in, and an empty result (no safe site found within the search budget) is
-accepted as honest, exactly as `buildCivic` already returns `null` under its own population gate.
-`hashModel()` does not hash `model.games` (the same reason `model.civic`/`model.markets` aren't
-hashed either), so this register cannot affect cross-version neutrality.
+Scope note (placement revision): the first cut of this register sited every entry beyond the town's
+own built-up area, reasoning purely from collision-safety (a peripheral candidate is safe from
+overlapping any real parcel "by construction," the same guarantee the Aztec chinampas/Venus
+waterway already rely on) without separately checking whether that siting was *historically*
+correct. Direct review — "stuff for entertainment isn't in the city, check historical placement" —
+caught this: a follow-up research pass (source list above) found 10 of the 16 non-empty entries
+were genuinely intramural, immediately beside the main square or palace complex, not out past the
+edge. Only Roman (both monuments), Viking, Celtic, Greek, Frontier and Industrial were actually
+extramural historically; those keep the original peripheral search unchanged. The other ten needed
+a new siting mode entirely, since "attach to the plaza's own far edge" (the first fix attempted,
+mirroring how `buildCivic` attaches to the plaza's near edge) turned out to be unsafe in its own
+right: `buildPlaza` forms the market square by widening an *existing* through-street, which keeps
+running live down the square's middle — a fixed edge offset cannot assume the square itself is
+clear of real street geometry, and empirically it wasn't (every candidate on every edge crossed
+that surviving through-street). The shipped fix instead searches an expanding ring centred on the
+plaza (or the market anchor, on a profile with no plaza), starting just outside the plaza's own
+footprint and widening in four tiers — checked against map bounds, water, the live street graph,
+the civic hall, and, because this zone is not guaranteed empty the way the far periphery is, every
+real parcel too (a check the peripheral search doesn't need, since it's unreachable by
+construction). Falls back to the original peripheral search if no safe ring position is found
+within budget. Found and fixed by generating output and measuring the actual distance from the
+plaza, not assumed correct from the mechanism's own description — the same discipline this project
+holds itself to everywhere else in this register.
+
+Scope note (siting mechanism, general): a doomed candidate — of either siting mode — is retried at
+another bearing/radius rather than forced in, and an empty result (no safe site found within the
+search budget) is accepted as honest, exactly as `buildCivic` already returns `null` under its own
+population gate. `hashModel()` does not hash `model.games` (the same reason `model.civic`/
+`model.markets` aren't hashed either), so this register cannot affect cross-version neutrality.
 
 ---
 

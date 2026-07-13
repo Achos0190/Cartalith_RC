@@ -101,11 +101,11 @@ svg.panning{cursor:grabbing}
 .coveredway{fill:none;stroke:#b3a276;stroke-width:1.4;stroke-dasharray:2 3;opacity:.8}
 .causeway{fill:#e2d6b4;stroke:#6d5a37;stroke-width:.7}
 .tree{fill:#9aa96e;stroke:#6b7a45;stroke-width:.4}
-.tree.orchard{fill:#a9b478}
+.tree.orchard{fill:#8a9e52;stroke:#5c6b34;stroke-width:.7}
 .well{fill:#cfd6d4;stroke:#4a3a22;stroke-width:.7}
 .cross{stroke:#4a3a22;stroke-width:1;fill:none}
 .fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
-.field{fill:none;stroke:#cbbd92;stroke-width:.55;opacity:.9}
+.field{fill:#dcc985;stroke:#a4874a;stroke-width:.6;opacity:.75}
 .chinampa{fill:#c3d6a8;stroke:#8a9e6a;stroke-width:.6;opacity:.85}
 .civicdome{fill:#5c7a8a;stroke:#2e4a54;stroke-width:.6}
 .bld.pavilion{fill:#b98a4a;stroke:#6b4e26}
@@ -1321,41 +1321,41 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
  * buildCivic already uses when its own gate isn't met). Sized by fixed per-culture ranges, not
  * scaled to population, matching buildCivic's own hall dimensions. */
 const GAMES_SPEC={
-  medieval:[{kind:'tiltyard',name:'Tiltyard',shape:'rect',w:[60,75],d:[22,28],minPop:3000,
-    prov:'Tiltyard: a fenced tournament list for jousting, attested at Hampton Court, Whitehall and Kenilworth (M-GAMES-1).'}],
-  roman:[{kind:'amphitheatre',name:'Amphitheatre',shape:'ellipse',rx:[34,42],ry:[26,32],minPop:3000,
-    prov:'Amphitheatre: an elliptical arena for gladiatorial games, on the model of the Colosseum, ~189x156 m (M-GAMES-2).'},
-   {kind:'circus',name:'Circus',shape:'ellipse',rx:[85,105],ry:[15,20],minPop:6000,
-    prov:'Circus: an elongated chariot-racing track, on the model of the Circus Maximus, ~621x118 m (M-GAMES-2) — modelled alongside the amphitheatre rather than instead of it, since both are independently well-attested Roman monument types (a higher population gate than the amphitheatre\'s: a circus was the rarer, grander undertaking of the two).'}],
-  islamic:[{kind:'maidan',name:'Maidan',shape:'rect',w:[70,90],d:[20,26],minPop:3000,
-    prov:'Maidan/maydan: a rectangular public square doubling as a polo ground, on the model of Isfahan\'s Naqsh-e Jahan (M-GAMES-3).'}],
-  byzantine:[{kind:'hippodrome',name:'Hippodrome',shape:'ellipse',rx:[70,85],ry:[20,26],minPop:3000,
-    prov:'Hippodrome: an elongated chariot-racing track, on the model of the Hippodrome of Constantinople, ~450x130 m (M-GAMES-4) — the real sphendone is a curved end on an otherwise straight track, simplified here to a full ellipse.'}],
-  chinese:[{kind:'cuju',name:'Cuju ground',shape:'rect',w:[45,60],d:[24,30],minPop:3000,
-    prov:'Cuju/polo ground: a marked field for cuju (an early form of football) and imperial polo (jiju), attested in Song-era art (M-GAMES-5) — a marked-out field rather than a monumental structure, an honest lower-confidence entry.'}],
-  aztec:[{kind:'tlachtli',name:'Ballcourt',shape:'ellipse',rx:[26,34],ry:[8,11],minPop:3000,
-    prov:'Tlachtli: the Mesoamerican ballgame court, sited in the sacred precinct (M-GAMES-6) — the real court is a distinctive "I" shape flanked by sloping walls, simplified here to an elongated ellipse, the same schematic-stand-in honesty pattern already used for the temple/pyramid substitution.'}],
-  viking:[{kind:'knattleikr',name:'Knattleikr field',shape:'ellipse',rx:[20,26],ry:[16,20],minPop:3000,
-    prov:'Knattleikr: a ball game played at assembly (þing) sites; no purpose-built structure is archaeologically attested, only an open field (M-GAMES-7) — the weakest-evidence entry in this register, modelled as a plain field rather than a monument, flagged low confidence rather than silently invented.'}],
-  celtic:[{kind:'tailteann',name:'Tailteann assembly ground',shape:'ellipse',rx:[22,28],ry:[19,24],minPop:3000,
-    prov:'The Tailteann Games (Óenach Tailteann), an ancient Gaelic athletic/funeral-games festival held at Teltown, Co. Meath, with a real circular embanked assembly ground (~85 m) attested archaeologically (M-GAMES-8) — modelled as an earthwork ground, not a masonry building.'}],
-  greek:[{kind:'stadion',name:'Stadium',shape:'rect',w:[85,100],d:[13,16],minPop:3000,
-    prov:'Stadion: a footrace track, on the model of the stadium at Olympia, ~192x28.5 m (M-GAMES-9).'}],
-  egyptian:[{kind:'hebsed',name:'Heb-Sed court',shape:'rect',w:[55,65],d:[10,13],minPop:3000,
-    prov:'Heb-Sed court: a long narrow ceremonial-running court flanked by dummy chapels, on the model of Djoser\'s Step Pyramid complex at Saqqara, ~95x18 m (M-GAMES-10) — Amarna\'s own Gem-pa-Aten rebuilt this form, though its remains are fragmentary; the type itself is solid.'}],
+  medieval:[{kind:'tiltyard',name:'Tiltyard',shape:'rect',siting:'plaza',w:[30,42],d:[10,14],minPop:3000,
+    prov:'Tiltyard: for an ordinary town (not a royal palace), tournaments were staged directly in the town\'s own marketplace (Brussels\' Grote Markt; also Lille, Cambrai) — dedicated palace tiltyards (Hampton Court, Whitehall, Kenilworth) were the exception, not the norm (Damen 2016, M-GAMES-1).'}],
+  roman:[{kind:'amphitheatre',name:'Amphitheatre',shape:'ellipse',siting:'peripheral',rx:[34,42],ry:[26,32],minPop:3000,
+    prov:'Amphitheatre: provincial colonia amphitheatres typically stood at the town\'s edge or were built into the wall circuit itself (Trier, Tarragona) — intramural cases (Rome\'s own Colosseum, London) were the exception (Welch 2007, M-GAMES-2).'},
+   {kind:'circus',name:'Circus',shape:'stadium',siting:'peripheral',w:[170,210],d:[30,40],minPop:6000,
+    prov:'Circus: provincial circuses (Mérida, Córdoba, Arles) stood extramural, sometimes 0.3-1.5 km beyond the walls, simply owing to their huge footprint — only a handful (Tarraco, Thessalonica, Rome itself) were intramural, as part of a palace/power complex (Humphrey 1986, M-GAMES-2) — modelled alongside the amphitheatre rather than instead of it, since both are independently well-attested; a higher population gate than the amphitheatre\'s, as the rarer, grander undertaking of the two. Shape is a discorectangle (straight sides, semicircular turns), the genuinely distinguishing feature of a raced-around-a-turn track that a smooth ellipse elided in the first cut of this register.'}],
+  islamic:[{kind:'maidan',name:'Maidan',shape:'rect',siting:'plaza',w:[40,55],d:[16,22],minPop:3000,
+    prov:'Maidan/maydan: Isfahan\'s Naqsh-e Jahan is the literal centre of the Safavid capital, gated directly into the Grand Bazaar and facing the Shah Mosque and Ali Qapu palace (UNESCO, M-GAMES-3) — modelled at a scale that fits alongside this engine\'s own market square rather than the real maidan\'s much grander extent, the same honest scale-down already used for the sumo grounds/dohyō (M-GAMES-13).'}],
+  byzantine:[{kind:'hippodrome',name:'Hippodrome',shape:'stadium',siting:'plaza',w:[48,65],d:[16,22],minPop:3000,
+    prov:'Hippodrome: adjoined the Great Palace at Constantinople\'s core, linked to the imperial box by a private passage (World History Encyclopedia, M-GAMES-4) — the real sphendone is a curved end on an otherwise straight track, modelled here as a full discorectangle (both ends curved) rather than a smooth ellipse.'}],
+  chinese:[{kind:'cuju',name:'Cuju ground',shape:'rect',siting:'plaza',w:[35,48],d:[18,24],minPop:3000,
+    prov:'Cuju/polo ground: Tang polo grounds were built within imperial palace compounds (a stele records one at Daming Palace\'s Hanguang Hall, 831 CE), and ordinary city wards of Chang\'an also held open polo/cuju fields — never an out-of-town facility (Benn 2002, M-GAMES-5) — a marked-out field rather than monumental masonry, an honest lower-confidence entry.'}],
+  aztec:[{kind:'tlachtli',name:'Ballcourt',shape:'ballcourt',siting:'plaza',w:[36,48],d:[14,18],minPop:3000,
+    prov:'Tlachtli: Tenochtitlan\'s principal ballcourt stood inside the walled sacred precinct beside the Templo Mayor (M-GAMES-6) — the real court is a distinctive "I" shape flanked by sloping walls, now modelled as an actual narrow-alley/wide-end-zone dogbone polygon rather than a smooth ellipse.'}],
+  viking:[{kind:'knattleikr',name:'Knattleikr field',shape:'ellipse',siting:'peripheral',rx:[20,26],ry:[16,20],minPop:3000,
+    prov:'Knattleikr: Viking-age Scandinavia/Iceland had few real towns; the game was played on open fields or frozen lakes, often near a þing assembly site (Þingvellir) rather than inside a built settlement (M-GAMES-7) — the weakest-evidence entry in this register, modelled as a plain field rather than a monument, flagged low confidence rather than silently invented.'}],
+  celtic:[{kind:'tailteann',name:'Tailteann assembly ground',shape:'ellipse',siting:'peripheral',rx:[22,28],ry:[19,24],minPop:3000,
+    prov:'The Tailteann Games (Óenach Tailteann): Teltown, Co. Meath was itself an earthwork assembly ground, not a town — a periodic pan-regional gathering tied to no single settlement (M-GAMES-8), with a real circular embanked ground (~85 m) attested archaeologically — modelled as an earthwork, not a masonry building.'}],
+  greek:[{kind:'stadion',name:'Stadium',shape:'rect',siting:'peripheral',w:[85,100],d:[13,16],minPop:3000,
+    prov:'Stadion: Olympia\'s stadium sits east of the sanctuary, deliberately separated from the temples by the Echo Stoa; Athens\' Panathenaic Stadium was extra muros across the Ilissos — outside or at the physical edge of the sacred/urban core was the norm, Delphi\'s hilltop siting the exception (M-GAMES-9).'}],
+  egyptian:[{kind:'hebsed',name:'Heb-Sed court',shape:'rect',siting:'plaza',w:[35,42],d:[8,10],minPop:3000,
+    prov:'Heb-Sed court: Djoser\'s court sits within his enclosure wall as a stone facsimile of the royal palace, and the live jubilee rites took place within the capital\'s own palace precinct, not open desert (Smarthistory, M-GAMES-10) — Amarna\'s own Gem-pa-Aten rebuilt this form, though its remains are fragmentary; the type itself is solid.'}],
   mesopotamian:[],
-  mayan:[{kind:'pitz',name:'Ballcourt',shape:'ellipse',rx:[20,28],ry:[7,9],minPop:3000,
-    prov:'Pok-ta-pok/pitz: the Mesoamerican ballgame court, independently attested at Maya sites (M-GAMES-11) — sized toward the typical range rather than the exceptional 168x70 m Great Ballcourt at Chichen Itza, itself simplified to an elongated ellipse (see Aztec, M-GAMES-6).'}],
-  inca:[{kind:'ushnu',name:'Ushnu platform',shape:'platform',w:[14,18],d:[10,13],minPop:3000,
-    prov:'Ushnu: a stepped ceremonial platform in the Huacaypata plaza used for state ritual — NOT a competitive-games building (no true sport architecture is attested for the Inca); included honestly as the closest real analogue, modelled distinctly smaller and plainer than every arena elsewhere in this register (M-GAMES-12).'}],
-  japanese:[{kind:'dohyo',name:'Sumo grounds',shape:'ellipse',rx:[24,30],ry:[20,25],minPop:3000,
-    prov:'Sumo grounds: the dohyō ring (a mere ~4.6 m circle in reality) sits at the centre of a much larger Edo-period kanjin-zumo tournament enclosure — modelled at the enclosure\'s scale, not the ring\'s own tiny footprint, for visibility (M-GAMES-13).'}],
-  colonial:[{kind:'plazadetoros',name:'Bullring',shape:'ellipse',rx:[24,30],ry:[20,25],minPop:3000,
-    prov:'Plaza de toros: bullfighting is a well-attested colonial tradition, but purpose-built circular rings (Lima\'s Acho, 1766; Mexico City, 1880) postdate this profile\'s 16th-century mining-boomtown setting by two centuries — early colonial bullfights used the plaza mayor itself. Modelled here as a flagged anachronism rather than silently presented as period-correct (M-GAMES-14).'}],
-  frontier:[{kind:'racetrack',name:'Racetrack',shape:'ellipse',rx:[55,70],ry:[16,20],minPop:3000,
-    prov:'Horse-racing track: frontier fairgrounds hosted informal racing from the 1840s on — a track, not a monumental building, consistent with this profile\'s low-investment, speed-over-permanence character (M-GAMES-15).'}],
-  industrial:[{kind:'cricket',name:'Cricket ground',shape:'ellipse',rx:[38,46],ry:[32,38],minPop:3000,
-    prov:'Cricket ground: Manchester\'s own Old Trafford cricket ground (Manchester Cricket Club, 1857) predates the association-football stadiums that arrived slightly later in the Victorian/Edwardian era — the period-correct choice for this profile\'s mid-19th-century mill-town setting (M-GAMES-16).'}],
+  mayan:[{kind:'pitz',name:'Ballcourt',shape:'ballcourt',siting:'plaza',w:[30,40],d:[12,15],minPop:3000,
+    prov:'Pok-ta-pok/pitz: Maya ballcourts occupy prime space in the main plaza/ceremonial core beside major temples (Tikal, Copán, Monte Albán, M-GAMES-11) — modelled as an actual narrow-alley/wide-end-zone dogbone polygon (see Aztec, M-GAMES-6), sized toward the typical range rather than the exceptional 168x70 m Great Ballcourt at Chichen Itza.'}],
+  inca:[{kind:'ushnu',name:'Ushnu platform',shape:'platform',siting:'plaza',w:[10,14],d:[8,10],minPop:3000,
+    prov:'Ushnu: stood at the literal centre of Huacaypata, Cusco\'s main plaza (a colonial fountain later occupied the same spot, M-GAMES-12) — NOT a competitive-games building (no true sport architecture is attested for the Inca); included honestly as the closest real analogue, modelled distinctly smaller and plainer than every arena elsewhere in this register.'}],
+  japanese:[{kind:'dohyo',name:'Sumo grounds',shape:'ellipse',siting:'plaza',rx:[16,20],ry:[14,18],minPop:3000,
+    prov:'Sumo grounds: Edo kanjin-zumo was staged at urban temple/shrine precincts (Ekō-in, Tomioka Hachiman, Yushima Tenjin), all within the city (M-GAMES-13) — the real dohyō ring is a mere ~4.6 m circle; modelled instead at the scale of the surrounding tournament enclosure so it remains visible, an honest choice of scale, not a claim about the ring\'s own size.'}],
+  colonial:[{kind:'plazadetoros',name:'Bullring',shape:'ellipse',siting:'plaza',rx:[16,20],ry:[14,18],minPop:3000,
+    prov:'Plaza de toros: early colonial bullfights (mounted, aristocratic) were held in the open plaza mayor itself with temporary wooden barriers — Mexico City\'s council mandated plaza bullfights from 1529; permanent circular rings (Lima\'s Acho, 1766; Mexico City, 1880) postdate this profile\'s 16th-century mining-boomtown setting by two centuries (M-GAMES-14). Modelled as a modest ring sited beside the plaza mayor itself — the temporary-barrier arena the plaza actually hosted — flagged as a permanent-masonry anachronism rather than presented as period-correct.'}],
+  frontier:[{kind:'racetrack',name:'Racetrack',shape:'stadium',siting:'peripheral',w:[110,140],d:[32,40],minPop:3000,
+    prov:'Horse-racing track: frontier fairgrounds sat at a town\'s edge or beyond it — Helena, Montana\'s 1870 track was built "on the outskirts" (M-GAMES-15) — a track, not a monumental building, consistent with this profile\'s low-investment character. Shape is a discorectangle (straight sides, semicircular turns) rather than a smooth ellipse, the genuinely distinguishing feature of an oval track.'}],
+  industrial:[{kind:'cricket',name:'Cricket ground',shape:'ellipse',siting:'peripheral',rx:[38,46],ry:[32,38],minPop:3000,
+    prov:'Cricket ground: Manchester\'s own Old Trafford (Manchester Cricket Club, 1857) was leased countryside meadow "out in the country," footpath access only, roughly two miles from the city centre — suburbanization enveloped it only later (M-GAMES-16).'}],
   venus:[],
 };
 function ellipsePoly(center,rx,ry,sides){
@@ -1368,18 +1368,83 @@ function orientedRect(center,along,w,d){ // along: unit vector for the w-axis; i
     V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,-d/2)),
     V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,d/2)),
     V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,d/2))];}
-function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile){
+// discorectangle ("stadium shape"): two straight sides joined by a semicircular cap at each end —
+// the genuinely distinguishing feature of a raced-around-a-turn track (circus/hippodrome/
+// racetrack) that a smooth ellipse elides (M-GAMES register, shape-accuracy revision). w = full
+// length end-to-end, d = full width (cap diameter).
+function stadiumPoly(center,along,w,d,capSides){
+  capSides=capSides||10;
+  const perp=V.rot90(along),rad=d/2,halfVec=V.mul(along,Math.max(0,(w-d)/2));
+  const c1=V.add(center,halfVec),c2=V.sub(center,halfVec);
+  const poly=[V.add(c2,V.mul(perp,rad)),V.add(c1,V.mul(perp,rad))];
+  for(let k=1;k<capSides;k++){const t=Math.PI/2-Math.PI*k/capSides;
+    poly.push(V.add(c1,V.add(V.mul(along,Math.cos(t)*rad),V.mul(perp,Math.sin(t)*rad))));}
+  poly.push(V.sub(c1,V.mul(perp,rad)),V.sub(c2,V.mul(perp,rad)));
+  for(let k=1;k<capSides;k++){const t=-Math.PI/2-Math.PI*k/capSides;
+    poly.push(V.add(c2,V.add(V.mul(along,Math.cos(t)*rad),V.mul(perp,Math.sin(t)*rad))));}
+  return poly;}
+// Mesoamerican ballcourt ("I"/dogbone shape): a narrow central playing alley flanked by wider
+// end-zones, the commonly-depicted schematic plan of the tlachtli/pok-ta-pok court type — a
+// genuinely different footprint from a plain elongated ellipse (M-GAMES-6/M-GAMES-11 shape-
+// accuracy revision). w = full length, d = full end-zone width (alley narrows to ~0.64*d/2).
+function ballcourtPoly(center,along,w,d){
+  const perp=V.rot90(along),L=w/2,aw=d*0.32,ew=d*0.5,el=w*0.18;
+  const pt=(a,p)=>V.add(center,V.add(V.mul(along,a),V.mul(perp,p)));
+  return [pt(L,ew),pt(L,-ew),pt(L-el,-aw),pt(-(L-el),-aw),pt(-L,-ew),pt(-L,ew),pt(-(L-el),aw),pt(L-el,aw)];}
+function gamesShapeAt(spec,center,along,rx,ry,w,d){
+  if(spec.shape==='ellipse')return ellipsePoly(center,rx,ry,22);
+  if(spec.shape==='stadium')return stadiumPoly(center,along,w,d,10);
+  if(spec.shape==='ballcourt')return ballcourtPoly(center,along,w,d);
+  return orientedRect(center,along,w,d); // 'rect' and 'platform' both plain oriented rectangles
+}
+function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic){
   // Palimpsest is a composite, not an independent tradition: it inherits whichever mature
   // identity it actually builds (Islamic housing/gates today, docs/07 §3.5), so its games
   // building is the same inherited maidan rather than a bespoke entry of its own.
   const specs=profile.id==='palimpsest'?GAMES_SPEC.islamic:GAMES_SPEC[profile.id];
   if(!specs||!specs.length)return [];
   const r=stream(seed,'games');
+  // precompute a cheap bounding-circle index per parcel once, not per candidate: the plaza-
+  // adjacent search (below) is NOT beyond the built radius the way the peripheral search is, so
+  // it cannot assume "no real building here" by construction — it has to check parcels for real.
+  const parcelInfo=[];
   let builtR=0;
-  for(const p of parcels)for(const v of p.poly)builtR=Math.max(builtR,V.dist(v,anchors.market));
+  for(const p of parcels){
+    let cx=0,cy=0;for(const v of p.poly){cx+=v.x;cy+=v.y;}
+    cx/=p.poly.length;cy/=p.poly.length;
+    let pr=0;for(const v of p.poly)pr=Math.max(pr,Math.hypot(v.x-cx,v.y-cy));
+    parcelInfo.push({poly:p.poly,cx,cy,r:pr});
+    for(const v of p.poly)builtR=Math.max(builtR,V.dist(v,anchors.market));}
   if(wallState.ring)for(const v of wallState.ring)builtR=Math.max(builtR,V.dist(v,anchors.market));
+  const plazaCenter=plaza?plaza.center:anchors.market;
+  let plazaR=0;
+  if(plaza)for(const v of plaza.poly)plazaR=Math.max(plazaR,V.dist(v,plazaCenter));
   const out=[],placedAt=[];
   let gid=0;
+  const margin=25;
+  const overlapsParcels=(poly,cx,cy,rad)=>{
+    for(const pi of parcelInfo){
+      if(Math.hypot(cx-pi.cx,cy-pi.cy)>rad+pi.r+2)continue;
+      for(let k=0;k<poly.length;k++){
+        const A=poly[k],B=poly[(k+1)%poly.length];
+        for(let j=0;j<pi.poly.length;j++)
+          if(segInt(A,B,pi.poly[j],pi.poly[(j+1)%pi.poly.length]))return true;}
+      if(pointInPoly(poly[0],pi.poly)||pointInPoly(pi.poly[0],poly))return true;}
+    return false;};
+  // shared collision check for both siting modes: map bounds, water, the live street graph
+  // (edgesNear+segInt, the same pair grow() itself uses), and the civic hall if one exists —
+  // a doomed candidate is rejected here and retried elsewhere, never forced in
+  const blocked=(poly)=>{
+    if(poly.some(v=>v.x<margin||v.y<margin||v.x>site.Wm-margin||v.y>site.Hm-margin))return true;
+    if(poly.some(v=>site.isWater(v)))return true;
+    for(let k=0;k<poly.length;k++){
+      const A=poly[k],B=poly[(k+1)%poly.length];
+      for(const eid of edgesNear(g,A,B)){
+        const e=g.edges[eid];if(!e||!e.alive)continue;
+        if(segInt(A,B,g.nodes[e.a],g.nodes[e.b]))return true;}
+      if(civic&&civic.hall)for(let j=0;j<civic.hall.length;j++)
+        if(segInt(A,B,civic.hall[j],civic.hall[(j+1)%civic.hall.length]))return true;}
+    return false;};
   for(const spec of specs){
     if(popTarget<spec.minPop)continue;
     const rx=spec.shape==='ellipse'?r.range(spec.rx[0],spec.rx[1]):null;
@@ -1387,29 +1452,54 @@ function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile){
     const w=spec.shape!=='ellipse'?r.range(spec.w[0],spec.w[1]):null;
     const d=spec.shape!=='ellipse'?r.range(spec.d[0],spec.d[1]):null;
     const half=Math.max(rx||w/2,ry||d/2);
-    const margin=25,nAng=16,a0=r.u()*Math.PI*2;
     let found=null;
-    for(const extra of [0,90,180,280]){
-      if(found)break;
-      const candR=builtR+half+40+extra;
-      for(let i=0;i<nAng;i++){
-        const ang=a0+i*(2*Math.PI/nAng);
-        const center={x:anchors.market.x+Math.cos(ang)*candR,y:anchors.market.y+Math.sin(ang)*candR};
-        if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
-        if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+40))continue;
-        let poly;
-        if(spec.shape==='ellipse')poly=ellipsePoly(center,rx,ry,22);
-        else{const radial=V.norm({x:Math.cos(ang),y:Math.sin(ang)});poly=orientedRect(center,V.rot90(radial),w,d);}
-        if(poly.some(v=>v.x<margin||v.y<margin||v.x>site.Wm-margin||v.y>site.Hm-margin))continue;
-        if(poly.some(v=>site.isWater(v)))continue;
-        let crosses=false;
-        for(let k=0;k<poly.length&&!crosses;k++){
-          const A=poly[k],B=poly[(k+1)%poly.length];
-          for(const eid of edgesNear(g,A,B)){
-            const e=g.edges[eid];if(!e||!e.alive)continue;
-            if(segInt(A,B,g.nodes[e.a],g.nodes[e.b])){crosses=true;break;}}}
-        if(crosses)continue;
-        found={center,poly};break;
+    // plaza-adjacent siting (docs/03 M-GAMES register, historical-placement revision): most of
+    // this register's buildings were genuinely intramural, immediately beside the main square/
+    // palace, not out past the town's edge. Searched as an expanding ring around the plaza (or
+    // the market anchor on a profile with no plaza) — the same "candidate, check, retry
+    // elsewhere" discipline as the peripheral search below, just centred on a much smaller
+    // reference radius (the plaza's own footprint, not the whole town), and — because this zone
+    // is NOT guaranteed empty the way the far periphery is — also checked against every real
+    // parcel, a check the peripheral search doesn't need (found necessary only after an initial
+    // "attach to the plaza's far edge" design kept failing: the plaza rectangle is built by
+    // widening an existing through-street, which keeps running live through its middle, so a
+    // fixed edge offset cannot assume the square itself is clear of real street geometry).
+    if(spec.siting==='plaza'){
+      const nAng=14,a0=r.u()*Math.PI*2;
+      for(const tier of [20,70,140,230]){
+        if(found)break;
+        const candR=plazaR+half+tier;
+        for(let i=0;i<nAng;i++){
+          const ang=a0+i*(2*Math.PI/nAng);
+          const center={x:plazaCenter.x+Math.cos(ang)*candR,y:plazaCenter.y+Math.sin(ang)*candR};
+          if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
+          if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+20))continue;
+          const radial=V.norm(V.sub(center,plazaCenter));
+          const poly=gamesShapeAt(spec,center,V.rot90(radial),rx,ry,w,d);
+          if(blocked(poly))continue;
+          if(overlapsParcels(poly,center.x,center.y,half))continue;
+          found={center,poly};break;
+        }
+      }
+    }
+    // peripheral siting (docs/07 §3.7), or a plaza search above found nowhere safe: beyond the
+    // town's own realized extent (guaranteed clear of every parcel by construction, so no parcel
+    // check needed here), retried at another bearing/radius on any collision
+    if(!found){
+      const nAng=16,a0=r.u()*Math.PI*2;
+      for(const extra of [0,90,180,280]){
+        if(found)break;
+        const candR=builtR+half+40+extra;
+        for(let i=0;i<nAng;i++){
+          const ang=a0+i*(2*Math.PI/nAng);
+          const center={x:anchors.market.x+Math.cos(ang)*candR,y:anchors.market.y+Math.sin(ang)*candR};
+          if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
+          if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+40))continue;
+          const radial=V.norm({x:Math.cos(ang),y:Math.sin(ang)});
+          const poly=gamesShapeAt(spec,center,V.rot90(radial),rx,ry,w,d);
+          if(blocked(poly))continue;
+          found={center,poly};break;
+        }
       }
     }
     if(!found)continue; // no safe site found: an honest omission, never forced in
@@ -2784,7 +2874,11 @@ function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,max
     if(par.district!=='agrarian'&&!(par.district==='suburb'&&par.empty))continue;
     details.push({id:'det'+(did++),kind:'fence',poly:par.poly,
       prov:'Plot fence: low-density holdings are enclosed rather than built to the line (M-BLD-5).'});}
-  // strip fields fossilizing along the approach roads (M-GRW-5)
+  // strip fields fossilizing along the approach roads (M-GRW-5): rendered as filled cultivated
+  // strips (the same "filled strip, not a bare line" technique the chinampas already use), since a
+  // boundary-only line at a stroke width this fine reads as functionally invisible against the
+  // parchment background — found and fixed after the render was actually looked at, not assumed
+  // correct from the mechanism's own description.
   for(const e of g.edges){
     if(!e.alive||e.cls!=='primary')continue;
     const a=g.nodes[e.a],b=g.nodes[e.b];
@@ -2796,21 +2890,25 @@ function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,max
     const rf=stream(fnv1a('f'+e.id),'fields');
     for(let t=18;t<L-12;t+=rf.range(28,40)){ // selion-width strips (M-GRW-5)
       const p=V.add(a,V.mul(dir,t));
+      const stripW=rf.range(4,7),half=V.mul(dir,stripW/2);
       for(const s of [1,-1]){
         const q1=V.add(p,V.mul(nl,s*9)),q2=V.add(p,V.mul(nl,s*rf.range(70,140)));
         if(site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5)))continue;
         if(urban(q2))continue;
-        details.push({id:'det'+(did++),kind:'field',a:q1,b:q2,
-          prov:'Strip-field boundary: the pre-urban furlong fabric along the approach road (M-GRW-5); later growth fossilizes these lines.'});}}
+        const poly=[V.sub(q1,half),V.add(q1,half),V.add(q2,half),V.sub(q2,half)];
+        details.push({id:'det'+(did++),kind:'field',poly,
+          prov:'Strip field: the pre-urban furlong fabric along the approach road (M-GRW-5) — later growth fossilizes these lines.'});}}
     if(details.filter(d=>d.kind==='field').length>260)break;}
-  // orchards on some agrarian parcels
+  // orchards on some agrarian parcels — visually distinct from a plain garden tree (bigger,
+  // more saturated fill, heavier stroke), not just a barely-different fill shade on the same
+  // tiny dot, so the regular planting grid actually reads as an orchard at a glance
   for(const par of parcels){
     if(par.district!=='agrarian'||!par.empty)continue;
     const rb=stream(fnv1a(par.id),'orchard');
     if(!rb.chance(0.5))continue;
     for(let u=0.18;u<0.9;u+=0.24)for(let v=0.2;v<0.9;v+=0.26){
       const p=bmap(par,u,v);
-      details.push({id:'det'+(did++),kind:'tree',orchard:true,x:p.x,y:p.y,rr:2.1,
+      details.push({id:'det'+(did++),kind:'tree',orchard:true,x:p.x,y:p.y,rr:3.2,
         prov:'Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).'});}
   }
   return details;}
@@ -3031,7 +3129,7 @@ function generate(seed,opts){
   // medieval market thresholds under a different name.
   const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
-  const games=buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile);
+  const games=buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
   if(profile.chinampas)details.push(...buildChinampas(seed,site,anchors,wallState,maxRF));
   // when the star fort is built canal-fed (M-VEN-3), the fort's own wet-moat rendering already
@@ -3127,10 +3225,11 @@ function render(){
     if(model.site.kind==='river'||model.site.kind==='riverthrough')
       el('path',{d:pl(model.site.river),class:'riverline'},L.water);}
 
-  // strip fields (land-side, under the water layer is fine — they never overlap it)
+  // strip fields (land-side, under the water layer is fine — they never overlap it): filled
+  // cultivated strips, not bare boundary lines (see buildDetails' own comment on this fix)
   for(const d of model.details)if(d.kind==='field'){
-    const e=el('path',{d:pl([d.a,d.b]),class:'field'},L.fields);
-    reg(e,'Strip field','Strip-field boundary',{},d.prov);}
+    const e=el('path',{d:pd(d.poly),class:'field'},L.fields);
+    reg(e,'Strip field','Cultivated field strip',{},d.prov);}
   // chinampas sit IN the water, so they must draw in a layer AFTER 'water' in z-order (L.fields
   // is drawn before 'water' and would be invisible, entirely covered by the water fill)
   for(const d of model.details)if(d.kind==='chinampa'){

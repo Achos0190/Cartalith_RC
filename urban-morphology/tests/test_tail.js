@@ -1262,6 +1262,64 @@ for (const site of ['river', 'landlocked']) {
       if (UME._test.segInt(amph.poly[i], amph.poly[(i+1)%amph.poly.length], circ.poly[j], circ.poly[(j+1)%circ.poly.length])) romOverlap = true;
   ok(!romOverlap, 'roman\'s amphitheatre and circus never overlap each other (the mutual-placement check in buildGames)');
 
+  // historical-placement revision: most of this register's buildings were genuinely intramural
+  // (adjacent to the main square/palace), not out past the town's edge — verified by distance
+  // from the plaza, not just trusted from the siting label (docs/03 M-GAMES, placement revision)
+  const plazaSited = ['medieval', 'islamic', 'byzantine', 'chinese', 'aztec', 'egyptian', 'mayan', 'inca', 'japanese', 'colonial'];
+  const peripheralSited = ['roman', 'viking', 'celtic', 'greek', 'frontier', 'industrial'];
+  for (const culture of plazaSited) {
+    const m = UME.generate(12345, { epochs: 8, pop: 7000, walls: true, culture });
+    const d = Math.hypot(m.games[0].center.x - m.plaza.center.x, m.games[0].center.y - m.plaza.center.y);
+    ok(d < 200, `${culture}'s games building sits near the plaza, inside the town (${d.toFixed(0)}m, plaza-sited)`);
+  }
+  for (const culture of peripheralSited) {
+    const m = UME.generate(12345, { epochs: 8, pop: 7000, walls: true, culture });
+    for (const gm of m.games) {
+      const d = Math.hypot(gm.center.x - m.plaza.center.x, gm.center.y - m.plaza.center.y);
+      ok(d > 400, `${culture}'s ${gm.kind} sits well beyond the town, extramural (${d.toFixed(0)}m, peripheral-sited)`);
+    }
+  }
+
+  // shape-accuracy revision: circus/hippodrome/racetrack are a discorectangle (straight sides +
+  // semicircular caps, ~22 points), not a smooth ellipse; the Aztec/Maya ballcourt is an actual
+  // "I"/dogbone polygon (8 points), not an elongated ellipse (M-GAMES register, shape revision)
+  const romShapes = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, culture: 'roman' });
+  const circus = romShapes.games.find(g => g.kind === 'circus');
+  ok(circus.poly.length === 22, `roman circus is a discorectangle (${circus.poly.length} points, expected 22)`);
+  const byz = UME.generate(12345, { epochs: 8, pop: 7000, walls: true, culture: 'byzantine' });
+  ok(byz.games[0].poly.length === 22, `byzantine hippodrome is a discorectangle (${byz.games[0].poly.length} points, expected 22)`);
+  const fro = UME.generate(12345, { epochs: 8, pop: 7000, walls: true, culture: 'frontier' });
+  ok(fro.games[0].poly.length === 22, `frontier racetrack is a discorectangle (${fro.games[0].poly.length} points, expected 22)`);
+  const aztShape = UME.generate(12345, { epochs: 8, pop: 7000, walls: true, culture: 'aztec' });
+  ok(aztShape.games[0].poly.length === 8, `aztec tlachtli is an "I"/dogbone polygon (${aztShape.games[0].poly.length} points, expected 8)`);
+  const mayShape = UME.generate(12345, { epochs: 8, pop: 7000, walls: true, culture: 'mayan' });
+  ok(mayShape.games[0].poly.length === 8, `mayan pitz is an "I"/dogbone polygon (${mayShape.games[0].poly.length} points, expected 8)`);
+
+  // plaza-sited buildings are NOT guaranteed clear of real parcels by construction the way the
+  // periphery is (they sit inside the built fabric) — so this is the one siting mode that needs
+  // an explicit parcel-overlap check, across several sites/seeds, not assumed safe by distance alone
+  let parcelOverlapFails = 0, plazaChecked = 0;
+  for (const culture of plazaSited) {
+    for (const site of ['river', 'bay', 'landlocked']) {
+      for (const seed of [12345, 2024, 777]) {
+        const m = UME.generate(seed, { epochs: 8, pop: 7000, walls: true, culture, site });
+        if (!m.games.length) continue;
+        plazaChecked++;
+        const gm = m.games[0];
+        for (const par of m.parcels) {
+          let hit = false;
+          for (let i = 0; i < gm.poly.length && !hit; i++)
+            for (let j = 0; j < par.poly.length && !hit; j++)
+              if (UME._test.segInt(gm.poly[i], gm.poly[(i+1)%gm.poly.length], par.poly[j], par.poly[(j+1)%par.poly.length])) hit = true;
+          if (!hit && UME._test.pointInPoly(gm.poly[0], par.poly)) hit = true;
+          if (hit) parcelOverlapFails++;
+        }
+      }
+    }
+  }
+  ok(plazaChecked === plazaSited.length * 3 * 3 && parcelOverlapFails === 0,
+    `plaza-sited games buildings never overlap a real parcel across ${plazaChecked} culture/site/seed combinations (${parcelOverlapFails} failures)`);
+
   // two honest omissions: no purpose-built venue attested (Mesopotamian) and recreation
   // deliberately distributed through the rings rather than centralized (Venus) — never forced in
   const mes = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, culture: 'mesopotamian' });
