@@ -947,5 +947,96 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Maya civilization profile (docs/03, M-MAY register) ---------- */
+{
+  const may = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'mayan' });
+  const may2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'mayan' });
+  ok(may.culture === 'mayan', 'mayan profile resolves');
+  ok(UME.hashModel(may) === UME.hashModel(may2), 'mayan generation deterministic');
+  ok(may.parcels.length > 150, `mayan city is a substantial settlement (${may.parcels.length} parcels)`);
+  ok(may.pop > 6000 * 0.85 && may.pop < 6000 * 1.2, `mayan strip parcels realize standard density, no multiplier needed (${may.pop}/6000)`);
+
+  const mayKinds = new Set(may.buildings.map(b => b.kind));
+  ok([...mayKinds].some(k => k === 'street range' || k === 'single-room house'), 'mayan buildings reuse the courtyard-house grammar (plazuela group stand-in, M-MAY-2)');
+  ok(!may.civic, 'mayan profile has no civic hall (divine-kingship governance)');
+  ok(may.markets.length > 0, 'mayan profile has markets (Tikal/Chunchucmil marketplace evidence, M-MAY-3, unlike the temple-redistribution profiles)');
+
+  // walls stay a genuine optional toggle here (unlike aztec's noWalls or the always-on profiles) —
+  // Maya defensive walls are regional/period-specific, not universal (M-MAY-1)
+  const mayNoWalls = UME.generate(12345, { epochs: 8, pop: 6000, walls: false, culture: 'mayan' });
+  ok(!mayNoWalls.wall.ring, 'mayan profile has no wall when the walls checkbox is off');
+  ok(may.wall.ring, 'mayan profile has a wall when the walls checkbox is on (an honest optional toggle, not forced either way)');
+
+  const mayf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'mayan' });
+  ok(!mayf.fortified && mayf.wall.style === 'curtain', 'mayan profile never gets a bastioned trace, even when requested');
+  ok(mayf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${mayf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const a1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'mayan', site });
+    const a2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'mayan', site });
+    ok(a1.parcels.length > 100 && UME.hashModel(a1) === UME.hashModel(a2), `mayan city on '${site}' site: substantial + deterministic (${a1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Inca civilization profile (docs/03, M-INC register) ---------- */
+{
+  const inc = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'inca' });
+  const inc2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'inca' });
+  ok(inc.culture === 'inca', 'inca profile resolves');
+  ok(UME.hashModel(inc) === UME.hashModel(inc2), 'inca generation deterministic');
+  ok(inc.parcels.length > 150, `inca city is a substantial settlement (${inc.parcels.length} parcels)`);
+  ok(inc.pop > 6000 * 0.85 && inc.pop < 6000 * 1.2, `inca strip parcels realize standard density, no multiplier needed (${inc.pop}/6000)`);
+
+  // kancha: the courtyard-house grammar is a direct architectural match here, not a stand-in
+  const incKinds = new Set(inc.buildings.map(b => b.kind));
+  ok([...incKinds].some(k => k === 'street range' || k === 'single-room house'), 'inca buildings reuse the courtyard-house grammar (kancha, a direct match, M-INC-1)');
+  ok(!inc.civic, 'inca profile has no civic hall (Sapa Inca divine-kingship governance)');
+
+  // the one profile in the whole register with a well-documented, specific no-market/no-currency economy
+  ok(inc.markets.length === 0, 'inca profile has no markets at all (mita-labour/qollqa command economy, M-INC-2 — not a modelling simplification but a documented historical fact)');
+
+  const incf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'inca' });
+  ok(!incf.fortified && incf.wall.style === 'curtain', 'inca profile never gets a bastioned trace, even when requested');
+  ok(incf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${incf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const i1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'inca', site });
+    const i2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'inca', site });
+    ok(i1.parcels.length > 100 && UME.hashModel(i1) === UME.hashModel(i2), `inca city on '${site}' site: substantial + deterministic (${i1.parcels.length} parcels)`);
+  }
+}
+
+/* ---------- Japanese Castle Town civilization profile (docs/03, M-JPN register) ---------- */
+{
+  const jpn = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'japanese' });
+  const jpn2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'japanese' });
+  ok(jpn.culture === 'japanese', 'japanese profile resolves');
+  ok(UME.hashModel(jpn) === UME.hashModel(jpn2), 'japanese generation deterministic');
+  ok(jpn.parcels.length > 150, `japanese castle town is a substantial settlement (${jpn.parcels.length} parcels)`);
+  ok(jpn.pop > 6000 * 0.85 && jpn.pop < 6000 * 1.2, `japanese strip parcels realize standard density, no multiplier needed (${jpn.pop}/6000)`);
+
+  // machiya townhouse: reuses the burgage grammar directly (a genuine cross-cultural parallel,
+  // M-JPN-2), not the courtyard-house grammar used by every other Asian profile in this register
+  const jpnKinds = new Set(jpn.buildings.map(b => b.kind));
+  ok(['main', 'wing', 'rear range'].some(k => jpnKinds.has(k)), 'japanese buildings reuse the medieval burgage grammar (machiya townhouse parallel, M-JPN-2)');
+  ok(![...jpnKinds].some(k => k === 'street range' || k === 'single-room house'), 'japanese buildings do not use the courtyard-house grammar (unlike islamic/chinese/aztec/greek/egyptian/mesopotamian/mayan/inca)');
+
+  // castle keep: a new civic style, reusing the basilica/townhall render path (hall + apse + columns)
+  ok(jpn.civic && jpn.civic.name === 'Castle keep' && jpn.civic.style === 'keep', 'japanese civic hall is the new castle-keep style (tenshu, M-JPN-3)');
+  ok(jpn.civic.apse && jpn.civic.apse.length === 4, 'castle keep has an inset tiered roofline (reuses the apse render path)');
+  ok(jpn.civic.columns.length === 4, 'castle keep has corner turret markers (reuses the column render path)');
+  ok(jpn.markets.length > 0, 'japanese profile keeps the chonin-chi merchant-quarter market economy');
+
+  const jpnf = UME.generate(12345, { epochs: 8, pop: 8000, walls: true, fortified: true, culture: 'japanese' });
+  ok(!jpnf.fortified && jpnf.wall.style === 'curtain', 'japanese profile never gets a bastioned trace, even when requested (independent, non-trace-italienne fortification lineage)');
+  ok(jpnf.wall.gates.some(g => g.name && /Gate$/.test(g.name)), `compass gate scheme names land gates (${jpnf.wall.gates.map(g=>g.name).join(', ')})`);
+
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const j1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'japanese', site });
+    const j2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'japanese', site });
+    ok(j1.parcels.length > 100 && UME.hashModel(j1) === UME.hashModel(j2), `japanese castle town on '${site}' site: substantial + deterministic (${j1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

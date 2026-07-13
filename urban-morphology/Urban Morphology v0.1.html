@@ -131,7 +131,10 @@ svg.panning{cursor:grabbing}
       <option value="celtic">Celtic (Iron Age)</option>
       <option value="greek">Ancient Greek (Hippodamian)</option>
       <option value="egyptian">Ancient Egyptian</option>
-      <option value="mesopotamian">Mesopotamian</option></select></div>
+      <option value="mesopotamian">Mesopotamian</option>
+      <option value="mayan">Maya (Classic Period)</option>
+      <option value="inca">Inca (Andean)</option>
+      <option value="japanese">Japanese Castle Town</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -156,6 +159,7 @@ svg.panning{cursor:grabbing}
       <option value="townhall">Town hall + belfry</option>
       <option value="basilica">Basilica (Roman)</option>
       <option value="loggia">Guild loggia</option>
+      <option value="keep">Castle keep</option>
       <option value="none">None</option></select></div>
     <div class="row"><label>Population</label><input id="pop" type="number" value="5000" min="400" max="20000" step="100">
       <button id="fit">Fit view</button></div>
@@ -272,7 +276,22 @@ const CULTURE_PROFILES={
     planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
     defaultFaith:'temple',defaultCivic:'none',markets:false,
     wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'temple precinct',
-    prov:'A Sumerian/Babylonian city (Ur, Nineveh): organic, dense, winding-laned growth around a walled temple-palace citadel mound, unlike the planned traditions above (M-MES-1); housing is the well-attested Mesopotamian courtyard house (excavated at Ur); the temple rite stands in for the stepped mudbrick ziggurat, the same documented simplification pattern as Chinese/Aztec/Egyptian (M-MES-2); temple-palace governance, so no separate civic hall and no independent markets (redistributive temple/palace economy); never a bastioned trace.'}
+    prov:'A Sumerian/Babylonian city (Ur, Nineveh): organic, dense, winding-laned growth around a walled temple-palace citadel mound, unlike the planned traditions above (M-MES-1); housing is the well-attested Mesopotamian courtyard house (excavated at Ur); the temple rite stands in for the stepped mudbrick ziggurat, the same documented simplification pattern as Chinese/Aztec/Egyptian (M-MES-2); temple-palace governance, so no separate civic hall and no independent markets (redistributive temple/palace economy); never a bastioned trace.'},
+  mayan:{id:'mayan',name:'Maya (Classic-period city-state)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'none',markets:true,
+    wallGates:{scheme:'compass'},orientation:'cardinal',civicAnchorLabel:'great plaza',
+    prov:'A Classic Maya city-state (Tikal, Copan): dispersed, organically-grown plaza groups linked by raised sacbe causeways rather than a single uniform grid (most Classic cities were not gridded, unlike the exceptional planned site of Nixtun-Ch\'ich\'), with a cardinal/astronomically-aligned monumental axis (M-MAY-1); commoner housing was the "plazuela group" — several single-room structures sharing a small patio — for which the existing courtyard-house grammar stands in (a documented simplification: real plazuela houses were often apsidal pole-and-thatch on a low platform, not rectangular masonry, M-MAY-2); the temple rite stands in for the stepped pyramid, the same substitution pattern as Aztec/Chinese/Egyptian; divine-kingship governance (no separate civic hall); archaeological evidence (Tikal, Chunchucmil) increasingly supports formal marketplaces, unlike the temple-redistribution profiles above (M-MAY-3); defensive walls are regional/period-specific (Becan, Mayapan, Tulum) rather than universal, so — uniquely among the temple-state profiles — walls stay an optional toggle rather than forced on or off; never a bastioned trace.'},
+  inca:{id:'inca',name:'Inca (Andean imperial city)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
+    defaultFaith:'temple',defaultCivic:'none',markets:false,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'ceremonial plaza',
+    prov:'An Andean imperial settlement built around the kancha — a walled rectangular/trapezoidal enclosure of single-room buildings facing a shared central courtyard (M-INC-1) — for which the existing courtyard-house grammar is a direct architectural match, not a stand-in; growth is organic and terrain-led rather than a flat grid, reflecting the dramatic Andean sites (Machu Picchu, Ollantaytambo) built by terracing into the mountainside rather than levelling it; the temple rite stands in for the Coricancha-style solar temple, the same substitution pattern as other temple-state profiles; the Sapa Inca\'s divine kingship means no separate civic hall; uniquely among every profile in this register, the Inca economy is well-documented as having had **no markets and no currency at all** — a redistributive mita-labour/state-warehouse (qollqa) command economy, a stronger and more specific claim than the general "temple-state redistribution" reasoning used elsewhere (M-INC-2); never a bastioned trace.'},
+  japanese:{id:'japanese',name:'Japanese Castle Town (jokamachi)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
+    defaultFaith:'temple',defaultCivic:'keep',markets:true,
+    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'castle',
+    prov:'An Edo-period jokamachi (castle town): deliberately non-gridded, winding streets radiating from the daimyo\'s castle — a defensive irregularity (masugata bent-gate approaches), not an accretive accident, but reusing the same organic growth/T-junction machinery as the medieval pack produces a comparably irregular result (M-JPN-1); merchant/artisan machiya townhouses were narrow-frontage, deep-lot row buildings strikingly similar in plan to the medieval burgage plot — a genuine cross-cultural parallel, so this profile reuses the burgage grammar directly rather than inventing a new one (M-JPN-2); the temple rite stands in for the tera-machi Buddhist temple district (the same documented pagoda-simplification pattern already used for the Chinese profile); a new civic style, the castle keep (tenshu) — a tiered stone-and-timber donjon — reuses the existing basilica/townhall render path (hall + inset "apse" roofline + corner turret markers) rather than new tiered-roof geometry (M-JPN-3); chonin-chi merchant quarters keep the market economy; compass-named gates for the moat/earthen-wall circuit; never a bastioned trace (Japanese castle fortification followed an independent, non-trace-italienne design lineage).'}
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -988,6 +1007,15 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
     out.hall=rect(base,w,d);out.name='Guild loggia';
     for(let k=-3;k<=3;k++)out.columns.push(V.add(V.add(base,V.mul(perp,k*w*0.15)),V.mul(inl,-d/2)));
     out.prov='Guild loggia: an open ground-floor arcade on the market where the guilds and merchants met and traded (M-ADMIN; docs/05 §2.2).';
+  }else if(style==='keep'){
+    const w=r.range(18,24),d=r.range(14,18);
+    out.hall=rect(base,w,d);out.name='Castle keep';
+    // tiered donjon (tenshu): a smaller inset roofline drawn on the same footprint, reusing the
+    // apse render path rather than new tiered-roof geometry (M-JPN-3); corner turret markers
+    // reuse the column-circle render path instead of a colonnade line
+    out.apse=rect(base,w*0.52,d*0.52);
+    out.columns=out.hall.slice();
+    out.prov='Castle keep (tenshu): a tiered stone-and-timber donjon at the jokamachi\'s core, the daimyo\'s seat of military and administrative authority (M-JPN-3).';
   }else{
     const w=r.range(15,21),d=r.range(9,13);
     out.hall=rect(base,w,d);out.name=pop>=10000?'Town hall':'Guildhall';

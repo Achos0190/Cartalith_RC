@@ -107,6 +107,22 @@ civilizations 3–18).
   fabric around a walled temple-palace citadel, M-MES-1); the well-attested Mesopotamian
   courtyard house; the temple rite stands in for the stepped mudbrick ziggurat (M-MES-2);
   temple-palace governance (no civic hall, no independent markets).
+- **Maya (Classic-period city-state)** — dispersed, organically-grown plaza groups on a
+  cardinal/astronomically-aligned axis (M-MAY-1); the courtyard-house grammar stands in for the
+  "plazuela group" household cluster (M-MAY-2); unlike the temple-redistribution profiles above,
+  keeps markets (Tikal/Chunchucmil marketplace archaeology, M-MAY-3); uniquely, defensive walls
+  stay a genuine optional toggle rather than forced on or off, since circuits were
+  regional/period-specific rather than universal.
+- **Inca (Andean imperial city)** — built from the **kancha**, a walled courtyard enclosure of
+  single-room buildings — a direct architectural match for the existing courtyard-house grammar,
+  not a stand-in (M-INC-1); terrain-led organic growth reflecting the Andes' terraced
+  mountainside sites rather than a flat grid; uniquely in this register, a well-documented
+  **no-market, no-currency** redistributive economy (M-INC-2).
+- **Japanese Castle Town (jokamachi)** — organic, deliberately winding streets radiating from
+  the daimyo's castle; merchant *machiya* townhouses reuse the medieval **burgage** grammar
+  directly, a genuine cross-cultural parallel (M-JPN-2); a new civic style, the **castle keep**
+  (*tenshu*), reuses the existing basilica/townhall render path — an inset roofline and
+  corner-turret markers — rather than new tiered-roof geometry (M-JPN-3).
 - Switching the civilization selector resets the worship rite / civic-hall style to that
   profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
   change (organic → grid), not just a re-skin, per the profile's `planning` field.
