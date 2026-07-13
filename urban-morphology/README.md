@@ -15,7 +15,7 @@ post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1115 assertions) |
+| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1176 assertions) |
 | Browser driver (screenshots + inspector click-tests, incl. the Roman colonia) | `tests/browser_check.js` |
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
