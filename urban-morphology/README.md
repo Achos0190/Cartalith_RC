@@ -15,7 +15,7 @@ post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1199 assertions) |
+| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1233 assertions) |
 | Browser driver (screenshots + inspector click-tests, incl. the Roman colonia) | `tests/browser_check.js` |
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
@@ -28,7 +28,7 @@ amenities switch on as population and connectivity grow ·
 parameters (kind/pop/traits/specialisation/faction/civWays) onto this generator's inputs, with
 the gaps to close for a future refactor into the Cartalith line ·
 **`07-culture-architecture.md`** — the Core Engine / Culture Profile split: which of the
-engine's ~115 functions are culture-independent vs. tradition-supplied, the `CultureProfile`
+engine's ~123 functions are culture-independent vs. tradition-supplied, the `CultureProfile`
 data schema, the Roman colonia's quantified morphology, and what's explicitly deferred to
 later phases (phased historical growth, negative space, infrastructure layer, Space
 Syntax/graph-theory metrics, settlement hierarchy, a profile-aware validation panel, and
@@ -37,7 +37,7 @@ civilizations 3–18) ·
 setback research, a two-factor McHarg-style suitability score, and its mapping onto Cartalith
 Gen1's actual terrain fields for the eventual refactor ·
 **`09-refactoring-function-inventory.md`** — the complete function-by-function port plan: every
-one of the 115 engine functions (plus the ~35 app-shell ones) tagged reuse/rename/adapt/discard
+one of the ~123 engine functions (plus the ~35 app-shell ones) tagged reuse/rename/adapt/discard
 against a direct read of `Cartalith Gen1 v0.85.html`, two verified naming collisions
 (`generate`/`render`), one free win (`mulberry32` already exists in Gen1, byte-equivalent), and a
 six-phase migration order.
@@ -231,6 +231,65 @@ not just water/streets); `'peripheral'` entries keep the original beyond-the-bui
 safe from any parcel by construction. Both modes retry a doomed candidate elsewhere rather than
 forcing one in, both fall back gracefully to an empty result if no safe site turns up, and
 `hashModel()` never hashes `model.games`, so none of this can affect cross-version neutrality.
+
+### Per-culture farmland/pasture (docs/03 M-FARM register, docs/07 §3.9)
+
+The hinterland around a town, dispatched per profile (`model.details`, via `buildFarmland()`/
+`FARM_SPEC`) exactly like the games register above, rather than the same generic medieval-style
+strips everywhere: Medieval keeps its pre-existing selion strips unchanged (the correct baseline) ·
+Roman **centuriation** (a rectilinear grid of large cardo/decumanus-aligned squares) · Islamic/
+Palimpsest **qanat oasis fan** (irrigation wedges radiating from a mother-well outlet) · Byzantine
+**concentric zonation** (garden belt → arable strips → outer pasture — a coarser ring-level
+distinction, not a new parcel shape, per the source's own framing) · Chinese **weitian diked
+polders** (a small, heavily-jittered grid standing in for the fish-scale patchwork) · Viking
+**solskifte** (ruled strip order, modelled as strips near town ramping to pasture farther out for
+the outfield) · Celtic **field system** (small near-square checkerboard plots) · Greek kept on the
+**unchanged baseline strip pattern** plus an olive-grove orchard boost — a self-caught category
+error: the best-attested Greek pattern, the colonial chora grid, was for *new* colonial foundations,
+the exact anachronism this profile's own organic-Athens framing already excludes, so it was not
+applied · Egyptian **Nile flood-basins** (chaikin-smoothed organic blobs, needs the river itself) ·
+Mesopotamian **canal long-lots** (perpendicular strips off the watercourse, falling back to the
+baseline strip mechanism on a landlocked site) · Mayan **raised-field platforms/camellones**
+(wetland-gated, zero on a landlocked site) · Inca **andenes** (contour-following terraces that
+resample this engine's own `site.height`/`site.slope` fields at every step, so the direction
+genuinely bends with the terrain) · Japanese a small irregular **paddy grid** (the source's own
+caveat: true terracing is right nationally, but a lowland grid is likelier around Edo itself) ·
+Colonial **hacienda/estancia grants** (the largest cell size in the register) · Frontier **PLSS/GLO
+survey** (the most regular, least-jittered grid, plus a high pasture share matching the profile's
+own "mining/cattle/rail" identity) · Industrial **parliamentary enclosure fields** · Venus
+**ring-farming bands** (a design choice, not a historical claim, echoing the Garden City diagram).
+Aztec gets no entry at all — chinampas already are its farmland signature, and a second generic
+field layer would double up rather than add detail.
+
+A genuinely new `pasture` detail kind (its own `.pasture` CSS, distinct from a cultivated field's
+gold) answers the "pastures *and* fields" half of an earlier request that only fields/orchards had
+covered — present via an intermixed per-cell share (Roman, Celtic, Frontier) or a share ramping up
+with distance from town (Byzantine, Viking, modelling the outer pasture/outfield zone). Four real
+bugs were found and fixed before this shipped, all by reviewing this feature's own test data rather
+than assuming success: (1) the qanat-fan generator located "away from the water" using the river
+polyline's own fixed geometric middle index, which broke whenever the market sat elsewhere along
+the river — Islamic/Palimpsest produced zero fields on ordinary river-site generation, the origin
+having landed off the map entirely; fixed with the same distance-gradient technique
+`buildChinampas` already uses, evaluated at the market's own position, plus an on-map clamp as a
+second safety margin. (2) An unbounded lattice scan in the shared grid generator could probe tens
+of thousands of candidates for a small-cell culture on a large town, each costing an
+O(shoreline/wall-ring length) `isWater`/`pointInPoly` call — found by timing the full suite, fixed
+with a hard budget on *examined* candidates independent of the pre-existing budget on accepted
+ones. (3) The biggest one: every generator, including the pre-existing baseline `stripFields`
+mechanism this register only ever extracted (never rewrote), checked candidates against water and
+the urban core but never against the live street graph itself — a dedicated 105-combination audit
+failed on first run with 1281 street-crossings and 34 water-overlaps, and running the same audit
+against Medieval alone (the unchanged mechanism) still found 63 crossings, confirming it was a
+latent pre-existing gap this project's own test coverage had simply never checked before. Fixed
+with one shared `crossesStreet()` helper reusing `buildGames`' own spatial-hash technique, called
+from all seven generators; the residual water-overlaps traced to two narrower gaps (a missing
+midpoint check in `canalFields`, a missing near-point check in `stripFields`) fixed the same way.
+Re-verified at 0/0 across the full audit. (4) Found only during a follow-up visual pass (a poly can
+be geometrically valid while simply never getting generated at all, which no geometric audit can
+catch): Mesopotamian produced zero canal fields on an ordinary `riverthrough` generation, traced to
+a fixed 14-unit near-bank offset that didn't clear a through-river's own wider channel — fixed by
+deriving the offset from `site.riverW` itself, with a dedicated regression test added.
+`hashModel()` never hashes `model.details`, so none of this can affect cross-version neutrality.
 
 ### Generation Rules (configurable parameters, not hardcoded constants)
 

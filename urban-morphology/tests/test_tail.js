@@ -1677,5 +1677,147 @@ for (const site of ['river', 'landlocked']) {
   ok(wetBuildingFails === 0, `terrainAware:true introduces no wet buildings across ${checkedTA} (seed x site) combinations (${wetBuildingFails} failures)`);
 }
 
+/* ---------- Per-culture farmland/pasture (docs/03 M-FARM register, docs/07 §3.9) ----------
+ * A population-independent hinterland layer (model.details, kind 'field'/'pasture'), dispatched
+ * per profile via FARM_SPEC exactly like the M-GAMES register's own precedent (docs/07 §3.7) —
+ * Aztec is the one deliberate omission (chinampas are already its farmland signature). */
+{
+  const farmKinds = (m) => m.details.filter(d => d.kind === 'field' || d.kind === 'pasture');
+
+  const f1 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'chinese', site: 'river' });
+  const f2 = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'chinese', site: 'river' });
+  ok(JSON.stringify(farmKinds(f1)) === JSON.stringify(farmKinds(f2)), 'farmland/pasture generation is deterministic');
+
+  // Aztec: no generic field/pasture layer at all — chinampas are its own farmland signature
+  const az = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'aztec', site: 'river' });
+  ok(farmKinds(az).length === 0, 'aztec gets no generic field/pasture layer (chinampas already are its farmland signature, M-FARM-6)');
+  ok(az.details.some(d => d.kind === 'chinampa'), 'aztec still gets its own chinampas (unaffected by the farmland register)');
+
+  // every OTHER culture produces at least one field/pasture detail on a river site
+  const allCultures = Object.keys(UME.CULTURE_PROFILES);
+  const coverageFails = [];
+  for (const culture of allCultures) {
+    if (culture === 'aztec') continue;
+    const m = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture, site: 'river' });
+    if (farmKinds(m).length === 0) coverageFails.push(culture);
+  }
+  ok(coverageFails.length === 0, `every non-aztec culture produces at least one field/pasture detail on a river site (failures: ${coverageFails.join(',') || 'none'})`);
+
+  // shape distinctiveness: grid-pattern cultures emit plain quads (orientedRect); Egyptian's
+  // flood-basins are chaikin-smoothed organic blobs with far more vertices — a real, testable
+  // geometric signature, the same discipline as the M-GAMES register's own shape-point-count checks
+  for (const culture of ['roman', 'frontier', 'colonial', 'industrial', 'celtic', 'chinese', 'mayan', 'japanese']) {
+    const m = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture, site: 'river' });
+    const fields = m.details.filter(d => d.kind === 'field');
+    ok(fields.length > 0 && fields.every(d => d.poly.length === 4), `${culture}'s grid-pattern fields are plain quads (${fields.length} checked)`);
+  }
+  const egy = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'egyptian', site: 'river' });
+  const egyFields = egy.details.filter(d => d.kind === 'field');
+  ok(egyFields.length > 0 && egyFields.every(d => d.poly.length > 8),
+    'egyptian flood-basins are chaikin-smoothed organic blobs, not plain quads (M-FARM-10)');
+
+  // Mayan raised-field platforms are gated to wetland margins only: zero on a landlocked site
+  const mayaLand = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'mayan', site: 'landlocked' });
+  ok(farmKinds(mayaLand).length === 0, 'mayan raised-field platforms never appear on a landlocked site (waterOnly gate, M-FARM-12)');
+
+  // Egyptian flood-basin agriculture needs the river itself: zero on a landlocked site
+  const egyLand = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'egyptian', site: 'landlocked' });
+  ok(farmKinds(egyLand).length === 0, 'egyptian flood-basins never appear on a landlocked site (need the river itself, M-FARM-10)');
+
+  // Mesopotamian canal long-lots gracefully fall back to the baseline strip mechanism when
+  // there's no watercourse to run perpendicular from, rather than producing no farmland at all
+  const mesLand = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'mesopotamian', site: 'landlocked' });
+  ok(mesLand.details.filter(d => d.kind === 'field').length > 0,
+    'mesopotamian falls back to the baseline strip mechanism on a landlocked site rather than producing no farmland (M-FARM-11)');
+
+  // regression: canalFields' near-bank offset must clear the river's OWN half-width, not a fixed
+  // constant — a riverthrough channel can run wide enough (up to 30 units, half-width up to 15)
+  // that a fixed 14-unit offset sometimes left the near point still inside the water, silently
+  // failing every candidate; checked across several seeds on the site kind where this actually
+  // surfaced (found via this register's own audit, not assumed fixed from the code alone)
+  let mesRiverthroughFails = 0;
+  for (const seed of [1, 2, 3, 4242, 777, 12345, 999, 2024]) {
+    const m = UME.generate(seed, { epochs: 8, pop: 6000, walls: true, culture: 'mesopotamian', site: 'riverthrough' });
+    if (m.details.filter(d => d.kind === 'field').length === 0) mesRiverthroughFails++;
+  }
+  ok(mesRiverthroughFails === 0, `mesopotamian canal fields never come up empty on a riverthrough site across 8 seeds (${mesRiverthroughFails} zero-field seeds)`);
+
+  // Greek self-correction: kept on the UNCHANGED baseline strip SHAPE (plain quads, same as every
+  // other stripFields-pattern culture — never the colony-founding kleroi grid, a documented
+  // anachronism for this organic-Athens profile) plus an olive-grove orchard-density boost instead;
+  // the field provenance explicitly documents why the grid was excluded (M-GRK-1/M-FARM-9)
+  const gr = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'greek', site: 'river' });
+  const grFields = gr.details.filter(d => d.kind === 'field');
+  ok(grFields.length > 0 && grFields.every(d => d.poly.length === 4) && grFields.every(d => d.prov.includes('M-GRK-1')),
+    'greek fields stay on the unchanged baseline strip shape (plain quads) and document why the colony-founding grid was excluded (M-FARM-9)');
+  ok(gr.details.some(d => d.kind === 'tree' && d.orchard && d.prov.includes('Olive grove')),
+    'greek gets an olive-grove orchard-density boost standing in for the geometric signature it cannot honestly claim');
+
+  // Byzantine concentric zonation: a garden-belt orchard boost, distinct from the plain orchard text
+  const byz = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'byzantine', site: 'river' });
+  ok(byz.details.some(d => d.kind === 'tree' && d.orchard && d.prov.includes('Garden belt')),
+    'byzantine gets a garden-belt orchard boost (innermost ring of the concentric-zonation model, M-FARM-4)');
+
+  // pasture is a real, testable kind distinct from field — present for the cultures FARM_SPEC
+  // flags with a pastureShare/pastureFar, aggregated across several seeds since it's a per-cell
+  // probability, not a per-seed guarantee (the same discipline as every other probabilistic
+  // effect already checked this way in this suite, e.g. the M-TER-1 near/far suitability check)
+  for (const culture of ['byzantine', 'viking', 'celtic', 'frontier', 'roman']) {
+    let anyPasture = false;
+    for (const seed of [1, 2, 3, 12345, 999]) {
+      const m = UME.generate(seed, { epochs: 8, pop: 6000, walls: true, culture, site: 'river' });
+      if (m.details.some(d => d.kind === 'pasture')) { anyPasture = true; break; }
+    }
+    ok(anyPasture, `${culture} produces at least one pasture-kind detail across several seeds`);
+  }
+
+  // Palimpsest inherits Islamic's qanat-fan wedge shape and provenance text literally, rather than
+  // a bespoke entry — the same "mature identity, not a fresh tradition" reasoning already
+  // established for its games building/gates/housing (docs/07 §3.5)
+  const pal = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'palimpsest', site: 'river' });
+  const islam = UME.generate(12345, { epochs: 8, pop: 6000, walls: true, culture: 'islamic', site: 'river' });
+  const palFields = pal.details.filter(d => d.kind === 'field'), islamFields = islam.details.filter(d => d.kind === 'field');
+  ok(palFields.length > 0 && palFields.every(d => d.poly.length === 4),
+    'palimpsest inherits islamic\'s qanat-fan wedge shape rather than a bespoke entry');
+  ok(islamFields.length > 0 && palFields[0].prov === islamFields[0].prov,
+    'palimpsest\'s farmland provenance text is identical to islamic\'s own (literal inheritance, not a re-derived copy)');
+
+  // safety audit: every field/pasture vertex, across a spread of cultures/sites/seeds covering
+  // every pattern family (grid/fan/strip+pasture/basins/canal/terraces), never sits in water and
+  // never crosses a live street edge — re-verified explicitly rather than trusted from the
+  // mechanism alone, the same standing discipline as the M-GAMES register's own audit
+  let auditChecked = 0, waterFails = 0, crossFails = 0;
+  for (const culture of ['roman', 'islamic', 'byzantine', 'chinese', 'egyptian', 'mesopotamian', 'inca']) {
+    for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+      for (const seed of [12345, 2024, 777]) {
+        const m = UME.generate(seed, { epochs: 8, pop: 7000, walls: true, fortified: true, culture, site });
+        auditChecked++;
+        for (const d of farmKinds(m)) {
+          if (m.site.waterPoly && m.site.waterPoly.length)
+            for (const v of d.poly) if (T.pointInPoly(v, m.site.waterPoly)) waterFails++;
+          for (let i = 0; i < d.poly.length; i++) {
+            const A = d.poly[i], B = d.poly[(i + 1) % d.poly.length];
+            for (const e of m.graph.edges) {
+              const na = m.graph.nodes[e.a], nb = m.graph.nodes[e.b];
+              if (T.segInt(A, B, na, nb)) { crossFails++; break; }
+            }
+          }
+        }
+      }
+    }
+  }
+  ok(auditChecked === 7 * 5 * 3 && waterFails === 0, `field/pasture details never sit in water across ${auditChecked} culture/site/seed combinations (${waterFails} failures)`);
+  ok(crossFails === 0, `field/pasture details never cross a live street edge across ${auditChecked} combinations (${crossFails} failures)`);
+
+  // never affects the cross-version neutrality hash: hashModel() only ever reads graph/blocks/
+  // parcels/buildings, never model.details — the same reasoning already established for
+  // civic/markets/games
+  for (const site of ['river', 'riverthrough', 'bay', 'coast', 'landlocked']) {
+    const s1 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'roman', site });
+    const s2 = UME.generate(2024, { epochs: 8, pop: 6500, walls: true, culture: 'roman', site });
+    ok(s1.parcels.length > 100 && UME.hashModel(s1) === UME.hashModel(s2), `farmland-enabled generation on '${site}' site: substantial + deterministic (${s1.parcels.length} parcels)`);
+  }
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

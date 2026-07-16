@@ -467,6 +467,79 @@ population gate. `hashModel()` does not hash `model.games` (the same reason `mod
 
 ---
 
+## BB. Per-culture farmland/pasture (M-FARM register) — see docs/07 §3.9
+
+Until this register, every culture's hinterland was rendered with the exact same generic
+mechanism: medieval-style selion strips along the approach roads, plus scattered orchards on
+agrarian-fringe parcels. A dedicated research pass — the same discipline as the M-GAMES register
+(§AA above): a real source per culture, or an honest "shares the baseline pattern" verdict where
+the record does not support a distinctive one — found a genuinely distinct field-division geometry
+for most of the 19 profiles. `FARM_SPEC` dispatches each to one of seven shape families
+(`stripFields`, `gridFields`, `fanFields`, `basinFields`, `canalFields`, `terraceFields`,
+`ringFields`) rather than a bespoke function per culture, since several traditions share the same
+underlying geometry at a different scale/regularity — one `gridFields` generator, parametrised by
+cell size/jitter/alignment, serves both the large regular cadastral grids (Roman/Colonial/
+Frontier/Industrial) and the small irregular ones (Celtic/Chinese/Mayan/Japanese). Medieval keeps
+its pre-existing mechanism verbatim, only extracted into `stripFields()`.
+
+| ID | Culture | Pattern | Source | Conf. | Justification |
+|----|---------|---------|--------|-------|---------------|
+| M-FARM-1 | Medieval | Selion strips (unchanged, M-GRW-5) | — (pre-existing baseline) | H | Already the correct baseline; this register only extracts the existing mechanism into a shared function, no behaviour change. |
+| M-FARM-2 | Roman | Centuriation: rectilinear grid of large squares, cardo/decumanus-aligned | Wikipedia, "Centuriation"; B. Campbell, *The Writings of the Roman Land Surveyors* (2000) | H | 20x20 actus (~710x710 m, ~50 ha) squares radiating from perpendicular baselines — scaled schematically to this engine's own units, the same "not a literal unit conversion" honesty already used for `terrainSuitability`. |
+| M-FARM-3 | Islamic / Palimpsest | Qanat oasis fan: irrigation wedges radiating from a mother-well outlet | UNESCO, "The Persian Qanat" (WHL 2016); World History Encyclopedia, "Qanat" | M | Walled orchard-gardens (bustan) closest to town, field strips beyond, radiating roughly 15-30 degrees apart. Also inherited by Palimpsest (scope note below). |
+| M-FARM-4 | Byzantine | Concentric zonation: garden belt -> arable strips -> outer pasture | *Farmer's Law* (Nomos Georgikos, ed. Ashburner); A. Laiou-Thomadakis, *Peasant Society in the Late Byzantine Empire* (Princeton UP, 1977) | M | A coarser ring-level distinction, not a new parcel shape — the source's own honest framing, carried over verbatim rather than dressed up as a bespoke geometry. Modelled as the baseline strip mechanism with a garden-belt orchard boost near town and a pasture ramp farther out. |
+| M-FARM-5 | Chinese | Weitian diked polders (fish-scale/yulin patchwork): irregular embanked polygon, small paddies inside | *Built Heritage* journal, "Agricultural Heritage Value of the Polder System in Gaochun, Nanjing" (2020); XJTLU news (2023) | M | Modelled as a small, heavily-jittered grid — the outer polder boundary's own irregularity folded into the same per-cell jitter rather than a second boundary mechanism. |
+| M-FARM-6 | Aztec | No entry — chinampas already are this culture's farmland signature | — | — | A second, generic field layer over a lake-city would double up rather than add detail; `buildChinampas` (M-AZT-2) is unaffected by this register. |
+| M-FARM-7 | Viking | Solskifte (sun-division): ruled strip order, sharp infield/outfield split | Wikipedia, "Solskifte" | M | Modelled as the baseline strip mechanism near town (infield), ramping to pasture farther out (outfield) — the per-strip ordering rule itself is not separately modelled, an honest simplification. |
+| M-FARM-8 | Celtic | "Celtic field system": small near-square plots in a checkerboard/reticulate block | Oxford Reference, "Celtic fields"; Historic England Bronze/Iron Age field archaeology | H | Sub-hectare to a few ha, bounded by lynchets — modelled with low jitter, reflecting the pattern's real regularity relative to the other small-grid cultures. |
+| M-FARM-9 | Greek | Kept on the unchanged baseline strip pattern + olive-grove orchard boost | UNESCO WHL 1411 (Chersonesos chora, for the pattern this profile does NOT use) | H (for the excluded pattern) / N/A (for what is actually modelled) | The best-attested Greek field pattern (the colonial chora grid/kleroi) was laid out at a NEW colony's founding — the same anachronism M-GRK-1 already excludes, since this profile deliberately models organic, centuries-old Athens, never a fresh foundation. Applying it here would reintroduce the exact category error M-GRK-1 corrected, so it is not used; an olive-grove density boost (Attica's iconic cash crop) stands in instead. |
+| M-FARM-10 | Egyptian | Nile flood-basin agriculture: large communal dike-bounded basins | S. Postel, "Egypt's Nile Valley Basin Irrigation" (waterhistory.org) | H | Big irregular polygons, tens of hectares, not strips — modelled as chaikin-smoothed organic blobs offset from the riverbank; needs the river itself, so no entry on a landlocked site. |
+| M-FARM-11 | Mesopotamian | Canal long-lots: narrow fields perpendicular to a branching canal trunk | Durham University Eridu-region canal survey (2025); World History Encyclopedia, "Agriculture in the Fertile Crescent and Mesopotamia" | H | Short edge on the canal, running back to maximize water frontage. Falls back to the baseline strip mechanism on a landlocked site, where there is no canal-fed trunk to run perpendicular from. |
+| M-FARM-12 | Mayan | Raised-field platforms (camellones): rectangular platforms in wetland margins | Turner and Harrison, "Prehistoric Raised-Field Agriculture in the Maya Lowlands," *Science* 213 (1981) | M | Solid only where wetlands exist (Pulltrouser Swamp, Belize; Candelaria basin) — gated to run near water only; most Classic Maya cities actually relied on non-geometric swidden with no strong shape signature, an honesty caveat carried over from the source itself. |
+| M-FARM-13 | Inca | Andenes: stepped terraces hugging contour lines | Wikipedia, "Andén"; FAO Digital Media Hub | H | Modelled by resampling this engine's own `site.height`/`site.slope` fields (already load-bearing for M-TER-1) at every step, so the terrace direction genuinely bends with the local contour rather than being a fixed decorative arc. |
+| M-FARM-14 | Japanese | Small irregular paddy grid (not true contour terracing) | Nippon.com; Wikipedia, "100 Terraced Rice Fields of Japan" (MAFF list) | M | Tanada (terraced rice paddies) is the right national signature, but the source's own caveat is that a flat lowland paddy grid is more likely accurate immediately around low-lying Edo itself — followed honestly rather than overclaiming hill terracing this profile's town site may not have. |
+| M-FARM-15 | Colonial | Hacienda/estancia grants: huge rectangles, far bigger than a town lot | sizes.com, "caballeria"; Florida Memory, WPA "History of the Spanish Land Grants" | H | A caballeria (~192x384 varas, ~43 ha) or a full sitio de estancia cattle range (one square league, ~1,792 ha) — modelled as the largest cell size in this register. |
+| M-FARM-16 | Frontier | PLSS/GLO rectangular survey: exact square-mile sections in townships | Wikipedia, "Public Land Survey System"; GISGeography, "How the PLSS Works" | H | The most regular, least-jittered grid in this register, matching the real survey's own precision; a high pasture share reflects the open range this profile's own name already flags ("mining/cattle/rail"). |
+| M-FARM-17 | Industrial | Parliamentary enclosure fields: compact surveyor-drawn rectangles | EBSCO Research Starters, "Enclosure movement"; Heldring et al., NBER Working Paper 29772 | H | Post-1750 awards replaced open strips with hedgerow-bounded rectangles — squarer/larger than a strip but far smaller than Roman/Frontier/Colonial's own huge survey blocks, matching the real award sizes (a few to ~15 acres). |
+| M-FARM-18 | Venus | Ring-farming bands: concentric cultivation belts beyond the built rings | Ebenezer Howard, Garden City concentric-ring diagram (1898) | N/A (design choice) | No historical culture applies; a deliberate design choice echoing the Garden City diagram Fresco's own circular-city brief already draws on for other amenities in this profile. |
+
+Scope note (Aztec, no entry): see M-FARM-6 above — the only culture with no `FARM_SPEC` entry at
+all, since `buildChinampas` already carries its farmland signature.
+
+Scope note (Palimpsest): not an independent tradition — `buildFarmland` resolves it to Islamic's
+own `FARM_SPEC` entry (the qanat fan, M-FARM-3), the same "inherits whichever mature identity it
+actually builds" reasoning already applied to its `buildingGrammar`/`wallGates.scheme`/games
+building (M-PAL, docs/07 §3.5, §AA above).
+
+Scope note (pasture): a genuinely new detail kind (`kind:'pasture'`), rendered distinctly from a
+cultivated field (`.pasture` CSS, a muted grazing-green rather than `.field`'s cultivated gold), not
+just a differently-shaded copy of the same thing. Present wherever `FARM_SPEC` flags a
+`pastureShare` (Roman, Celtic, Frontier — an intermixed share of grid cells) or `pastureFar`
+(Byzantine, Viking — a share ramping up with distance from town, modelling the outer
+pasture/outfield zone each source itself describes) — a per-cell probability, not a per-generation
+guarantee, the same "aggregate across seeds" discipline already used elsewhere in this project for
+legitimately probabilistic effects.
+
+Scope note (never affects cross-version neutrality): `hashModel()` does not hash `model.details`
+(the same reason `model.games`/`model.civic`/`model.markets` aren't hashed either), so this
+register cannot affect cross-version neutrality regardless of how its output varies.
+
+Scope note (collision audit): the register's own dedicated test (105 culture/site/seed
+combinations) initially failed with 1281 street-crossings and 34 water-overlaps — not sited by
+`isWater`/`urban` alone being insufficient, but by every generator (the pre-existing `stripFields`
+baseline included, confirmed by running the same audit against Medieval's unchanged mechanism
+alone: 63 crossings) never checking the live street graph at all. Fixed with a shared
+`crossesStreet(g,poly)` helper reusing `buildGames`' own `edgesNear()`+`segInt()` technique,
+plumbed into all seven generators, plus two narrower water-check gaps in `canalFields`/
+`stripFields` found the same way (docs/07 §3.9 carries the full narrative). Re-verified at 0/0
+across the full audit. A fourth, distinct bug — Mesopotamian producing zero canal fields on a
+`riverthrough` site, `canalFields`' near-bank offset not scaling with `site.riverW` — surfaced only
+during the follow-up visual pass, since a poly can be geometrically valid while simply never
+getting generated at all; fixed by deriving the offset from the real channel width instead of a
+fixed constant, with a dedicated regression assertion added.
+
+---
+
 ## Usage contract
 
 1. Code cites entries by ID in a comment at the point of use (`// M-PAR-1`).

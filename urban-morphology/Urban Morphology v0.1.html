@@ -106,6 +106,7 @@ svg.panning{cursor:grabbing}
 .cross{stroke:#4a3a22;stroke-width:1;fill:none}
 .fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
 .field{fill:#dcc985;stroke:#a4874a;stroke-width:.6;opacity:.75}
+.pasture{fill:#c7d19a;stroke:#82945a;stroke-width:.6;opacity:.7}
 .chinampa{fill:#c3d6a8;stroke:#8a9e6a;stroke-width:.6;opacity:.85}
 .civicdome{fill:#5c7a8a;stroke:#2e4a54;stroke-width:.6}
 .bld.pavilion{fill:#b98a4a;stroke:#6b4e26}
@@ -2789,6 +2790,346 @@ function buildChinampas(seed,site,anchors,wallState,maxRF){
       if(details.length>220)return details;}}
   return details;}
 
+/* ---------------- per-culture farmland/pasture (M-FARM register) ----------------
+ * The hinterland around a town was, until now, the exact same generic strip-field-plus-orchard
+ * prop for every culture. A dedicated research pass (real web search, real citations, an honest
+ * "shares the baseline pattern" verdict where the record does not support a distinctive one —
+ * the same discipline already used for the M-GAMES register, docs/03 §AA) found a genuinely
+ * distinct field-division geometry for most of the 19 profiles. FARM_SPEC dispatches each to one
+ * of a handful of shape families rather than a bespoke function per culture, since several
+ * traditions share the same underlying geometry at a different scale/regularity: one big regular
+ * cadastral grid generator serves Roman/Colonial/Frontier/Industrial, one small irregular grid
+ * generator serves Celtic/Chinese/Mayan/Japanese. Medieval keeps its pre-existing selion-strip
+ * mechanism (M-GRW-5), now just factored out into stripFields() unchanged. Aztec gets no entry:
+ * chinampas (buildChinampas, M-AZT-2) already are that culture's farmland signature, and a
+ * second generic field layer over a lake-city would double up rather than add detail. Palimpsest
+ * has no entry of its own and resolves to Islamic's, exactly like GAMES_SPEC's own palimpsest
+ * special-case (docs/07 §3.7). */
+const FARM_SPEC={
+  medieval:{pattern:'strip',
+    prov:'Strip field: the pre-urban furlong fabric along the approach road (M-GRW-5) - later growth fossilizes these lines. Unchanged by this register; already the correct baseline (M-FARM-1).'},
+  roman:{pattern:'grid',cell:[130,180],jitter:0.05,align:'cardinal',pastureShare:0.12,
+    prov:'Centuriation: a rectilinear grid of large square land parcels, roads on every gridline, radiating from perpendicular cardo/decumanus baselines - 20x20 actus (roughly 710x710 m, ~50 ha) in reality, scaled schematically here to this engine\'s own units rather than a literal conversion (Wikipedia, Centuriation; B. Campbell, The Writings of the Roman Land Surveyors, 2000; H confidence, M-FARM-2).'},
+  islamic:{pattern:'fan',
+    prov:'Qanat oasis fan: narrow channel-fed strips fanning downhill from a mother-well outlet, walled orchard-gardens (bustan) closest to town and field strips beyond, radiating roughly 15-30 degrees apart (UNESCO, The Persian Qanat, WHL 2016; World History Encyclopedia, Qanat; M confidence, M-FARM-3).'},
+  byzantine:{pattern:'strip',pastureShare:0.4,pastureFar:true,gardenBoost:true,
+    prov:'Concentric zonation: a garden/vineyard belt close to the walls, open arable beyond (itself dispersed strips, unchanged geometry), common pasture/woodland outermost - a coarser ring-level distinction rather than a new parcel shape, per the source\'s own honest framing (Farmer\'s Law/Nomos Georgikos, ed. Ashburner; A. Laiou-Thomadakis, Peasant Society in the Late Byzantine Empire, Princeton UP 1977; M confidence, M-FARM-4).'},
+  chinese:{pattern:'grid',cell:[18,28],jitter:0.4,
+    prov:'Weitian diked polders (fish-scale/yulin patchwork): an irregular embanked polygon reclaimed from lake/marsh, subdivided inside by a rectilinear grid of small paddies - modelled here as a small, heavily-jittered grid (the outer polder boundary\'s own irregularity is a documented simplification, folded into the same per-cell jitter rather than a second boundary mechanism) (Built Heritage journal, Agricultural Heritage Value of the Polder System in Gaochun, Nanjing, 2020; XJTLU news 2023; M confidence, M-FARM-5).'},
+  aztec:{pattern:'none',
+    prov:'No entry: chinampas (buildChinampas, M-AZT-2) already are this culture\'s farmland signature - a second, generic field layer over a lake-city would double up rather than add detail (M-FARM-6).'},
+  viking:{pattern:'strip',pastureShare:0.45,pastureFar:true,
+    prov:'Solskifte (sun-division): arable cut into strips ordered by a rule (matching farmhouse order along the village street, a per-strip ordering this engine does not separately model) with a sharp fenced infield versus open common-grazing outfield - modelled as the baseline strip mechanism near town, ramping to pasture farther out for the outfield (Wikipedia, Solskifte; M confidence, M-FARM-7).'},
+  celtic:{pattern:'grid',cell:[20,30],jitter:0.15,pastureShare:0.3,
+    prov:'Celtic field system (the archaeologists\' term, not an ethnic claim): small, near-square plots bounded by lynchets, packed in a checkerboard/reticulate block, sub-hectare to a few ha - modelled with low jitter, reflecting the pattern\'s real regularity (Oxford Reference, Celtic fields; Historic England Bronze/Iron Age field archaeology; H confidence, M-FARM-8).'},
+  greek:{pattern:'strip',gardenBoost:true,
+    prov:'The best-attested Greek geometric field pattern is the colonial chora grid (kleroi) - e.g. Chersonesos\'s ~10,000 ha divided into ~400 lots (UNESCO WHL 1411) - but that grid was laid out at a NEW colony\'s founding, the same anachronism this profile\'s own M-GRK-1 already excludes (it deliberately models organic, centuries-old Athens, never re-planned, not a new foundation): applying a colony-founding grid to a city this profile explicitly says was never founded that way would reintroduce the exact category error M-GRK-1 corrected. Kept on the baseline strip pattern instead, with an olive-grove orchard-density boost - Attica\'s iconic cash crop, well-attested in general classical scholarship - standing in for the real geometric signature this profile cannot honestly claim (M-FARM-9).'},
+  egyptian:{pattern:'basins',
+    prov:'Nile flood-basin agriculture: large communal basins (hod) bounded by earthen dikes parallel and perpendicular to the river, filled by the annual flood via sluice and held 30-60 days - big irregular polygons, tens of hectares, not strips (S. Postel, Egypt\'s Nile Valley Basin Irrigation, waterhistory.org; H confidence, M-FARM-10).'},
+  mesopotamian:{pattern:'canal',
+    prov:'Canal long-lots: narrow fields with their short edge on the canal, running back from it to maximize water frontage, off river-levee trunk channels branching in a comb pattern - very elongated strips off a branching trunk (Durham University Eridu-region canal survey, 2025; World History Encyclopedia, Agriculture in the Fertile Crescent and Mesopotamia; H confidence, M-FARM-11). Falls back to the baseline strip mechanism on a landlocked site, where there is no canal-fed trunk to run perpendicular from.'},
+  mayan:{pattern:'grid',cell:[14,20],jitter:0.2,waterOnly:true,
+    prov:'Raised-field platforms (camellones): rectangular platforms separated by drainage canals in a grid, documented in wetland margins (Pulltrouser Swamp, Belize; Candelaria basin) - solid only where wetlands exist, so gated to run near water only; most Classic Maya cities actually relied on non-geometric swidden with no strong shape signature, making this the best available option rather than a universal one, an honesty caveat carried over from the source itself (Turner and Harrison, Prehistoric Raised-Field Agriculture in the Maya Lowlands, Science 213, 1981; M confidence, M-FARM-12).'},
+  inca:{pattern:'terraces',
+    prov:'Andenes: stepped terraces hugging contour lines behind stone retaining walls - modelled by resampling the actual local gradient of this engine\'s own site.height/site.slope fields (already load-bearing for M-TER-1) at every step, so the terrace direction genuinely bends with the terrain\'s contour rather than being drawn as a fixed decorative arc (Wikipedia, Anden; FAO Digital Media Hub; H confidence, M-FARM-13).'},
+  japanese:{pattern:'grid',cell:[14,22],jitter:0.3,
+    prov:'Tanada (terraced rice paddies) is the right national signature, but the source\'s own caveat is that a flat lowland paddy grid is more likely accurate immediately around low-lying Edo itself - modelled as a small irregular paddy grid rather than true contour terracing, honestly following that caveat rather than overclaiming hill terracing this profile\'s own town site may not have (Nippon.com; Wikipedia, 100 Terraced Rice Fields of Japan, MAFF list; M confidence, M-FARM-14).'},
+  colonial:{pattern:'grid',cell:[160,220],jitter:0.22,align:'terrain',
+    prov:'Hacienda/estancia grants: huge rectangles, far bigger than an ordinary town lot - a caballeria (roughly 192x384 varas, ~43 ha, about 1:2) or a full sitio de estancia cattle range (one square league, ~1,792 ha) (sizes.com, caballeria; Florida Memory, WPA History of the Spanish Land Grants; H confidence, M-FARM-15).'},
+  frontier:{pattern:'grid',cell:[110,140],jitter:0.02,align:'cardinal',pastureShare:0.5,
+    prov:'PLSS/GLO rectangular survey: exact square-mile sections in 6x6-mile townships, a quarter-section (160 ac) homestead claim - the most regular, least jittered grid in this register, matching the real survey\'s own precision; a high pasture share reflects the open range this profile\'s own name already flags (mining/cattle/rail) (Wikipedia, Public Land Survey System; GISGeography, How the PLSS Works; H confidence, M-FARM-16).'},
+  industrial:{pattern:'grid',cell:[55,80],jitter:0.12,align:'terrain',
+    prov:'Parliamentary enclosure fields: post-1750 awards replaced open strips with compact surveyor-drawn rectangles bounded by hedgerows - squarer and larger than a strip but far smaller than Roman/Frontier/Colonial\'s own huge survey blocks, matching the real award sizes (a few to about 15 acres) (EBSCO Research Starters, Enclosure movement; Heldring et al., NBER Working Paper 29772; H confidence, M-FARM-17).'},
+  venus:{pattern:'ring',
+    prov:'Ring-farming bands: concentric cultivation belts beyond the built rings, echoing Ebenezer Howard\'s Garden City concentric-ring diagram (1898) - a deliberate design choice, not a historical claim, since no historical culture applies (N/A by design, M-FARM-18).'},
+};
+// shared street-crossing guard for every farmland generator (M-FARM register): reuses the exact
+// spatial-hash edgesNear()+segInt() technique buildGames' own blocked() already established for
+// games buildings. The exterior hinterland is NOT free of streets — primary routes reach well
+// past the urban core toward neighbouring settlements (M-REG-1) — and this project's own test
+// data caught real crossings once actually audited, across every pattern family including the
+// pre-existing, unchanged medieval strip mechanism: found empirically (a dedicated audit, not
+// assumed safe just because a candidate sits beyond urban()/isWater()), then fixed here rather
+// than left as a latent gap the new, more thorough farmland test happened to be the first to
+// actually check for.
+function crossesStreet(g,poly){
+  for(let i=0;i<poly.length;i++){
+    const A=poly[i],B=poly[(i+1)%poly.length];
+    for(const eid of edgesNear(g,A,B)){
+      const e=g.edges[eid];if(!e||!e.alive)continue;
+      if(segInt(A,B,g.nodes[e.a],g.nodes[e.b]))return true;}}
+  return false;}
+function stripFields(rng,site,anchors,g,urban,opt){
+  const details=[];let did=0;
+  const pastureShare=opt.pastureShare||0,pastureFar=!!opt.pastureFar;
+  for(const e of g.edges){
+    if(!e.alive||e.cls!=='primary')continue;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    const mid=V.lerp(a,b,0.5);
+    if(urban(mid))continue;
+    if(V.dist(mid,anchors.market)<330)continue;
+    const dir=V.norm(V.sub(b,a));const nl=V.rot90(dir);
+    const L=V.dist(a,b);
+    const rf=stream(fnv1a('f'+e.id),'fields');
+    for(let t=18;t<L-12;t+=rf.range(28,40)){ // selion-width strips (M-GRW-5)
+      const p=V.add(a,V.mul(dir,t));
+      const stripW=rf.range(4,7),half=V.mul(dir,stripW/2);
+      for(const s of [1,-1]){
+        const q1=V.add(p,V.mul(nl,s*9)),q2=V.add(p,V.mul(nl,s*rf.range(70,140)));
+        // q1 itself, not just the far point/midpoint: on a riverthrough site a road can run close
+        // enough alongside the channel that the near end of a strip already dips in, a residual
+        // gap this register's own water audit still caught even after the other two points passed.
+        if(site.isWater(q1)||site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5)))continue;
+        if(urban(q2))continue;
+        const poly=[V.sub(q1,half),V.add(q1,half),V.add(q2,half),V.sub(q2,half)];
+        if(crossesStreet(g,poly))continue;
+        let kind='field';
+        if(pastureShare>0){
+          const distFrac=pastureFar?Math.max(0,Math.min(1,(V.dist(q2,anchors.market)-330)/550)):1;
+          if(rf.chance(pastureShare*(pastureFar?(0.1+0.9*distFrac):1)))kind='pasture';}
+        details.push({id:'farm'+(did++),kind,poly,prov:opt.prov});}}
+    if(details.length>260)break;}
+  return details;}
+// big regular (Roman/Colonial/Frontier/Industrial) and small irregular (Celtic/Chinese/Mayan/
+// Japanese) cadastral grids are the SAME lattice-scan algorithm at different cell/jitter settings
+// (M-FARM register) - one generator, not four near-duplicates.
+function gridFields(rng,site,anchors,g,urban,maxRF,opt){
+  const details=[];let did=0;
+  const cap=opt.cap||280;
+  // a small cell size on a large town can put tens of thousands of lattice points inside the
+  // scan span, and both site.isWater and urban (pointInPoly against a many-vertexed wall/fort
+  // ring) are O(shoreline/ring length) per call — found by timing the full test suite, which
+  // regressed from seconds to several minutes once this generator started probing that many
+  // candidates; a budget on EXAMINED candidates (not just accepted ones) bounds the worst case
+  // regardless of acceptance rate, independent of the existing accepted-count cap below.
+  const maxCand=1200;
+  let cand=0;
+  const dir=opt.align==='cardinal'?{x:1,y:0}:(opt.dirHint||{x:1,y:0.18});
+  const perp=V.rot90(dir);
+  const cMin=opt.cell[0],cMax=opt.cell[1];
+  const cell=(cMin+cMax)/2;
+  const jitter=opt.jitter||0;
+  const origin=anchors.market;
+  const span=maxRF*1.9;
+  const nSteps=Math.ceil(span/cell);
+  for(let i=-nSteps;i<=nSteps;i++){
+    for(let j=-nSteps;j<=nSteps;j++){
+      const c=V.add(origin,V.add(V.mul(dir,i*cell),V.mul(perp,j*cell)));
+      if(c.x<30||c.y<30||c.x>site.Wm-30||c.y>site.Hm-30)continue;
+      if(V.dist(c,origin)>span)continue;
+      if(cand++>maxCand)return details;
+      if(urban(c))continue;
+      if(opt.waterOnly){if(site.riverDist(c)>100)continue;}
+      else if(site.isWater(c))continue;
+      const w=rng.range(cMin,cMax),d=rng.range(cMin,cMax);
+      const jc={x:c.x+rng.range(-jitter,jitter)*cell*0.4,y:c.y+rng.range(-jitter,jitter)*cell*0.4};
+      const poly=orientedRect(jc,dir,w*0.86,d*0.86);
+      if(poly.some(v=>site.isWater(v)))continue;
+      if(urban(polyCentroid(poly)))continue;
+      if(crossesStreet(g,poly))continue;
+      const kind=rng.chance(opt.pastureShare||0)?'pasture':'field';
+      details.push({id:'farm'+(did++),kind,poly,prov:opt.prov});
+      if(details.length>cap)return details;}}
+  return details;}
+// qanat oasis fan (Islamic/Palimpsest, M-FARM-3): irrigation wedges radiating from a mother-well
+// outlet sited on the dry/inland side of town within a bounded arc, not a full circle.
+function fanFields(rng,site,anchors,g,urban,maxRF,prov){
+  const details=[];let did=0;
+  let away={x:1,y:0.05};
+  if(!site.noWater){
+    // the gradient of distance-to-water, evaluated AT THE MARKET, points away from the water by
+    // construction — the same gradient technique buildChinampas already uses for its own opposite
+    // "into water" direction, just without that final negation. Replaces an earlier fixed
+    // array-index sample (site.river[len/2]) that used the river polyline's own geometric middle
+    // as a stand-in for "the nearby riverbank" — wrong whenever the market sits far along the
+    // river from that middle index (found via direct debugging: for a market near either end of
+    // the river, the computed direction pointed nowhere near the real nearest bank, and the origin
+    // it produced landed off the map entirely, at x>Wm — zero fields resulted, not a subtly wrong
+    // count, which is what actually surfaced this while reviewing this register's own test data).
+    const m=anchors.market,e=8;
+    const gx=site.riverDist({x:m.x+e,y:m.y})-site.riverDist({x:m.x-e,y:m.y});
+    const gy=site.riverDist({x:m.x,y:m.y+e})-site.riverDist({x:m.x,y:m.y-e});
+    if(Math.hypot(gx,gy)>1e-6)away=V.norm({x:gx,y:gy});}
+  const originAngle=Math.atan2(away.y,away.x);
+  // clamped, not just offset: a market already close to a map edge could still push the raw
+  // offset past the boundary even with the correct direction, so the origin is pinned to stay
+  // safely on-map regardless of magnitude, rather than only trusting the direction fix above.
+  const marginC=60;
+  const origin={
+    x:Math.max(marginC,Math.min(site.Wm-marginC,anchors.market.x+away.x*maxRF*0.95)),
+    y:Math.max(marginC,Math.min(site.Hm-marginC,anchors.market.y+away.y*maxRF*0.95))};
+  const nRays=rng.int(9,13),arc=rng.range(1.6,2.3);
+  const a0=originAngle-arc/2;
+  const halfAngStep=arc/(2*Math.max(1,nRays-1));
+  for(let i=0;i<nRays;i++){
+    const ang=a0+(nRays>1?(i/(nRays-1))*arc:0)+rng.range(-0.03,0.03);
+    const dir={x:Math.cos(ang),y:Math.sin(ang)};
+    const perp=V.rot90(dir);
+    let r0=rng.range(10,20);
+    for(let ring=0;ring<7;ring++){
+      const r1=r0+rng.range(30,55);
+      const halfW0=r0*Math.tan(halfAngStep)*0.85,halfW1=r1*Math.tan(halfAngStep)*0.85;
+      const p0=V.add(origin,V.mul(dir,r0)),p1=V.add(origin,V.mul(dir,r1));
+      const poly=[V.add(p0,V.mul(perp,-halfW0)),V.add(p1,V.mul(perp,-halfW1)),
+        V.add(p1,V.mul(perp,halfW1)),V.add(p0,V.mul(perp,halfW0))];
+      r0=r1;
+      if(poly.some(v=>v.x<20||v.y<20||v.x>site.Wm-20||v.y>site.Hm-20))continue;
+      if(poly.some(v=>site.isWater(v))||urban(polyCentroid(poly)))continue;
+      if(crossesStreet(g,poly))continue;
+      details.push({id:'farm'+(did++),kind:'field',poly,prov});
+      if(details.length>200)return details;}}
+  return details;}
+// Nile flood-basin agriculture (Egyptian, M-FARM-10): a handful of large irregular dike-bounded
+// blobs offset from the river/coast, elongated along the bank rather than perpendicular to it.
+function basinFields(rng,site,anchors,g,urban,maxRF,prov){
+  const details=[];let did=0;
+  if(site.noWater)return details;
+  const riv=site.river;
+  const nBasins=rng.int(4,7);
+  let tries=0;
+  while(details.length<nBasins&&tries<80){
+    tries++;
+    const i=rng.int(1,riv.length-2);
+    const A=riv[i-1],B=riv[i+1];
+    const tangent=V.norm(V.sub(B,A));
+    if(!isFinite(tangent.x)||!isFinite(tangent.y))continue;
+    const nrm=V.rot90(tangent);
+    const side=rng.chance(0.5)?1:-1;
+    const outw=rng.range(75,170);
+    const c=V.add(riv[i],V.mul(nrm,side*outw));
+    if(c.x<45||c.y<45||c.x>site.Wm-45||c.y>site.Hm-45)continue;
+    if(urban(c)||V.dist(c,anchors.market)<maxRF*0.75)continue;
+    const baseR=rng.range(55,95),sides=9,poly=[];
+    for(let k=0;k<sides;k++){const a=2*Math.PI*k/sides;
+      const rad=baseR*(1+rng.range(-0.3,0.3));
+      poly.push(V.add(c,V.add(V.mul(tangent,Math.cos(a)*rad*1.35),V.mul(nrm,Math.sin(a)*rad))));}
+    const smoothed=chaikin(poly,true);
+    if(smoothed.some(v=>site.isWater(v)||v.x<10||v.y<10||v.x>site.Wm-10||v.y>site.Hm-10))continue;
+    if(crossesStreet(g,smoothed))continue;
+    details.push({id:'farm'+(did++),kind:'field',poly:smoothed,prov});}
+  return details;}
+// canal long-lots (Mesopotamian, M-FARM-11): strips perpendicular to the river/canal bank,
+// mirroring buildChinampas' own perpendicular-offset technique but on the dry land side.
+function canalFields(rng,site,anchors,g,urban,maxRF,prov){
+  if(site.noWater)return stripFields(rng,site,anchors,g,urban,{prov:'Strip field (fallback: no watercourse to run canal long-lots from on this landlocked site): the pre-urban furlong fabric along the approach road (M-GRW-5).'});
+  const details=[];let did=0;
+  const riv=site.river;
+  for(let i=1;i<riv.length-1;i++){
+    const A=riv[i-1],B=riv[i+1];
+    const tangent=V.norm(V.sub(B,A));
+    if(!isFinite(tangent.x)||!isFinite(tangent.y))continue;
+    if(!rng.chance(0.5))continue;
+    const nrm=V.rot90(tangent);
+    const side=rng.chance(0.5)?1:-1;
+    const p=riv[i];
+    if(V.dist(p,anchors.market)<maxRF*0.85)continue;
+    const stripLen=rng.range(60,130),w=rng.range(6,10);
+    // clear the river's OWN half-width, not a fixed constant: a riverthrough site's channel can
+    // run up to 30 units wide (half-width up to 15), so a fixed 14-unit near offset sometimes left
+    // q1 still inside the water band — found via this register's own water audit reproducing as
+    // EVERY candidate failing specifically on riverthrough (16 water-rejects out of 16 survivors,
+    // not a handful), traced to this exact offset via direct instrumentation rather than assumed
+    // from the mechanism's own description; +4 is a small extra clearance margin past the bank.
+    const bankClear=site.riverW/2+4;
+    const q1=V.add(p,V.mul(nrm,side*bankClear)),q2=V.add(p,V.mul(nrm,side*(bankClear+stripLen)));
+    // the river can curve between the near and far ends of a strip this long, so the far point
+    // alone isn't enough — check the midpoint too, the same two-point discipline stripFields
+    // already uses for exactly this reason (found missing here via this register's own water
+    // audit: a real, reproducible failure specifically on the riverthrough site kind, where the
+    // channel bends most).
+    if(site.isWater(q1)||site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5))||urban(q2))continue;
+    if(q2.x<20||q2.y<20||q2.x>site.Wm-20||q2.y>site.Hm-20)continue;
+    const half=V.mul(tangent,w/2);
+    const poly=[V.sub(q1,half),V.add(q1,half),V.add(q2,half),V.sub(q2,half)];
+    if(crossesStreet(g,poly))continue;
+    details.push({id:'farm'+(did++),kind:'field',poly,prov});
+    if(details.length>220)break;}
+  return details;}
+// Andean andenes (Inca, M-FARM-13): contour-following terraces - the direction is resampled from
+// the real site.height/site.slope gradient at every step, so it genuinely bends with the terrain
+// rather than being a fixed decorative arc.
+function terraceFields(rng,site,anchors,g,urban,maxRF,prov){
+  const details=[];let did=0;
+  let best=null,bestSlope=-1;
+  for(let i=0;i<28;i++){
+    const ang=rng.u()*Math.PI*2;
+    const rad=maxRF*rng.range(0.85,1.5);
+    const p={x:anchors.market.x+Math.cos(ang)*rad,y:anchors.market.y+Math.sin(ang)*rad};
+    if(p.x<40||p.y<40||p.x>site.Wm-40||p.y>site.Hm-40)continue;
+    if(site.isWater(p))continue;
+    const s=site.slope(p);
+    if(s>bestSlope){bestSlope=s;best=p;}}
+  if(!best)return details;
+  const grad=(p)=>{const e=8;
+    return V.norm({x:site.height({x:p.x+e,y:p.y})-site.height({x:p.x-e,y:p.y}),
+                    y:site.height({x:p.x,y:p.y+e})-site.height({x:p.x,y:p.y-e})});};
+  const nTerraces=rng.int(7,11);
+  let p=best,dir=grad(best);
+  const step=rng.range(9,13);
+  for(let i=0;i<nTerraces;i++){
+    const g1=grad(p);
+    if(V.len(g1)>1e-6)dir=g1;
+    const along=V.rot90(dir);
+    const half=rng.range(30,55),w=rng.range(6,9);
+    const a=V.add(p,V.mul(along,-half)),b=V.add(p,V.mul(along,half));
+    if(!site.isWater(a)&&!site.isWater(b)&&!urban(a)&&!urban(b)){
+      const poly=[V.add(a,V.mul(dir,w/2)),V.add(b,V.mul(dir,w/2)),
+        V.add(b,V.mul(dir,-w/2)),V.add(a,V.mul(dir,-w/2))];
+      if(!crossesStreet(g,poly)){
+        details.push({id:'farm'+(did++),kind:'field',poly,prov});
+        if(details.length>60)break;}}
+    p=V.add(p,V.mul(dir,step));}
+  return details;}
+// Venus ring-farming bands (M-FARM-18): a design choice, not a historical claim - concentric
+// cultivation belts beyond the built rings, echoing the Garden City diagram.
+function ringFields(rng,site,anchors,g,urban,maxRF,prov){
+  const details=[];let did=0;
+  const nRings=rng.int(3,4);
+  let r0=maxRF*1.02;
+  for(let ring=0;ring<nRings;ring++){
+    const r1=r0+rng.range(45,70);
+    const nSeg=rng.int(14,20);
+    const a0=rng.u()*Math.PI*2;
+    for(let i=0;i<nSeg;i++){
+      const a1=a0+(i/nSeg)*Math.PI*2,a2=a0+((i+1)/nSeg)*Math.PI*2;
+      const poly=[
+        {x:anchors.market.x+Math.cos(a1)*r0,y:anchors.market.y+Math.sin(a1)*r0},
+        {x:anchors.market.x+Math.cos(a2)*r0,y:anchors.market.y+Math.sin(a2)*r0},
+        {x:anchors.market.x+Math.cos(a2)*r1,y:anchors.market.y+Math.sin(a2)*r1},
+        {x:anchors.market.x+Math.cos(a1)*r1,y:anchors.market.y+Math.sin(a1)*r1}];
+      if(poly.some(v=>site.isWater(v)||v.x<15||v.y<15||v.x>site.Wm-15||v.y>site.Hm-15))continue;
+      if(urban(polyCentroid(poly)))continue;
+      if(crossesStreet(g,poly))continue;
+      const kind=rng.chance(0.3)?'pasture':'field';
+      details.push({id:'farm'+(did++),kind,poly,prov});
+      if(details.length>200)return details;}
+    r0=r1;}
+  return details;}
+function buildFarmland(seed,site,anchors,g,wallState,maxRF,profile){
+  const spec=profile.id==='palimpsest'?FARM_SPEC.islamic:FARM_SPEC[profile.id];
+  if(!spec||spec.pattern==='none')return [];
+  const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
+  const rng=stream(seed,'farmland');
+  if(spec.pattern==='strip')return stripFields(rng,site,anchors,g,urban,spec);
+  if(spec.pattern==='grid'){
+    let dirHint={x:1,y:0.18};
+    if(spec.align!=='cardinal'){
+      let sx=0,sy=0,any=false;
+      for(const e of g.edges){
+        if(!e.alive||e.cls!=='primary')continue;
+        const d=V.sub(g.nodes[e.b],g.nodes[e.a]);
+        const len=V.len(d);if(len<1e-6)continue;
+        const ang=Math.atan2(d.y,d.x)*2; // double-angle: opposite directions average to the same axis
+        sx+=Math.cos(ang)*len;sy+=Math.sin(ang)*len;any=true;}
+      if(any){const meanAng=Math.atan2(sy,sx)/2;dirHint={x:Math.cos(meanAng),y:Math.sin(meanAng)};}}
+    return gridFields(rng,site,anchors,g,urban,maxRF,Object.assign({dirHint},spec));}
+  if(spec.pattern==='fan')return fanFields(rng,site,anchors,g,urban,maxRF,spec.prov);
+  if(spec.pattern==='basins')return basinFields(rng,site,anchors,g,urban,maxRF,spec.prov);
+  if(spec.pattern==='canal')return canalFields(rng,site,anchors,g,urban,maxRF,spec.prov);
+  if(spec.pattern==='terraces')return terraceFields(rng,site,anchors,g,urban,maxRF,spec.prov);
+  if(spec.pattern==='ring')return ringFields(rng,site,anchors,g,urban,maxRF,spec.prov);
+  return [];}
+
 /* Factory/mill (M-IND-2), the Industrial profile's one new building type: rather than siting a
  * new freestanding footprint (and risking exactly the kind of overlap this project audits
  * against), it re-tags the town's own largest already-placed warehouse/insula-block building —
@@ -2829,9 +3170,8 @@ function applyDecay(seed,parcels,buildings){
   for(const b of buildings)if(ruinedIds.has(b.parcel))b.ruined=true;
 }
 
-function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour){
+function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour,profile){
   const r=stream(seed,'details');
-  const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
   const details=[];let did=0;
   // wells: one per ~250-400 residents (M-DEN-7), at well-connected nodes away from each other
   const nWells=Math.max(2,Math.round(pop/320));
@@ -2874,42 +3214,27 @@ function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,max
     if(par.district!=='agrarian'&&!(par.district==='suburb'&&par.empty))continue;
     details.push({id:'det'+(did++),kind:'fence',poly:par.poly,
       prov:'Plot fence: low-density holdings are enclosed rather than built to the line (M-BLD-5).'});}
-  // strip fields fossilizing along the approach roads (M-GRW-5): rendered as filled cultivated
-  // strips (the same "filled strip, not a bare line" technique the chinampas already use), since a
-  // boundary-only line at a stroke width this fine reads as functionally invisible against the
-  // parchment background — found and fixed after the render was actually looked at, not assumed
-  // correct from the mechanism's own description.
-  for(const e of g.edges){
-    if(!e.alive||e.cls!=='primary')continue;
-    const a=g.nodes[e.a],b=g.nodes[e.b];
-    const mid=V.lerp(a,b,0.5);
-    if(urban(mid))continue;
-    if(V.dist(mid,anchors.market)<330)continue;
-    const dir=V.norm(V.sub(b,a));const nl=V.rot90(dir);
-    const L=V.dist(a,b);
-    const rf=stream(fnv1a('f'+e.id),'fields');
-    for(let t=18;t<L-12;t+=rf.range(28,40)){ // selion-width strips (M-GRW-5)
-      const p=V.add(a,V.mul(dir,t));
-      const stripW=rf.range(4,7),half=V.mul(dir,stripW/2);
-      for(const s of [1,-1]){
-        const q1=V.add(p,V.mul(nl,s*9)),q2=V.add(p,V.mul(nl,s*rf.range(70,140)));
-        if(site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5)))continue;
-        if(urban(q2))continue;
-        const poly=[V.sub(q1,half),V.add(q1,half),V.add(q2,half),V.sub(q2,half)];
-        details.push({id:'det'+(did++),kind:'field',poly,
-          prov:'Strip field: the pre-urban furlong fabric along the approach road (M-GRW-5) — later growth fossilizes these lines.'});}}
-    if(details.filter(d=>d.kind==='field').length>260)break;}
   // orchards on some agrarian parcels — visually distinct from a plain garden tree (bigger,
   // more saturated fill, heavier stroke), not just a barely-different fill shade on the same
-  // tiny dot, so the regular planting grid actually reads as an orchard at a glance
+  // tiny dot, so the regular planting grid actually reads as an orchard at a glance. A profile
+  // flagged gardenBoost (FARM_SPEC, M-FARM register) gets a denser planting with its own
+  // provenance — Greek's olive groves (M-FARM-9), Byzantine's concentric garden belt (M-FARM-4)
+  // — reusing this same mechanism rather than a second orchard code path.
+  const farmSpec=FARM_SPEC[profile.id];
+  const gardenBoost=!!(farmSpec&&farmSpec.gardenBoost);
+  const orchardProv=profile.id==='greek'
+    ?'Olive grove: intensive olive cultivation on the agrarian fringe, Attica\'s iconic cash crop (M-FARM-9).'
+    :profile.id==='byzantine'
+    ?'Garden belt: the innermost ring of the concentric-zonation model, kitchen gardens and orchards hard by the walls (M-FARM-4).'
+    :'Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).';
   for(const par of parcels){
     if(par.district!=='agrarian'||!par.empty)continue;
     const rb=stream(fnv1a(par.id),'orchard');
-    if(!rb.chance(0.5))continue;
+    if(!rb.chance(gardenBoost?0.8:0.5))continue;
     for(let u=0.18;u<0.9;u+=0.24)for(let v=0.2;v<0.9;v+=0.26){
       const p=bmap(par,u,v);
       details.push({id:'det'+(did++),kind:'tree',orchard:true,x:p.x,y:p.y,rr:3.2,
-        prov:'Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).'});}
+        prov:orchardProv});}
   }
   return details;}
 
@@ -3130,7 +3455,8 @@ function generate(seed,opts){
   const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
   const games=buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic);
-  const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
+  const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour,profile);
+  details.push(...buildFarmland(seed,site,anchors,g,wallState,maxRF,profile));
   if(profile.chinampas)details.push(...buildChinampas(seed,site,anchors,wallState,maxRF));
   // when the star fort is built canal-fed (M-VEN-3), the fort's own wet-moat rendering already
   // carries the canal visually — skip the separate decorative ring so it doesn't duplicate it
@@ -3230,6 +3556,11 @@ function render(){
   for(const d of model.details)if(d.kind==='field'){
     const e=el('path',{d:pd(d.poly),class:'field'},L.fields);
     reg(e,'Strip field','Cultivated field strip',{},d.prov);}
+  // pasture (M-FARM register): the same filled-polygon treatment as a cultivated field, a
+  // visually distinct grazing-land colour so the two read apart at a glance
+  for(const d of model.details)if(d.kind==='pasture'){
+    const e=el('path',{d:pd(d.poly),class:'pasture'},L.fields);
+    reg(e,'Pasture','Pasture / grazing land',{},d.prov);}
   // chinampas sit IN the water, so they must draw in a layer AFTER 'water' in z-order (L.fields
   // is drawn before 'water' and would be invisible, entirely covered by the water fill)
   for(const d of model.details)if(d.kind==='chinampa'){
@@ -3610,6 +3941,10 @@ function renderLegend(){
     <span><span class="chip" style="background:#4a3a22"></span>Wall</span>
     <span><span class="chip" style="background:#b9c7c3"></span>Water</span>
     <span><span class="chip" style="background:#9aa96e;border-radius:50%"></span>Tree</span>`;
+  if(model.details.some(d=>d.kind==='field'))
+    html+=`<span><span class="chip" style="background:#dcc985;border-color:#a4874a"></span>Field</span>`;
+  if(model.details.some(d=>d.kind==='pasture'))
+    html+=`<span><span class="chip" style="background:#c7d19a;border-color:#82945a"></span>Pasture</span>`;
   if(model.details.some(d=>d.kind==='chinampa'))
     html+=`<span><span class="chip" style="background:#c3d6a8;border-color:#8a9e6a"></span>Chinampa</span>`;
   if(model.details.some(d=>d.kind==='waterway'))

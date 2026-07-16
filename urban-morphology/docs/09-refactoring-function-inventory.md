@@ -184,13 +184,17 @@ panel/editor DOM rather than copied verbatim.
 | `buildChinampas` | Aztec raised-bed garden strips reclaimed from the shore | REUSE |
 | `tagFactory` | Industrial mill-anchor re-tagging (reuses an already-placed building, never new geometry) | REUSE |
 | `applyDecay` | the `ruined` toggle's decay pass (docs/03 M-PA) — profile-agnostic by design | REUSE |
-| `buildDetails` | trees/wells/crosses/fences/strip-fields/orchards/bollards — **the function task #66 (per-culture farmland) will extend** | REUSE (pending task #66's in-flight per-culture rework) |
+| `buildDetails` | trees/wells/crosses/fences/bollards + the per-profile orchard-density/provenance boost (`gardenBoost`, docs/03 M-FARM register) — no longer contains the strip-field mechanism itself, which task #66 extracted into `stripFields` below | REUSE |
+| `FARM_SPEC` (18 keys: 17 with a pattern + Aztec's `{pattern:'none'}`; Palimpsest has no entry of its own, inherited via the same `profile.id==='palimpsest'` special-case lookup pattern `GAMES_SPEC` already established, resolving to `FARM_SPEC.islamic`) | per-culture farmland/pasture registry (docs/03 M-FARM register, docs/07 §3.9) — task #66, landed after this document's first draft | REUSE unchanged |
+| `crossesStreet` | shared street-crossing guard (spatial-hash `edgesNear()`+`segInt()`, the same technique `buildGames`' own `blocked()` already established) called from all seven farmland generators below — added after this register's own audit caught 1281 real crossings on first run, including 63 in the pre-existing `stripFields` mechanism alone | REUSE unchanged |
+| `stripFields` / `gridFields` / `fanFields` / `basinFields` / `canalFields` / `terraceFields` / `ringFields` | the seven farmland shape-family generators `buildFarmland` dispatches across via `FARM_SPEC.pattern` — `gridFields` alone serves four big-regular and four small-irregular cultures via cell-size/jitter/alignment parameters rather than eight near-duplicate functions; `terraceFields` is the one pattern that queries `site.height`/`site.slope` directly (real terrain-following geometry, not a decorative shape) | REUSE unchanged — `terraceFields`' direct `site.height`/`site.slope` calls are exactly the shape `siteFromTerrain`'s replacement fields need to support (docs/06 §3.1), a live consumer of that interface beyond `terrainSuitability` |
+| `buildFarmland` | per-profile farmland dispatcher (mirrors `buildGames`'s `GAMES_SPEC` lookup pattern exactly): resolves `FARM_SPEC`, computes a dominant-street-axis `dirHint` for non-cardinal grid alignments (a length-weighted circular mean over live primary edges), calls the matching generator | REUSE unchanged |
 
 ### 3.14 Metrics, generation entry point, export
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `computeMetrics` | morphometric validation bands (deg3/deg4 share, meshedness, median frontage, …) | REUSE — becomes the city module's own regression suite, exactly as `docs/06` §4 anticipates ("the PoC's 194-assertion headless suite… become the city module's suite" — a direct quote from docs/06 as originally written; the suite has since grown to **1199 assertions**, docs/06's own count simply predates most of this project's later work) |
+| `computeMetrics` | morphometric validation bands (deg3/deg4 share, meshedness, median frontage, …) | REUSE — becomes the city module's own regression suite, exactly as `docs/06` §4 anticipates ("the PoC's 194-assertion headless suite… become the city module's suite" — a direct quote from docs/06 as originally written; the suite has since grown to **1233 assertions**, docs/06's own count simply predates most of this project's later work) |
 | `generate(seed,opts)` | **the pipeline orchestrator** — every function above, called in the fixed order documented in `docs/07` | **RENAME** to `cityGen(placeContext)` (§2) + **ADAPT** its opts object to unpack a `placeContext` (docs/06 §4) instead of raw `{seed,pop,epochs,walls,fortified,site,harbourDefence,faith,civicStyle,culture,rules,terrainAware,ruined}` |
 | `hashModel(m)` | selective FNV hash over graph/blocks/parcels/buildings (civic/markets/games/details deliberately excluded — confirmed throughout docs/03's M-GAMES register write-up) — the cross-version neutrality mechanism | REUSE — becomes the city module's own determinism-regression tool, independent of whatever hashing (if any) Gen1's own EF pipeline uses for its `g-toggle round-trip` invariant |
 
@@ -233,7 +237,7 @@ against a direct re-read of `Cartalith Gen1 v0.85.html`. What this document adds
    recommendation for each.
 2. **One free win**: `mulberry32` needs no porting at all — Gen1 already carries a byte-equivalent
    PRNG, so the eventual `cityGen()` can call Gen1's own copy rather than shipping a second one.
-3. **Confirmation that the overwhelming majority of the 115 functions are REUSE-as-is** — of the
+3. **Confirmation that the overwhelming majority of the ~123 functions are REUSE-as-is** — of the
    full inventory, only `buildSite` is a true replacement (swapped for `siteFromTerrain`), a
    double-digit handful are ADAPT (site-model consumers, era/faction/economy hooks docs/06 already
    flagged), and the rest of the non-app-shell functions port with zero logic changes. The
@@ -281,6 +285,15 @@ incremental discipline this project has held itself to throughout:
 - **Where the fourth script block actually lives** — a genuine new block 4, or a lazy-loaded
   module fetched only when a settlement is opened? Docs/06 §4 floats both; this document doesn't
   pick one, since it's a Gen1-side packaging decision this project has no visibility into.
-- **Task #66 (per-culture farmland)** is in flight as of this writing and will add new entries to
-  `buildDetails` (§3.13) before this port would actually happen — this inventory's disposition for
-  that function should be re-checked once that work lands, not treated as final.
+- **Task #66 (per-culture farmland) has since landed** — `FARM_SPEC`/`buildFarmland` and the seven
+  shape-family generators are now in §3.13 above, all REUSE unchanged; this bullet is kept only as
+  a record that the disposition above was re-checked against the actual shipped code, not assumed
+  from this document's own first draft.
+- **A real timing characteristic, found incidentally while shipping task #66, worth carrying into
+  the "is `cityGen()` fast enough to run synchronously" question above**: this PoC's own synthetic
+  `buildSite` makes `isWater`/`riverDist` an O(shoreline-length) linear scan, and river/bay/coast
+  site generation was measured (before any task #66 code ran) at roughly 4-6x a landlocked site's
+  wall-clock cost at the same population. Whether this carries over to Gen1's real terrain fields
+  is genuinely unknown — `siteFromTerrain` (docs/06 §3.1) replaces this synthetic site with a real
+  raster lookup, a different cost profile entirely — so this is a data point about the PoC's own
+  current bottleneck, not a claim about the ported system, flagged rather than left undiscovered.

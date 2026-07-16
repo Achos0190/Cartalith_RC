@@ -503,6 +503,145 @@ mechanism's own description:
   the "I" shape this register's own `prov` text had described in words since the first cut but never
   actually modelled in the geometry until this revision.
 
+### 3.9 Per-culture farmland/pasture: closing the last generic-prop gap
+
+Direct user feedback, given while §3.8's games-building placement fix was still being verified:
+"Should also see for pastures and fields I suppose for the farms" — flagging that, unlike every
+building type by this point, the hinterland around every single culture's town was rendered with
+the exact same generic mechanism (medieval-style selion strips plus scattered orchards), the one
+remaining spot where 18 of 19 profiles were still a reskinned medieval village rather than their
+own tradition. `buildFarmland()` (docs/03 M-FARM register) closes this gap the same way §3.7 closed
+it for civic monuments: a spec table (`FARM_SPEC`) dispatched per profile, not a bespoke mechanism
+per culture.
+
+- **A dedicated research pass, same discipline as M-GAMES**: real web search per culture, a named
+  source or an honest "shares the baseline pattern" verdict where the record does not support a
+  distinctive one (docs/03 M-FARM register, full source list). Confirmed the existing selion-strip
+  mechanism is already Medieval's own correct baseline, needing no change beyond extraction into a
+  shared `stripFields()` function.
+- **Seven shape families, not nineteen bespoke mechanisms**: `stripFields` (the pre-existing
+  baseline, now parametrised with an optional `pastureShare`/`pastureFar` ramp), `gridFields` (one
+  lattice-scan generator serving both the large regular cadastral grids — Roman centuriation,
+  Colonial hacienda grants, Frontier's PLSS sections, Industrial's parliamentary enclosure — and the
+  small irregular ones — Celtic field system, Chinese weitian polders, Mayan raised-field platforms,
+  Japanese paddy grid — purely by varying cell size/jitter/alignment, since it is genuinely the same
+  algorithm at a different scale rather than four near-duplicates), `fanFields` (Islamic/Palimpsest's
+  qanat oasis fan, wedges radiating from a mother-well outlet on the dry side of town), `basinFields`
+  (Egyptian Nile flood-basins, a handful of chaikin-smoothed organic blobs offset from the riverbank),
+  `canalFields` (Mesopotamian canal long-lots, perpendicular strips off the river — the same
+  perpendicular-offset technique `buildChinampas` already uses on the water side, mirrored onto dry
+  land), `terraceFields` (Inca andenes) and `ringFields` (Venus's own concentric ring-farming bands,
+  a design choice rather than a historical claim, echoing the Garden City diagram).
+- **A real terrain-responsive mechanism, not a decorative arc**: `terraceFields` resamples this
+  engine's own `site.height`/`site.slope` fields (already load-bearing for M-TER-1's building-
+  suitability score) at every terrace step, so the contour direction genuinely bends with the local
+  gradient rather than being drawn as a fixed shape. This is the first farmland pattern in this
+  register to be terrain-*aware* rather than terrain-*agnostic*.
+- **A genuinely new, testable detail kind**: `kind:'pasture'`, rendered with its own `.pasture` CSS
+  (a muted grazing-green, distinct from `.field`'s cultivated gold) rather than a re-tinted copy of
+  the same polygon kind — directly answering the "pastures **and** fields" half of the request that
+  the first pass at this register had not yet addressed (only fields/orchards existed until this
+  point). Present via `pastureShare` (an intermixed per-cell chance — Roman, Celtic, Frontier) or
+  `pastureFar` (a chance ramping up with distance from town — Byzantine, Viking — modelling the
+  outer pasture/outfield zone each source itself describes as a coarser ring-level distinction, not
+  a new parcel shape).
+- **A self-caught category error, not applied**: the research turned up a real, well-sourced,
+  high-confidence Greek geometric pattern — the colonial chora grid (kleroi), e.g. Chersonesos's
+  ~10,000 ha divided into ~400 lots — but that grid was laid out at a **new colony's founding**,
+  the exact anachronism M-GRK-1 already excludes, since the Greek profile deliberately models
+  organic, centuries-old Athens, never re-planned, specifically because Hippodamian grid-planning
+  was a documented innovation for new colonial foundations, not retrofitted onto existing cities
+  (§3.6-adjacent reasoning, carried from the original grid-to-organic conversion). Applying a
+  colony-founding grid here would reintroduce the very error that conversion corrected. Kept on the
+  unchanged baseline strip pattern instead, with an olive-grove orchard-density boost (Attica's
+  iconic cash crop) standing in for the geometric signature this profile cannot honestly claim —
+  caught during this register's own design phase, before any code was written, not after.
+- **Graceful degradation over an empty result**: Mesopotamian's canal long-lots need a real
+  watercourse to run perpendicular from; on a landlocked site, `canalFields` falls back to the
+  baseline `stripFields` mechanism rather than producing no farmland at all. Egyptian's flood-basins
+  and Mayan's wetland-gated raised fields have no such fallback — a landlocked/dry site honestly
+  gets none, since there is no flood or wetland for either pattern to represent.
+- **Aztec is the one deliberate non-entry**: `buildChinampas` (M-AZT-2) already is that culture's
+  farmland signature; a second, generic field layer over a lake-city would double up rather than
+  add detail, so `FARM_SPEC.aztec` is `{pattern:'none'}` and `buildFarmland` returns `[]` for it
+  immediately.
+- **Palimpsest inherits, again**: resolved to Islamic's own `FARM_SPEC` entry (the qanat fan) at
+  build time, the same per-profile lookup pattern as its games building/gates/housing (§3.5, §3.7).
+- **A real directional bug found and fixed before this shipped**: `fanFields`' first cut located
+  "away from the water" using the river polyline's own geometric middle index
+  (`site.river[len/2]`) as a stand-in for "the nearby riverbank," reasoning that the vector from
+  the market to that sample point, negated, would point inland. This works only when the market
+  happens to sit near that one array index; for a market placed farther along the river (this
+  engine's own `placeAnchors` allows the market anywhere along a wide arc around the bridge point,
+  not just near the river's geometric centre), the sampled point can be nowhere near the actual
+  nearest bank, giving a direction that points nowhere near "away from water" — caught by reviewing
+  this feature's own test data rather than assumed correct: Islamic and Palimpsest (the only two
+  `'fan'`-pattern cultures) produced **zero** fields on ordinary river-site generation, not a subtly
+  wrong count, for a market sited 80% of the way across the map while the sampled index corresponded
+  to the geometric 50% mark — the resulting origin landed at `x>Wm`, off the map entirely, so every
+  candidate failed its own bounds check. Fixed by computing the gradient of `site.riverDist`
+  directly at the market's own position (the same finite-difference gradient technique
+  `buildChinampas` already uses for its own opposite "into water" direction, just without the final
+  negation), plus clamping the computed origin to stay on-map regardless of magnitude as a second,
+  independent safety margin. Re-verified across 8 seeds × 2 cultures × 5 site kinds (80
+  combinations) with zero recurrences after the fix.
+- **A real performance bug found and fixed before this shipped**: the first cut of `gridFields`
+  scanned every lattice point in a fixed square span with no bound on how many candidates it
+  examined — fine for the large-cell cultures (Roman, Frontier, Colonial, Industrial), but a
+  small-cell culture (Mayan's 14-20-unit cells, say) on a large town could put **tens of thousands**
+  of candidates inside the scan span, and both `site.isWater` and the `urban` closure (a
+  `pointInPoly` check against a potentially many-vertexed wall/bastion ring) cost O(shoreline/ring
+  length) per call — found by timing the full headless suite, which is normally a multi-minute run
+  on this engine already (river/coastal site generation was already the slow path before this
+  feature, confirmed by timing the pre-existing code unchanged) but had clearly regressed further.
+  Fixed with a hard budget on *examined* candidates (1200), independent of the pre-existing budget
+  on *accepted* ones — bounding the worst case regardless of acceptance rate, without changing
+  normal-case output (a typical town still fills its accepted-cell cap comfortably within that
+  budget). Found by direct timing measurement across every culture/site combination, not assumed
+  fast from the mechanism's own description — the same "generate output and measure it" discipline
+  this project holds itself to everywhere else.
+- **A real collision bug, and the biggest one, caught by this register's own dedicated audit
+  test before this shipped**: every farmland generator (all seven, plus the pre-existing baseline
+  `stripFields` this register only extracted, never rewrote) checked candidates against `isWater`
+  and `urban`, but never against the live street graph itself. This is not a hypothetical: the
+  exterior hinterland a generator scans is not free of streets — primary routes reach well past
+  the walled/urban core toward neighbouring settlements (M-REG-1) — so a candidate happily outside
+  `urban()` can still land squarely on top of one. The audit added alongside this register (105
+  culture/site/seed combinations covering every pattern family) failed on first run: **1281**
+  street-crossings and 34 water-overlaps, not a handful of edge cases. Running the identical audit
+  against Medieval alone — using the exact `stripFields` logic unchanged from before this register
+  existed — still found 63 crossings, confirming this was a latent gap in the pre-existing
+  mechanism itself, simply never checked before (fields were invisible until the prior fix, and no
+  test had ever looked at field-vs-street collision). Fixed with one shared `crossesStreet(g,poly)`
+  helper, reusing the exact spatial-hash `edgesNear()`+`segInt()` technique `buildGames`' own
+  `blocked()` already established, called from every generator (`gridFields`, `fanFields`,
+  `basinFields`, `terraceFields` and `ringFields` all gained a `g` parameter for this; `stripFields`
+  and `canalFields` already had it). The residual 34 water-overlaps traced to two narrower, distinct
+  gaps found the same way: `canalFields` checked only its strip's far endpoint for water, missing
+  that a curving river (worst on the `riverthrough` site kind) can dip back into a strip's middle
+  even when both ends are dry — fixed by adding the same near/mid/far three-point check
+  `stripFields` already used for exactly this reason, which itself was still missing a check on its
+  *own* near point (`q1`), the last 2 of the 34 — added too. Re-verified: 0 water-overlaps, 0
+  street-crossings across the full 105-combination audit after all three fixes landed together.
+- **A fourth bug, found only after the browser screenshots were actually looked at**: even with
+  every audit at 0/0, a manual visual pass (this project's own stated discipline for anything the
+  headless suite can't fully cover) turned up Mesopotamian producing **zero** canal fields on an
+  ordinary `riverthrough` generation at the exact seed used for every other screenshot. Direct
+  reproduction and instrumentation traced it to `canalFields`' near-bank offset: a fixed 14-unit
+  constant, which cleared a plain `river` site's channel (half-width up to 12) but not a
+  `riverthrough` channel (half-width up to 15, since through-rivers are generated wider) — so the
+  strip's own near point sometimes still sat inside the water, silently rejecting every single
+  candidate rather than just some of them (16 water-rejects out of 16 survivors in the traced run).
+  Fixed by deriving the offset from `site.riverW` itself (`riverW/2 + 4` clearance) instead of a
+  constant untied to the actual channel width. Re-verified across 8 seeds × 2 river-like site kinds
+  with zero recurrences, plus a dedicated regression assertion added to the suite (which the prior,
+  purely-geometric audit could not have caught on its own, since a poly can be internally
+  consistent, non-crossing and non-overlapping while simply never getting generated at all —
+  exactly why the visual pass still matters even after every automated check is green).
+- **Not hashed, by the same reasoning as `civic`/`markets`/`games`**: `hashModel()` never touches
+  `model.details`, so this entire register is structurally incapable of affecting the cross-version
+  neutrality every other addition in this project is held to.
+
 ## 4. Roman planned-colony morphology — quantified (M-ROM register)
 
 | Quantity | Value | Source |
