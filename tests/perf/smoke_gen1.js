@@ -1093,6 +1093,31 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { overviewRebuildMs, chunksBaked: n, overviewW, overviewH, GW, GH };
   });
 
+  // v0.92 follow-up fix (owner report: "graphic fidelity seems to have degraded also"): every OTHER
+  // way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already scheduled a
+  // refine so the sharp tile overlay replaces the coarse overview after a beat -- the `lodChk`
+  // checkbox itself never did, so ticking it and just looking (no pan/zoom yet) left the user on the
+  // coarse overview indefinitely. Regression guard: checking the box alone (a real click, not a
+  // synthetic zoom/pan) must populate the visible tile's render cache without any further gesture.
+  const errorsBeforeCheckbox = errors.length;
+  R.lodCheckboxAutoRefine = await page.evaluate(async () => {
+    _lodOn = false; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2;   // clean, predictable whole-map state regardless of what earlier tests left behind
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = false;
+    lodCacheClear();
+    _atlasBaked.clear(); _atlasImg.clear();   // the preceding perf test baked z=0..2 to the atlas -- clear it so this tests the real "nothing baked yet" scenario the fix targets (refineVisibleTiles() skips already-baked coverage by design)
+    const acc = lc.closest('details'); if (acc) acc.open = true;
+    lc.checked = true; lc.dispatchEvent(new Event('change'));
+    await new Promise(res => setTimeout(res, 600));   // withBusy's ~20ms defer + the refine itself
+    const v = lodViewRect();
+    const keys = visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1);
+    const cachedAfterCheck = keys.length > 0 && keys.every(k => !!lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile)));
+    lc.checked = false; lc.dispatchEvent(new Event('change'));
+    await new Promise(res => setTimeout(res, 400));   // let any in-flight deferred refine settle before the Node-side errors check below
+    _lodOn = false; applyView(); renderNow();
+    return { cachedAfterCheck };
+  });
+  R.lodCheckboxAutoRefine.noNewErrors = errors.length === errorsBeforeCheckbox;
+
   await browser.close();
 
   // ---- assertions ----
@@ -1209,6 +1234,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now capped to a 512px target width)', R.lodOverviewPerf.overviewRebuildMs < 400);
   A('v0.92 follow-up fix: overview canvas is capped at 512px wide, not a flat GW/4 (was 256px at this 1024px world → blocky lakes)', R.lodOverviewPerf.overviewW === 512);
   A('v0.92 follow-up fix: overview canvas keeps GW/GH aspect ratio', Math.abs(R.lodOverviewPerf.overviewW / R.lodOverviewPerf.overviewH - R.lodOverviewPerf.GW / R.lodOverviewPerf.GH) < 0.01);
+  A('v0.92 follow-up fix: checking "Tiled LOD view" alone (no pan/zoom) auto-refines the visible tile', R.lodCheckboxAutoRefine.cachedAfterCheck === true);
+  A('v0.92 follow-up fix: unchecking the box before the deferred refine settles throws no errors', R.lodCheckboxAutoRefine.noNewErrors === true);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

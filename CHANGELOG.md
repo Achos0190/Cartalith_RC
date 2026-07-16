@@ -115,6 +115,45 @@ view and the lakes are blocky/pixilated again on their edges."** The Part 2 fix 
   256px, the old `/4` value) at the existing 1024px test world, and its aspect ratio is asserted to
   match `GW/GH`. Existing perf/bit-identity/headless batteries unaffected (all green).
 
+**Part 4 — same-day second follow-up: "Graphic fidelity seems to have degraded also."** Part 3 fixed
+lake/coastline blockiness, but a broader complaint remained: the terrain itself looked softer/blurrier
+than before, not just at small water features.
+- **Diagnosis**: comparing v0.91 (full-resolution overview) against v0.92 (Part 3's 512px-cap overview)
+  at a *whole-map* zoom — the worst case, since the fixed 512px budget must represent the entire world
+  at that zoom — showed a real, visible loss of fine surface grain (screenshots: v0.91's mottled
+  micro-texture reads as a coarser, blotchier pattern in v0.92). This looked like an inherent cost of
+  any resolution cap... until testing whether the app's own existing "sharpen after a beat" mechanism
+  was actually firing. It wasn't, for one specific entry point.
+- **Root cause**: `drawLODView()`'s coarse "instant overview" (Part 2/3, above) was never meant to be
+  the *only* thing on screen for long — a second layer, the sharp per-tile renderer
+  (`renderBiomeTileRGBA`, run through `refineVisibleTiles()`), is supposed to draw over it once the
+  user settles on a view, via a `scheduleLodRefine()` call (240ms debounce) wired into every interaction
+  that changes the LOD viewport: wheel-zoom, pan release, the +/− zoom buttons, and the auto-enter-LOD-
+  on-zoom path. Verified this mechanism genuinely restores full sharpness once triggered (a controlled
+  before/after screenshot of the identical view, before vs. after calling `refineVisibleTiles()`, shows
+  a stark difference — crisp per-pixel terrain detail appears). But the **`lodChk` checkbox's own
+  `change` handler never called it** — enabling "Tiled LOD view" by ticking the box (with no subsequent
+  pan/zoom) left the user on the coarse overview *indefinitely*, since nothing ever scheduled the
+  sharpen pass for that initial view. This gap has existed since the LOD feature shipped, but was
+  invisible pre-v0.92: the un-refined overview used to be full native resolution (fine on its own), so
+  never refining it looked identical to refining it. Part 2/3's resolution cap is what finally exposed
+  the gap — now the two states visibly differ, and the checkbox's initial view was stuck in the worse
+  one.
+- **Fix**: the `lodChk` change handler now calls `withBusy('sharpening view…', ()=>{ refineVisibleTiles();
+  renderNow(); })` immediately when checked — the same busy-overlay pattern the explicit "Refine" button
+  already uses for this exact operation, run once immediately (not the 240ms debounce the continuous
+  wheel/pan gestures use, since a checkbox click isn't a stream of events to coalesce). The deferred
+  callback re-checks `_lodOn` before doing any work, guarding against the box having been unchecked
+  again before the ~20ms+-deferred `withBusy` chain actually runs.
+- Cost: refining+rendering a whole-map z=0 tile is a one-time, resolution-dependent hit (profiled at
+  ~660ms at 1024px, ~2.7s at 2048px, on this test machine) — the same cost that already happened
+  silently on a user's first pan/zoom nudge; this fix only moves it earlier and adds a busy indicator,
+  it doesn't add new cost. Subsequent views of the same area are served from cache as before.
+- Verified with a real `.click()` on the checkbox (not a synthetic `_lodOn=true` assignment) confirming
+  the visible tile is populated in the refine cache with no further gesture, plus a screenshot showing
+  full sharpness immediately after the click. New smoke-suite regression guard added (148th assertion);
+  full battery green (923 headless, bit-identity ALL IDENTICAL, 148/148 smoke).
+
 ### v0.91 (2026-07-13)
 **Owner request (/goal): "…how in explore the timeline should work. Currently it works, bit rather
 clunky."** Chosen direction from an `AskUserQuestion` pass: **"one home, real time-scale."** No engine

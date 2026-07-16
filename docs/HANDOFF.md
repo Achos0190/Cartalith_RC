@@ -16,7 +16,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 - **v0.92 — owner /goal: "carry out the [save-export audit's] reported fixes, then analyze why
   the program is so slow when zooming in even when tiles are baked"**, followed same-day by a
   bug report on the resulting fix (render battery ALL IDENTICAL to v0.91, headless **923**
-  unchanged, smoke **137 → 146**). Three parts:
+  unchanged, smoke **137 → 148**). Four parts:
   (1) **audit fixes** (`docs/research/save-export-architecture-audit.md` §5, compatibility break
   accepted per owner): `exportZip()` now skips the redundant `map.png`/`tiles/*` flat bake when
   `state.finalized` (the Atlas pyramid already covers the whole map at every baked level — a
@@ -54,6 +54,22 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   2048px) while spending full resolution on worlds already ≤512px wide. Verified with fixed-seed
   screenshot A/Bs (lake shapes back to round, matching full-res) and two new smoke-suite
   regression guards (overview canvas width == 512px at the 1024px test world; aspect preserved).
+  (4) **Second same-day follow-up — "Graphic fidelity seems to have degraded also."** The 512px
+  cap fixed lakes/coastlines, but a broader softness remained at whole-map zoom (screenshots: v0.91's
+  fine surface grain reads as a coarser blotch pattern in v0.92). Root cause wasn't the cap itself —
+  every OTHER way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already
+  schedules `refineVisibleTiles()` after a 240ms settle, which draws a full-detail sharp tile over
+  the coarse overview; a controlled before/after screenshot confirmed this genuinely restores full
+  sharpness once triggered. But the **`lodChk` checkbox's own change handler never triggered it** —
+  ticking "Tiled LOD view" and just looking left the user on the coarse overview indefinitely. This
+  gap always existed but was invisible pre-v0.92 (the un-refined overview used to be full native
+  resolution already); the resolution cap above is what finally exposed it. Fixed by having the
+  checkbox call `withBusy('sharpening view…', refineVisibleTiles+renderNow)` immediately when
+  checked (same pattern the explicit "Refine" button already uses), guarded by a re-check of
+  `_lodOn` inside the deferred callback so a since-unchecked box can't race it. Verified with a real
+  `.click()` on the checkbox confirming the visible tile populates with no further gesture. One new
+  smoke-suite regression guard. Full battery green (923 headless, bit-identity ALL IDENTICAL,
+  148/148 smoke).
 - **v0.91 — owner /goal: "…how in explore the timeline should work. Currently it works, bit
   rather clunky"** (no engine changes — script block 2 civ-UI only; render battery ALL IDENTICAL
   to v0.90, headless **923** unchanged, smoke **123 → 130**): the second half of the v0.90 /goal
@@ -532,11 +548,16 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   blocky/pixilated again" + "aspect ratio goes weird" (the same artifact, described two ways). Replaced
   the flat ratio with a **512px fixed target output width**, which bounds the overview's cost
   independent of world resolution (~100-130ms at both 1024px and 2048px, vs. the rejected flat-`/2`
-  alternative's ~420-440ms at 2048px) while giving small worlds full resolution. Both fixes locked in
-  with permanent smoke-suite regression guards (timing + overview-canvas-size/aspect). Nothing queued —
-  if the owner reports zooming still feels slow after this, the next place to look is the TILE overlay's
-  own per-tile colorization cost (not yet profiled in isolation) or the debug-overlay vector drawing pass
-  (`drawLODDebugOverlays`), not the overview backdrop these fixes already addressed.
+  alternative's ~420-440ms at 2048px) while giving small worlds full resolution. A same-day second
+  report ("graphic fidelity seems to have degraded also") traced to a *pre-existing* gap the cap
+  exposed rather than caused: the `lodChk` checkbox never scheduled the sharpen-on-settle pass every
+  other LOD entry point already gets, so ticking it and just looking left the user on the coarse
+  overview indefinitely. Fixed by triggering that pass immediately on checkbox-check. All three fixes
+  locked in with permanent smoke-suite regression guards (timing + overview-canvas-size/aspect +
+  checkbox-triggers-refine). Nothing queued — if the owner reports zooming still feels slow after this,
+  the next place to look is the TILE overlay's own per-tile colorization cost (not yet profiled in
+  isolation) or the debug-overlay vector drawing pass (`drawLODDebugOverlays`), not the overview
+  backdrop these fixes already addressed.
 - **The owner's 2026-07-12 /goal (settlement pop-up + Explore timeline rework) is now fully shipped**
   across v0.90 (settlement editor → map pop-up) and v0.91 (timeline: one home, real time-scale — see
   above). No queued follow-up on either; nothing else outstanding from that request.

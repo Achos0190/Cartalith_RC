@@ -9889,7 +9889,18 @@ function lodZoomStep(f){ _lodZoom=Math.max(1,Math.min(lodMaxZoom(),f>1?_lodZoom*
 document.getElementById('zoomIn').addEventListener('click',()=>{ if(_view3dOn){ _cam3.dist=Math.max(0.8,_cam3.dist/1.2); _v3dDirty=true; return; } if(_lodOn){ lodZoomStep(2); return; } const c=viewCenter(); zoomAt(c[0],c[1],1.35); });
 document.getElementById('zoomOut').addEventListener('click',()=>{ if(_view3dOn){ _cam3.dist=Math.min(16,_cam3.dist*1.2); _v3dDirty=true; return; } if(_lodOn){ lodZoomStep(0.5); return; } const c=viewCenter(); zoomAt(c[0],c[1],1/1.35); });
 document.getElementById('zoomReset').addEventListener('click',()=>{ if(_view3dOn){ Object.assign(_cam3d,_CAM3D_DEF); _v3dDirty=true; return; } if(_lodOn){ _lodZoom=1; _lodCx=GW/2; _lodCy=GH/2; renderNow(); return; } panMode=false; const pb=document.getElementById('panBtn'); if(pb)pb.classList.remove('on'); resetView(); });
-{ const lc=document.getElementById('lodChk'); if(lc) lc.addEventListener('change',()=>{ _lodOn=lc.checked; painting=false; panDrag=null; /* clear stuck sculpt/pan state when toggling LOD */ if(_lodOn){ _lodCx=GW/2; _lodCy=GH/2; _lodZoom=Math.max(1,_lodZoom); } applyView(); renderNow(); }); }
+{ const lc=document.getElementById('lodChk'); if(lc) lc.addEventListener('change',()=>{ _lodOn=lc.checked; painting=false; panDrag=null; /* clear stuck sculpt/pan state when toggling LOD */ if(_lodOn){ _lodCx=GW/2; _lodCy=GH/2; _lodZoom=Math.max(1,_lodZoom); } applyView(); renderNow();
+  /* v0.92 fix (owner report: "graphic fidelity seems to have degraded also") — every OTHER way into LOD
+     (wheel-zoom, pan release, the zoom buttons, auto-enter-on-zoom) schedules a refine so the sharp tile
+     overlay replaces the coarse overview after a beat. This checkbox never did, so ticking it and just
+     looking (no pan/zoom yet) left the user staring at the overview indefinitely — harmless when the
+     overview was full-resolution, but now that it's capped for speed (v0.92 above), that indefinite
+     no-refine state reads as a real quality drop, not a momentary one. Runs once, immediately (not the
+     240ms debounce the continuous gestures use — a checkbox click isn't a stream of events to coalesce),
+     under the same busy overlay the explicit "Refine" button already shows for this exact operation.
+     withBusy defers ~20ms+ (queued behind any other pending busy op), so the inner `_lodOn` re-check
+     guards against the box having been unchecked again before this actually runs. */
+  if(_lodOn) withBusy('sharpening view…',()=>{ if(_lodOn){ refineVisibleTiles(); renderNow(); } }); }); }
 { const la=document.getElementById('lodAutoChk'); if(la) la.addEventListener('change',()=>{ state.lodAuto=la.checked; }); }   /* v0.133: auto-enter LOD on zoom */
 bind('zoomDetailR',e=>{ state.viz.zoomDetail=+e.target.value/100; document.getElementById('zoomDetailV').textContent=state.viz.zoomDetail.toFixed(2)+'×'; lodCacheClear(); if(_lodOn) renderNow(); });   /* v0.133: how much procedural relief emerges on zoom (1× = legacy) */
 { const seg=document.getElementById('lodTileSeg'); if(seg) seg.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; [...seg.children].forEach(c=>c.classList.toggle('on',c===b)); _lodTile=+b.dataset.ts; lodCacheClear(); if(_lodOn) renderNow(); }); }
