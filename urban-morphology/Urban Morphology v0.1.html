@@ -176,7 +176,8 @@ svg.panning{cursor:grabbing}
       <label style="margin-left:10px;flex:0 0 auto"><input id="fortified" type="checkbox"> star fort</label></div>
     <div class="row"><label style="flex:0 0 auto" title="Prototype (docs/08): excludes parcels whose ground is too steep and/or too flood-prone from building, leaving them vacant. Off by default — purely additive, does not change any existing town."><input id="terrainAware" type="checkbox"> terrain-aware placement (experimental)</label></div>
     <div class="row"><label style="flex:0 0 auto" title="A state any settlement can be in, not a civilization of its own (M-PA register): flags a seeded ~35-45% of the already-built stock as ruined and abandoned, on top of whichever culture is selected above."><input id="ruined" type="checkbox"> ruined (post-apocalyptic)</label></div>
-    <div class="row"><label style="flex:0 0 auto" title="M-GRW-2, organic growth only: as the town's built-up mass fills its wall, the old ring is demolished and a bigger one rises around it, with the old wall's foundation surviving as a ring road (Vienna's Ringstrasse, Paris's Grands Boulevards). Growth pacing ties age to a placeholder carrying-capacity factor (samples this engine's own terrain-suitability score) — a PoC stand-in Cartalith's real resource system is meant to replace. Off by default — purely additive, does not change any existing town."><input id="wallGenerations" type="checkbox"> successive wall generations (experimental)</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="M-GRW-2, organic growth only: once the current wall's interior is genuinely full AND growth has spilled beyond it (ribbon suburbs), the old ring is demolished and a bigger one rises around both, with the old wall's foundation surviving as a ring road (Vienna's Ringstrasse, Paris's Grands Boulevards). Growth pacing ties age to a placeholder carrying-capacity factor (samples this engine's own terrain-suitability score) — a PoC stand-in Cartalith's real resource system is meant to replace. Off by default — purely additive, does not change any existing town."><input id="wallGenerations" type="checkbox"> successive wall generations (experimental)</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="How long this settlement has existed, spreading growth epochs across real years — gates how many wall circuits its own history can plausibly afford: successive circuits need ~70-170 years apart historically (Cologne, Florence, Paris), so a young settlement's whole lifespan can't fit a second one, while an old settlement's epochs are each worth many years. Only read when 'successive wall generations' is on.">Settlement age (yr)</label><input id="settlementAge" type="number" value="300" min="30" max="1000" step="10"></div>
     <div id="status"></div>
   </div>
   <div class="box" id="rulesBox">
@@ -296,7 +297,10 @@ const DEFAULT_RULES={
     plotDepthVariance:0.28,        // sigma (median depth 22/30 m by core-vs-fringe stays fixed, M-PAR-2)
     subdivisionCap:2},             // max burgage-cycle re-subdivisions of a frontage grant
   settlement:{                    // successive wall generations (M-GRW-2), opt-in wallGenerations toggle only
-    wallGenerationThreshold:0.8,   // built-mass hull fills this fraction of the active wall's area -> supersede
+    wallGenerationThreshold:0.8,   // interior-only built hull fills this fraction of the active wall's area -> eligible
+    wallGenerationMinAgeGap:120,   // years since the active wall was built before another may supersede it
+                                   // (real successive-circuit gaps: Cologne ~74y, Florence ~94-111y, Paris ~158-168y)
+    wallGenerationExtramuralShare:0.15, // exterior (ribbon-suburb) built nodes must reach this share of interior ones too
     maxWallGenerations:3,          // M-GRW-2: "1-3 typical for towns that persist"
     carryingCapacityWeight:1.0},   // 0=ignore the placeholder carrying-capacity factor, 1=full effect
   meta:{wildness:1.0,plotChaos:1.0}};
@@ -1328,6 +1332,34 @@ function estimateCarryingCapacity(site,anchors,maxRF){
   }
   return clamp(0.3+0.7*(sum/N),0.3,1.0);
 }
+// M-GRW-2a trigger metric: how full IS the current wall's interior, and has growth also spilled
+// past it (ribbon suburbs)? Distinct from builtMassHull (which sizes a NEW wall from every nearby
+// node, in and out) -- this measures occupancy strictly INSIDE the given ring, operationalizing
+// M-GRW-2's "built-up >= ~80% of enclosed area" citation directly. A first cut instead compared a
+// freshly recomputed all-nodes hull (which already includes any extramural growth at all) against
+// the wall's own area -- but since the wall itself IS that same hull construction inflated by only
+// ~10%+16m growth reserve, any new growth whatsoever (even a couple of stray ribbon-suburb nodes)
+// made a fresh hull exceed the old wall's area almost immediately: direct epoch-by-epoch
+// instrumentation showed generation 2 firing the very epoch after generation 1 was built, with the
+// interior barely begun and only a handful of exterior nodes -- ring roads appearing well ahead of
+// real growth, not after it, exactly the ordering bug a user review caught. fillFraction here is
+// naturally bounded well under 1 (interior nodes can never exceed the ring's own footprint), so a
+// 0.8 threshold is a real, non-trivial "the reserve is now mostly used up" signal.
+function wallOccupancy(g,ring){
+  const isBuilt=(n)=>n.adj.filter(id=>g.edges[id].alive).length>=2;
+  const interior=[],exterior=[];
+  for(const n of g.nodes){
+    if(!isBuilt(n))continue;
+    (pointInPoly(n,ring)?interior:exterior).push(n);
+  }
+  const wallArea=Math.abs(polyArea(ring));
+  let fillFraction=0;
+  if(wallArea>0&&interior.length>=8){
+    const hull=convexHull(interior.map(n=>({x:n.x,y:n.y})));
+    if(hull.length>=3)fillFraction=Math.abs(polyArea(hull))/wallArea;
+  }
+  return {fillFraction,interiorCount:interior.length,exteriorCount:exterior.length};
+}
 /* ---------------- epoch growth loop (densification + exploration) ---------------- */
 function grow(seed,site,anchors,g,epochs,wallState,opts){
   const targetLen=opts.targetLen; // m of streets, derived from target population (M-DEN-1/2)
@@ -1346,6 +1378,11 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
     ?(1-ST.carryingCapacityWeight)+ST.carryingCapacityWeight*estimateCarryingCapacity(site,anchors,opts.maxRF)
     :1;
   const fireEpoch=Math.max(3,Math.floor(epochs*0.6)); // M-GRW-2: town has substance by here
+  // settlement age (years), spread evenly across this run's epochs, so each epoch has a real-year
+  // scale to gate successive wall generations against (M-GRW-2b): a young settlement's whole
+  // lifespan can't afford the real-world gap a second circuit needs, so it simply never affords
+  // one; an old settlement's epochs are each worth many years, so several circuits fit naturally.
+  const yearsPerEpoch=wallGens?Math.max(1,opts.settlementAge||300)/epochs:0;
   let placedLen=0;
   const kept=[];
   for(let ep=1;ep<=epochs;ep++){
@@ -1463,25 +1500,20 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
     // wall episode(s) (M-GRW-2): optional enclosure, built once the town has substance. Without
     // wallGenerations this fires exactly once, exactly as before (the !wallGens branch below is
     // byte-identical to the original single-fire condition). With it: the first circuit still
-    // rises at the same fireEpoch, but once a wall exists, each later epoch compares the current
-    // built-mass hull's area to the ACTIVE wall's enclosed area (same hull-of-built-nodes proxy
-    // buildWall itself already uses); crossing wallGenerationThreshold demolishes the old ring to
-    // a road and raises a bigger one in its place, up to maxWallGenerations. Self-limiting with no
-    // extra cooldown needed: buildWall always inflates its new ring with growth reserve, so the
-    // ratio drops well back below threshold immediately after every supersession.
+    // rises at the same fireEpoch; from then on, a new circuit needs BOTH real time to have passed
+    // (age-gated, M-GRW-2b) AND the historical pattern itself — the interior actually full AND
+    // growth already spilling past the wall (M-GRW-2a) — not either alone.
     if(opts.walls){
       if(!wallGens){
         if(!wallState.ring&&ep===fireEpoch)buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
       }else if(!wallState.ring){
         if(ep===fireEpoch)buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
-      }else if(ep>=fireEpoch&&(wallState.generation||1)<ST.maxWallGenerations){
-        const bmh=builtMassHull(site,anchors,g);
-        if(bmh){
-          const wallArea=Math.abs(polyArea(wallState.ring));
-          const hullArea=Math.abs(polyArea(bmh.hull));
-          if(wallArea>0&&hullArea/wallArea>=ST.wallGenerationThreshold)
-            supersedeWall(seed,site,anchors,g,wallState,ep,opts);
-        }
+      }else if((wallState.generation||1)<ST.maxWallGenerations
+          &&(ep-wallState.epoch)>=ST.wallGenerationMinAgeGap/yearsPerEpoch){
+        const occ=wallOccupancy(g,wallState.ring);
+        if(occ.fillFraction>=ST.wallGenerationThreshold
+            &&occ.exteriorCount>=Math.max(10,occ.interiorCount*ST.wallGenerationExtramuralShare))
+          supersedeWall(seed,site,anchors,g,wallState,ep,opts);
       }
     }
   }
@@ -1498,13 +1530,20 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
 // overwrites ring/gates/style/fort/etc in place, exactly as it does on a first build.
 function supersedeWall(seed,site,anchors,g,wallState,ep,opts){
   const gen=wallState.generation||1;
+  // the exact occupancy this generation was superseded AT (recomputed once more here rather than
+  // threaded through the caller): makes the "why now" auditable in the inspector/evidence ledger,
+  // the same explainability discipline this project already holds every other provenance string to
+  const occ=wallOccupancy(g,wallState.ring);
   wallState.history=wallState.history||[];
   wallState.history.push({ring:wallState.ring,gates:wallState.gates,landArc:wallState.landArc,
     waterWalls:wallState.waterWalls,spurs:wallState.spurs,spansWater:wallState.spansWater,
-    style:wallState.style,fort:wallState.fort,prov:wallState.prov,epoch:wallState.epoch,generation:gen});
+    style:wallState.style,fort:wallState.fort,prov:wallState.prov,epoch:wallState.epoch,generation:gen,
+    fillFractionAtSupersession:occ.fillFraction,exteriorNodesAtSupersession:occ.exteriorCount});
   if(wallState.landArc&&wallState.landArc.length>1){
-    const roadProv='Ring road: wall circuit '+gen+' of this town, demolished once the town outgrew '+
-      'it, its foundation surviving as a road inside the newer enceinte (M-GRW-2; Florence/Cologne circuit histories).';
+    const roadProv='Ring road: wall circuit '+gen+' of this town, demolished once its interior filled to '+
+      Math.round(occ.fillFraction*100)+'% of the enclosure and '+occ.exteriorCount+' buildings\' worth of '+
+      'ribbon suburb had already grown up outside it — its foundation surviving as a road inside the '+
+      'newer enceinte (M-GRW-2; Florence/Cologne circuit histories).';
     addPolylineStreet(g,wallState.landArc,'ringroad',7.5,ep,roadProv);
   }
   wallState.generation=gen+1;
@@ -2620,6 +2659,10 @@ function generate(seed,opts){
   // threaded into grow()'s opts below; never read on the radial (Venus) branch, so it is simply
   // inert there rather than special-cased.
   const wallGenerations=!!opts.wallGenerations;
+  // settlement age (years): only meaningful when wallGenerations is on (gates the real-year
+  // spacing between successive circuits, M-GRW-2b); reported back regardless, same pattern as the
+  // other opt-in fields above.
+  const settlementAge=Math.max(30,Math.min(1000,opts.settlementAge||300));
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
   // enclosures are optional (default on); profile.noWalls forces them off regardless of the walls
@@ -2667,7 +2710,7 @@ function generate(seed,opts){
     plaza=buildPlaza(seed,site,anchors,g);
     harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
     if(site.through)addRiverBridges(seed,site,anchors,g,2); // a river that bisects the town
-    grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget,rules,wallGenerations});
+    grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget,rules,wallGenerations,settlementAge});
   }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
   removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
@@ -2714,7 +2757,7 @@ function generate(seed,opts){
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,terrainAware,ruined,wallGenerations,Wm,Hm,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,terrainAware,ruined,wallGenerations,settlementAge,Wm,Hm,
     culture:profile.id,cultureName:profile.name,
     site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
@@ -3195,7 +3238,9 @@ const RULE_PARAM_SPECS=[
   {grp:'parcels',key:'frontageWidthVariance',label:'Frontage width variance (σ)',min:0.10,max:0.50,step:0.01},
   {grp:'parcels',key:'plotDepthVariance',label:'Plot depth variance (σ)',min:0.10,max:0.60,step:0.01},
   {grp:'parcels',key:'subdivisionCap',label:'Subdivision cap',min:1,max:4,step:1},
-  {grp:'settlement',key:'wallGenerationThreshold',label:'Wall-generation threshold (built-mass fill)',min:0.5,max:0.95,step:0.01},
+  {grp:'settlement',key:'wallGenerationThreshold',label:'Wall-generation threshold (interior fill)',min:0.5,max:0.95,step:0.01},
+  {grp:'settlement',key:'wallGenerationMinAgeGap',label:'Min. years between circuits',min:40,max:250,step:5},
+  {grp:'settlement',key:'wallGenerationExtramuralShare',label:'Min. extramural share',min:0.05,max:0.40,step:0.01},
   {grp:'settlement',key:'maxWallGenerations',label:'Max wall generations',min:1,max:5,step:1},
   {grp:'settlement',key:'carryingCapacityWeight',label:'Carrying-capacity weight',min:0.0,max:1.0,step:0.05},
 ];
@@ -3375,9 +3420,10 @@ function renderRulesCompare(){
   const terrainAware=document.getElementById('terrainAware').checked;
   const ruined=document.getElementById('ruined').checked;
   const wallGenerations=document.getElementById('wallGenerations').checked;
+  const settlementAge=parseInt(document.getElementById('settlementAge').value,10)||300;
   const siteKind=document.getElementById('siteKind').value;
   const culture=document.getElementById('culture').value;
-  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,wallGenerations,site:siteKind,culture});
+  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,wallGenerations,settlementAge,site:siteKind,culture});
   const avgParcelArea=(m)=>m.parcels.length?m.parcels.reduce((s,p)=>s+p.area,0)/m.parcels.length:0;
   const streetDensity=(m)=>m.metrics.totalLen/(m.pop||1);
   const rows=[
@@ -3433,13 +3479,14 @@ function regen(){
   const terrainAware=document.getElementById('terrainAware').checked;
   const ruined=document.getElementById('ruined').checked;
   const wallGenerations=document.getElementById('wallGenerations').checked;
+  const settlementAge=parseInt(document.getElementById('settlementAge').value,10)||300;
   const siteKind=document.getElementById('siteKind').value;
   const harbourDefence=document.getElementById('harbourDefence').value;
   const faith=document.getElementById('faith').value;
   const civicStyle=document.getElementById('civicStyle').value;
   const culture=document.getElementById('culture').value;
   const t0=performance.now();
-  model=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,wallGenerations,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
+  model=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,wallGenerations,settlementAge,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
   const dt=performance.now()-t0;
   render();
   let note='';

@@ -133,7 +133,8 @@ panel/editor DOM rather than copied verbatim.
 | Function | Purpose | Disposition |
 |---|---|---|
 | `buildWall` | curtain wall, gates, harbour integration | ADAPT — `docs/06` §3.3 flags the era signal (`civYear`) this needs, which doesn't exist as a wired input yet |
-| `builtMassHull` | hull-of-built-nodes extraction shared by `buildWall`'s first circuit and the `wallGenerations` expansion trigger (docs/07 §3.11) — pure refactor out of `buildWall`, its own output unchanged | REUSE — pure graph geometry, no era/style dependency |
+| `builtMassHull` | hull-of-built-nodes extraction `buildWall` uses to size every circuit it builds (first or superseding, docs/07 §3.11) — pure refactor out of `buildWall`, its own output unchanged | REUSE — pure graph geometry, no era/style dependency |
+| `wallOccupancy` | `wallGenerations` expansion trigger metric (docs/07 §3.11.1): interior-only fill fraction (bounded by construction, unlike an earlier version's unbounded all-nodes hull comparison — a real bug a user review caught) plus exterior (ribbon-suburb) node count, both required before a circuit may be superseded | REUSE — pure graph geometry, no era/style dependency |
 | `supersedeWall` | `wallGenerations` only: snapshots the active wall into `wallState.history`, converts its land-facing arc to a `ringroad` edge, then calls `buildWall` again for the bigger replacement (docs/07 §3.11) | ADAPT — inherits `buildWall`'s own era-signal dependency (above), since it just re-invokes it |
 | `applyStarFort` | Naarden-trace bastioned enceinte | ADAPT — same era-signal dependency, plus `traits.fortified` gating already sketched in docs/06 §2 |
 | `clearFortZone` | field-of-fire clearing (removes overlapping buildings/parcels/streets/clutter) | REUSE — verified needs no `wallGenerations` special-casing: its clear band is defined outside the active ring, so an interior superseded-wall ring road is never in it |

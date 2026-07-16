@@ -183,18 +183,29 @@ Medieval/organic growth only, off by default. A growing town outgrows its wall, 
 around the expanded built-up area, and the superseded wall is demolished for material — its
 foundation surviving as a **ring road** inside the modern street plan (Vienna's Ringstrasse,
 Paris's Grands Boulevards on the razed Fermiers-Généraux wall are the real-world referents), up to
-3 generations (M-GRW-2's "1–3 typical for towns that persist"). Growth is tied to settlement age
-and a carrying-capacity placeholder, per the user's own request: the frontier-radius ramp that
-governs how fast the town's built-up area expands maps age through a logistic curve (slow while
-young, faster once established, tapering as it matures) instead of linearly, scaled by a `[0.3,1.0]`
-placeholder factor sampling this engine's own terrain-suitability score around the market — a
-deliberate stand-in for Cartalith's real resource/carrying-capacity system, isolated to one
-function with a fixed signature so a real port only needs to replace that one function's body (see
-docs/07 §3.11 for the exact integration contract). Venus's radial growth mode has no epoch loop to
-hang this on, so the toggle is simply inert there. Verified robust across an 11-seed × 4-epoch-count
-× 4-population-level sweep (every combination reached the generation cap) and byte-identical to the
-pre-existing behaviour when left off (neutrality), the same discipline every other opt-in toggle in
-this tool is held to.
+3 generations (M-GRW-2's "1–3 typical for towns that persist"). A new circuit only rises once the
+current wall's interior is **genuinely full** and growth has **already spilled past it** into
+ribbon suburbs — not from proximity to the wall alone, a real ordering bug an earlier pass of this
+feature had (a user review caught it reading as "ring roads generating in advance of the growth");
+docs/07 §3.11.1 documents the bug, direct epoch-by-epoch instrumentation confirming it, and the fix
+(`wallOccupancy()`: a bounded interior-fill fraction plus an independent extramural-share check).
+
+A new **"Settlement age (years)"** input (default 300, range 30–1000) gates the pacing itself:
+successive circuits also need real time to have passed since the last one, grounded in actual
+historical gaps (Cologne ~74y, Florence ~94–111y, Paris ~145–168y between recorded circuits) rather
+than an arbitrary constant — so a young settlement's own lifespan simply cannot afford a second
+circuit (verified: a 50-year-old settlement never supersedes its first wall across 5 seeds,
+however dense it gets), while an old one's growth epochs are each worth many years and several
+circuits fit naturally. Growth is also tied to a carrying-capacity placeholder, per the user's own
+request: the frontier-radius ramp that governs how fast the town's built-up area expands maps age
+through a logistic curve (slow while young, faster once established, tapering as it matures)
+instead of linearly, scaled by a `[0.3,1.0]` placeholder factor sampling this engine's own
+terrain-suitability score around the market — a deliberate stand-in for Cartalith's real
+resource/carrying-capacity system, isolated to one function with a fixed signature so a real port
+only needs to replace that one function's body (see docs/07 §3.11 for the exact integration
+contract). Venus's radial growth mode has no epoch loop to hang this on, so the toggle is simply
+inert there. Verified byte-identical to the pre-existing behaviour when left off (neutrality), the
+same discipline every other opt-in toggle in this tool is held to.
 
 The v0.1 app generates a deterministic medieval-pack town from a seed: site (river crossing,
 bay harbour, or open coast) → anchors → least-cost primary routes over a slope/water cost

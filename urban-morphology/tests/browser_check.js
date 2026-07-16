@@ -133,11 +133,12 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome', ruined: false } },
     { name: 'ruined-venus', set: { culture: 'venus', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome', ruined: true } },
     { name: 'terrain-aware-coast', set: { culture: 'medieval', siteKind: 'coast', pop: '9000', fortified: false, walls: true, terrainAware: true, ruined: false } },
-    // successive wall generations (M-GRW-2, experimental): a large-enough town at the default
-    // epoch count reliably outgrows its first wall at least once (verified headlessly across
-    // many seed/pop/epoch combinations before this scenario was added) — this screenshot should
-    // show a visible inner ring road left behind by the superseded circuit.
-    { name: 'wall-generations', set: { culture: 'medieval', siteKind: 'river', pop: '9000', fortified: false, walls: true, terrainAware: false, ruined: false, wallGenerations: true } },
+    // successive wall generations (M-GRW-2, experimental): needs a genuinely long-lived settlement
+    // to reach a second circuit now that the trigger requires real interior fill + extramural
+    // growth + a historically-grounded age gap, not just proximity to the wall (verified headlessly
+    // across many seed/epoch/age/pop combinations before this scenario was tuned) — this screenshot
+    // should show a visible inner ring road left behind by the superseded circuit.
+    { name: 'wall-generations', set: { culture: 'medieval', siteKind: 'river', pop: '9000', epochs: '10', settlementAge: '600', fortified: false, walls: true, terrainAware: false, ruined: false, wallGenerations: true } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
@@ -159,9 +160,9 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     console.log('SCENARIO ' + sc.name + ' ' + JSON.stringify(info));
     await page.screenshot({ path: path.join(outDir, `town-${sc.name}.png`) });
   }
-  // reset the culture selector + terrain-aware/ruined/wallGenerations checkboxes so none leaks
-  // into any later manual use
-  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; document.getElementById('ruined').checked = false; document.getElementById('wallGenerations').checked = false; });
+  // reset the culture selector + terrain-aware/ruined/wallGenerations checkboxes + epochs/
+  // settlementAge fields so none leaks into any later manual use
+  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; document.getElementById('ruined').checked = false; document.getElementById('wallGenerations').checked = false; document.getElementById('epochs').value = '8'; document.getElementById('settlementAge').value = '300'; });
 
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);

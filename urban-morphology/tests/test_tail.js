@@ -1035,18 +1035,35 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
-/* ---------- Successive wall generations -> ring roads (docs/03 M-GRW-2, docs/07 §3.10) ----------
+/* ---------- Successive wall generations -> ring roads (docs/03 M-GRW-2, docs/07 §3.11) ----------
  * Organic/medieval growth only, opt-in via wallGenerations (default off, additive like every
  * other toggle in this file). Venus's radial branch never reads the option at all (no epoch loop
- * to hang repeatable expansion on), so it must be a complete no-op there. */
+ * to hang repeatable expansion on), so it must be a complete no-op there.
+ *
+ * A first cut of this feature's trigger compared a freshly recomputed all-built-nodes hull
+ * (already including any extramural growth) against the previous wall's own area — but since the
+ * wall itself IS that same hull construction inflated by only ~10%+16m growth reserve, ANY new
+ * growth at all made a fresh hull exceed the old wall's area almost immediately: direct
+ * epoch-by-epoch instrumentation showed generation 2 firing the very epoch after generation 1 was
+ * built, and generation 3 the epoch after that — ring roads appearing well ahead of real growth,
+ * exactly the ordering bug a user review caught ("generates ring roads in advance of the growth
+ * instead of building upto and beyond the wall"). Fixed with `wallOccupancy()`: interior-only fill
+ * fraction (bounded well under 1 by construction) plus a minimum extramural (ribbon-suburb) share,
+ * AND a real-year age gate (`settlementAge`, a new user-facing input) requiring a historically-
+ * grounded gap since the active wall was built — real successive-circuit gaps run ~74y (Cologne
+ * 1106->1180), ~94-111y (Florence Matildine->Communal1->Communal2), ~158-168y (Paris Philip
+ * II->Charles V); wallGenerationMinAgeGap defaults to 120y inside that band. This block both
+ * exercises the mechanism AND locks in the fix: the tests below assert genuine epoch spacing
+ * between generations and that a young settlement's own lifespan can't afford a second circuit. */
 {
-  // multi-generation firing: swept across many seed/pop/epoch combinations while designing this
-  // test (11 seeds x 4 epoch counts x 4 pop levels) — every combination reached the generation
-  // cap, so this is a robust mechanism, not a lucky seed. epochs:8/pop:9000 (this file's own
-  // epochs default) with seed 12345 (reused throughout this file) lands comfortably inside the
-  // existing population tolerance band too.
-  const m = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river' });
+  // multi-generation firing: needs a genuinely long-running settlement now (correctly so) — swept
+  // many seed/epoch/age/pop combinations while designing this test; epochs:10, settlementAge:600
+  // (a long-lived, several-circuit-plausible town per the real gaps above) reliably reaches the
+  // generation cap for seed 12345 (reused throughout this file), landing inside the existing
+  // population tolerance band too.
+  const m = UME.generate(12345, { epochs: 10, pop: 9000, walls: true, wallGenerations: true, settlementAge: 600, culture: 'medieval', site: 'river' });
   ok(m.wallGenerations === true, 'model reports the requested wallGenerations option back');
+  ok(m.settlementAge === 600, 'model reports the requested settlementAge option back');
   ok(!!m.wall.ring, 'a wall exists');
   ok(Array.isArray(m.wall.history) && m.wall.history.length >= 1,
     `wall history has >=1 superseded generation (got ${m.wall.history ? m.wall.history.length : 0})`);
@@ -1055,6 +1072,32 @@ for (const site of ['river', 'landlocked']) {
     `active generation respects maxWallGenerations (got ${m.wall.generation})`);
   ok(m.wall.history.every((h, i) => h.generation === i + 1),
     'history generations are the ascending 1-based sequence that preceded the active one');
+
+  // the fix itself: successive generations must be genuinely spaced apart in epochs, never
+  // adjacent — the exact regression the buggy first cut exhibited (superseding practically every
+  // epoch). yearsPerEpoch = settlementAge/epochs (the same derivation grow() itself uses), so the
+  // minimum epoch gap a wallGenerationMinAgeGap-year requirement implies is computable here too.
+  const yearsPerEpoch = 600 / 10;
+  const minEpochGap = UME.DEFAULT_RULES.settlement.wallGenerationMinAgeGap / yearsPerEpoch;
+  const epochsOfEachGen = [...m.wall.history.map(h => h.epoch), m.wall.epoch];
+  let properlySpaced = true;
+  for (let i = 1; i < epochsOfEachGen.length; i++)
+    if (epochsOfEachGen[i] - epochsOfEachGen[i - 1] < minEpochGap) properlySpaced = false;
+  ok(properlySpaced, `successive generations are spaced >= the age-derived minimum epoch gap (${minEpochGap.toFixed(2)}), not firing every epoch (epochs: ${epochsOfEachGen.join(',')})`);
+  ok(m.wall.history.every(h => typeof h.fillFractionAtSupersession === 'number' && h.fillFractionAtSupersession >= UME.DEFAULT_RULES.settlement.wallGenerationThreshold),
+    'every superseded generation had genuinely reached the interior fill-fraction threshold at the moment it was replaced (not before)');
+  ok(m.wall.history.every(h => h.exteriorNodesAtSupersession >= 10),
+    'every superseded generation had a real (not token) extramural presence at the moment it was replaced');
+
+  // young-settlement regression: a settlement whose own lifespan is too short to afford even the
+  // real-world minimum gap between circuits must never supersede its first wall, however dense its
+  // interior gets — directly locks in the age-gate fix, across several seeds
+  let youngNeverSupersedes = true;
+  for (const seed of [1, 5, 7, 12345, 999]) {
+    const young = UME.generate(seed, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, settlementAge: 50, culture: 'medieval', site: 'river' });
+    if ((young.wall.generation || 1) > 1) youngNeverSupersedes = false;
+  }
+  ok(youngNeverSupersedes, 'a 50-year-old settlement never supersedes its first wall across 5 seeds, however dense it gets (age-gate, M-GRW-2b)');
 
   const ringroadEdges = m.graph.edges.filter(e => e.cls === 'ringroad');
   ok(ringroadEdges.length > 0, `ring-road edges exist (${ringroadEdges.length} found)`);
@@ -1074,14 +1117,14 @@ for (const site of ['river', 'landlocked']) {
   ok(Math.abs(m.pop - m.popTarget) / m.popTarget < 0.6,
     `wallGenerations:true realized population ~${m.pop} still tracks target ${m.popTarget} (M-DEN-1/2)`);
 
-  const m2 = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river' });
+  const m2 = UME.generate(12345, { epochs: 10, pop: 9000, walls: true, wallGenerations: true, settlementAge: 600, culture: 'medieval', site: 'river' });
   ok(UME.hashModel(m) === UME.hashModel(m2), 'wallGenerations:true generation is deterministic');
 
   // maxWallGenerations cap respected across several seeds/site kinds, not just one
   let capOk = true, capChecked = 0;
-  for (const seed of [1, 5, 7, 21, 42, 100, 777, 999, 31337]) {
+  for (const seed of [1, 5, 7, 21, 42, 100, 777, 999, 31337, 12345]) {
     for (const site of ['river', 'bay', 'coast']) {
-      const mm = UME.generate(seed, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site });
+      const mm = UME.generate(seed, { epochs: 10, pop: 9000, walls: true, wallGenerations: true, settlementAge: 600, culture: 'medieval', site });
       capChecked++;
       if ((mm.wall.generation || 1) > UME.DEFAULT_RULES.settlement.maxWallGenerations) capOk = false;
     }
@@ -1108,22 +1151,25 @@ for (const site of ['river', 'landlocked']) {
   for (const seed of [1, 42, 777]) {
     const opts = { epochs: 8, pop: 9000, walls: true, culture: 'venus', site: 'river' };
     const off = UME.generate(seed, opts);
-    const on = UME.generate(seed, Object.assign({}, opts, { wallGenerations: true }));
+    const on = UME.generate(seed, Object.assign({}, opts, { wallGenerations: true, settlementAge: 600 }));
     if (UME.hashModel(off) !== UME.hashModel(on)) venusOk = false;
   }
-  ok(venusOk, 'Venus (radial growth) generation is byte-identical with wallGenerations true vs. false across 3 seeds — the toggle is inert on that branch');
+  ok(venusOk, 'Venus (radial growth) generation is byte-identical with wallGenerations/settlementAge set vs. unset across 3 seeds — the toggle is inert on that branch');
 
   // safety audit (same technique the standing audit elsewhere in this file uses): ring-road edges
   // never genuinely sit in water (matching removeWaterCrossings' own >=2-of-9-samples definition
   // of "wet" — a single grazing sample near a landArc/bank handoff is expected and already
   // tolerated for every other street/lane class in this engine, not unique to ring roads), and
-  // never cross the active wall away from a gate
-  let wetFails = 0, crossFails = 0, auditChecked = 0;
+  // never cross the active wall away from a gate. Not every seed/site combination fires a
+  // supersession at all (correctly so, now that it needs genuine cause) — this audits whatever
+  // ring-road edges each combination actually produced, empty or not.
+  let wetFails = 0, crossFails = 0, auditChecked = 0, auditWithRingroads = 0;
   for (const seed of [1, 4242, 777, 12345, 999]) {
     for (const site of ['river', 'riverthrough', 'bay', 'coast']) {
       const mm = UME.generate(seed, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site });
       auditChecked++;
       const rrEdges = mm.graph.edges.filter(e => e.cls === 'ringroad');
+      if (rrEdges.length) auditWithRingroads++;
       if (mm.site.waterPoly && mm.site.waterPoly.length)
         for (const e of rrEdges) {
           const a = mm.graph.nodes[e.a], b = mm.graph.nodes[e.b];
@@ -1146,24 +1192,27 @@ for (const site of ['river', 'landlocked']) {
       }
     }
   }
+  ok(auditWithRingroads > 0, `at least some of the ${auditChecked} (seed x site) combinations actually produced ring-road edges to audit (${auditWithRingroads} did)`);
   ok(wetFails === 0, `ring-road edges never genuinely sit in water across ${auditChecked} (seed x site) combinations (${wetFails} failures)`);
   ok(crossFails === 0, `ring-road edges never cross the active wall away from a gate across ${auditChecked} combinations (${crossFails} failures)`);
 
   // settlement rules group: defaults + tunability wired the same generic way as street/parcels
-  ok(UME.DEFAULT_RULES.settlement.wallGenerationThreshold === 0.8, 'DEFAULT_RULES.settlement.wallGenerationThreshold default (M-GRW-2)');
+  ok(UME.DEFAULT_RULES.settlement.wallGenerationThreshold === 0.8, 'DEFAULT_RULES.settlement.wallGenerationThreshold default (M-GRW-2a)');
+  ok(UME.DEFAULT_RULES.settlement.wallGenerationMinAgeGap === 120, 'DEFAULT_RULES.settlement.wallGenerationMinAgeGap default (M-GRW-2b: real gaps ~74-168y)');
+  ok(UME.DEFAULT_RULES.settlement.wallGenerationExtramuralShare === 0.15, 'DEFAULT_RULES.settlement.wallGenerationExtramuralShare default');
   ok(UME.DEFAULT_RULES.settlement.maxWallGenerations === 3, 'DEFAULT_RULES.settlement.maxWallGenerations default (M-GRW-2)');
   ok(UME.DEFAULT_RULES.settlement.carryingCapacityWeight === 1.0, 'DEFAULT_RULES.settlement.carryingCapacityWeight default (full placeholder effect)');
   const customSettlement = UME.resolveRules({ settlement: { maxWallGenerations: 1 } });
   ok(customSettlement.settlement.maxWallGenerations === 1 && customSettlement.settlement.wallGenerationThreshold === UME.DEFAULT_RULES.settlement.wallGenerationThreshold,
     'resolveRules(partial) merges the settlement group the same generic way as every other group');
-  const capped = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river', rules: customSettlement });
-  ok((capped.wall.generation || 1) <= 1, 'maxWallGenerations:1 (via rules) caps the town at its first wall — it never supersedes');
+  const capped = UME.generate(12345, { epochs: 10, pop: 9000, walls: true, wallGenerations: true, settlementAge: 600, culture: 'medieval', site: 'river', rules: customSettlement });
+  ok((capped.wall.generation || 1) <= 1, 'maxWallGenerations:1 (via rules) caps the town at its first wall — it never supersedes even when age/fill/extramural would otherwise allow it');
 
   // carrying-capacity placeholder: weight=0 pins the factor to a no-op, isolating the logistic-
   // ramp change from the carrying-capacity change; a real Cartalith port only needs to change
   // what estimateCarryingCapacity itself returns, never this call site
   const rulesNoCarry = UME.resolveRules({ settlement: { carryingCapacityWeight: 0 } });
-  const noCarryModel = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river', rules: rulesNoCarry });
+  const noCarryModel = UME.generate(12345, { epochs: 10, pop: 9000, walls: true, wallGenerations: true, settlementAge: 600, culture: 'medieval', site: 'river', rules: rulesNoCarry });
   ok(UME.hashModel(noCarryModel) !== UME.hashModel(m),
     'carryingCapacityWeight genuinely changes the outcome vs. the full-weight default (the mechanism is live, not inert)');
 }

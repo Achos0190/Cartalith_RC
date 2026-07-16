@@ -790,16 +790,68 @@ toggle is simply never read there — inert by construction, not by a special-ca
   the active wall away from a gate.
 
 **Trigger, mechanically:** the first circuit still rises at the same fixed epoch M-GRW-2 always
-used (`max(3, floor(epochs·0.6))`). From then on, each epoch compares a shared
-`builtMassHull(site,anchors,g)` helper's area (extracted from `buildWall`'s own hull-of-built-nodes
-computation — a pure refactor, `buildWall`'s own output is byte-identical before/after) against the
-active wall's enclosed area; crossing `rules.settlement.wallGenerationThreshold` (default 0.8, per
-M-GRW-2's own "≥~80%") supersedes the wall, up to `rules.settlement.maxWallGenerations` (default 3,
-per M-GRW-2's "1–3 typical"). Self-limiting with no extra cooldown: a freshly-built wall's own
-growth-reserve inflation keeps the ratio well under threshold immediately after every supersession.
-Swept across an 11-seed × 4-epoch-count × 4-population-level grid while validating this: every
-combination reached the generation cap, so this is a robust mechanism across this engine's normal
-parameter range, not a lucky seed.
+used (`max(3, floor(epochs·0.6))`). From then on, a wall generation is eligible to be superseded
+only once **all three** hold: (1) a real-year age gate has elapsed since it was built (§3.11.1
+below), (2) its interior is genuinely full (`wallOccupancy()`'s `fillFraction`, §3.11.1), and (3)
+growth has spilled past it into ribbon suburbs in real numbers (the same function's exterior-node
+share). Crossing all three supersedes the wall — old ring → `ringroad`, bigger ring raised in its
+place — up to `rules.settlement.maxWallGenerations` (default 3, per M-GRW-2's "1–3 typical").
+
+#### 3.11.1 A user review caught a real ordering bug — this section documents the fix
+
+The first cut of this trigger (before the fix below) compared a freshly recomputed hull of *every*
+built node — interior and extramural alike — against the previous wall's own area, crossing
+`wallGenerationThreshold` (0.8) to supersede. It passed its own test suite (which only checked the
+generation counter advanced and stayed under the cap) and even looked plausible in isolation. A
+user review of the actual rendered output caught what the tests missed: *"it seems to generate ring
+roads in advance of the growth instead of building upto and beyond the wall before creating a new
+wall/road."*
+
+Direct epoch-by-epoch instrumentation confirmed it: wall #1 built at epoch 4 of 8; at epoch 5 (the
+very next epoch), the all-nodes hull already exceeded the wall's area by 10% (only 82 of 307 built
+nodes were even outside the wall yet) and superseded; the *next* epoch superseded again. The root
+cause was structural, not a tuning miss: the wall itself **is** a freshly-built hull inflated by
+only ~10%+16m growth reserve, so comparing a *newly recomputed* hull (with its own ~10%+16m
+reserve) against the *old* wall was comparing two numbers that start almost equal — any growth at
+all, even a couple of stray ribbon-suburb nodes pulling the convex hull outward, tipped the ratio
+over 0.8 almost immediately. The mechanism was firing on the *envelope* of growth, not on how full
+the *interior* actually was.
+
+**The fix, `wallOccupancy(g, ring)`:** splits built (degree≥2) nodes into interior (inside the
+given ring) and exterior, and computes `fillFraction` from the **interior nodes' own hull area**
+divided by the ring's area — a quantity that can never exceed the ring's own footprint by
+construction, so it is a genuine, bounded "how full is this specific enclosure" signal rather than
+an unbounded envelope comparison. A new `rules.settlement.wallGenerationExtramuralShare` (default
+0.15, floor 10 nodes) requires the exterior count to independently reach a real share of the
+interior count — operationalizing "beyond the wall" as its own explicit, checked condition rather
+than a side effect of the same broken ratio. Re-instrumented: wall #1 (epoch 4) now stays active
+through epochs 5, 6, 7 (age gate not yet satisfied, see below) and only supersedes at epoch 8, by
+which point `fillFraction` has climbed 0.821→0.834→0.849 and exterior nodes 82→94→98→110 — a
+visibly gradual fill-then-spill, not an instant flip.
+
+**The age gate, and the new `settlementAge` input.** Even a correctly-bounded fill/spillover
+metric doesn't by itself capture *when* a second circuit is plausible — a two-year-old frontier
+camp and an 800-year-old capital can have geometrically identical street graphs. Per the user's
+explicit request ("adjust with an input for the settlement age"), a new top-level UI field,
+**Settlement age (years)** (default 300, range 30–1000), spreads this run's epochs evenly across
+real years (`yearsPerEpoch = settlementAge/epochs`). A wall generation can only be superseded once
+`rules.settlement.wallGenerationMinAgeGap` (default 120 years) worth of epochs have elapsed since
+it was built. That figure is grounded in real successive-circuit gaps, not invented: **Cologne**
+1106 → 1179/1180 (~73–74y); **Florence** Matildine (1078) → First Communal (1172–75) (~94–97y) →
+Second Communal (started 1285) (~110–112y); **Paris** Philip II (~1190–1213) → Charles V
+(1358–1371) (~145–168y) — a real ~74–168-year band, 120 chosen as a PoC point-value inside it
+(docs/03 M-GRW-2c has the full citations). The practical effect: a young settlement's entire epoch
+budget cannot afford the real-world gap a second circuit needs, so it simply never gets one
+(verified: a 50-year-old settlement never supersedes its first wall across 5 seeds, however dense
+its interior gets) — while an old settlement's epochs are each worth many years and several
+circuits fit naturally, exactly the "age and population growth go hand in hand" coupling the user
+asked for, now expressed as a real, user-controlled input rather than an implicit side effect of
+epoch count.
+
+Re-swept the parameter space after the fix (11 seeds × 3 epoch counts × 3 ages × 3 populations):
+reaching multiple generations now genuinely depends on the settlement having both the epochs and
+the age to support it — no longer every combination hits the cap, which is itself evidence the fix
+changed real behavior rather than just relabeling the same one.
 
 **Age ↔ population ↔ carrying capacity:** rather than touching the final population formula
 (`pop = built-parcels × 5.2`, left untouched so existing realized-population tolerances hold), the
@@ -831,9 +883,12 @@ call site, or downstream mechanic needs to change.
 
 **New tunables** (`DEFAULT_RULES.settlement`, a 4th top-level rules group — `resolveRules`/
 `cloneRules` needed zero changes, since they already iterate `Object.keys` generically):
-`wallGenerationThreshold` (0.8), `maxWallGenerations` (3), `carryingCapacityWeight` (1.0, `0` fully
-disables the placeholder's effect). All three are also wired into the Generation Rules UI panel
-(`RULE_PARAM_SPECS`) the same way every other tunable already is.
+`wallGenerationThreshold` (0.8), `wallGenerationMinAgeGap` (120 years), `wallGenerationExtramuralShare`
+(0.15), `maxWallGenerations` (3), `carryingCapacityWeight` (1.0, `0` fully disables the
+placeholder's effect). All five are also wired into the Generation Rules UI panel
+(`RULE_PARAM_SPECS`) the same way every other tunable already is. `settlementAge` itself is a
+top-level scenario input (alongside Population/Growth epochs), not a rules-group tunable — it
+describes a fact about *this* town, not a generic style knob a saved rules profile would carry.
 
 ## 4. Roman planned-colony morphology — archived (was: quantified M-ROM register)
 
