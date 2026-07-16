@@ -177,6 +177,25 @@ See `docs/08-terrain-building-suitability.md` for the research, the design, and 
 Cartalith Gen1's actual terrain fields (`field`, `flowField`, `resistanceField`) for when the
 actual port happens.
 
+### Successive wall generations → ring roads (experimental, docs/03 M-GRW-2, docs/07 §3.11)
+
+Medieval/organic growth only, off by default. A growing town outgrows its wall, a bigger one rises
+around the expanded built-up area, and the superseded wall is demolished for material — its
+foundation surviving as a **ring road** inside the modern street plan (Vienna's Ringstrasse,
+Paris's Grands Boulevards on the razed Fermiers-Généraux wall are the real-world referents), up to
+3 generations (M-GRW-2's "1–3 typical for towns that persist"). Growth is tied to settlement age
+and a carrying-capacity placeholder, per the user's own request: the frontier-radius ramp that
+governs how fast the town's built-up area expands maps age through a logistic curve (slow while
+young, faster once established, tapering as it matures) instead of linearly, scaled by a `[0.3,1.0]`
+placeholder factor sampling this engine's own terrain-suitability score around the market — a
+deliberate stand-in for Cartalith's real resource/carrying-capacity system, isolated to one
+function with a fixed signature so a real port only needs to replace that one function's body (see
+docs/07 §3.11 for the exact integration contract). Venus's radial growth mode has no epoch loop to
+hang this on, so the toggle is simply inert there. Verified robust across an 11-seed × 4-epoch-count
+× 4-population-level sweep (every combination reached the generation cap) and byte-identical to the
+pre-existing behaviour when left off (neutrality), the same discipline every other opt-in toggle in
+this tool is held to.
+
 The v0.1 app generates a deterministic medieval-pack town from a seed: site (river crossing,
 bay harbour, or open coast) → anchors → least-cost primary routes over a slope/water cost
 field → epoch-looped street growth (densification + exploration, T-junction attachment,

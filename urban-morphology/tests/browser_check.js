@@ -133,6 +133,11 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome', ruined: false } },
     { name: 'ruined-venus', set: { culture: 'venus', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome', ruined: true } },
     { name: 'terrain-aware-coast', set: { culture: 'medieval', siteKind: 'coast', pop: '9000', fortified: false, walls: true, terrainAware: true, ruined: false } },
+    // successive wall generations (M-GRW-2, experimental): a large-enough town at the default
+    // epoch count reliably outgrows its first wall at least once (verified headlessly across
+    // many seed/pop/epoch combinations before this scenario was added) — this screenshot should
+    // show a visible inner ring road left behind by the superseded circuit.
+    { name: 'wall-generations', set: { culture: 'medieval', siteKind: 'river', pop: '9000', fortified: false, walls: true, terrainAware: false, ruined: false, wallGenerations: true } },
   ];
   for (const sc of scenarios) {
     await page.evaluate((s) => {
@@ -147,13 +152,16 @@ const { chromium } = require(PLAYWRIGHT_DIR);
         gates: m.wall.gates.map(g => g.name || (g.water ? 'water' : '?')),
         terrainAware: m.terrainAware, unsuitableParcels: m.parcels.filter(p => p.unsuitable).length,
         ruined: m.ruined, ruinedBuildings: m.buildings.filter(b => b.ruined).length,
-        games: (m.games || []).map(x => x.kind) };
+        games: (m.games || []).map(x => x.kind),
+        wallGeneration: m.wall.generation || 1, wallHistory: (m.wall.history || []).length,
+        ringRoadEdges: m.graph.edges.filter(e => e.cls === 'ringroad').length };
     });
     console.log('SCENARIO ' + sc.name + ' ' + JSON.stringify(info));
     await page.screenshot({ path: path.join(outDir, `town-${sc.name}.png`) });
   }
-  // reset the culture selector + terrain-aware checkbox so neither leaks into any later manual use
-  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; document.getElementById('ruined').checked = false; });
+  // reset the culture selector + terrain-aware/ruined/wallGenerations checkboxes so none leaks
+  // into any later manual use
+  await page.evaluate(() => { document.getElementById('culture').value = 'medieval'; document.getElementById('terrainAware').checked = false; document.getElementById('ruined').checked = false; document.getElementById('wallGenerations').checked = false; });
 
   await browser.close();
   const failedInsp = inspResults.filter(r => !r.ok);

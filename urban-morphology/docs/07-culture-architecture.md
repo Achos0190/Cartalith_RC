@@ -731,16 +731,11 @@ archival pointer; the full text is in git history):
 
 **Explicitly deferred, not attempted in this pass (both per direct user instruction):**
 
-- **Successive city walls → ring roads.** The historical mechanic where a growing settlement
-  outgrows its wall, a new outer wall is built around the expanded area, and the old inner wall is
-  eventually dismantled for building material — its foundation surviving as a ring road inside the
-  modern street plan (a real, well-attested pattern in many old European/Asian cities). Raised
-  during this same review; explicitly held for a future pass, not designed or implemented here. Any
-  future attempt should account for: multiple wall generations coexisting in the model at once
-  (current `wallState` assumes a single active ring), the demolition-to-road conversion needing new
-  render/data handling (a wall segment becoming a `street`-class edge is not something any existing
-  mechanism does), and interaction with the existing gate-placement and field-of-fire-clearing logic
-  for whichever wall generation is currently "active."
+- **Successive city walls → ring roads.** ~~The historical mechanic where a growing settlement
+  outgrows its wall... explicitly held for a future pass, not designed or implemented here.~~
+  **Implemented in a later pass — see §3.11.** Raised during this review, picked up once the user
+  explicitly asked for it (tied to settlement age, population growth, and a carrying-capacity
+  placeholder ready for a real Cartalith integration).
 - **Scale-up to 40–200 settlements.** The user flagged that today's per-building and per-road-segment
   detail model — real for a single settlement — becomes far too complex and expensive to hold for a
   regional view of many settlements at once. No redesign was attempted here; this is a note for
@@ -750,6 +745,95 @@ archival pointer; the full text is in git history):
   a schematic footprint or a handful of aggregate stats; whether `model.details`/`model.buildings`
   need to become lazily-generated rather than always-materialized; and whether the existing
   `hashModel()` neutrality discipline needs a regional-scale equivalent.
+
+### 3.11 Successive wall generations: implementation (picks up the §3.10 deferral)
+
+Picked up on explicit user request, with three requirements: tie it to **settlement age**, tie age
+to **population growth** ("age and population growth go hand in hand"), and tie growth to **local
+resources/carrying capacity** — using simple placeholder values since Cartalith owns the real
+resource/carrying-capacity system, but built **ready for integration** with it. Scope: **organic
+(medieval) growth only**, opt-in via a new `wallGenerations` toggle (default off). Venus's radial
+branch lays every ring/spoke in one shot with no epoch loop to hang repeatable expansion on, so the
+toggle is simply never read there — inert by construction, not by a special-case guard (verified:
+`wallGenerations:true`/`false` produce byte-identical `hashModel()` output on Venus).
+
+**What §3.10 flagged as needed, and how each was resolved:**
+
+- *"Multiple wall generations coexisting in the model at once (current `wallState` assumes a single
+  active ring)."* Resolved additively: `model.wall` (`wallState`) keeps its exact pre-existing
+  meaning — the active/current/outermost wall — so all 5 of its non-`grow` consumers
+  (`applyStarFort`, `clearFortZone`, `assignDistricts`, `buildFarmland`, `buildGames`) needed zero
+  changes; they already only ever run after the epoch loop finishes, so they only ever see whatever
+  `wallState` holds at that point, which is still "the wall" by construction. History is purely
+  additive: `wallState.history` (array of prior generations, each snapshotting the same shape
+  `wallState` itself has) and `wallState.generation` (1-based counter of the active generation).
+- *"The demolition-to-road conversion needing new render/data handling (a wall segment becoming a
+  street-class edge is not something any existing mechanism does)."* Resolved with a genuinely new
+  edge class, `ringroad`, rather than reusing `street` — it gets its own CSS fill colour, its own
+  slot in the road-class draw order/label lookup, and (at 7.5m) a width matching/exceeding a
+  primary road, since real ring boulevards built on demolished fortifications (Vienna's
+  Ringstrasse, Paris's Grands Boulevards on the Fermiers-Généraux wall) were characteristically
+  wide. The road itself is laid through the exact same `addPolylineStreet`/`addStreet` primitive
+  every other street in this engine already uses, so it snaps into the existing network with no new
+  graph machinery.
+- *"Interaction with the existing gate-placement and field-of-fire-clearing logic for whichever
+  wall generation is currently 'active.'"* Turned out to need **no special-casing at all**, verified
+  rather than assumed: a new (superseding) wall's hull is always computed from the current,
+  larger built-mass extent and re-inflated with `buildWall`'s own existing growth-reserve
+  logic, so it geometrically contains the ring road it just superseded. `clearFortZone`'s clear
+  band is defined as *outside* the active ring (`!pointInPoly(p,ring) && distToLine(...)`), so an
+  interior ring road is never in it; `removeWaterCrossings` (which already generically removes any
+  non-primary/non-quay edge with ≥2-of-9 sampled points in water) cleanly trims the rare case where
+  a spans-water generation's old water-gate crossing has no bridge, with no new logic. Confirmed by
+  a dedicated safety audit (same `pointInPoly`/`segInt` technique the file's other standing audits
+  use): across a 5-seed × 4-site sweep, ring-road edges never genuinely sit in water and never cross
+  the active wall away from a gate.
+
+**Trigger, mechanically:** the first circuit still rises at the same fixed epoch M-GRW-2 always
+used (`max(3, floor(epochs·0.6))`). From then on, each epoch compares a shared
+`builtMassHull(site,anchors,g)` helper's area (extracted from `buildWall`'s own hull-of-built-nodes
+computation — a pure refactor, `buildWall`'s own output is byte-identical before/after) against the
+active wall's enclosed area; crossing `rules.settlement.wallGenerationThreshold` (default 0.8, per
+M-GRW-2's own "≥~80%") supersedes the wall, up to `rules.settlement.maxWallGenerations` (default 3,
+per M-GRW-2's "1–3 typical"). Self-limiting with no extra cooldown: a freshly-built wall's own
+growth-reserve inflation keeps the ratio well under threshold immediately after every supersession.
+Swept across an 11-seed × 4-epoch-count × 4-population-level grid while validating this: every
+combination reached the generation cap, so this is a robust mechanism across this engine's normal
+parameter range, not a lucky seed.
+
+**Age ↔ population ↔ carrying capacity:** rather than touching the final population formula
+(`pop = built-parcels × 5.2`, left untouched so existing realized-population tolerances hold), the
+existing frontier-radius ramp inside `grow()` — `maxR = maxRF·(0.38+0.62·ep/epochs)`, linear — is
+replaced (toggle-on only) by `maxR = maxRF·ccFactor·(0.38+0.62·logisticRamp(ep/epochs))`: the same
+floor/ceiling, but age maps through a normalized logistic curve instead of a straight line (slow
+while young, faster once established, tapering as it matures), and the whole ramp is scaled by
+`ccFactor`, a placeholder carrying-capacity multiplier. Verified live: zeroing
+`rules.settlement.carryingCapacityWeight` (which pins `ccFactor` to 1, isolating the ramp-shape
+change alone) measurably changes realized population vs. the full-weight default on the same
+seed/site — the mechanism visibly does something, not just documented intent.
+
+**Cartalith integration contract.** The entire carrying-capacity hook is one pure function:
+
+```js
+// current PoC body — samples this engine's own M-TER-1 terrainSuitability() in a ring around
+// the market and averages it into one factor
+function estimateCarryingCapacity(site, anchors, maxRF) { /* -> a single number in ~[0.3, 1.0] */ }
+```
+
+Signature and contract to preserve on a real port: `(site, anchors, maxRF) -> a single number in
+roughly [0.3, 1.0]` (never a hard 0 — a site this engine already generated a market on is buildable
+by construction). There is exactly **one call site** (inside `grow()`, computed once per
+generation, not per-epoch), and every downstream consumer — the frontier-radius ramp, and by
+extension the wall-generation trigger that reads the same realized extent — already treats the
+result as "whatever this returns." A real Cartalith port replacing the sampled-terrain-suitability
+body with an actual resource/carrying-capacity query is the **entire** integration; no other file,
+call site, or downstream mechanic needs to change.
+
+**New tunables** (`DEFAULT_RULES.settlement`, a 4th top-level rules group — `resolveRules`/
+`cloneRules` needed zero changes, since they already iterate `Object.keys` generically):
+`wallGenerationThreshold` (0.8), `maxWallGenerations` (3), `carryingCapacityWeight` (1.0, `0` fully
+disables the placeholder's effect). All three are also wired into the Generation Rules UI panel
+(`RULE_PARAM_SPECS`) the same way every other tunable already is.
 
 ## 4. Roman planned-colony morphology — archived (was: quantified M-ROM register)
 

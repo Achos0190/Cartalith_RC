@@ -124,15 +124,19 @@ panel/editor DOM rather than copied verbatim.
 | `buildPlaza` | market-square carving (widens the nearest primary edge) — **note for the games-building port**: the plaza polygon is not fully clear ground (docs/07 §3.8 finding: the original through-street still runs through it); anything sited off `plaza.poly` on the Gen1 side needs the same real-parcel check `buildGames`'s plaza-siting mode added, not just an edge-offset | REUSE (with that caveat carried forward) |
 | `buildHarbour` | quay/piers/mole, harbour defence | ADAPT — `docs/06` §2 already notes `traits.port` + real terrain at `(x,y)` selects harbour presence/sub-type |
 | `addRiverBridges` | bridge placement on a river-through site | REUSE |
-| `grow` | the organic epoch-loop (densification + exploration, M-GRW-1) — the single largest function in the engine | REUSE |
+| `grow` | the organic epoch-loop (densification + exploration, M-GRW-1) — the single largest function in the engine | REUSE — organic-only `wallGenerations` opt-in (docs/07 §3.11) branches its frontier-radius ramp and wall-episode trigger; the toggle-off path is byte-identical to before |
+| `logisticRamp` | normalized [0,1]->[0,1] logistic curve, used by `wallGenerations`'s age-pacing (docs/07 §3.11) | REUSE — pure math helper, no domain dependency |
+| `estimateCarryingCapacity` | PoC placeholder carrying-capacity factor for `wallGenerations` (docs/07 §3.11): samples this engine's own `terrainSuitability()` around the market and averages it | REPLACE — deliberately PoC-placeholder-quality; a real port keeps the exact `(site,anchors,maxRF) -> ~[0.3,1.0]` signature/contract and replaces only the body with a real resource/carrying-capacity query (docs/07 §3.11 has the full integration contract) — every consumer already treats the result as opaque |
 
 ### 3.7 Fortification
 
 | Function | Purpose | Disposition |
 |---|---|---|
 | `buildWall` | curtain wall, gates, harbour integration | ADAPT — `docs/06` §3.3 flags the era signal (`civYear`) this needs, which doesn't exist as a wired input yet |
+| `builtMassHull` | hull-of-built-nodes extraction shared by `buildWall`'s first circuit and the `wallGenerations` expansion trigger (docs/07 §3.11) — pure refactor out of `buildWall`, its own output unchanged | REUSE — pure graph geometry, no era/style dependency |
+| `supersedeWall` | `wallGenerations` only: snapshots the active wall into `wallState.history`, converts its land-facing arc to a `ringroad` edge, then calls `buildWall` again for the bigger replacement (docs/07 §3.11) | ADAPT — inherits `buildWall`'s own era-signal dependency (above), since it just re-invokes it |
 | `applyStarFort` | Naarden-trace bastioned enceinte | ADAPT — same era-signal dependency, plus `traits.fortified` gating already sketched in docs/06 §2 |
-| `clearFortZone` | field-of-fire clearing (removes overlapping buildings/parcels/streets/clutter) | REUSE |
+| `clearFortZone` | field-of-fire clearing (removes overlapping buildings/parcels/streets/clutter) | REUSE — verified needs no `wallGenerations` special-casing: its clear band is defined outside the active ring, so an interior superseded-wall ring road is never in it |
 
 ### 3.8 Post-growth encroachment passes
 

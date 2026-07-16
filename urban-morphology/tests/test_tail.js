@@ -1035,5 +1035,138 @@ for (const site of ['river', 'landlocked']) {
   }
 }
 
+/* ---------- Successive wall generations -> ring roads (docs/03 M-GRW-2, docs/07 §3.10) ----------
+ * Organic/medieval growth only, opt-in via wallGenerations (default off, additive like every
+ * other toggle in this file). Venus's radial branch never reads the option at all (no epoch loop
+ * to hang repeatable expansion on), so it must be a complete no-op there. */
+{
+  // multi-generation firing: swept across many seed/pop/epoch combinations while designing this
+  // test (11 seeds x 4 epoch counts x 4 pop levels) — every combination reached the generation
+  // cap, so this is a robust mechanism, not a lucky seed. epochs:8/pop:9000 (this file's own
+  // epochs default) with seed 12345 (reused throughout this file) lands comfortably inside the
+  // existing population tolerance band too.
+  const m = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river' });
+  ok(m.wallGenerations === true, 'model reports the requested wallGenerations option back');
+  ok(!!m.wall.ring, 'a wall exists');
+  ok(Array.isArray(m.wall.history) && m.wall.history.length >= 1,
+    `wall history has >=1 superseded generation (got ${m.wall.history ? m.wall.history.length : 0})`);
+  ok((m.wall.generation || 1) > 1, `active generation counter advanced past 1 (got ${m.wall.generation})`);
+  ok((m.wall.generation || 1) <= UME.DEFAULT_RULES.settlement.maxWallGenerations,
+    `active generation respects maxWallGenerations (got ${m.wall.generation})`);
+  ok(m.wall.history.every((h, i) => h.generation === i + 1),
+    'history generations are the ascending 1-based sequence that preceded the active one');
+
+  const ringroadEdges = m.graph.edges.filter(e => e.cls === 'ringroad');
+  ok(ringroadEdges.length > 0, `ring-road edges exist (${ringroadEdges.length} found)`);
+  ok(ringroadEdges.every(e => T.pointInPoly(m.graph.nodes[e.a], m.wall.ring) && T.pointInPoly(m.graph.nodes[e.b], m.wall.ring)),
+    'every ring-road edge endpoint sits inside the final active wall ring (a superseded ring is always smaller, by construction)');
+
+  // gates correspond to the ACTIVE ring only — every gate point sits on (not just near) it
+  ok(m.wall.gates.every(gt => {
+    const ring = m.wall.ring;
+    let best = Infinity;
+    for (let i = 0; i < ring.length; i++) best = Math.min(best, T.distPtSeg(gt.pt, ring[i], ring[(i + 1) % ring.length]));
+    return best < 5;
+  }), 'every gate sits on the currently active wall ring, never a superseded one');
+
+  // realized population still lands in the same tolerance band this file already holds every
+  // other generation to (M-DEN-1/2) — the feature must not blow the population model up
+  ok(Math.abs(m.pop - m.popTarget) / m.popTarget < 0.6,
+    `wallGenerations:true realized population ~${m.pop} still tracks target ${m.popTarget} (M-DEN-1/2)`);
+
+  const m2 = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river' });
+  ok(UME.hashModel(m) === UME.hashModel(m2), 'wallGenerations:true generation is deterministic');
+
+  // maxWallGenerations cap respected across several seeds/site kinds, not just one
+  let capOk = true, capChecked = 0;
+  for (const seed of [1, 5, 7, 21, 42, 100, 777, 999, 31337]) {
+    for (const site of ['river', 'bay', 'coast']) {
+      const mm = UME.generate(seed, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site });
+      capChecked++;
+      if ((mm.wall.generation || 1) > UME.DEFAULT_RULES.settlement.maxWallGenerations) capOk = false;
+    }
+  }
+  ok(capOk, `maxWallGenerations respected across ${capChecked} (seed x site) combinations`);
+
+  // neutrality: omitting the option and passing an explicit false must agree exactly (byte-
+  // identical hashModel()) across several seeds/sites — the same discipline every other opt-in
+  // toggle in this file is held to (terrainAware, ruined, GenerationRules)
+  let neutralOk = true, neutralChecked = 0;
+  for (const seed of [1, 42, 777, 12345]) {
+    for (const site of ['river', 'bay', 'landlocked']) {
+      const opts = { epochs: 8, pop: 8000, walls: true, culture: 'medieval', site };
+      const omitted = UME.generate(seed, opts);
+      const explicitFalse = UME.generate(seed, Object.assign({}, opts, { wallGenerations: false }));
+      neutralChecked++;
+      if (UME.hashModel(omitted) !== UME.hashModel(explicitFalse)) neutralOk = false;
+    }
+  }
+  ok(neutralOk, `wallGenerations omitted vs. explicit false are byte-identical across ${neutralChecked} (seed x site) combinations (neutrality)`);
+
+  // Venus (radial) is completely unaffected: the toggle is never read on that branch
+  let venusOk = true;
+  for (const seed of [1, 42, 777]) {
+    const opts = { epochs: 8, pop: 9000, walls: true, culture: 'venus', site: 'river' };
+    const off = UME.generate(seed, opts);
+    const on = UME.generate(seed, Object.assign({}, opts, { wallGenerations: true }));
+    if (UME.hashModel(off) !== UME.hashModel(on)) venusOk = false;
+  }
+  ok(venusOk, 'Venus (radial growth) generation is byte-identical with wallGenerations true vs. false across 3 seeds — the toggle is inert on that branch');
+
+  // safety audit (same technique the standing audit elsewhere in this file uses): ring-road edges
+  // never genuinely sit in water (matching removeWaterCrossings' own >=2-of-9-samples definition
+  // of "wet" — a single grazing sample near a landArc/bank handoff is expected and already
+  // tolerated for every other street/lane class in this engine, not unique to ring roads), and
+  // never cross the active wall away from a gate
+  let wetFails = 0, crossFails = 0, auditChecked = 0;
+  for (const seed of [1, 4242, 777, 12345, 999]) {
+    for (const site of ['river', 'riverthrough', 'bay', 'coast']) {
+      const mm = UME.generate(seed, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site });
+      auditChecked++;
+      const rrEdges = mm.graph.edges.filter(e => e.cls === 'ringroad');
+      if (mm.site.waterPoly && mm.site.waterPoly.length)
+        for (const e of rrEdges) {
+          const a = mm.graph.nodes[e.a], b = mm.graph.nodes[e.b];
+          let wetSamples = 0;
+          for (let i = 1; i < 10; i++) {
+            const p = { x: a.x + (b.x - a.x) * i / 10, y: a.y + (b.y - a.y) * i / 10 };
+            if (T.pointInPoly(p, mm.site.waterPoly)) wetSamples++;
+          }
+          if (wetSamples >= 2) wetFails++;
+        }
+      if (mm.wall.ring) {
+        const ring = mm.wall.ring, gates = mm.wall.gates;
+        for (const e of rrEdges) {
+          const a = mm.graph.nodes[e.a], b = mm.graph.nodes[e.b];
+          for (let i = 0; i < ring.length; i++) {
+            const h = T.segInt(a, b, ring[i], ring[(i + 1) % ring.length]);
+            if (h && !gates.some(gt => Math.hypot(gt.pt.x - h.pt.x, gt.pt.y - h.pt.y) < 40)) crossFails++;
+          }
+        }
+      }
+    }
+  }
+  ok(wetFails === 0, `ring-road edges never genuinely sit in water across ${auditChecked} (seed x site) combinations (${wetFails} failures)`);
+  ok(crossFails === 0, `ring-road edges never cross the active wall away from a gate across ${auditChecked} combinations (${crossFails} failures)`);
+
+  // settlement rules group: defaults + tunability wired the same generic way as street/parcels
+  ok(UME.DEFAULT_RULES.settlement.wallGenerationThreshold === 0.8, 'DEFAULT_RULES.settlement.wallGenerationThreshold default (M-GRW-2)');
+  ok(UME.DEFAULT_RULES.settlement.maxWallGenerations === 3, 'DEFAULT_RULES.settlement.maxWallGenerations default (M-GRW-2)');
+  ok(UME.DEFAULT_RULES.settlement.carryingCapacityWeight === 1.0, 'DEFAULT_RULES.settlement.carryingCapacityWeight default (full placeholder effect)');
+  const customSettlement = UME.resolveRules({ settlement: { maxWallGenerations: 1 } });
+  ok(customSettlement.settlement.maxWallGenerations === 1 && customSettlement.settlement.wallGenerationThreshold === UME.DEFAULT_RULES.settlement.wallGenerationThreshold,
+    'resolveRules(partial) merges the settlement group the same generic way as every other group');
+  const capped = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river', rules: customSettlement });
+  ok((capped.wall.generation || 1) <= 1, 'maxWallGenerations:1 (via rules) caps the town at its first wall — it never supersedes');
+
+  // carrying-capacity placeholder: weight=0 pins the factor to a no-op, isolating the logistic-
+  // ramp change from the carrying-capacity change; a real Cartalith port only needs to change
+  // what estimateCarryingCapacity itself returns, never this call site
+  const rulesNoCarry = UME.resolveRules({ settlement: { carryingCapacityWeight: 0 } });
+  const noCarryModel = UME.generate(12345, { epochs: 8, pop: 9000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river', rules: rulesNoCarry });
+  ok(UME.hashModel(noCarryModel) !== UME.hashModel(m),
+    'carryingCapacityWeight genuinely changes the outcome vs. the full-weight default (the mechanism is live, not inert)');
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }
