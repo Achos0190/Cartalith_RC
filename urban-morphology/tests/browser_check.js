@@ -122,34 +122,16 @@ const { chromium } = require(PLAYWRIGHT_DIR);
     { name: 'mosque-town', set: { siteKind: 'coast', pop: '7000', fortified: false, walls: true, faith: 'mosque', harbourDefence: 'chain', civicStyle: 'auto' } },
     { name: 'landlocked', set: { siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'church', civicStyle: 'auto' } },
     { name: 'hamlet', set: { siteKind: 'landlocked', pop: '400', fortified: false, walls: false, faith: 'none' } },
-    { name: 'roman-colonia', set: { culture: 'roman', siteKind: 'river', pop: '8000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica' } },
-    { name: 'islamic-medina', set: { culture: 'islamic', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto' } },
-    { name: 'byzantine-city', set: { culture: 'byzantine', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'orthodox', civicStyle: 'auto' } },
-    { name: 'chinese-capital', set: { culture: 'chinese', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica' } },
-    { name: 'aztec-lakecity', set: { culture: 'aztec', siteKind: 'bay', pop: '7000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
-    { name: 'viking-town', set: { culture: 'viking', siteKind: 'bay', pop: '6000', fortified: false, walls: true, faith: 'shrine', civicStyle: 'none' } },
-    { name: 'celtic-oppidum', set: { culture: 'celtic', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'shrine', civicStyle: 'none' } },
-    { name: 'greek-polis', set: { culture: 'greek', siteKind: 'coast', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'loggia' } },
-    { name: 'egyptian-town', set: { culture: 'egyptian', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
-    { name: 'mesopotamian-city', set: { culture: 'mesopotamian', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
-    { name: 'mayan-city', set: { culture: 'mayan', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
-    { name: 'inca-city', set: { culture: 'inca', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'none' } },
-    { name: 'japanese-castletown', set: { culture: 'japanese', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'keep' } },
-    { name: 'colonial-town', set: { culture: 'colonial', siteKind: 'coast', pop: '6000', fortified: false, walls: true, faith: 'church', civicStyle: 'townhall' } },
-    { name: 'frontier-boomtown', set: { culture: 'frontier', siteKind: 'landlocked', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'none' } },
-    { name: 'industrial-milltown', set: { culture: 'industrial', siteKind: 'river', pop: '6000', fortified: false, walls: false, faith: 'church', civicStyle: 'townhall' } },
     { name: 'ruined-medieval', set: { culture: 'medieval', siteKind: 'river', pop: '6000', fortified: false, walls: true, ruined: true } },
-    { name: 'ruined-roman', set: { culture: 'roman', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'temple', civicStyle: 'basilica', ruined: true } },
-    // every scenario below runs after the two 'ruined' ones above and must explicitly reset the
-    // checkbox back to false: the loop below only ever sets fields a scenario's own `set` object
-    // mentions, so an unlisted checkbox silently keeps whatever the previous scenario left it at
-    // (found by generating output and noticing venus/palimpsest/terrain-aware all reported
-    // ruined:true despite none of them being about ruination — the same discipline this project
-    // holds itself to everywhere else, not assumed from the loop's own description).
+    // every scenario below runs after 'ruined-medieval' and must explicitly reset the checkbox
+    // back to false: the loop below only ever sets fields a scenario's own `set` object mentions,
+    // so an unlisted checkbox silently keeps whatever the previous scenario left it at (found by
+    // generating output and noticing venus/terrain-aware both reported ruined:true despite
+    // neither being about ruination — the same discipline this project holds itself to
+    // everywhere else, not assumed from the loop's own description).
     { name: 'venus-circular-city', set: { culture: 'venus', siteKind: 'landlocked', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome', ruined: false } },
     { name: 'venus-star-fort', set: { culture: 'venus', siteKind: 'landlocked', pop: '9000', fortified: true, walls: true, faith: 'none', civicStyle: 'dome', ruined: false } },
-    { name: 'palimpsest-souk', set: { culture: 'palimpsest', siteKind: 'river', pop: '7000', fortified: false, walls: true, faith: 'mosque', civicStyle: 'auto', ruined: false } },
-    { name: 'palimpsest-fortified', set: { culture: 'palimpsest', siteKind: 'riverthrough', pop: '9000', fortified: true, walls: true, faith: 'mosque', civicStyle: 'auto', ruined: false } },
+    { name: 'ruined-venus', set: { culture: 'venus', siteKind: 'river', pop: '6000', fortified: false, walls: true, faith: 'none', civicStyle: 'dome', ruined: true } },
     { name: 'terrain-aware-coast', set: { culture: 'medieval', siteKind: 'coast', pop: '9000', fortified: false, walls: true, terrainAware: true, ruined: false } },
   ];
   for (const sc of scenarios) {

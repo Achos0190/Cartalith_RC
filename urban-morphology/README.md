@@ -10,13 +10,14 @@ harness, keyed assumption register) are reused.
 ## Status
 
 **Phase 0 complete (research) + working proof of concept (Phases 1–4) + Phase 1 of the
-post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v0.1.**
+post-PoC expansion: a Core Engine / Culture Profile architecture split, all in v0.1 — since
+simplified from 19 to 2 culture profiles after a rendering-distinctiveness review (docs/07 §3.10).**
 
 | Artifact | File |
 |---|---|
 | **The app** — open in any browser via `file://` | [`Urban Morphology v0.1.html`](Urban%20Morphology%20v0.1.html) |
-| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (1233 assertions) |
-| Browser driver (screenshots + inspector click-tests, incl. the Roman colonia) | `tests/browser_check.js` |
+| Headless suite (determinism, road validity, topology, statistical bands, culture profiles) | `tests/run.sh` (801 assertions) |
+| Browser driver (screenshots + inspector click-tests, incl. both surviving profiles) | `tests/browser_check.js` |
 
 **Research (`docs/`):** `01-literature-review.md` · `02-algorithm-survey.md` ·
 `03-mathematical-assumptions.md` (keyed `M-*` register, incl. `M-ROM-*`) ·
@@ -29,10 +30,10 @@ parameters (kind/pop/traits/specialisation/faction/civWays) onto this generator'
 the gaps to close for a future refactor into the Cartalith line ·
 **`07-culture-architecture.md`** — the Core Engine / Culture Profile split: which of the
 engine's ~123 functions are culture-independent vs. tradition-supplied, the `CultureProfile`
-data schema, the Roman colonia's quantified morphology, and what's explicitly deferred to
-later phases (phased historical growth, negative space, infrastructure layer, Space
-Syntax/graph-theory metrics, settlement hierarchy, a profile-aware validation panel, and
-civilizations 3–18) ·
+data schema, and (§3.10) the post-launch simplification pass that culled the roster from 19
+profiles to 2 after a rendering-distinctiveness review, including what's explicitly held for a
+future pass (successive-wall-generations/ring-roads) and documented but not attempted
+(scale-prep for 40–200 settlements at once) ·
 **`08-terrain-building-suitability.md`** — Cartalith-port groundwork: real-world slope/flood-
 setback research, a two-factor McHarg-style suitability score, and its mapping onto Cartalith
 Gen1's actual terrain fields for the eventual refactor ·
@@ -44,252 +45,88 @@ six-phase migration order.
 
 ### Civilization profiles (selectable in-app)
 
-- **Medieval Western European** (default) — the original PoC pack below, unchanged.
-- **Roman (planned colonia)** — a *fundamentally different growth model*, not a re-skin: a
-  regular grid laid in one act (cardo maximus × decumanus maximus crossing at the forum, minor
-  cardines/decumani at ~50–60 m, M-ROM-1), insula blocks cut into a lot grid rather than
-  medieval strip-platting (M-ROM-2/3), domus (atrium + peristyle courtyard) for the
-  market/burgher elite vs. dense multi-storey **insula** apartment blocks for everyone else,
-  a classical **temple** + **basilica** by default (reusing the existing worship-rite/civic-hall
-  machinery unchanged), no specialised market squares (the forum substitutes), a castrum-scheme
-  wall with the four traditional named gates (*porta praetoria/decumana/principalis
-  dextra/sinistra*) — and **never** a gunpowder-era bastioned trace, however requested, since
-  that fortification revolution postdates Rome by over a millennium. Statistically distinct
-  from the medieval pack in a testable way: its street grid is overwhelmingly axis-aligned
-  (M-ROM-6), unlike the organic pack's all-angle tangle — the morphometrics panel shows the
-  medieval-calibrated bands for reference only when a non-medieval profile is active, rather
-  than mis-marking a legitimately different morphology as a failure.
-- **Islamic (traditional medina)** — organic growth like the medieval pack, but the
-  congregational mosque anchors a souk that radiates the trade hierarchy outward (most
-  esteemed trades nearest the mosque, reusing the existing mosque-rite geometry and
-  market-anchor siting unchanged); residential quarters are privacy-oriented **courtyard
-  houses** universal across social classes (not just the elite, unlike Roman's domus/insula
-  split); a documented **encroachment** mechanism privatizes a share of through-lanes into
-  cul-de-sacs after the fabric is fully built (so no dwelling frontage is lost — only through
-  *access* is closed), giving a materially higher, testable dead-end share than the medieval
-  pack (M-ISL-2); no monumental civic building (the existing faith→civic auto-pick already got
-  this right); gates named by compass quadrant (*Bab ash-Sharq* etc., M-ISL-4); never a
-  bastioned trace (same anachronism guard as Roman).
-- **Byzantine** — organic growth as the medieval pack (an existing Roman-founded city's plan
-  continuing to accrete, not a re-plan), but the rite is the mature Middle Byzantine
-  **cross-in-square** church — a domed naos on four columns, narthex, apsed bema (M-BYZ-1) —
-  with the civic hall reusing the Roman-derived basilica; the specialised-market economy is
-  kept (unlike Roman/Islamic); never a bastioned trace (the Byzantine millennium ends in 1453,
-  at the dawn of that revolution).
-- **Chinese Imperial (Song-dynasty commercial city)** — Tang Chang'an was the Kaogongji tradition
-  made real: a square/rectangular walled capital on a strict cardinal grid. That system broke
-  down through the Tang-to-Song transition (the "medieval urban revolution," Skinner 1977 — the
-  same source already load-bearing for Levantine Palimpsest's M-PAL-2): Song cities like Kaifeng
-  shed the walled-ward grid as commerce spilled into the street. This profile now models that
-  organic, post-transition city (M-CHN-1) rather than the earlier planned ideal, reusing the
-  medieval pack's own organic growth and the Islamic profile's universal courtyard-house
-  (siheyuan) grammar wholesale; compass-quadrant gate names (M-CHN-3); markets are now a real
-  institution, matching the Song relaxation of state market control. No bastioned trace.
-- **Aztec (lake-city, Tenochtitlan-style)** — the sacred precinct and four main causeways had a
-  real cardinal order, but the residential *calpulli* districts built out over the chinampas grew
-  organically across roughly two centuries of land reclamation (1325–1521) — the strict grid
-  popularly associated with the site is largely the *post*-conquest Spanish rebuild (Mexico
-  City), not the Mexica city itself (M-AZT-1). This profile now models that organic residential
-  growth (reusing the medieval pack's own organic mechanics) rather than a uniform grid, while
-  keeping a genuinely new infrastructure layer: **chinampas** — narrow (~2.5–4 m) raised-bed
-  garden strips reclaimed from the lake shallows along the town's own shoreline, canals between
-  them (M-AZT-2). No European-style wall (the lake, causeways and their removable bridges were
-  the defence, M-AZT-3 — forced off regardless of the walls checkbox); no civic hall (temple-state
-  governance seated in the sacred precinct itself).
-- **Viking (Hedeby/Birka-style)** — organic growth like the medieval pack, but housing is a
-  new **longhouse** grammar (a single ~10–20 m timber hall per parcel, M-VIK-1) rather than any
-  multi-range building; no civic hall (communal decisions were made at the open-air **þing**,
-  not a building); gates named by plain compass quadrant via a new generic `'compass'` scheme;
-  never a bastioned trace (the Viking Age ends c. 1050).
-- **Celtic (Iron Age oppidum)** — organic growth with a new **roundhouse** grammar — the first
-  building shape that isn't a rectangle re-skin, a circular polygon sized to the parcel
-  (M-CEL-2); the curtain wall stands in for a timber-laced *murus gallicus* rampart; no civic
-  hall; compass-quadrant gates (shared `'compass'` scheme with Viking); never a bastioned trace.
-- **Ancient Greek (Archaic/Classical polis)** — most Greek poleis were never gridded at all:
-  Athens itself, the paradigm case, grew organically for centuries, explicitly contrasted by
-  ancient and modern writers with Hippodamus of Miletus's regular grid — a Classical-era
-  innovation applied to *new* colonial foundations (Miletus rebuilt 479 BC, Priene, Rhodes)
-  rather than retrofitted onto existing cities (M-GRK-1). This profile models that older, far
-  more common organic polis; the Mediterranean courtyard house shared with Rome/Islam; the
-  agora's civic function is modelled as a colonnaded **stoa** (the existing loggia geometry)
-  rather than the anachronistic Roman basilica (M-GRK-2).
-- **Ancient Egyptian (Amarna's Main City)** — at Amarna itself, under the same pharaoh, the
-  state-built Workmen's Village was a rigid planned grid of 72 houses — but the much larger Main
-  City next door, where most of the population actually lived, grew with "a surprising lack of
-  direction," organic and unplanned by comparison (M-EGY-1). This profile now models that Main
-  City instead of the small planned enclave: standardized courtyard housing, temple-state
-  governance (no civic hall, no independent markets); the temple rite stands in for pylon-form
-  Egyptian temple architecture, a documented simplification (M-EGY-2).
-- **Mesopotamian (Sumerian/Babylonian city)** — the one Bronze/Iron Age Near Eastern profile
-  modelled as **organic** growth rather than a planned grid (Ur/Nineveh's dense, winding-laned
-  fabric around a walled temple-palace citadel, M-MES-1); the well-attested Mesopotamian
-  courtyard house; the temple rite stands in for the stepped mudbrick ziggurat (M-MES-2);
-  temple-palace governance (no civic hall, no independent markets).
-- **Maya (Classic-period city-state)** — dispersed, organically-grown plaza groups on a
-  cardinal/astronomically-aligned axis (M-MAY-1); the courtyard-house grammar stands in for the
-  "plazuela group" household cluster (M-MAY-2); unlike the temple-redistribution profiles above,
-  keeps markets (Tikal/Chunchucmil marketplace archaeology, M-MAY-3); uniquely, defensive walls
-  stay a genuine optional toggle rather than forced on or off, since circuits were
-  regional/period-specific rather than universal.
-- **Inca (Andean imperial city)** — built from the **kancha**, a walled courtyard enclosure of
-  single-room buildings — a direct architectural match for the existing courtyard-house grammar,
-  not a stand-in (M-INC-1); terrain-led organic growth reflecting the Andes' terraced
-  mountainside sites rather than a flat grid; uniquely in this register, a well-documented
-  **no-market, no-currency** redistributive economy (M-INC-2).
-- **Japanese Castle Town (jokamachi)** — organic, deliberately winding streets radiating from
-  the daimyo's castle; merchant *machiya* townhouses reuse the medieval **burgage** grammar
-  directly, a genuine cross-cultural parallel (M-JPN-2); a new civic style, the **castle keep**
-  (*tenshu*), reuses the existing basilica/townhall render path — an inset roofline and
-  corner-turret markers — rather than new tiered-roof geometry (M-JPN-3).
-- **Colonial (Spanish American mining boomtown)** — Philip II's 1573 Laws of the Indies codified
-  a plaza-mayor grid template for new civil foundations, but many settlements never followed it:
-  mining boomtowns like Zacatecas (founded 1546, decades earlier) and Potosí grew spontaneously
-  around a strike site, following ravine/hillside topography rather than a grid, and often stayed
-  that way even after 1573 (M-COL-1). This profile now models that organic mining-town growth;
-  housing is the Mediterranean-derived colonial patio house (M-COL-2); the church rite marks this
-  as the first organic profile built under Christian rather than classical/temple-state auspices.
-- **Frontier (American Old West boomtown)** — unplanned, terrain-led main-street growth; the
-  narrow-frontage burgage grammar stands in for the iconic false-front wooden storefront
-  (M-FRO-2); never fortified at all — a third, distinct reasoning for the `noWalls` mechanism
-  (Aztec: alternative defence; Frontier: no defence tradition, M-FRO-3).
-- **Industrial (Manchester-style mill town)** — grid planning was one choice among several for
-  19th-century industrialization, not a universal feature of it: Manchester, the archetypal
-  industrial city, grew almost entirely without formal planning — chaotic, market-driven
-  expansion around mills and canals — in sharp contrast to deliberately platted American company
-  towns like Lowell, MA (M-IND-3). This profile now models Manchester's more common organic
-  pattern, reusing the Roman **domus-insula** grammar unchanged: the tenement/mill-owner-villa
-  split maps directly onto the historical insula-block/domus divide (M-IND-1); the one new
-  mechanism, `tagFactory()`, re-tags the town's own largest warehouse/insula-class building as
-  its factory/mill anchor with a chimney marker (M-IND-2).
+**Post-launch simplification (docs/07 §3.10):** the original 19-profile roster is culled to 2 as
+of this pass. A review of every profile's actual rendered output — not just its citations — found
+that most of the 17 historical, organic-planning cultures produced towns reading as visually
+near-identical to the medieval baseline at the level this tool actually draws: same accretive
+street tangle, same burgage-style parcel comb, same building massing. A rendering/visual-
+distinctiveness finding, not a defect in the underlying research — every citation those profiles
+carried remains valid and is recoverable from git history — but it meant shipping 19 selectable
+cultures that mostly looked like 2. Deleted entirely (data rows, dedicated functions, tests, docs
+sections, not just hidden): Roman, Islamic, Byzantine, Chinese Imperial, Aztec, Viking, Celtic,
+Ancient Greek, Ancient Egyptian, Mesopotamian, Maya, Inca, Japanese Castle Town, Colonial,
+Frontier, Industrial, Levantine Palimpsest. Kept:
+
+- **Organic Growth (Medieval Western European)** (default) — the original PoC pack, framed as the
+  general organic-planning pattern rather than one culture among 18 near-equivalent others:
+  epoch-looped organic streets, series-platted burgage strip parcels, a parish church per few
+  thousand souls, market squares that specialise with rank. Gained a modest common-pasture share
+  (more prevalent farther from town) in this pass — well-attested for the medieval open-field
+  system's communally-grazed fallow shift independent of this project's own reasons for adding it,
+  which was to keep the `pasture` detail kind (added for the per-culture farmland register, below)
+  reachable now that the two cultures that used to exercise it are gone.
 - **The Venus Project (resource-based circular city)** — Jacque Fresco's circular-city concept,
-  the first genuinely new *growth model* since the grid: several concentric ring streets at regular
-  intervals plus radial and intermediate cross-spokes, converging on a domed central hub (the
-  Center for Resource Management), reusing the roundhouse's polygon-for-a-circle technique at city
-  scale. Deliberately mixed, per direct design feedback, with medieval-European amenity/logistics
-  richness and Asian/Japanese residential typologies rather than reconstructed as a sparse, uniform
-  circle: circular pavilions cluster at the hub/inner rings, the residential rings blend the
-  standardized modular apartment with an Asian-influenced courtyard house and a Japanese machiya
-  rowhouse, market squares scale with rank, and the outermost ring carries logistics warehouses. No
-  religious buildings (Fresco's explicitly secular social vision). Walls and the bastioned star fort
-  are a genuine optional toggle reusing the medieval fortification machinery unchanged — unwalled
-  by default, but not forced off; when fortified, the circular irrigation waterway supplies the
-  fort's wet moat (even on a landlocked site) instead of standing alone outside the curtain
-  (M-VEN register).
-- **Levantine Palimpsest (Aleppo/Damascus, grid-to-souk)** — a fourth planning mode,
-  `planning:'palimpsest'`: a Hellenistic/Roman colonia grid (`buildGridStreets`, unchanged —
-  literally the Roman profile's own founding act) founded once and never re-planned, but
-  organically transformed over centuries by four small encroachment sub-passes instead of
-  organic growth's exploration: colonnaded avenues progressively narrow into an enclosed souk
-  (road width only, never the centerline — Sauvaget's Damascus/Aleppo studies, M-PAL-1);
-  interior residential wards carry a founding enclosure, a share of which has already dissolved
-  by this snapshot (Skinner's Tang-to-Song "medieval urban revolution," M-PAL-2, a pure
-  data/render pass, verified against every real building rather than trusted by construction);
-  secondary streets grow along the shoreline rather than the founding grid's orientation where
-  the site has one (Kaifeng's post-flood HGIS pattern, M-PAL-3); and the existing back-lane
-  mechanism recurs at increasing density as the fabric matures (Conzen's burgage cycle,
-  M-PAL-4). Housing and gates read the mature Islamic-period identity the plan ended at
-  (courtyard houses, Bab-scheme gate names), not the Roman one it started from. Encroachment
-  intensity is a tunable per-profile parameter (`rules.palimpsest`), not a fixed universal curve,
-  since real cities encroached at different times and rates (Jacobs 2009, M-PAL-5); never a
-  bastioned trace, however large the requested population (same anachronism guard as Roman/
-  Islamic — `bab` is not on the `scheme:'organic'` allowlist that alone unlocks it).
+  kept because its radial *growth model* is structurally distinct from organic accretion, not just
+  differently labelled: several concentric ring streets at regular intervals plus radial and
+  intermediate cross-spokes, converging on a domed central hub (the Center for Resource
+  Management). Deliberately mixed, per earlier direct design feedback, with medieval-European
+  amenity/logistics richness and Asian/Japanese residential typologies rather than reconstructed as
+  a sparse, uniform circle: circular pavilions cluster at the hub/inner rings, the residential rings
+  blend the standardized modular apartment with an Asian-influenced courtyard house and a Japanese
+  machiya rowhouse, market squares scale with rank, and the outermost ring carries logistics
+  warehouses. No religious buildings (Fresco's explicitly secular social vision). Walls and the
+  bastioned star fort are a genuine optional toggle reusing the medieval fortification machinery
+  unchanged — unwalled by default, but not forced off; when fortified, the circular irrigation
+  waterway supplies the fort's wet moat (even on a landlocked site) instead of standing alone
+  outside the curtain (M-VEN register). **Softened in this pass**: the perfectly mathematical
+  concentric rings read as too mechanically exact against every other profile's noisy, accretive
+  streets — the one artificial-looking thing on the map — so the rings and both spoke sets now
+  carry a seeded low-frequency wobble (±5.5% ring-radius perturbation, phase drifting per ring like
+  tree-ring eccentricity; ±0.045 rad spoke-angle jitter), keeping the radial skeleton legible while
+  losing the compass-drawn look.
 - Switching the civilization selector resets the worship rite / civic-hall style to that
-  profile's defaults (still overridable) and regenerates — for Roman this is a real morphology
-  change (organic → grid), not just a re-skin, per the profile's `planning` field.
+  profile's defaults (still overridable) and regenerates.
+- Adding a 3rd/4th profile back is architecturally a new `CULTURE_PROFILES`/`GAMES_SPEC`/
+  `FARM_SPEC` table row, not an engine change — the dispatch tables stayed generic through this
+  cull specifically so that remains true (docs/07 §1, §3.10).
 
 ### Signature games/spectacle buildings (docs/03 M-GAMES register, docs/07 §3.7-3.8)
 
-A population-gated monument (`model.games`) for every profile — the Colosseum/Circus Maximus
-pairing named as the motivating example — reusing four geometry techniques (the roundhouse/dome
-regular-polygon ellipse; an oriented-rectangle closure in the spirit of `buildCivic`'s own `rect()`;
-a discorectangle/"stadium shape" — straight sides, semicircular turns — for anything raced around a
-turn; and an "I"/dogbone polygon for Mesoamerican ballcourts), never a bespoke per-culture shape:
-Medieval **tiltyard** · Roman **amphitheatre + circus** (the one profile with two, both
-independently well-attested) · Islamic **maidan** · Byzantine **hippodrome** · Chinese **cuju/polo
-ground** · Aztec **tlachtli ballcourt** · Viking **knattleikr field** (weakest evidence in the
-register, flagged rather than invented) · Celtic **Tailteann assembly ground** · Greek **stadion** ·
-Egyptian **Heb-Sed court** · Maya **pitz ballcourt** · Inca **ushnu platform** (honestly ceremonial,
-not a games building — no true sport architecture is attested for the Inca) · Japanese **sumo
-grounds** · Colonial **bullring** (a flagged anachronism — real rings postdate this profile's
-setting by two centuries) · Frontier **racetrack** · Industrial **cricket ground** (Manchester's own
-Old Trafford, 1857). Mesopotamian and Venus honestly get none — no purpose-built venue is attested
-for the former, and the latter's own design already distributes recreation through its rings rather
-than centralizing it — and Palimpsest inherits Islamic's maidan rather than a bespoke entry, the
-same "mature identity" reasoning its housing/gates already follow.
-
-Each entry also carries a **siting** mode, revised after direct review ("stuff for entertainment
-isn't in the city, check historical placement") flagged the first cut's blanket extramural siting
-as historically wrong for most of the register. A dedicated research pass found 10 of the 16
-non-empty entries were genuinely intramural — immediately beside the main square or palace
-(Islamic, Byzantine, Chinese, Aztec, Egyptian, Maya, Inca, Japanese, Colonial, and even ordinary
-medieval jousting, staged in the town's own marketplace rather than a dedicated palace tiltyard) —
-while only Roman (both monuments, true to a *provincial* colonia specifically), Viking, Celtic,
-Greek, Frontier and Industrial were confirmed genuinely extramural. `'plaza'`-sited entries search
-an expanding ring centred on the plaza (starting just outside its own footprint, and — since this
-zone isn't safe by construction the way the far periphery is — checked against every real parcel,
-not just water/streets); `'peripheral'` entries keep the original beyond-the-built-radius search,
-safe from any parcel by construction. Both modes retry a doomed candidate elsewhere rather than
-forcing one in, both fall back gracefully to an empty result if no safe site turns up, and
-`hashModel()` never hashes `model.games`, so none of this can affect cross-version neutrality.
+A population-gated monument (`model.games`), dispatched per profile via `GAMES_SPEC`. Medieval gets
+a **tiltyard**, plaza-sited (tournaments were staged in the town's own marketplace, not a dedicated
+palace tiltyard, for an ordinary town) — the one remaining reused geometry technique is a plain
+oriented-rectangle closure in the spirit of `buildCivic`'s own `rect()`. Venus honestly gets none —
+its own design already distributes recreation through its rings rather than centralizing it in one
+monument. **Archived (post-launch simplification, docs/07 §3.10):** the other 16 profiles' entries
+(Roman's amphitheatre+circus, Islamic's maidan, and 14 more — plus the discorectangle/"stadium
+shape" and "I"/dogbone shape primitives their entries used, and the historical-placement research
+that found 10 of them genuinely intramural) are removed with their profiles; recoverable from git
+history. `hashModel()` never hashes `model.games`, so none of this can affect cross-version
+neutrality.
 
 ### Per-culture farmland/pasture (docs/03 M-FARM register, docs/07 §3.9)
 
 The hinterland around a town, dispatched per profile (`model.details`, via `buildFarmland()`/
-`FARM_SPEC`) exactly like the games register above, rather than the same generic medieval-style
-strips everywhere: Medieval keeps its pre-existing selion strips unchanged (the correct baseline) ·
-Roman **centuriation** (a rectilinear grid of large cardo/decumanus-aligned squares) · Islamic/
-Palimpsest **qanat oasis fan** (irrigation wedges radiating from a mother-well outlet) · Byzantine
-**concentric zonation** (garden belt → arable strips → outer pasture — a coarser ring-level
-distinction, not a new parcel shape, per the source's own framing) · Chinese **weitian diked
-polders** (a small, heavily-jittered grid standing in for the fish-scale patchwork) · Viking
-**solskifte** (ruled strip order, modelled as strips near town ramping to pasture farther out for
-the outfield) · Celtic **field system** (small near-square checkerboard plots) · Greek kept on the
-**unchanged baseline strip pattern** plus an olive-grove orchard boost — a self-caught category
-error: the best-attested Greek pattern, the colonial chora grid, was for *new* colonial foundations,
-the exact anachronism this profile's own organic-Athens framing already excludes, so it was not
-applied · Egyptian **Nile flood-basins** (chaikin-smoothed organic blobs, needs the river itself) ·
-Mesopotamian **canal long-lots** (perpendicular strips off the watercourse, falling back to the
-baseline strip mechanism on a landlocked site) · Mayan **raised-field platforms/camellones**
-(wetland-gated, zero on a landlocked site) · Inca **andenes** (contour-following terraces that
-resample this engine's own `site.height`/`site.slope` fields at every step, so the direction
-genuinely bends with the terrain) · Japanese a small irregular **paddy grid** (the source's own
-caveat: true terracing is right nationally, but a lowland grid is likelier around Edo itself) ·
-Colonial **hacienda/estancia grants** (the largest cell size in the register) · Frontier **PLSS/GLO
-survey** (the most regular, least-jittered grid, plus a high pasture share matching the profile's
-own "mining/cattle/rail" identity) · Industrial **parliamentary enclosure fields** · Venus
-**ring-farming bands** (a design choice, not a historical claim, echoing the Garden City diagram).
-Aztec gets no entry at all — chinampas already are its farmland signature, and a second generic
-field layer would double up rather than add detail.
+`FARM_SPEC`) rather than the same generic strip everywhere. Medieval keeps its pre-existing selion
+strips (the original, correct baseline), now with a modest common-pasture share added in the
+post-launch simplification pass (more prevalent farther from town, standing in for the open-field
+system's communally-grazed fallow shift). Venus gets **ring-farming bands** — concentric
+cultivation belts beyond the built rings, a design choice echoing the Garden City diagram rather
+than a historical claim (no historical culture applies to a resource-based circular city).
+**Archived (post-launch simplification, docs/07 §3.10):** the other 16 profiles' field patterns
+(Roman centuriation, Islamic/Palimpsest's qanat fan, Byzantine's concentric zonation, and 13 more)
+and the five shape-family generators (`gridFields`/`fanFields`/`basinFields`/`canalFields`/
+`terraceFields`) that produced them are removed with their profiles; recoverable from git history.
 
 A genuinely new `pasture` detail kind (its own `.pasture` CSS, distinct from a cultivated field's
 gold) answers the "pastures *and* fields" half of an earlier request that only fields/orchards had
-covered — present via an intermixed per-cell share (Roman, Celtic, Frontier) or a share ramping up
-with distance from town (Byzantine, Viking, modelling the outer pasture/outfield zone). Four real
-bugs were found and fixed before this shipped, all by reviewing this feature's own test data rather
-than assuming success: (1) the qanat-fan generator located "away from the water" using the river
-polyline's own fixed geometric middle index, which broke whenever the market sat elsewhere along
-the river — Islamic/Palimpsest produced zero fields on ordinary river-site generation, the origin
-having landed off the map entirely; fixed with the same distance-gradient technique
-`buildChinampas` already uses, evaluated at the market's own position, plus an on-map clamp as a
-second safety margin. (2) An unbounded lattice scan in the shared grid generator could probe tens
-of thousands of candidates for a small-cell culture on a large town, each costing an
-O(shoreline/wall-ring length) `isWater`/`pointInPoly` call — found by timing the full suite, fixed
-with a hard budget on *examined* candidates independent of the pre-existing budget on accepted
-ones. (3) The biggest one: every generator, including the pre-existing baseline `stripFields`
-mechanism this register only ever extracted (never rewrote), checked candidates against water and
-the urban core but never against the live street graph itself — a dedicated 105-combination audit
-failed on first run with 1281 street-crossings and 34 water-overlaps, and running the same audit
-against Medieval alone (the unchanged mechanism) still found 63 crossings, confirming it was a
-latent pre-existing gap this project's own test coverage had simply never checked before. Fixed
-with one shared `crossesStreet()` helper reusing `buildGames`' own spatial-hash technique, called
-from all seven generators; the residual water-overlaps traced to two narrower gaps (a missing
-midpoint check in `canalFields`, a missing near-point check in `stripFields`) fixed the same way.
-Re-verified at 0/0 across the full audit. (4) Found only during a follow-up visual pass (a poly can
-be geometrically valid while simply never getting generated at all, which no geometric audit can
-catch): Mesopotamian produced zero canal fields on an ordinary `riverthrough` generation, traced to
-a fixed 14-unit near-bank offset that didn't clear a through-river's own wider channel — fixed by
-deriving the offset from `site.riverW` itself, with a dedicated regression test added.
-`hashModel()` never hashes `model.details`, so none of this can affect cross-version neutrality.
+covered. Four real bugs were found and fixed while this register covered all 19 profiles, all by
+reviewing the feature's own test data rather than assuming success — including the headline one: a
+dedicated 105-combination audit initially failed with 1281 street-crossings and 34 water-overlaps,
+tracing to every generator (the pre-existing baseline `stripFields` mechanism included) never
+checking candidates against the live street graph, fixed with one shared `crossesStreet()` helper
+now still load-bearing for the two generators that survive this pass. `hashModel()` never hashes
+`model.details`, so none of this can affect cross-version neutrality.
 
 ### Generation Rules (configurable parameters, not hardcoded constants)
 
@@ -307,22 +144,23 @@ JSON. Every slider change triggers a debounced live-preview regeneration, and a 
 shows the current town's morphometrics against the default profile's, highlighting anything that
 differs by more than 8%.
 
-An **Evidence Ledger** panel lists every `M-*`/`M-ROM-*` register id actually load-bearing for
-the currently generated town (collected from every object's provenance as it's drawn), formalizing
-the assumptions register as in-app, queryable data rather than only a markdown file.
+An **Evidence Ledger** panel lists every `M-*` register id actually load-bearing for the currently
+generated town (collected from every object's provenance as it's drawn), formalizing the
+assumptions register as in-app, queryable data rather than only a markdown file.
 
 ### Ruined (post-apocalyptic): a toggle, not a civilization (docs/03 M-PA)
 
 Collapse is a **state** any settlement can be found in, not a tradition with its own street plan —
-originally shipped as a dedicated "Post-Apocalyptic" profile that just reused Industrial's grid
-and forced its one mechanism on, `applyDecay()` was always profile-agnostic (it never actually
-read `profile`), so it's now a plain **"ruined (post-apocalyptic)"** checkbox, off by default,
-layered over *any* selected culture. A seeded ~35–45% of the built stock is flagged ruined and
-excluded from the population count, but never moved or removed — a deliberate choice, since an
-actual breached-wall/blocked-road model would be exactly the kind of "impossible intersection"
-this project's standing audit checks against everywhere else (M-PA-1). Ruination is orthogonal to
-the underlying culture's own rules: a ruined medieval town can still raise a full bastioned trace
-on request, and a ruined Industrial town still never gets a wall at all.
+originally shipped as a dedicated "Post-Apocalyptic" profile that just reused another culture's
+grid and forced its one mechanism on, `applyDecay()` was always profile-agnostic (it never
+actually read `profile`), so it's now a plain **"ruined (post-apocalyptic)"** checkbox, off by
+default, layered over *any* selected culture. A seeded ~35–45% of the built stock is flagged
+ruined and excluded from the population count, but never moved or removed — a deliberate choice,
+since an actual breached-wall/blocked-road model would be exactly the kind of "impossible
+intersection" this project's standing audit checks against everywhere else (M-PA-1). Ruination is
+orthogonal to the underlying culture's own rules: a ruined medieval town can still raise a full
+bastioned trace on request, and a ruined Venus town still defaults to unwalled per its own profile
+default.
 
 ### Terrain / building-suitability groundwork (Cartalith-port preparation, docs/08)
 

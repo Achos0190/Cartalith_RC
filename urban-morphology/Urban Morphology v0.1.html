@@ -82,7 +82,6 @@ svg.panning{cursor:grabbing}
 .ridge{stroke:#f6e9db;stroke-width:.55;fill:none;opacity:.75}
 .bld.ruined{fill:#9a9184;stroke:#4a453c;stroke-width:.5;stroke-dasharray:1.4 1;opacity:.6}
 .ridge.ruined{opacity:.3}
-.chimney{fill:#4a453c;stroke:#2a271f;stroke-width:.4}
 .roadcase{fill:none;stroke:#6d5a37;stroke-linecap:round;stroke-linejoin:round}
 .roadfill{fill:none;stroke:#f8f3e4;stroke-linecap:round;stroke-linejoin:round}
 .roadfill.lane{stroke:#efe8d2}
@@ -107,12 +106,9 @@ svg.panning{cursor:grabbing}
 .fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
 .field{fill:#dcc985;stroke:#a4874a;stroke-width:.6;opacity:.75}
 .pasture{fill:#c7d19a;stroke:#82945a;stroke-width:.6;opacity:.7}
-.chinampa{fill:#c3d6a8;stroke:#8a9e6a;stroke-width:.6;opacity:.85}
 .civicdome{fill:#5c7a8a;stroke:#2e4a54;stroke-width:.6}
 .bld.pavilion{fill:#b98a4a;stroke:#6b4e26}
 .waterway{fill:none;stroke:#8fa39e;stroke-width:5;opacity:.75}
-.wardwall{fill:none;stroke:#8a7444;stroke-width:1.6;stroke-linecap:round}
-.wardwall.dissolved{stroke:#c9bb96;stroke-width:.8;stroke-dasharray:2 3;opacity:.55}
 .fieldedge{fill:none;stroke:#b3a276;stroke-width:.6;opacity:.8}
 .grave{fill:#8d8d7a}
 .lbl{font:italic 10px Georgia,serif;fill:#5c4a28;pointer-events:none}
@@ -144,25 +140,8 @@ svg.panning{cursor:grabbing}
     <div class="row"><label>Seed</label><input id="seed" type="number" value="12345">
       <button id="gen">Generate</button><button id="rnd">Random</button></div>
     <div class="row"><label>Civilization</label><select id="culture" style="font:12px Georgia,serif">
-      <option value="medieval">Medieval Western European</option>
-      <option value="roman">Roman (planned colonia)</option>
-      <option value="islamic">Islamic (traditional medina)</option>
-      <option value="byzantine">Byzantine</option>
-      <option value="chinese">Chinese Imperial (Song commercial city)</option>
-      <option value="aztec">Aztec (lake-city)</option>
-      <option value="viking">Viking</option>
-      <option value="celtic">Celtic (Iron Age)</option>
-      <option value="greek">Ancient Greek (Archaic/Classical polis)</option>
-      <option value="egyptian">Ancient Egyptian (Amarna Main City)</option>
-      <option value="mesopotamian">Mesopotamian</option>
-      <option value="mayan">Maya (Classic Period)</option>
-      <option value="inca">Inca (Andean)</option>
-      <option value="japanese">Japanese Castle Town</option>
-      <option value="colonial">Colonial (mining boomtown)</option>
-      <option value="frontier">Frontier (Old West)</option>
-      <option value="industrial">Industrial (Manchester-style)</option>
-      <option value="venus">The Venus Project (circular city)</option>
-      <option value="palimpsest">Levantine Palimpsest (grid-to-souk)</option></select></div>
+      <option value="medieval">Organic Growth (Medieval Western European)</option>
+      <option value="venus">The Venus Project (circular city)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
@@ -230,10 +209,10 @@ svg.panning{cursor:grabbing}
   <div class="box"><h2>Evidence ledger</h2><div id="ledger"></div></div>
   <div class="box"><h2>About</h2>
     <div style="font-size:11px">Deterministic growth simulation: environment/site &rarr; anchors &rarr;
-    culture-profiled street growth (medieval: epoch-looped organic densification + exploration over
-    least-cost routes; Roman: a planned cardo/decumanus grid laid in one act) &rarr; planar-face
-    blocks &rarr; culture-profiled parcels (medieval: series-platted strips; Roman: insula lots) &rarr;
-    grammar buildings &rarr; derived districts &rarr; wall &amp; gates &rarr; details. The renderer draws
+    culture-profiled street growth (Organic Growth: epoch-looped densification + exploration over
+    least-cost routes; Venus Project: concentric rings + radial spokes around a central hub) &rarr;
+    planar-face blocks &rarr; culture-profiled parcels &rarr; grammar buildings &rarr; derived
+    districts &rarr; wall &amp; gates &rarr; details. The renderer draws
     only what the simulation produced. Evidence register: <code>docs/03-mathematical-assumptions.md</code>
     (M-* refs in the inspector and the Evidence Ledger panel); architecture: <code>docs/07-culture-architecture.md</code>.
     Drag to pan, wheel to zoom.</div></div>
@@ -272,105 +251,17 @@ function stream(seed,label){
  * data on the resolved profile object, read once in generate() and threaded down the call
  * chain. Adding a 3rd/4th civilization is a new table row, not an engine change. */
 const CULTURE_PROFILES={
-  medieval:{id:'medieval',name:'Medieval Western European',
+  medieval:{id:'medieval',name:'Organic Growth (Medieval Western European)',
     planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
     defaultFaith:'church',defaultCivic:'auto',markets:true,
     wallGates:{scheme:'organic'},orientation:'terrain',civicAnchorLabel:'market',
-    prov:'Accretive growth over centuries: epoch-looped organic streets, series-platted burgage strip parcels, a parish church per few thousand souls, market squares that specialise with rank (docs/01 §1.1; docs/03 M-* register).'},
-  roman:{id:'roman',name:'Roman (planned colonia)',
-    planning:'grid',parcelPattern:'insula',buildingGrammar:'domus-insula',
-    defaultFaith:'temple',defaultCivic:'basilica',markets:false,
-    wallGates:{scheme:'castrum'},orientation:'cardinal',civicAnchorLabel:'forum',
-    prov:'A planned colonia laid out in one act from a castrum-derived module: cardo maximus × decumanus maximus crossing at the forum, a regular grid of minor cardines/decumani ~50-60 m apart, rectangular insula blocks, four castrum-scheme gates (docs/07 §4, M-ROM register).'},
-  islamic:{id:'islamic',name:'Islamic (traditional medina)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'mosque',defaultCivic:'auto',markets:false,
-    wallGates:{scheme:'bab'},orientation:'terrain',civicAnchorLabel:'souk',deadEndBias:0.16,
-    prov:'A congregational mosque at the commercial/religious core with the souk radiating from it (most esteemed trades nearest the mosque); organic growth as the medieval pack, but residential quarters are a network of privacy-oriented, inward-facing courtyard houses reached by a maze of cul-de-sac alleys — the historically documented "encroachment" process privatized what were once through-lanes (M-ISL register).'},
-  byzantine:{id:'byzantine',name:'Byzantine',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
-    defaultFaith:'orthodox',defaultCivic:'auto',markets:true,
-    wallGates:{scheme:'byzantine'},orientation:'terrain',civicAnchorLabel:'mese',
-    prov:'Organic growth as the medieval pack (the Roman-inherited street plan of an existing city continues to accrete rather than being re-planned), but the rite is the mature Middle Byzantine cross-in-square church — a domed naos on four columns, narthex and apsed bema (M-BYZ-1) — with the civic hall reusing the Roman-derived basilica; never a gunpowder-era bastioned trace (the Byzantine millennium ends, 1453, at the very dawn of that revolution).'},
-  chinese:{id:'chinese',name:'Chinese Imperial (Song-dynasty commercial city)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'basilica',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'palace',
-    prov:'Tang Chang\'an was the Kaogongji ideal (Rites of Zhou) made real — a square/rectangular walled capital on a strict cardinal grid, the palace at the geometric centre facing due south, under a walled ward (li-fang) curfew system. That system broke down through the Tang-to-Song transition: Song cities like Kaifeng shed the walled-ward grid entirely as commerce spilled into the street, the one-official-market restriction was relaxed, and multi-storey houses stood directly on the street rather than hidden inside gated wards — the "medieval urban revolution" (Skinner 1977, the same source already load-bearing for the Levantine Palimpsest profile\'s M-PAL-2). This profile now models that organic, post-transition Song commercial city (M-CHN-1) rather than the earlier planned ideal, reusing the medieval pack\'s own organic growth mechanics and the universal courtyard-house grammar built for the Islamic profile unchanged (the siheyuan is the same "four ranges around a private court" pattern, at every social scale, M-CHN-2); gates read by plain compass quadrant rather than a maximus axis a Song city no longer has (M-CHN-3); civic/temple geometry still reuses the existing basilica/temple forms as a schematic stand-in for the palace/temple complex — a distinct pagoda/palace geometry is future work.'},
-  aztec:{id:'aztec',name:'Aztec (lake-city, Tenochtitlan-style)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'sacred precinct',
-    chinampas:true,noWalls:true,
-    prov:'A lake-city on the Tenochtitlan model: the sacred precinct and four main causeways had a real cardinal order, but the residential calpulli districts built out over the chinampas grew organically across roughly two centuries of land reclamation (1325-1521) as new raised-bed plots were dredged from the shallows, linked by formal streets, informal footpaths and waterways rather than a uniform module (M-AZT-1) — the strict grid popularly associated with the site is largely the post-conquest Spanish rebuild (Mexico City), not the Mexica city itself. This profile now models that organic residential growth (reusing the medieval pack\'s own organic mechanics; this engine\'s single reused street network still stands in for the historical dual street-and-canal circulation, a genuine simplification noted honestly rather than modelled as fully distinct infrastructure, docs/07 §7), while keeping chinampas — narrow raised-bed garden strips reclaimed from the shallows along the town\'s own shoreline, canals between them (M-AZT-2). No walls in the European sense (the lake itself, causeways and removable bridges were the defence); no separate civic hall (temple-state governance was seated in the sacred precinct itself).'},
-  viking:{id:'viking',name:'Viking (Hedeby/Birka-style)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'longhouse',
-    defaultFaith:'shrine',defaultCivic:'none',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'assembly ground',
-    prov:'An organic trading town on the Hedeby/Birka model: dense timber longhouses (~10-20 m by ~5 m) housing an extended household under one roof (M-VIK-1), enclosed by a semicircular/oval earthwork rampart with a small number of gates; no monumental civic hall (communal decisions were made at the þing, an open assembly ground, not a building); never a bastioned trace (the Viking Age ends c.1050, well before trace italienne).'},
-  celtic:{id:'celtic',name:'Celtic (Iron Age oppidum)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'roundhouse',
-    defaultFaith:'shrine',defaultCivic:'none',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'assembly ground',
-    prov:'An Iron Age oppidum: circular wattle-and-daub roundhouses under conical thatched roofs (M-CEL-2), replacing every rectilinear building grammar; organized in quarters for dwellings, corrals and storehouses behind a murus gallicus-style rampart (this engine\'s reused curtain-wall machinery stands in for the timber-laced construction, a documented simplification); no monumental civic hall; never a bastioned trace.'},
-  greek:{id:'greek',name:'Ancient Greek (Archaic/Classical polis)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'loggia',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'agora',
-    prov:'Most Greek poleis were never gridded at all: Athens itself, the paradigm case, grew organically for centuries into narrow, winding streets, explicitly contrasted by ancient and modern writers with Hippodamus of Miletus\'s regular grid — a Classical-era (5th c. BC) innovation applied to NEW colonial foundations (Miletus rebuilt after 479 BC, Priene, Rhodes) rather than retrofitted onto existing cities (M-GRK-1). This profile now models that older, far more common organic polis instead of a new colonial foundation, reusing the medieval pack\'s own organic growth mechanics (the grid mechanism itself remains proven Rome-independent via the Chinese/Aztec/Egyptian/Colonial profiles); housing is the Mediterranean courtyard house shared with Rome/Islam, on ordinary strip-platted lots now that this profile is organic — the larger-lot household correction Chinese/Aztec/Egyptian/Colonial once needed for grid/insula lots no longer applies here (M-GRK-3), the same as every other courtyard-house organic profile (Islamic/Byzantine/Mesopotamian); the agora combines market and civic life, so the civic hall is modelled as a colonnaded stoa (this engine\'s existing loggia geometry) rather than the anachronistic Roman basilica (M-GRK-2); a classical temple (already the engine\'s default rite) anchors the acropolis; never a bastioned trace.'},
-  egyptian:{id:'egyptian',name:'Ancient Egyptian (Amarna\'s Main City)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'temple precinct',
-    prov:'At Amarna itself, under the same pharaoh, in the same short-lived (~15-year) capital: the state-built Workmen\'s Village was a rigid grid of 72 houses on 5 parallel streets behind a single-entrance enclosure wall — but the much larger Main City next door, where most of the population (elite and commoner alike) actually lived, grew with "a surprising lack of direction," organic and unplanned by comparison (M-EGY-1). This profile now models that Main City instead of the small planned enclave, reusing the medieval pack\'s own organic growth mechanics — the larger-lot household correction this profile once needed for grid/insula lots no longer applies now that housing sits on ordinary strip-platted lots (M-EGY-3), the same as every other courtyard-house organic profile (Islamic/Byzantine/Mesopotamian); the temple rite stands in for pylon-form Egyptian temple architecture, the same documented simplification already used for the Chinese pagoda and Aztec pyramid substitutions (M-EGY-2); pharaonic temple-state governance, so no separate civic hall and no independent markets (state/temple redistribution, matching the Roman/Aztec precedent); never a bastioned trace.'},
-  mesopotamian:{id:'mesopotamian',name:'Mesopotamian (Sumerian/Babylonian city)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'temple precinct',
-    prov:'A Sumerian/Babylonian city (Ur, Nineveh): organic, dense, winding-laned growth around a walled temple-palace citadel mound, unlike the planned traditions above (M-MES-1); housing is the well-attested Mesopotamian courtyard house (excavated at Ur); the temple rite stands in for the stepped mudbrick ziggurat, the same documented simplification pattern as Chinese/Aztec/Egyptian (M-MES-2); temple-palace governance, so no separate civic hall and no independent markets (redistributive temple/palace economy); never a bastioned trace.'},
-  mayan:{id:'mayan',name:'Maya (Classic-period city-state)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'none',markets:true,
-    wallGates:{scheme:'compass'},orientation:'cardinal',civicAnchorLabel:'great plaza',
-    prov:'A Classic Maya city-state (Tikal, Copan): dispersed, organically-grown plaza groups linked by raised sacbe causeways rather than a single uniform grid (most Classic cities were not gridded, unlike the exceptional planned site of Nixtun-Ch\'ich\'), with a cardinal/astronomically-aligned monumental axis (M-MAY-1); commoner housing was the "plazuela group" — several single-room structures sharing a small patio — for which the existing courtyard-house grammar stands in (a documented simplification: real plazuela houses were often apsidal pole-and-thatch on a low platform, not rectangular masonry, M-MAY-2); the temple rite stands in for the stepped pyramid, the same substitution pattern as Aztec/Chinese/Egyptian; divine-kingship governance (no separate civic hall); archaeological evidence (Tikal, Chunchucmil) increasingly supports formal marketplaces, unlike the temple-redistribution profiles above (M-MAY-3); defensive walls are regional/period-specific (Becan, Mayapan, Tulum) rather than universal, so — uniquely among the temple-state profiles — walls stay an optional toggle rather than forced on or off; never a bastioned trace.'},
-  inca:{id:'inca',name:'Inca (Andean imperial city)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'temple',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'ceremonial plaza',
-    prov:'An Andean imperial settlement built around the kancha — a walled rectangular/trapezoidal enclosure of single-room buildings facing a shared central courtyard (M-INC-1) — for which the existing courtyard-house grammar is a direct architectural match, not a stand-in; growth is organic and terrain-led rather than a flat grid, reflecting the dramatic Andean sites (Machu Picchu, Ollantaytambo) built by terracing into the mountainside rather than levelling it; the temple rite stands in for the Coricancha-style solar temple, the same substitution pattern as other temple-state profiles; the Sapa Inca\'s divine kingship means no separate civic hall; uniquely among every profile in this register, the Inca economy is well-documented as having had **no markets and no currency at all** — a redistributive mita-labour/state-warehouse (qollqa) command economy, a stronger and more specific claim than the general "temple-state redistribution" reasoning used elsewhere (M-INC-2); never a bastioned trace.'},
-  japanese:{id:'japanese',name:'Japanese Castle Town (jokamachi)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
-    defaultFaith:'temple',defaultCivic:'keep',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'castle',
-    prov:'An Edo-period jokamachi (castle town): deliberately non-gridded, winding streets radiating from the daimyo\'s castle — a defensive irregularity (masugata bent-gate approaches), not an accretive accident, but reusing the same organic growth/T-junction machinery as the medieval pack produces a comparably irregular result (M-JPN-1); merchant/artisan machiya townhouses were narrow-frontage, deep-lot row buildings strikingly similar in plan to the medieval burgage plot — a genuine cross-cultural parallel, so this profile reuses the burgage grammar directly rather than inventing a new one (M-JPN-2); the temple rite stands in for the tera-machi Buddhist temple district (the same documented pagoda-simplification pattern already used for the Chinese profile); a new civic style, the castle keep (tenshu) — a tiered stone-and-timber donjon — reuses the existing basilica/townhall render path (hall + inset "apse" roofline + corner turret markers) rather than new tiered-roof geometry (M-JPN-3); chonin-chi merchant quarters keep the market economy; compass-named gates for the moat/earthen-wall circuit; never a bastioned trace (Japanese castle fortification followed an independent, non-trace-italienne design lineage).'},
-  colonial:{id:'colonial',name:'Colonial (Spanish American mining boomtown)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'church',defaultCivic:'townhall',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'plaza mayor',
-    prov:'Philip II\'s 1573 Laws of the Indies mandated a symmetrical grid centred on the plaza mayor — the most complete and widely disseminated 16th-century town-planning ordinance — but many Spanish American settlements never followed it: mining boomtowns like Zacatecas (founded 1546, decades before the ordinance) and Potosi grew spontaneously around a strike site, following ravine and hillside topography rather than a plaza-centred grid, and often stayed that way even after 1573, since roughly 200 towns had already been founded (with varying degrees of order) in the six decades before the Laws were codified (M-COL-1). This profile now models that organic mining-town growth instead of a new ordinance-planned civil foundation, reusing the medieval pack\'s own organic growth mechanics (the grid mechanism itself remains proven general-purpose via Roman/Chinese/Aztec/Greek/Egyptian); housing is the Mediterranean-derived colonial patio house, the same courtyard-house grammar as Roman/Islamic/Greek (M-COL-2); the church rite (not temple) marks this as the first organic profile built under Christian rather than classical/temple-state or Mesoamerican auspices; compass-named gates for an optional curtain (some colonial ports were walled against raiders — Cartagena, Havana — others were not, so this stays a normal toggle like the base pack, not forced either way).'},
-  frontier:{id:'frontier',name:'Frontier (American Old West boomtown)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
-    defaultFaith:'church',defaultCivic:'none',markets:false,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'main street',
-    noWalls:true,
-    prov:'An American frontier boomtown (mining/cattle/rail): rapid, unplanned growth following the trail/rail line and terrain rather than a rigid grid (M-FRO-1); narrow-frontage commercial buildings lining the main street reuse the burgage grammar — the same cross-cultural parallel already established for the Japanese machiya — standing in for the iconic false-front wooden storefront (the tall false facade itself is an unmodelled ornamental detail, a documented simplification, M-FRO-2); no formal market-square institution (commerce ran through the general store, not a chartered market) and no monumental civic hall (formal town government typically lagged years behind the boom); uniquely among this register\'s "no-wall" profiles, this is neither a defensive-alternative case like Aztec\'s lake nor a genuine regional-variation toggle like Maya\'s — frontier boomtowns simply never built fortifications at all, forced off regardless of the checkbox (M-FRO-3); never a bastioned trace.'},
-  industrial:{id:'industrial',name:'Industrial (Manchester-style mill town)',
-    planning:'organic',parcelPattern:'strip',buildingGrammar:'domus-insula',
-    defaultFaith:'church',defaultCivic:'townhall',markets:true,
-    wallGates:{scheme:'compass'},orientation:'terrain',civicAnchorLabel:'town square',
-    noWalls:true,factory:true,
-    prov:'Grid planning was one choice among several for 19th-century industrialization, not a universal feature of it: Manchester, the archetypal industrial city, grew almost entirely without formal planning — chaotic, market-driven expansion around mills and canals, its population exploding from ~100,000 (1800) to over 500,000 (1851) with no governing system to plat it — in sharp contrast to deliberately platted American company towns like Lowell, MA (M-IND-3). This profile now models that more common organic-growth pattern instead of a planned company-town grid, reusing the Roman domus-insula grammar unchanged — its multi-storey insula-kind/domus split maps directly onto the historical tenement/mill-owner-villa divide (M-IND-1), so the existing M-ROM-7 household-size correction for insula-kind buildings still applies automatically with no separate multiplier needed; the town\'s largest warehouse/insula-class building is re-tagged as its factory/mill anchor with a chimney marker (M-IND-2), reusing that building\'s own already-sited footprint rather than new freestanding geometry, so this can never introduce the kind of overlap this register\'s standing audit checks against; no walls — the fortified-city era had largely ended by the industrial revolution (many surviving medieval walls were being demolished in this period, e.g. Vienna\'s Ringstrasse), forced off regardless of the checkbox; never a bastioned trace.'},
+    prov:'Accretive growth over centuries: epoch-looped organic streets, series-platted burgage strip parcels, a parish church per few thousand souls, market squares that specialise with rank (docs/01 §1.1; docs/03 M-* register). Presented as the general "Organic Growth" pattern rather than one culture among many: a post-launch review across this register\'s original 19 profiles found every other organic-planning culture (Islamic, Byzantine, Chinese, Aztec, Viking, Celtic, Greek, Egyptian, Mesopotamian, Mayan, Inca, Japanese, Colonial, Frontier, Industrial, Palimpsest) rendering near-indistinguishably from this one at the level this tool actually draws — a rendering/visual-distinctiveness problem, not a defect in their underlying research, which remains valid and citable but is no longer separately modelled here (docs/07 §3.10). Kept as this pattern\'s concrete, best-attested reference point, alongside the radial Venus Project as the one structurally distinct alternative.'},
   venus:{id:'venus',name:'The Venus Project (resource-based circular city)',
     planning:'radial',parcelPattern:'strip',buildingGrammar:'venus-mixed',
     defaultFaith:'none',defaultCivic:'dome',markets:true,
     wallGates:{scheme:'organic'},orientation:'radial',civicAnchorLabel:'Center for Resource Management',
     defaultWalls:false,waterway:true,
-    prov:'Jacque Fresco\'s Venus Project circular city (thevenusproject.com/resource-based-economy/environment/circular-city), taken here as a deliberate design fusion rather than a literal reconstruction: several concentric ring streets at regular intervals connected by radial spokes (with extra cross-spokes in the wider outer band) to a domed central hub, the Center for Resource Management (M-VEN-2) — a genuinely new radial planning mode (M-VEN-1), not a re-skin of the grid or organic models, using the shape-aware bisector parcel method rather than the bounding-box-based insula method since the wedge-shaped ring blocks need lot boundaries that respect the true (curved) block outline. Per the brief, the clean circular geometry is mixed with the lived-in amenity richness of medieval-European and Asian/Japanese towns (M-VEN-5): circular pavilions cluster at the hub and inner rings (reusing the roundhouse polygon technique), the residential rings blend the standardized modular apartment with Asian courtyard houses and Japanese machiya rowhouses (reusing the M-ISL-3/M-CHN-2 courtyard grammar and the M-JPN-2 machiya=burgage parallel), market/amenity squares scale with rank, and the outermost ring carries the logistics warehouses. Fortification is optional and off by default (defaultWalls:false — the UI unchecks the wall box on selecting this profile), but the medieval curtain wall and the bastioned star fort are both available on request (wallGates.scheme:\'organic\', so the anachronism guard permits the trace). A circular irrigation waterway (M-VEN-3) encircles the built city: when the star fort is built the canal supplies its wet moat around the bastions even on a landlocked site, otherwise it is the irrigation ring outside the (optional) curtain wall — drawn as a fully-closed circle capped to the map so it never terminates in a straight clipped edge.'},
-  palimpsest:{id:'palimpsest',name:'Levantine Palimpsest (Aleppo/Damascus, grid-to-souk)',
-    planning:'palimpsest',parcelPattern:'strip',buildingGrammar:'courtyard-house',
-    defaultFaith:'mosque',defaultCivic:'auto',markets:true,
-    wallGates:{scheme:'bab'},orientation:'terrain',civicAnchorLabel:'souk',
-    prov:'A planned Hellenistic/Roman colonia (Aleppo, Damascus, Palmyra) founded once on a cardo/decumanus grid exactly like the Roman profile (reuses buildGridStreets unchanged), then organically deformed over centuries without ever being re-planned — a genuinely third planning mode, neither organic nor grid but a founded-then-encroached process (docs/, "Palimpsest Growth" design note; M-PAL register). Colonnaded avenues progressively narrow into an enclosed souk as shopkeepers build stalls into the road reservation (Sauvaget 1934/1941 — narrowColonnades, M-PAL-1, road-width only, never the centerline: Damascus\'s Via Recta is walkable on the same alignment two thousand years later); interior residential wards carry a founding enclosure that a fraction have already shed by this snapshot (cross-checked against the Tang-to-Song "medieval urban revolution," Skinner 1977 — dissolveWardWalls, M-PAL-2, a pure data/render pass, never touching street or building geometry); new secondary streets grow along the shoreline rather than the founding grid\'s orientation where the site has one (the Kaifeng post-flood HGIS finding — growAlongFixedEdge, M-PAL-3); and the strip-parcel pattern\'s existing age-driven grant-then-subdivide cycle stands in for Conzen\'s burgage cycle (1960) unchanged, with lanePass\'s existing pseudo-street mechanism running at increased intensity as the fabric fragments (M-PAL-4). Housing is the courtyard house the city actually became (reusing the Islamic/Chinese courtyard grammar); Bab-scheme gates read the mature Islamic-period identity the plan ended at, not the Roman one it started from. Encroachment intensity is a tunable per-profile parameter (rules.palimpsest), not a fixed universal curve, per Jacobs\' 2009 finding that encroachment began at different times/rates in different cities.'}
+    prov:'Jacque Fresco\'s Venus Project circular city (thevenusproject.com/resource-based-economy/environment/circular-city), taken here as a deliberate design fusion rather than a literal reconstruction: several concentric ring streets at regular intervals connected by radial spokes (with extra cross-spokes in the wider outer band) to a domed central hub, the Center for Resource Management (M-VEN-2) — a genuinely new radial planning mode (M-VEN-1), not a re-skin of the grid or organic models, using the shape-aware bisector parcel method rather than the bounding-box-based insula method since the wedge-shaped ring blocks need lot boundaries that respect the true (curved) block outline. Per the brief, the clean circular geometry is mixed with the lived-in amenity richness of medieval-European and Asian/Japanese towns (M-VEN-5): circular pavilions cluster at the hub and inner rings, the residential rings blend the standardized modular apartment with Asian courtyard houses and Japanese machiya rowhouses, market/amenity squares scale with rank, and the outermost ring carries the logistics warehouses. Fortification is optional and off by default (defaultWalls:false — the UI unchecks the wall box on selecting this profile), but the medieval curtain wall and the bastioned star fort are both available on request (wallGates.scheme:\'organic\', so the anachronism guard permits the trace). A circular irrigation waterway (M-VEN-3) encircles the built city: when the star fort is built the canal supplies its wet moat around the bastions even on a landlocked site, otherwise it is the irrigation ring outside the (optional) curtain wall — drawn as a fully-closed circle capped to the map so it never terminates in a straight clipped edge. The concentric rings and spokes carry a seeded low-frequency wobble (post-review organic softening, M-VEN-1) so the radial skeleton reads as hand-drawn rather than compass-drawn, consistent with this tool\'s own hand-drawn-cadastral aesthetic.'},
 };
 function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
 
@@ -402,15 +293,6 @@ const DEFAULT_RULES={
     frontageWidthVariance:0.22,    // sigma (median frontage 11 m stays fixed, M-PAR-1)
     plotDepthVariance:0.28,        // sigma (median depth 22/30 m by core-vs-fringe stays fixed, M-PAR-2)
     subdivisionCap:2},             // max burgage-cycle re-subdivisions of a frontage grant
-  palimpsest:{
-    // intensities for the palimpsest planning mode's post-founding encroachment passes (docs/,
-    // "Palimpsest Growth" design note) — kept tunable per Jacobs' 2009 finding that encroachment
-    // began at different times/rates in different cities, not a single fixed decay curve.
-    colonnadeNarrowRate:0.12,      // fraction of a primary/secondary edge's width lost per epoch, scaled by pressure
-    colonnadeNarrowShare:0.5,      // fraction of eligible edges that encroach at all (not every street colonnades)
-    wardWallDissolveRate:0.22,     // fraction of ward-boundary edges opened per epoch
-    fixedEdgeGrowthShare:0.3,      // fraction of each epoch's street budget routed along the fixed edge (river/canal)
-    subdivisionPressure:0.16},     // extra per-epoch chance a block re-subdivides beyond the base burgage cycle
   meta:{wildness:1.0,plotChaos:1.0}};
 function cloneRules(r){return JSON.parse(JSON.stringify(r));}
 function resolveRules(partial){
@@ -917,73 +799,31 @@ function buildPrimaries(seed,site,anchors,g){
   for(const rt of routes)addPolylineStreet(g,rt.pts,'primary',7,0,prov); // width M-NET-8
   return routes;}
 
-/* ---------------- grid streets: planned colonia (M-ROM-1) ----------------
- * A planned tradition does not grow organically at all — it lays a regular module in one act.
- * Two wider "maximus" streets cross at the civic anchor (forum); a regular minor grid at ~50-60 m
- * spacing fills the rest, clipped to the buildable land (never drawn into water). addStreet's
- * snap/split-at-crossing planarity invariant (core engine, unchanged) turns this into proper
- * 4-way city blocks exactly as it does for the organic pack — only the LAYOUT RULE producing the
- * candidate segments differs, per the Core/Culture split (docs/07 §2). Roman is the only profile
- * that still calls this today: Chinese, Aztec, Greek, Egyptian, Colonial and Industrial were all
- * originally modelled this way too, then converted to organic growth per docs/07 §3.6 — the
- * mechanism itself remains general-purpose (any future planned-grid profile can reuse it
- * unchanged), it simply has one caller at present rather than seven. */
-function buildGridStreets(seed,site,anchors,g,opts){
-  const r=stream(seed,'gridstreets');
-  const F=anchors.market; // the civic anchor; labelled 'forum' for this profile (civicAnchorLabel)
-  // minor grid spacing (M-ROM-1 default ~50-60 m); `opts.gridSpacing` lets a profile override it
-  // for a finer or coarser secondary grid within the same broad avenue framework — unused by
-  // Roman itself (the only current caller) but left general-purpose for a future grid profile
-  const sp=opts.gridSpacing||[50,60];
-  const spacing=r.range(sp[0],sp[1]);
-  const half=Math.max(140,Math.min(480,opts.maxRF*0.62)); // minor grid's built extent
-  const margin=25;
-  const land=(x,y)=>x>margin&&y>margin&&x<site.Wm-margin&&y<site.Hm-margin&&!site.isWater({x,y})&&
-    site.riverDist({x,y})>(site.riverW?site.riverW/2+8:0);
-  // longest-contiguous-land runs along a fixed-coordinate line, out to a given half-extent
-  // (reuses the technique buildWall uses to pick the land arc at a noisy bank boundary)
-  const landRuns=(fixed,axis,ext)=>{
-    const runs=[];let curStart=null,lastT=null;
-    for(let t=-ext;t<=ext;t+=6){
-      const p=axis==='h'?{x:F.x+t,y:fixed}:{x:fixed,y:F.y+t};
-      if(land(p.x,p.y)){if(curStart===null)curStart=t;lastT=t;}
-      else{if(curStart!==null&&lastT-curStart>40)runs.push([curStart,lastT]);curStart=null;}}
-    if(curStart!==null&&lastT-curStart>40)runs.push([curStart,lastT]);
-    return runs;};
-  const addAxis=(fixed,axis,cls,w,ext,prov)=>{
-    for(const [t0,t1] of landRuns(fixed,axis,ext)){
-      const A=axis==='h'?{x:F.x+t0,y:fixed}:{x:fixed,y:F.y+t0};
-      const B=axis==='h'?{x:F.x+t1,y:fixed}:{x:fixed,y:F.y+t1};
-      addStreet(g,A.x,A.y,B.x,B.y,cls,w,0,prov);}};
-  // the maximus streets are through-routes to the edge of the map (like the organic pack's
-  // immutable primaries reaching site.routeEnds), so they always cross a wall placed around the
-  // built-up core, whatever that core's radius turns out to be — a colonia's cardo/decumanus
-  // maximus continued beyond the town as the road to the next place (M-ROM-1, M-ROM-4)
-  const fullExtent=Math.max(site.Wm,site.Hm);
-  addAxis(F.y,'h','primary',7,fullExtent,'Decumanus maximus: the colonia\'s principal east-west street, run through the forum (M-ROM-1, M-ROM-4).');
-  addAxis(F.x,'v','primary',7,fullExtent,'Cardo maximus: the colonia\'s principal north-south street, run through the forum (M-ROM-1, M-ROM-4).');
-  const nRings=Math.max(2,Math.round(half/spacing));
-  const minorExtent=half*1.15;
-  for(let i=-nRings;i<=nRings;i++){
-    if(i===0)continue;
-    addAxis(F.y+i*spacing,'h','street',4.5,minorExtent,'Minor decumanus: regular colonial grid street (M-ROM-1).');
-    addAxis(F.x+i*spacing,'v','street',4.5,minorExtent,'Minor cardo: regular colonial grid street (M-ROM-1).');}
-  return {forum:F,spacing};}
-
 /* ---------------- radial streets: concentric-ring city (Venus Project, M-VEN-1) ----------------
- * A third planning mode, genuinely different from both 'organic' (accreted tangle) and 'grid'
- * (rectilinear module): concentric ring streets connected by radial spokes to a central hub.
- * Reuses the roundhouse building grammar's regular-polygon-approximates-a-circle technique
- * (docs/03 M-CEL-2) at city scale for each ring, and leans on the core engine's unchanged
- * planar-face block detector to turn ring x spoke crossings into annular-wedge blocks exactly as
- * buildGridStreets' own comment describes for the rectilinear case — only the LAYOUT RULE
- * differs (docs/07 §2). Distance-based district assignment (assignDistricts, keyed to distance
+ * A second planning mode, genuinely different from 'organic' (accreted tangle): concentric ring
+ * streets connected by radial spokes to a central hub, each ring a regular polygon standing in
+ * for a circle, and leaning on the core engine's unchanged planar-face block detector to turn
+ * ring x spoke crossings into annular-wedge blocks — only the LAYOUT RULE differs (docs/07 §2).
+ * Distance-based district assignment (assignDistricts, keyed to distance
  * from anchors.market with no cardinal-direction assumption) needs no change at all to read this
  * as concentric zones — market-adjacent parcels ring the hub, agrarian/suburb parcels fall
  * outside the built rings, exactly matching Fresco's concentric-zone concept for free. */
 function buildRadialStreets(seed,site,anchors,g,opts){
   const C=anchors.market;
   const maxRF=opts.maxRF;
+  // organic softening (post-review): perfectly mathematical concentric circles read as too
+  // mechanically exact against this tool's own hand-drawn-cadastral aesthetic — every other
+  // profile's streets are noisy/accretive, so a flawless compass-drawn ring stood out as the one
+  // artificial-looking thing on the map. A seeded low-frequency wobble (two summed sine terms,
+  // phase drifting slightly ring-to-ring like real tree-ring eccentricity) keeps the radial
+  // skeleton — a hub, concentric rings, straight spokes — structurally recognizable while losing
+  // the geometrically-exact look; spoke angles get the same small jitter treatment.
+  const rOrg=stream(seed,'radial-organic');
+  const wobPhase1=rOrg.range(0,Math.PI*2),wobPhase2=rOrg.range(0,Math.PI*2);
+  const wobFreq1=rOrg.int(3,5),wobFreq2=rOrg.int(6,9);
+  const wobAmp=0.055; // +-5.5% radius variation, small enough consecutive rings never cross
+  const wobble=(ang,ringIdx)=>1+wobAmp*
+    (Math.sin(ang*wobFreq1+wobPhase1+ringIdx*0.35)*0.6+Math.sin(ang*wobFreq2+wobPhase2+ringIdx*0.5)*0.4);
   const spokes=12; // evenly-spaced primary radial streets, the spine of the concentric-zone city
   // outermost built (residential) ring: several concentric rings + cross-spokes pack far more
   // buildable frontage into a given radius than the original 2-ring layout did, so the radius
@@ -1001,16 +841,17 @@ function buildRadialStreets(seed,site,anchors,g,opts){
   const landSeg=(p0,p1)=>{const n=12;
     for(let k=0;k<=n;k++)if(!land(V.lerp(p0,p1,k/n)))return false;
     return true;};
-  const provRing='Ring street: one of several concentric circuits at regular intervals linking the radial spokes, reusing the roundhouse\'s regular-polygon-for-a-circle technique at city scale (M-VEN-1).';
+  const provRing='Ring street: one of several concentric circuits at regular intervals linking the radial spokes, each ring a regular polygon standing in for a circle at city scale (M-VEN-1).';
   const provSpoke='Radial spoke: a straight route from the central Resource Management hub outward to the residential ring — the spine of the concentric-zone city (M-VEN-1).';
   const provCross='Cross-spoke: an intermediate radial in the wider outer band, added where the larger circumference wants more crossings than the inner spokes alone provide (M-VEN-1).';
   // ring radii: the hub ring, then nRings evenly spaced out to the residential ring
   const ringR=[hubR];
   for(let i=1;i<=nRings;i++)ringR.push(hubR+(outerR-hubR)*i/nRings);
-  const drawRing=(radius,cls,w)=>{
+  const drawRing=(radius,ringIdx,cls,w)=>{
     const sides=Math.max(24,Math.round(radius/8)); // vertex ~every 8 m so the circle reads smooth
     const pts=[];
-    for(let k=0;k<=sides;k++){const a=2*Math.PI*k/sides;pts.push({x:C.x+Math.cos(a)*radius,y:C.y+Math.sin(a)*radius});}
+    for(let k=0;k<=sides;k++){const a=2*Math.PI*k/sides;const rad=radius*wobble(a,ringIdx);
+      pts.push({x:C.x+Math.cos(a)*rad,y:C.y+Math.sin(a)*rad});}
     // split into contiguous on-land runs so a ring never gets drawn uncapped across water
     let run=[];
     const flush=()=>{if(run.length>1)addPolylineStreet(g,run,cls,w,0,provRing);run=[];};
@@ -1019,14 +860,14 @@ function buildRadialStreets(seed,site,anchors,g,opts){
   // every ring stays 'street'-class: these are internal mesh, not through-routes reaching the
   // wall — only the primary spokes below are tagged so buildWall's gate logic actually sees them
   // (an untagged edge never gets a land gate at all, M-VEN-1 / infrastructure-safety audit)
-  ringR.forEach(rr=>drawRing(rr,'street',rr===ringR[ringR.length-1]?6.5:4.5));
+  ringR.forEach((rr,idx)=>drawRing(rr,idx,'street',idx===ringR.length-1?6.5:4.5));
   // primary spokes: the only edges meant to reach the outermost ring/wall boundary, so these are
   // the only radial streets tagged 'primary' — buildWall's gate-placement loop only creates a
   // land gate for cls==='primary' edges; leaving these untagged (as an earlier version did) left
   // a fortified Venus town with zero land gates at all, an impossible intersection caught by the
   // standing audit once walls became a real option here.
   for(let i=0;i<spokes;i++){
-    const a=2*Math.PI*i/spokes;
+    const a=2*Math.PI*i/spokes+rOrg.range(-0.045,0.045); // jittered spacing, still a straight radius
     const p0={x:C.x+Math.cos(a)*hubR,y:C.y+Math.sin(a)*hubR};
     const p1={x:C.x+Math.cos(a)*outerR,y:C.y+Math.sin(a)*outerR};
     if(landSeg(p0,p1))addStreet(g,p0.x,p0.y,p1.x,p1.y,'primary',5,0,provSpoke);}
@@ -1037,20 +878,20 @@ function buildRadialStreets(seed,site,anchors,g,opts){
   const midR=ringR[Math.max(1,Math.floor(nRings/2))];
   const crossOuter=ringR[ringR.length-2];
   for(let i=0;i<spokes;i++){
-    const a=2*Math.PI*(i+0.5)/spokes;
+    const a=2*Math.PI*(i+0.5)/spokes+rOrg.range(-0.045,0.045);
     const p0={x:C.x+Math.cos(a)*midR,y:C.y+Math.sin(a)*midR};
     const p1={x:C.x+Math.cos(a)*crossOuter,y:C.y+Math.sin(a)*crossOuter};
     if(landSeg(p0,p1))addStreet(g,p0.x,p0.y,p1.x,p1.y,'street',4.5,0,provCross);}
   return {center:C,rings:ringR,spokes,outerR};}
 
 /* ---------------- circular waterway: Venus Project irrigation canal (M-VEN-3) ----------------
- * The one genuinely new infrastructure detail for this profile, in the same spirit as the Aztec
- * chinampas (docs/07 §3.1): a closed decorative ring drawn beyond the outermost built ring's
- * radius, i.e. entirely outside the street network's reach — so it can never overlap a building
- * or parcel BY CONSTRUCTION (no block/parcel/building geometry is ever generated out there in the
- * first place), the same defensive pattern already proven for the Industrial/Post-Apocalyptic
- * profiles' new mechanisms. Never a parcel or building, so it carries none of the "must not sit
- * in water" invariant that applies to built fabric — sitting past the built city is the point. */
+ * The one genuinely new infrastructure detail for this profile: a closed decorative ring drawn
+ * beyond the outermost built ring's radius, i.e. entirely outside the street network's reach —
+ * so it can never overlap a building or parcel BY CONSTRUCTION (no block/parcel/building geometry
+ * is ever generated out there in the first place), the same defensive "generate it somewhere
+ * geometry can't reach" pattern the opt-in ruined-decay pass (applyDecay) also relies on. Never a
+ * parcel or building, so it carries none of the "must not sit in water" invariant that applies to
+ * built fabric — sitting past the built city is the point. */
 function buildWaterway(seed,site,anchors,radius){
   const C=anchors.market,sides=64;
   // cap the radius so the whole circle sits inside the map with a margin — this is the fix for
@@ -1295,9 +1136,8 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
     out.columns=out.hall.slice();
     out.prov='Castle keep (tenshu): a tiered stone-and-timber donjon at the jokamachi\'s core, the daimyo\'s seat of military and administrative authority (M-JPN-3).';
   }else if(style==='dome'){
-    // circular drum + dome, reusing the roundhouse's regular-polygon-for-a-circle technique
-    // (M-CEL-2) rather than the rectangular rect() helper — the first civic hall that isn't a
-    // rectangle re-skin, matching the roundhouse's own precedent for building grammars.
+    // circular drum + dome: a regular polygon standing in for a circle, rather than the
+    // rectangular rect() helper — the one civic hall style that isn't a rectangle re-skin.
     const rad=r.range(9,13),nSides=16,hall=[];
     for(let k=0;k<nSides;k++){const a=2*Math.PI*k/nSides;hall.push({x:base.x+Math.cos(a)*rad,y:base.y+Math.sin(a)*rad});}
     out.hall=hall;out.name='Center for Resource Management';out.dome=true;
@@ -1312,97 +1152,32 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
   return out;}
 
 /* Signature games/spectacle building(s) (docs/03 M-GAMES register; docs/07 §3.7): one
- * population-gated monument per culture (Roman gets its own defining pair), reusing only
- * existing geometry techniques — the roundhouse/dome regular-polygon-for-an-ellipse trick
- * (M-CEL-2/M-VEN-2) and an oriented-rectangle closure identical in spirit to buildCivic's own
- * local rect() — rather than inventing new per-culture shapes. Collision safety follows the
- * Aztec-chinampa/Venus-waterway precedent: every candidate is generated, range- and
- * water/street-checked, and a doomed candidate is simply retried at another bearing/radius
+ * population-gated monument per culture, reusing an oriented-rectangle closure identical in
+ * spirit to buildCivic's own local rect() rather than inventing a new per-culture shape.
+ * Collision safety follows the Venus-waterway precedent: every candidate is generated, range-
+ * and water/street-checked, and a doomed candidate is simply retried at another bearing/radius
  * rather than forced in; an empty result is an honest, valid outcome (the same discipline
  * buildCivic already uses when its own gate isn't met). Sized by fixed per-culture ranges, not
- * scaled to population, matching buildCivic's own hall dimensions. */
+ * scaled to population, matching buildCivic's own hall dimensions. The register originally
+ * covered ellipse/stadium/ballcourt shapes too (docs/03 §AA retains that research); only the
+ * plain oriented-rectangle case has a live caller since the post-launch simplification pass
+ * (docs/07 §3.10). */
 const GAMES_SPEC={
   medieval:[{kind:'tiltyard',name:'Tiltyard',shape:'rect',siting:'plaza',w:[30,42],d:[10,14],minPop:3000,
     prov:'Tiltyard: for an ordinary town (not a royal palace), tournaments were staged directly in the town\'s own marketplace (Brussels\' Grote Markt; also Lille, Cambrai) — dedicated palace tiltyards (Hampton Court, Whitehall, Kenilworth) were the exception, not the norm (Damen 2016, M-GAMES-1).'}],
-  roman:[{kind:'amphitheatre',name:'Amphitheatre',shape:'ellipse',siting:'peripheral',rx:[34,42],ry:[26,32],minPop:3000,
-    prov:'Amphitheatre: provincial colonia amphitheatres typically stood at the town\'s edge or were built into the wall circuit itself (Trier, Tarragona) — intramural cases (Rome\'s own Colosseum, London) were the exception (Welch 2007, M-GAMES-2).'},
-   {kind:'circus',name:'Circus',shape:'stadium',siting:'peripheral',w:[170,210],d:[30,40],minPop:6000,
-    prov:'Circus: provincial circuses (Mérida, Córdoba, Arles) stood extramural, sometimes 0.3-1.5 km beyond the walls, simply owing to their huge footprint — only a handful (Tarraco, Thessalonica, Rome itself) were intramural, as part of a palace/power complex (Humphrey 1986, M-GAMES-2) — modelled alongside the amphitheatre rather than instead of it, since both are independently well-attested; a higher population gate than the amphitheatre\'s, as the rarer, grander undertaking of the two. Shape is a discorectangle (straight sides, semicircular turns), the genuinely distinguishing feature of a raced-around-a-turn track that a smooth ellipse elided in the first cut of this register.'}],
-  islamic:[{kind:'maidan',name:'Maidan',shape:'rect',siting:'plaza',w:[40,55],d:[16,22],minPop:3000,
-    prov:'Maidan/maydan: Isfahan\'s Naqsh-e Jahan is the literal centre of the Safavid capital, gated directly into the Grand Bazaar and facing the Shah Mosque and Ali Qapu palace (UNESCO, M-GAMES-3) — modelled at a scale that fits alongside this engine\'s own market square rather than the real maidan\'s much grander extent, the same honest scale-down already used for the sumo grounds/dohyō (M-GAMES-13).'}],
-  byzantine:[{kind:'hippodrome',name:'Hippodrome',shape:'stadium',siting:'plaza',w:[48,65],d:[16,22],minPop:3000,
-    prov:'Hippodrome: adjoined the Great Palace at Constantinople\'s core, linked to the imperial box by a private passage (World History Encyclopedia, M-GAMES-4) — the real sphendone is a curved end on an otherwise straight track, modelled here as a full discorectangle (both ends curved) rather than a smooth ellipse.'}],
-  chinese:[{kind:'cuju',name:'Cuju ground',shape:'rect',siting:'plaza',w:[35,48],d:[18,24],minPop:3000,
-    prov:'Cuju/polo ground: Tang polo grounds were built within imperial palace compounds (a stele records one at Daming Palace\'s Hanguang Hall, 831 CE), and ordinary city wards of Chang\'an also held open polo/cuju fields — never an out-of-town facility (Benn 2002, M-GAMES-5) — a marked-out field rather than monumental masonry, an honest lower-confidence entry.'}],
-  aztec:[{kind:'tlachtli',name:'Ballcourt',shape:'ballcourt',siting:'plaza',w:[36,48],d:[14,18],minPop:3000,
-    prov:'Tlachtli: Tenochtitlan\'s principal ballcourt stood inside the walled sacred precinct beside the Templo Mayor (M-GAMES-6) — the real court is a distinctive "I" shape flanked by sloping walls, now modelled as an actual narrow-alley/wide-end-zone dogbone polygon rather than a smooth ellipse.'}],
-  viking:[{kind:'knattleikr',name:'Knattleikr field',shape:'ellipse',siting:'peripheral',rx:[20,26],ry:[16,20],minPop:3000,
-    prov:'Knattleikr: Viking-age Scandinavia/Iceland had few real towns; the game was played on open fields or frozen lakes, often near a þing assembly site (Þingvellir) rather than inside a built settlement (M-GAMES-7) — the weakest-evidence entry in this register, modelled as a plain field rather than a monument, flagged low confidence rather than silently invented.'}],
-  celtic:[{kind:'tailteann',name:'Tailteann assembly ground',shape:'ellipse',siting:'peripheral',rx:[22,28],ry:[19,24],minPop:3000,
-    prov:'The Tailteann Games (Óenach Tailteann): Teltown, Co. Meath was itself an earthwork assembly ground, not a town — a periodic pan-regional gathering tied to no single settlement (M-GAMES-8), with a real circular embanked ground (~85 m) attested archaeologically — modelled as an earthwork, not a masonry building.'}],
-  greek:[{kind:'stadion',name:'Stadium',shape:'rect',siting:'peripheral',w:[85,100],d:[13,16],minPop:3000,
-    prov:'Stadion: Olympia\'s stadium sits east of the sanctuary, deliberately separated from the temples by the Echo Stoa; Athens\' Panathenaic Stadium was extra muros across the Ilissos — outside or at the physical edge of the sacred/urban core was the norm, Delphi\'s hilltop siting the exception (M-GAMES-9).'}],
-  egyptian:[{kind:'hebsed',name:'Heb-Sed court',shape:'rect',siting:'plaza',w:[35,42],d:[8,10],minPop:3000,
-    prov:'Heb-Sed court: Djoser\'s court sits within his enclosure wall as a stone facsimile of the royal palace, and the live jubilee rites took place within the capital\'s own palace precinct, not open desert (Smarthistory, M-GAMES-10) — Amarna\'s own Gem-pa-Aten rebuilt this form, though its remains are fragmentary; the type itself is solid.'}],
-  mesopotamian:[],
-  mayan:[{kind:'pitz',name:'Ballcourt',shape:'ballcourt',siting:'plaza',w:[30,40],d:[12,15],minPop:3000,
-    prov:'Pok-ta-pok/pitz: Maya ballcourts occupy prime space in the main plaza/ceremonial core beside major temples (Tikal, Copán, Monte Albán, M-GAMES-11) — modelled as an actual narrow-alley/wide-end-zone dogbone polygon (see Aztec, M-GAMES-6), sized toward the typical range rather than the exceptional 168x70 m Great Ballcourt at Chichen Itza.'}],
-  inca:[{kind:'ushnu',name:'Ushnu platform',shape:'platform',siting:'plaza',w:[10,14],d:[8,10],minPop:3000,
-    prov:'Ushnu: stood at the literal centre of Huacaypata, Cusco\'s main plaza (a colonial fountain later occupied the same spot, M-GAMES-12) — NOT a competitive-games building (no true sport architecture is attested for the Inca); included honestly as the closest real analogue, modelled distinctly smaller and plainer than every arena elsewhere in this register.'}],
-  japanese:[{kind:'dohyo',name:'Sumo grounds',shape:'ellipse',siting:'plaza',rx:[16,20],ry:[14,18],minPop:3000,
-    prov:'Sumo grounds: Edo kanjin-zumo was staged at urban temple/shrine precincts (Ekō-in, Tomioka Hachiman, Yushima Tenjin), all within the city (M-GAMES-13) — the real dohyō ring is a mere ~4.6 m circle; modelled instead at the scale of the surrounding tournament enclosure so it remains visible, an honest choice of scale, not a claim about the ring\'s own size.'}],
-  colonial:[{kind:'plazadetoros',name:'Bullring',shape:'ellipse',siting:'plaza',rx:[16,20],ry:[14,18],minPop:3000,
-    prov:'Plaza de toros: early colonial bullfights (mounted, aristocratic) were held in the open plaza mayor itself with temporary wooden barriers — Mexico City\'s council mandated plaza bullfights from 1529; permanent circular rings (Lima\'s Acho, 1766; Mexico City, 1880) postdate this profile\'s 16th-century mining-boomtown setting by two centuries (M-GAMES-14). Modelled as a modest ring sited beside the plaza mayor itself — the temporary-barrier arena the plaza actually hosted — flagged as a permanent-masonry anachronism rather than presented as period-correct.'}],
-  frontier:[{kind:'racetrack',name:'Racetrack',shape:'stadium',siting:'peripheral',w:[110,140],d:[32,40],minPop:3000,
-    prov:'Horse-racing track: frontier fairgrounds sat at a town\'s edge or beyond it — Helena, Montana\'s 1870 track was built "on the outskirts" (M-GAMES-15) — a track, not a monumental building, consistent with this profile\'s low-investment character. Shape is a discorectangle (straight sides, semicircular turns) rather than a smooth ellipse, the genuinely distinguishing feature of an oval track.'}],
-  industrial:[{kind:'cricket',name:'Cricket ground',shape:'ellipse',siting:'peripheral',rx:[38,46],ry:[32,38],minPop:3000,
-    prov:'Cricket ground: Manchester\'s own Old Trafford (Manchester Cricket Club, 1857) was leased countryside meadow "out in the country," footpath access only, roughly two miles from the city centre — suburbanization enveloped it only later (M-GAMES-16).'}],
   venus:[],
 };
-function ellipsePoly(center,rx,ry,sides){
-  const poly=[];
-  for(let k=0;k<sides;k++){const a=2*Math.PI*k/sides;poly.push({x:center.x+Math.cos(a)*rx,y:center.y+Math.sin(a)*ry});}
-  return poly;}
 function orientedRect(center,along,w,d){ // along: unit vector for the w-axis; its perpendicular carries d
   const perp=V.rot90(along);
   return [V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,-d/2)),
     V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,-d/2)),
     V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,d/2)),
     V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,d/2))];}
-// discorectangle ("stadium shape"): two straight sides joined by a semicircular cap at each end —
-// the genuinely distinguishing feature of a raced-around-a-turn track (circus/hippodrome/
-// racetrack) that a smooth ellipse elides (M-GAMES register, shape-accuracy revision). w = full
-// length end-to-end, d = full width (cap diameter).
-function stadiumPoly(center,along,w,d,capSides){
-  capSides=capSides||10;
-  const perp=V.rot90(along),rad=d/2,halfVec=V.mul(along,Math.max(0,(w-d)/2));
-  const c1=V.add(center,halfVec),c2=V.sub(center,halfVec);
-  const poly=[V.add(c2,V.mul(perp,rad)),V.add(c1,V.mul(perp,rad))];
-  for(let k=1;k<capSides;k++){const t=Math.PI/2-Math.PI*k/capSides;
-    poly.push(V.add(c1,V.add(V.mul(along,Math.cos(t)*rad),V.mul(perp,Math.sin(t)*rad))));}
-  poly.push(V.sub(c1,V.mul(perp,rad)),V.sub(c2,V.mul(perp,rad)));
-  for(let k=1;k<capSides;k++){const t=-Math.PI/2-Math.PI*k/capSides;
-    poly.push(V.add(c2,V.add(V.mul(along,Math.cos(t)*rad),V.mul(perp,Math.sin(t)*rad))));}
-  return poly;}
-// Mesoamerican ballcourt ("I"/dogbone shape): a narrow central playing alley flanked by wider
-// end-zones, the commonly-depicted schematic plan of the tlachtli/pok-ta-pok court type — a
-// genuinely different footprint from a plain elongated ellipse (M-GAMES-6/M-GAMES-11 shape-
-// accuracy revision). w = full length, d = full end-zone width (alley narrows to ~0.64*d/2).
-function ballcourtPoly(center,along,w,d){
-  const perp=V.rot90(along),L=w/2,aw=d*0.32,ew=d*0.5,el=w*0.18;
-  const pt=(a,p)=>V.add(center,V.add(V.mul(along,a),V.mul(perp,p)));
-  return [pt(L,ew),pt(L,-ew),pt(L-el,-aw),pt(-(L-el),-aw),pt(-L,-ew),pt(-L,ew),pt(-(L-el),aw),pt(L-el,aw)];}
-function gamesShapeAt(spec,center,along,rx,ry,w,d){
-  if(spec.shape==='ellipse')return ellipsePoly(center,rx,ry,22);
-  if(spec.shape==='stadium')return stadiumPoly(center,along,w,d,10);
-  if(spec.shape==='ballcourt')return ballcourtPoly(center,along,w,d);
-  return orientedRect(center,along,w,d); // 'rect' and 'platform' both plain oriented rectangles
+function gamesShapeAt(spec,center,along,w,d){
+  return orientedRect(center,along,w,d); // every surviving spec uses a plain oriented rectangle
 }
 function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic){
-  // Palimpsest is a composite, not an independent tradition: it inherits whichever mature
-  // identity it actually builds (Islamic housing/gates today, docs/07 §3.5), so its games
-  // building is the same inherited maidan rather than a bespoke entry of its own.
-  const specs=profile.id==='palimpsest'?GAMES_SPEC.islamic:GAMES_SPEC[profile.id];
+  const specs=GAMES_SPEC[profile.id];
   if(!specs||!specs.length)return [];
   const r=stream(seed,'games');
   // precompute a cheap bounding-circle index per parcel once, not per candidate: the plaza-
@@ -1448,11 +1223,9 @@ function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaz
     return false;};
   for(const spec of specs){
     if(popTarget<spec.minPop)continue;
-    const rx=spec.shape==='ellipse'?r.range(spec.rx[0],spec.rx[1]):null;
-    const ry=spec.shape==='ellipse'?r.range(spec.ry[0],spec.ry[1]):null;
-    const w=spec.shape!=='ellipse'?r.range(spec.w[0],spec.w[1]):null;
-    const d=spec.shape!=='ellipse'?r.range(spec.d[0],spec.d[1]):null;
-    const half=Math.max(rx||w/2,ry||d/2);
+    const w=r.range(spec.w[0],spec.w[1]);
+    const d=r.range(spec.d[0],spec.d[1]);
+    const half=Math.max(w,d)/2;
     let found=null;
     // plaza-adjacent siting (docs/03 M-GAMES register, historical-placement revision): most of
     // this register's buildings were genuinely intramural, immediately beside the main square/
@@ -1476,7 +1249,7 @@ function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaz
           if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
           if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+20))continue;
           const radial=V.norm(V.sub(center,plazaCenter));
-          const poly=gamesShapeAt(spec,center,V.rot90(radial),rx,ry,w,d);
+          const poly=gamesShapeAt(spec,center,V.rot90(radial),w,d);
           if(blocked(poly))continue;
           if(overlapsParcels(poly,center.x,center.y,half))continue;
           found={center,poly};break;
@@ -1497,7 +1270,7 @@ function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaz
           if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
           if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+40))continue;
           const radial=V.norm({x:Math.cos(ang),y:Math.sin(ang)});
-          const poly=gamesShapeAt(spec,center,V.rot90(radial),rx,ry,w,d);
+          const poly=gamesShapeAt(spec,center,V.rot90(radial),w,d);
           if(blocked(poly))continue;
           found={center,poly};break;
         }
@@ -1505,8 +1278,7 @@ function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaz
     }
     if(!found)continue; // no safe site found: an honest omission, never forced in
     placedAt.push({center:found.center,half});
-    let inner=null;
-    if(spec.shape==='platform')inner=insetPoly(ensureCCW(found.poly),[Math.min(w,d)*0.22])||null;
+    const inner=null; // the ushnu platform-shape inset (docs/03 M-GAMES-12) has no live caller since docs/07 §3.10
     out.push({id:'games'+(gid++),kind:spec.kind,name:spec.name,poly:found.poly,inner,center:found.center,prov:spec.prov});
   }
   return out;}
@@ -2042,11 +1814,10 @@ function clearFortZone(site,wallState,g,parcels,buildings,details){
 
 /* ---------------- interior lane pass: split oversized central blocks ---------------- */
 function lanePass(seed,site,anchors,g,epoch,minArea){
-  minArea=minArea===undefined?12000:minArea; // palimpsest calls this with a lower floor as
-  // pressure increases (M-PAL-4): Conzen's burgage-cycle pseudo-streets recur "repeatedly, at
-  // increasing density, across several plot-cycles" — this fn already IS that mechanism
-  // (docs/, "Palimpsest Growth" §2.3), it just needed a tunable threshold instead of one fixed
-  // for every profile.
+  minArea=minArea===undefined?12000:minArea; // a caller-supplied threshold that scales with
+  // encroachment pressure (M-PAL-4) had no live caller since the post-launch simplification pass
+  // (docs/07 §3.10) removed the profile it was built for; the parameter stays tunable rather than
+  // hardcoded so a future profile with its own re-subdivision pressure can reuse it.
   const r=stream(seed,'lanes/'+epoch);
   const faces=extractFaces(g);
   let added=0;
@@ -2075,121 +1846,6 @@ function lanePass(seed,site,anchors,g,epoch,minArea){
     added++;}
   return added;}
 
-/* ---------------- palimpsest growth: post-founding encroachment (M-PAL register) ----------------
- * A third historical process alongside 'organic'/'grid': a street network founded ONCE in a
- * planned act (buildGridStreets, unchanged) and then organically deformed over epochs without
- * ever being re-planned — Aleppo/Damascus's colonnaded Roman avenues narrowing into an enclosed
- * souk (Sauvaget 1934/1941), cross-checked against Tang-to-Song Kaifeng's ward-wall dissolution
- * (Skinner 1977) and Conzen's burgage-cycle pseudo-streets (1960). Every sub-pass reuses an
- * existing primitive rather than inventing new geometry (see docs/07 §3.5). */
-
-/* narrowColonnades (M-PAL-1): road-RESERVATION narrowing only, never the centerline — the route
- * survives exactly where it was founded (Damascus's Via Recta is walkable on the same alignment
- * two thousand years later), only its drawn width degrades. Since block-insetting (buildBlocks)
- * reads e.w at the time blocks are computed, this must run before buildBlocks — narrowing a width
- * can only ever shrink the drawn road CASING, never move a centerline or a junction, so it cannot
- * introduce a new road/wall or road/building intersection by construction (docs/07 §3.5 safety
- * note — no geometry primitive here can create the "impossible intersection" this project audits
- * for, only a rendering change). Jacobs (2009): encroachment began at different times/rates in
- * different cities — modelled as a per-edge deterministic selection (colonnadeNarrowShare), not
- * "every street encroaches uniformly."
- */
-function narrowColonnades(seed,g,ep,pressure,pr){
-  const minW=1.8; // a footpath through the souk — the narrowest a colonnade ever encroaches to
-  for(const e of g.edges){
-    if(!e.alive||(e.cls!=='primary'&&e.cls!=='street'))continue;
-    const encroaches=(fnv1a('colonnade'+e.id)%1000)/1000<pr.colonnadeNarrowShare;
-    if(!encroaches)continue;
-    if(e.foundedW===undefined)e.foundedW=e.w;
-    const target=Math.max(minW,e.foundedW*(1-pr.colonnadeNarrowRate*pressure*4));
-    if(e.w>target)e.w=target;}
-}
-
-/* dissolveWardWalls (M-PAL-2): a pure data/render pass, run once after buildings exist — the same
- * discipline the Post-Apocalyptic profile's applyDecay() already established (docs/03 M-PA-1):
- * never moves, adds, or removes a vertex or a street edge, so street/building/parcel topology
- * cannot be affected. Interior residential blocks (Chang'an's lifang) are flagged with a founding
- * "ward wall," drawn as independent per-edge parallel segments offset OUTWARD from blk.poly into
- * the street's own right-of-way (never inward: blk.poly is already the block's inset-from-street
- * buildable boundary and buildings sit with zero setback right up to it, M-BLD-1); each one's
- * dissolved flag is a single seeded roll at wardWallDissolveRate, standing in for "by this
- * snapshot's epoch, has this particular ward's enclosure already come down."
- * A plain outward offset is safe for a CONVEX block edge, but this project's own audit found it
- * is NOT reliably safe at a reflex (concave) vertex of an irregular block — growAlongFixedEdge
- * can reshape blocks away from clean grid rectangles, and a per-edge offset has no way to know
- * the polygon is locally concave there without a full corner-mitering step (which itself proved
- * unreliable for a negative/outward offset, see history in git blame). Rather than perfect the
- * construction further, this now VERIFIES: any candidate segment crossing a real building is
- * simply dropped, not drawn — correctness by verification, not by trusting geometry to work out,
- * matching the wet-parcel/bowtie-quad checks already used elsewhere in this file. */
-function dissolveWardWalls(seed,blocks,anchors,parcels,buildings,pr){
-  const r=stream(seed,'wardwalls');
-  const parBlock=new Map(parcels.map(p=>[p.id,p.block]));
-  const byBlock=new Map();
-  for(const b of buildings){
-    const bl=parBlock.get(b.parcel);if(bl===undefined)continue;
-    let arr=byBlock.get(bl);if(!arr){arr=[];byBlock.set(bl,arr);}
-    arr.push(b);}
-  for(const blk of blocks){
-    if(blk.plaza)continue;
-    const dM=V.dist(polyCentroid(blk.poly),anchors.market);
-    if(dM<90||dM>520)continue; // the forum/temple precinct and the far fringe were never gated wards
-    if(!r.chance(0.6))continue; // not every block was a walled ward
-    const dissolved=r.chance(pr.wardWallDissolveRate*4);
-    // only buildings whose parcel belongs to this block can possibly be near its own ward wall
-    const near=byBlock.get(blk.id)||[];
-    const n=blk.poly.length,segs=[];
-    for(let i=0;i<n;i++){
-      const A=blk.poly[i],B=blk.poly[(i+1)%n];
-      const d=V.norm(V.sub(B,A));if(!isFinite(d.x))continue;
-      const out={x:d.y,y:-d.x}; // outward normal for a CCW polygon (insetPoly's inward is {-d.y,d.x})
-      const sa=V.add(A,V.mul(out,0.6)),sb=V.add(B,V.mul(out,0.6));
-      let crosses=false;
-      for(const b of near){
-        for(let j=0;j<b.poly.length&&!crosses;j++)
-          if(segInt(sa,sb,b.poly[j],b.poly[(j+1)%b.poly.length]))crosses=true;
-        if(crosses)break;}
-      if(!crosses)segs.push([sa,sb]);}
-    if(segs.length)blk.wardWall={segs,dissolved};}
-}
-
-/* growAlongFixedEdge (M-PAL-3): a restricted call into the organic router's own safety discipline
- * (multi-point land validation, matching the landSeg fix in buildRadialStreets) rather than the
- * router itself — new secondary streets track the shoreline specifically, matching the Kaifeng
- * HGIS finding that post-flood streets followed the surviving canals, not the original grid's
- * orientation. A no-op on a landlocked site (there is no fixed edge to grow along).
- * Three corrections found only by actually inspecting generated output, not by construction:
- * (1) townBank's own offset (riverW/2+5 for a river/riverthrough bank, a flat ~5 for a bay/coast
- * shore) sat INSIDE the +6 margin land() originally demanded, so every candidate failed land()
- * by construction and the pass was a silent no-op on every site/seed; the margin is now split by
- * site kind and kept below townBank's own offset. (2) bank runs the full map perimeter, so a
- * uniformly random index usually lands far from the built town — attachPoint's snap radius then
- * misses every existing node, addStreet creates a new floating component, and pruneLargest
- * deletes it; candidates are now restricted to bank points within reach of the market (mirroring
- * the 520 m radius the other M-PAL passes already use). (3) a bay/coast shore is sampled far
- * more finely than a river's, so most adjacent-point segments are shorter than the old 20 m
- * floor and were discarded before the land check ever ran; the floor is now 8 m. */
-function growAlongFixedEdge(seed,site,anchors,g,ep,pressure,pr){
-  const bank=townBank(site,anchors);
-  if(!bank||bank.length<2)return;
-  const nearIdx=[];
-  for(let i=0;i<bank.length-1;i++)if(V.dist(bank[i],anchors.market)<520)nearIdx.push(i);
-  if(!nearIdx.length)return;
-  const r=stream(seed,'fixededge/e'+ep);
-  const rk=(site.kind==='river'||site.kind==='riverthrough');
-  const land=(p)=>rk?(!site.isWater(p)&&site.riverDist(p)>site.riverW/2+3):(!site.isWater(p)&&site.riverDist(p)>3);
-  const landSeg=(p0,p1)=>{for(let k=0;k<=8;k++)if(!land(V.lerp(p0,p1,k/8)))return false;return true;};
-  const nTry=Math.max(1,Math.round(pr.fixedEdgeGrowthShare*4*pressure));
-  for(let i=0;i<nTry;i++){
-    const idx=nearIdx[r.int(0,nearIdx.length-1)];
-    const A=bank[idx],B=bank[idx+1];
-    if(V.dist(A,B)<8)continue;
-    if(!landSeg(A,B))continue;
-    addStreet(g,A.x,A.y,B.x,B.y,'street',3.6,ep,
-      'Riverside street: a secondary street grown along the shoreline after the founding grid, tracking the fixed edge rather than the original grid orientation (Kaifeng post-flood pattern, M-PAL-3).');
-  }
-}
-
 /* ---------------- blocks (faces -> inset polygons) ---------------- */
 function buildBlocks(g,plaza,site){
   const faces=extractFaces(g);
@@ -2217,48 +1873,16 @@ function buildBlocks(g,plaza,site){
         :'Urban block: a face of the planar street graph, inset by half the width of each fronting street (+ verge).'});}
   return blocks;}
 
-/* ---------------- insula parcels: regular lot grid within a planned block (M-ROM-2/3) ----------------
- * A planned colonia's blocks are cut in one act, not accreted street-frontage by street-frontage:
- * a regular row (or two back-to-back rows) of rectangular lots along the block's long axis,
- * rather than medieval bisector strip-platting. Blocks from the grid street layout are
- * axis-aligned rectangles, so the block's own bounding box IS its lot grid's frame. */
-function insulaLots(poly,rB){
-  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
-  for(const p of poly){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);}
-  const spanX=maxX-minX,spanY=maxY-minY;
-  if(spanX<8||spanY<8)return [];
-  const longIsX=spanX>=spanY;
-  const longSpan=longIsX?spanX:spanY,shortSpan=longIsX?spanY:spanX;
-  const lotW=Math.max(12,Math.min(26,rB.logn(19,0.15))); // insula lot frontage, M-ROM-2/3
-  const nLots=Math.max(1,Math.round(longSpan/lotW));
-  const rows=shortSpan>=42?2:1; // double-loaded frontage on a deep block (M-ROM-2)
-  const rowDepth=shortSpan/rows;
-  const cand=[];
-  for(let row=0;row<rows;row++){
-    for(let k=0;k<nLots;k++){
-      const u0=minX+(longIsX?k/nLots*spanX:0),u1=minX+(longIsX?(k+1)/nLots*spanX:0);
-      const v0=minY+(longIsX?0:k/nLots*spanY),v1=minY+(longIsX?0:(k+1)/nLots*spanY);
-      let F0,F1,B0,B1;
-      if(longIsX){
-        const y0=minY+row*rowDepth,y1=minY+(row+1)*rowDepth;
-        const x0=minX+k/nLots*spanX,x1=minX+(k+1)/nLots*spanX;
-        if(row===0){F0={x:x0,y:y0};F1={x:x1,y:y0};B0={x:x0,y:y1};B1={x:x1,y:y1};}
-        else{F0={x:x0,y:y1};F1={x:x1,y:y1};B0={x:x0,y:y0};B1={x:x1,y:y0};}
-      }else{
-        const x0=minX+row*rowDepth,x1=minX+(row+1)*rowDepth;
-        const y0=minY+k/nLots*spanY,y1=minY+(k+1)/nLots*spanY;
-        if(row===0){F0={x:x0,y:y0};F1={x:x0,y:y1};B0={x:x1,y:y0};B1={x:x1,y:y1};}
-        else{F0={x:x1,y:y0};F1={x:x1,y:y1};B0={x:x0,y:y0};B1={x:x0,y:y1};}
-      }
-      const quad=[F0,F1,B1,B0];
-      const area=Math.abs(polyArea(quad));
-      if(area<26)continue;
-      cand.push({poly:quad,frontage:V.dist(F0,F1),depth:(V.dist(F0,B0)+V.dist(F1,B1))/2,
-        area,F0,F1,B1,B0,
-        prov:'Insula lot: a regular rectangular lot cut from the planned block in one act — one row (or two, back-to-back) along the block\'s long axis (M-ROM-2/3), unlike medieval series-platted strips.'});}}
-  return cand;}
-
-/* ---------------- parcels: series platting via bisector edge-cells, or insula lots (M-ROM) ---------------- */
+/* ---------------- parcels: series platting via bisector edge-cells ----------------
+ * The vertex-bisector method handles any convex-ish block shape, including the wedge-shaped
+ * annular blocks Venus's radial rings produce — its lot boundaries respect the true (curved)
+ * block outline rather than assuming an axis-aligned rectangle, which is what let Venus adopt
+ * this same generic mechanism unchanged rather than needing its own parcel method (M-VEN-1). A
+ * bounding-box insula-lot method (regular rows within a planned block's own bounding box,
+ * dispatched on profile.parcelPattern) existed here through the tool's original 19-profile run;
+ * it has no live caller since the post-launch simplification pass (docs/07 §3.10) — both
+ * medieval and Venus set parcelPattern:'strip', so a future insula-pattern profile would need to
+ * reintroduce the dispatch as well as the method. */
 function buildParcels(seed,g,blocks,anchors,epochs,site,profile,rules){
   profile=profile||CULTURE_PROFILES.medieval;
   const P=(rules||DEFAULT_RULES).parcels; // configurable generation rules
@@ -2269,23 +1893,6 @@ function buildParcels(seed,g,blocks,anchors,epochs,site,profile,rules){
     const n=poly.length;
     if(n<3)continue;
     const rB=stream((fnv1a(blk.id)^0)>>>0,'parcels/'+blk.id);
-    if(profile.parcelPattern==='insula'){
-      const acc=[];
-      // check the FULL lot footprint (all 4 corners + centroid), not just the centroid: a
-      // harbour-district building can run to ~85% of a parcel's depth (M-BLD-2), so a lot whose
-      // centroid is dry but whose back corners dip into the water would still float a warehouse
-      // in the channel — the exact "impossible intersection" this project audits for.
-      const wetLot=(lot)=>{ if(!site)return false;
-        const margin=site.kind==='river'?site.riverW/2+1:3;
-        const wet=(p)=>site.isWater(p)||site.riverDist(p)<margin;
-        if(wet(polyCentroid(lot.poly)))return true;
-        for(const q of lot.poly)if(wet(q))return true;
-        return false;};
-      for(const lot of insulaLots(poly,rB)){
-        if(wetLot(lot))continue;
-        acc.push(Object.assign({id:'par'+(pid++),block:blk.id,age:0,edgeCls:'street'},lot));}
-      for(const p of acc)parcels.push(p);
-      continue;}
     const cand=[]; // per-block candidates; filtered for overlap + area conservation below
     const dM=V.dist(polyCentroid(poly),anchors.market);
     // block-uniform target plot depth (M-PAR-2), shallower at the core where land is dear
@@ -2451,92 +2058,9 @@ function buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware){
     // half the setback margin scores 0.5) — either constraint alone can already drag a real
     // site below this bar, matching the "neither factor can cancel the other out" design (docs/08 §2).
     if(terrainAware&&par.suitability<0.5){par.empty=true;par.unsuitable=true;continue;}
-    // Roman domus/insula grammar (M-ROM-3): the harbour quarter still reuses the warehouse
-    // grammar below unchanged (harbour/quay typology is core, not culture-specific, docs/07 §2).
-    if(profile.buildingGrammar==='domus-insula'&&d!=='harbour'){
-      // uniformHousing (Venus Project, M-VEN-4): a moneyless, automation-based economy has no
-      // elite/mass housing split to model — every parcel gets the standardized modular-apartment
-      // building instead, so isDomus is forced false rather than tuned to a different rate.
-      const isDomus=!profile.uniformHousing&&(d==='market'||d==='burgher')&&par.frontage>=15&&par.depth>=20&&r.chance(0.45);
-      const rects=isDomus?[
-        {u0:0,u1:1,v0:0,v1:0.28,kind:'atrium range'},
-        {u0:0,u1:0.3,v0:0.26,v1:0.78,kind:'wing'},
-        {u0:0.7,u1:1,v0:0.26,v1:0.78,kind:'wing'},
-        {u0:0,u1:1,v0:0.76,v1:0.94,kind:'peristyle range'}]
-        :[{u0:0.04,u1:0.96,v0:0.04,v1:0.96,kind:'insula block'}];
-      for(const rc of rects){
-        const poly=rectPoly(par,rc.u0,rc.u1,rc.v0,rc.v1);
-        if(Math.abs(polyArea(poly))<9)continue;
-        const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
-        let ridge=wU>=wV?[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)]:[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
-        const ins=0.16;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
-        out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:rc.kind,district:d,age:0,
-          courtyard:isDomus,
-          prov:isDomus
-            ?(rc.kind==='atrium range'?'Atrium range: the domus\'s street-facing reception rooms around the roofed, skylit atrium (M-ROM-3).'
-              :rc.kind==='wing'?'Domus wing: rooms flanking the peristyle garden (M-ROM-3).'
-              :'Peristyle range: the colonnaded garden court at the rear of the domus — the Hellenistic addition to the Italic atrium house (M-ROM-3).')
-            :'Insula: a multi-storey apartment block (~15-20 m tall, 3-5 storeys) let out room-by-room or floor-by-floor to non-elite tenants, often with shops (tabernae) at street level (M-ROM-3).'});}
-      par.built=true;
-      continue;
-    }
-    // Islamic courtyard-house grammar (M-ISL-3): unlike Roman (elite domus vs. dense insula
-    // apartments) the inward-facing courtyard house is the norm across social classes — a
-    // blank, windowless outer wall for privacy, rooms opening only onto the private court
-    if(profile.buildingGrammar==='courtyard-house'&&d!=='harbour'){
-      const hasCourt=par.frontage>=8&&par.depth>=12;
-      const rects=hasCourt?[
-        {u0:0,u1:1,v0:0,v1:0.24,kind:'street range'},
-        {u0:0,u1:0.24,v0:0.22,v1:0.8,kind:'wing'},
-        {u0:0.76,u1:1,v0:0.22,v1:0.8,kind:'wing'},
-        {u0:0,u1:1,v0:0.78,v1:0.98,kind:'rear range'}]
-        :[{u0:0.05,u1:0.95,v0:0.05,v1:0.95,kind:'single-room house'}];
-      for(const rc of rects){
-        const poly=rectPoly(par,rc.u0,rc.u1,rc.v0,rc.v1);
-        if(Math.abs(polyArea(poly))<9)continue;
-        const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
-        let ridge=wU>=wV?[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)]:[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
-        const ins=0.16;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
-        out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:rc.kind,district:d,age:0,
-          courtyard:hasCourt,
-          prov:hasCourt
-            ?(rc.kind==='street range'?'Street range: a blank, windowless outer wall (the privacy norm) around the household\'s inward-facing rooms (M-ISL-3).'
-              :rc.kind==='wing'?'Courtyard wing: rooms opening onto the private central court, never directly onto the street (M-ISL-3).'
-              :'Rear range closing the courtyard house (M-ISL-3).')
-            :'Single-room house: too small a lot for a courtyard — the plain minimum dwelling of the quarter.'});}
-      par.built=true;
-      continue;
-    }
-    // Viking longhouse grammar (M-VIK-1): a single long, narrow rectangular hall spanning most
-    // of the plot's frontage — no courtyard, no wings, the plain accretive-quarter form.
-    if(profile.buildingGrammar==='longhouse'&&d!=='harbour'){
-      const poly=rectPoly(par,0.06,0.94,0.08,Math.min(0.85,10/Math.max(par.depth,1)+0.08));
-      if(Math.abs(polyArea(poly))>=9){
-        const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
-        let ridge=wU>=wV?[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)]:[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
-        const ins=0.14;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
-        out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:'longhouse',district:d,age:0,courtyard:false,
-          prov:'Longhouse: a rectangular timber-framed hall (~10-20 m by ~5 m, Hedeby), wattle-and-daub walls and a turf roof, housing an extended household plus its granary/workshop under one roof (M-VIK-1).'});}
-      par.built=true;
-      continue;
-    }
-    // Celtic roundhouse grammar (M-CEL-2): a circular timber-and-daub dwelling with a conical
-    // thatched roof — the standard Iron Age house form, replacing every rectilinear grammar.
-    if(profile.buildingGrammar==='roundhouse'&&d!=='harbour'){
-      const cx=(par.F0.x+par.F1.x+par.B0.x+par.B1.x)/4,cy=(par.F0.y+par.F1.y+par.B0.y+par.B1.y)/4;
-      const rad=Math.max(2.2,Math.min(7,Math.min(par.frontage,par.depth)/2-0.8));
-      const nSides=10,poly=[];
-      for(let k=0;k<nSides;k++){const a=2*Math.PI*k/nSides;poly.push({x:cx+Math.cos(a)*rad,y:cy+Math.sin(a)*rad});}
-      if(Math.abs(polyArea(poly))>=9){
-        out.push({id:'bld'+(bid++),poly,ridge:[{x:cx-rad*0.4,y:cy},{x:cx+rad*0.4,y:cy}],
-          parcel:par.id,kind:'roundhouse',district:d,age:0,courtyard:false,
-          prov:'Roundhouse: a circular wattle-and-daub dwelling under a conical thatched roof, the standard Celtic Iron Age house form (M-CEL-2).'});}
-      par.built=true;
-      continue;
-    }
     // Venus Project blended grammar (M-VEN-5): a deliberate fusion, not a reconstruction. Banded
-    // by distance from the hub — circular pavilions near the centre/inner rings (reusing the
-    // roundhouse polygon technique), a seeded blend of the standardized modular apartment / Asian
+    // by distance from the hub — circular pavilions (regular polygons standing in for a circle)
+    // near the centre/inner rings, a seeded blend of the standardized modular apartment / Asian
     // courtyard house / Japanese machiya through the residential rings, and logistics warehouses
     // on the outermost built ring.
     if(profile.buildingGrammar==='venus-mixed'&&d!=='harbour'){
@@ -2571,13 +2095,13 @@ function buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware){
       const pick=r.chance(0.45)?'modular':r.chance(0.55)?'courtyard':'machiya';
       if(pick==='courtyard'&&par.frontage>=8&&par.depth>=12){
         emit([
-          {u0:0,u1:1,v0:0,v1:0.24,kind:'street range',prov:'Courtyard-house street range: an Asian-influenced inward-facing dwelling woven into the residential ring (M-VEN-5, reusing the M-ISL-3/M-CHN-2 courtyard grammar).'},
+          {u0:0,u1:1,v0:0,v1:0.24,kind:'street range',prov:'Courtyard-house street range: an Asian-influenced inward-facing dwelling woven into the residential ring (M-VEN-5).'},
           {u0:0,u1:0.24,v0:0.22,v1:0.8,kind:'wing',prov:'Courtyard wing opening onto the private central court (M-VEN-5).'},
           {u0:0.76,u1:1,v0:0.22,v1:0.8,kind:'wing',prov:'Courtyard wing opening onto the private central court (M-VEN-5).'},
           {u0:0,u1:1,v0:0.78,v1:0.98,kind:'rear range',prov:'Rear range closing the courtyard house (M-VEN-5).'}],true);
       }else if(pick==='machiya'){
         emit([{u0:0.06,u1:0.94,v0:0,v1:Math.min(0.82,Math.max(0.4,12/Math.max(par.depth,1)+0.15)),kind:'machiya',gable:true,
-          prov:'Machiya rowhouse: a narrow-fronted, deep Japanese townhouse (reusing the M-JPN-2 machiya=burgage parallel), mixed into the residential ring for variety (M-VEN-5).'}]);
+          prov:'Machiya rowhouse: a narrow-fronted, deep Japanese townhouse, mixed into the residential ring for variety (M-VEN-5).'}]);
       }else{
         emit([{u0:0.04,u1:0.96,v0:0.04,v1:0.96,kind:'modular apartment',
           prov:'Modular apartment: the standardized prefabricated residential block of the resource-based city — the base fabric the courtyard houses and machiya are mixed into (M-VEN-5).'}]);}
@@ -2749,97 +2273,20 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith,site,harbour
   return sites;}
 
 /* ---------------- details: wells, trees, fences, fields (M-DEN-7, M-GRW-5) ---------------- */
-/* ---------------- chinampas: raised-bed lake agriculture (M-AZT-2) ----------------
- * A lake-city tradition's defining feature: narrow, man-made rectangular garden strips built
- * out from the shore into the shallows, canals between them. Genuinely different from every
- * other profile's fields (which stay ON land, avoiding water, M-GRW-5) — these deliberately
- * extend INTO the water, along the town's own shoreline (reuses townBank, the same shoreline
- * reference buildWall uses). A decorative/agricultural detail layer, like wells/trees/fences —
- * not a parcel or building, so it carries none of the "must not be in water" invariants that
- * apply to built fabric; sitting in shallow water is the entire point. */
-function buildChinampas(seed,site,anchors,wallState,maxRF){
-  if(site.noWater)return [];
-  const bank=townBank(site,anchors);
-  if(!bank||bank.length<2)return [];
-  const r=stream(seed,'chinampas');
-  const rk=(site.kind==='river'||site.kind==='riverthrough');
-  const intoWater=(p)=>{
-    if(rk){const e=6;
-      const gx=site.riverDist({x:p.x+e,y:p.y})-site.riverDist({x:p.x-e,y:p.y});
-      const gy=site.riverDist({x:p.x,y:p.y+e})-site.riverDist({x:p.x,y:p.y-e});
-      return V.mul(V.norm({x:gx,y:gy}),-1);}
-    return {x:0,y:1};}; // open coast/bay: water lies south, matching townBank's offset convention
-  const details=[];let did=0;
-  const stripW=r.range(2.5,4); // chinampa width, M-AZT-2
-  const maxLen=rk?Math.max(10,site.riverW*0.4):60; // never reach the far bank on a narrow channel
-  for(let i=0;i<bank.length-1;i++){
-    const A=bank[i],B=bank[i+1];
-    if(V.dist(A,anchors.market)>maxRF*1.1)continue; // chinampas cluster near the town, not the whole shore
-    const dir=V.norm(V.sub(B,A));if(!isFinite(dir.x))continue;
-    const segLen=V.dist(A,B),nrm=V.rot90(dir);
-    for(let t=4;t<segLen-4;t+=r.range(5,8)){ // canal width between chinampas, M-AZT-2
-      const p=V.add(A,V.mul(dir,t));
-      const into=intoWater(p);
-      const len=Math.min(maxLen,r.range(24,50));
-      const q=V.add(p,V.mul(into,len));
-      if(!site.isWater(V.lerp(p,q,0.5)))continue; // only where the strip actually sits in water
-      const poly=[V.add(p,V.mul(nrm,stripW/2)),V.add(q,V.mul(nrm,stripW/2)),
-        V.add(q,V.mul(nrm,-stripW/2)),V.add(p,V.mul(nrm,-stripW/2))];
-      details.push({id:'chin'+(did++),kind:'chinampa',poly,
-        prov:'Chinampa: a narrow raised-bed garden plot reclaimed from the shallows (~2.5-4 m wide), one of a grid separated by canoe canals — the lake-city\'s intensive agricultural base (M-AZT-2).'});
-      if(details.length>220)return details;}}
-  return details;}
-
 /* ---------------- per-culture farmland/pasture (M-FARM register) ----------------
- * The hinterland around a town was, until now, the exact same generic strip-field-plus-orchard
- * prop for every culture. A dedicated research pass (real web search, real citations, an honest
- * "shares the baseline pattern" verdict where the record does not support a distinctive one —
- * the same discipline already used for the M-GAMES register, docs/03 §AA) found a genuinely
- * distinct field-division geometry for most of the 19 profiles. FARM_SPEC dispatches each to one
- * of a handful of shape families rather than a bespoke function per culture, since several
- * traditions share the same underlying geometry at a different scale/regularity: one big regular
- * cadastral grid generator serves Roman/Colonial/Frontier/Industrial, one small irregular grid
- * generator serves Celtic/Chinese/Mayan/Japanese. Medieval keeps its pre-existing selion-strip
- * mechanism (M-GRW-5), now just factored out into stripFields() unchanged. Aztec gets no entry:
- * chinampas (buildChinampas, M-AZT-2) already are that culture's farmland signature, and a
- * second generic field layer over a lake-city would double up rather than add detail. Palimpsest
- * has no entry of its own and resolves to Islamic's, exactly like GAMES_SPEC's own palimpsest
- * special-case (docs/07 §3.7). */
+ * The hinterland around a town was, until this register was introduced, the exact same generic
+ * strip-field-plus-orchard prop for every profile. FARM_SPEC still dispatches by pattern rather
+ * than hardcoding a shape inline, so a future third profile only needs a new table row plus (if
+ * its geometry is genuinely novel) one more pattern function — the dispatch itself needs no
+ * change (docs/07 §2). Only two shape families survive the post-launch simplification pass
+ * (docs/07 §3.10): medieval's baseline selion strips (stripFields, M-GRW-5, unchanged since
+ * before this register existed) and Venus's concentric ring-farming bands (ringFields, M-FARM-18,
+ * a deliberate design choice with no historical claim). The grid/fan/basin/canal/terrace pattern
+ * families this register also built remain valid, citable research (docs/03 §BB retains their
+ * write-ups) — they simply have no live caller now that the cultures they served are gone. */
 const FARM_SPEC={
-  medieval:{pattern:'strip',
-    prov:'Strip field: the pre-urban furlong fabric along the approach road (M-GRW-5) - later growth fossilizes these lines. Unchanged by this register; already the correct baseline (M-FARM-1).'},
-  roman:{pattern:'grid',cell:[130,180],jitter:0.05,align:'cardinal',pastureShare:0.12,
-    prov:'Centuriation: a rectilinear grid of large square land parcels, roads on every gridline, radiating from perpendicular cardo/decumanus baselines - 20x20 actus (roughly 710x710 m, ~50 ha) in reality, scaled schematically here to this engine\'s own units rather than a literal conversion (Wikipedia, Centuriation; B. Campbell, The Writings of the Roman Land Surveyors, 2000; H confidence, M-FARM-2).'},
-  islamic:{pattern:'fan',
-    prov:'Qanat oasis fan: narrow channel-fed strips fanning downhill from a mother-well outlet, walled orchard-gardens (bustan) closest to town and field strips beyond, radiating roughly 15-30 degrees apart (UNESCO, The Persian Qanat, WHL 2016; World History Encyclopedia, Qanat; M confidence, M-FARM-3).'},
-  byzantine:{pattern:'strip',pastureShare:0.4,pastureFar:true,gardenBoost:true,
-    prov:'Concentric zonation: a garden/vineyard belt close to the walls, open arable beyond (itself dispersed strips, unchanged geometry), common pasture/woodland outermost - a coarser ring-level distinction rather than a new parcel shape, per the source\'s own honest framing (Farmer\'s Law/Nomos Georgikos, ed. Ashburner; A. Laiou-Thomadakis, Peasant Society in the Late Byzantine Empire, Princeton UP 1977; M confidence, M-FARM-4).'},
-  chinese:{pattern:'grid',cell:[18,28],jitter:0.4,
-    prov:'Weitian diked polders (fish-scale/yulin patchwork): an irregular embanked polygon reclaimed from lake/marsh, subdivided inside by a rectilinear grid of small paddies - modelled here as a small, heavily-jittered grid (the outer polder boundary\'s own irregularity is a documented simplification, folded into the same per-cell jitter rather than a second boundary mechanism) (Built Heritage journal, Agricultural Heritage Value of the Polder System in Gaochun, Nanjing, 2020; XJTLU news 2023; M confidence, M-FARM-5).'},
-  aztec:{pattern:'none',
-    prov:'No entry: chinampas (buildChinampas, M-AZT-2) already are this culture\'s farmland signature - a second, generic field layer over a lake-city would double up rather than add detail (M-FARM-6).'},
-  viking:{pattern:'strip',pastureShare:0.45,pastureFar:true,
-    prov:'Solskifte (sun-division): arable cut into strips ordered by a rule (matching farmhouse order along the village street, a per-strip ordering this engine does not separately model) with a sharp fenced infield versus open common-grazing outfield - modelled as the baseline strip mechanism near town, ramping to pasture farther out for the outfield (Wikipedia, Solskifte; M confidence, M-FARM-7).'},
-  celtic:{pattern:'grid',cell:[20,30],jitter:0.15,pastureShare:0.3,
-    prov:'Celtic field system (the archaeologists\' term, not an ethnic claim): small, near-square plots bounded by lynchets, packed in a checkerboard/reticulate block, sub-hectare to a few ha - modelled with low jitter, reflecting the pattern\'s real regularity (Oxford Reference, Celtic fields; Historic England Bronze/Iron Age field archaeology; H confidence, M-FARM-8).'},
-  greek:{pattern:'strip',gardenBoost:true,
-    prov:'The best-attested Greek geometric field pattern is the colonial chora grid (kleroi) - e.g. Chersonesos\'s ~10,000 ha divided into ~400 lots (UNESCO WHL 1411) - but that grid was laid out at a NEW colony\'s founding, the same anachronism this profile\'s own M-GRK-1 already excludes (it deliberately models organic, centuries-old Athens, never re-planned, not a new foundation): applying a colony-founding grid to a city this profile explicitly says was never founded that way would reintroduce the exact category error M-GRK-1 corrected. Kept on the baseline strip pattern instead, with an olive-grove orchard-density boost - Attica\'s iconic cash crop, well-attested in general classical scholarship - standing in for the real geometric signature this profile cannot honestly claim (M-FARM-9).'},
-  egyptian:{pattern:'basins',
-    prov:'Nile flood-basin agriculture: large communal basins (hod) bounded by earthen dikes parallel and perpendicular to the river, filled by the annual flood via sluice and held 30-60 days - big irregular polygons, tens of hectares, not strips (S. Postel, Egypt\'s Nile Valley Basin Irrigation, waterhistory.org; H confidence, M-FARM-10).'},
-  mesopotamian:{pattern:'canal',
-    prov:'Canal long-lots: narrow fields with their short edge on the canal, running back from it to maximize water frontage, off river-levee trunk channels branching in a comb pattern - very elongated strips off a branching trunk (Durham University Eridu-region canal survey, 2025; World History Encyclopedia, Agriculture in the Fertile Crescent and Mesopotamia; H confidence, M-FARM-11). Falls back to the baseline strip mechanism on a landlocked site, where there is no canal-fed trunk to run perpendicular from.'},
-  mayan:{pattern:'grid',cell:[14,20],jitter:0.2,waterOnly:true,
-    prov:'Raised-field platforms (camellones): rectangular platforms separated by drainage canals in a grid, documented in wetland margins (Pulltrouser Swamp, Belize; Candelaria basin) - solid only where wetlands exist, so gated to run near water only; most Classic Maya cities actually relied on non-geometric swidden with no strong shape signature, making this the best available option rather than a universal one, an honesty caveat carried over from the source itself (Turner and Harrison, Prehistoric Raised-Field Agriculture in the Maya Lowlands, Science 213, 1981; M confidence, M-FARM-12).'},
-  inca:{pattern:'terraces',
-    prov:'Andenes: stepped terraces hugging contour lines behind stone retaining walls - modelled by resampling the actual local gradient of this engine\'s own site.height/site.slope fields (already load-bearing for M-TER-1) at every step, so the terrace direction genuinely bends with the terrain\'s contour rather than being drawn as a fixed decorative arc (Wikipedia, Anden; FAO Digital Media Hub; H confidence, M-FARM-13).'},
-  japanese:{pattern:'grid',cell:[14,22],jitter:0.3,
-    prov:'Tanada (terraced rice paddies) is the right national signature, but the source\'s own caveat is that a flat lowland paddy grid is more likely accurate immediately around low-lying Edo itself - modelled as a small irregular paddy grid rather than true contour terracing, honestly following that caveat rather than overclaiming hill terracing this profile\'s own town site may not have (Nippon.com; Wikipedia, 100 Terraced Rice Fields of Japan, MAFF list; M confidence, M-FARM-14).'},
-  colonial:{pattern:'grid',cell:[160,220],jitter:0.22,align:'terrain',
-    prov:'Hacienda/estancia grants: huge rectangles, far bigger than an ordinary town lot - a caballeria (roughly 192x384 varas, ~43 ha, about 1:2) or a full sitio de estancia cattle range (one square league, ~1,792 ha) (sizes.com, caballeria; Florida Memory, WPA History of the Spanish Land Grants; H confidence, M-FARM-15).'},
-  frontier:{pattern:'grid',cell:[110,140],jitter:0.02,align:'cardinal',pastureShare:0.5,
-    prov:'PLSS/GLO rectangular survey: exact square-mile sections in 6x6-mile townships, a quarter-section (160 ac) homestead claim - the most regular, least jittered grid in this register, matching the real survey\'s own precision; a high pasture share reflects the open range this profile\'s own name already flags (mining/cattle/rail) (Wikipedia, Public Land Survey System; GISGeography, How the PLSS Works; H confidence, M-FARM-16).'},
-  industrial:{pattern:'grid',cell:[55,80],jitter:0.12,align:'terrain',
-    prov:'Parliamentary enclosure fields: post-1750 awards replaced open strips with compact surveyor-drawn rectangles bounded by hedgerows - squarer and larger than a strip but far smaller than Roman/Frontier/Colonial\'s own huge survey blocks, matching the real award sizes (a few to about 15 acres) (EBSCO Research Starters, Enclosure movement; Heldring et al., NBER Working Paper 29772; H confidence, M-FARM-17).'},
+  medieval:{pattern:'strip',pastureShare:0.3,pastureFar:true,
+    prov:'Strip field: the pre-urban furlong fabric along the approach road (M-GRW-5) - later growth fossilizes these lines; already the correct baseline (M-FARM-1). A modest common-pasture share, more prevalent farther from the town, stands in for the open-field system\'s communally-grazed fallow shift and true common/waste land at the village margins - added during the post-launch simplification pass (docs/07 §3.10) so this register\'s pasture mechanism, previously exercised by the now-removed Byzantine/Viking entries, stays reachable on the one organic profile that remains (M-FARM-1).'},
   venus:{pattern:'ring',
     prov:'Ring-farming bands: concentric cultivation belts beyond the built rings, echoing Ebenezer Howard\'s Garden City concentric-ring diagram (1898) - a deliberate design choice, not a historical claim, since no historical culture applies (N/A by design, M-FARM-18).'},
 };
@@ -2890,196 +2337,6 @@ function stripFields(rng,site,anchors,g,urban,opt){
         details.push({id:'farm'+(did++),kind,poly,prov:opt.prov});}}
     if(details.length>260)break;}
   return details;}
-// big regular (Roman/Colonial/Frontier/Industrial) and small irregular (Celtic/Chinese/Mayan/
-// Japanese) cadastral grids are the SAME lattice-scan algorithm at different cell/jitter settings
-// (M-FARM register) - one generator, not four near-duplicates.
-function gridFields(rng,site,anchors,g,urban,maxRF,opt){
-  const details=[];let did=0;
-  const cap=opt.cap||280;
-  // a small cell size on a large town can put tens of thousands of lattice points inside the
-  // scan span, and both site.isWater and urban (pointInPoly against a many-vertexed wall/fort
-  // ring) are O(shoreline/ring length) per call — found by timing the full test suite, which
-  // regressed from seconds to several minutes once this generator started probing that many
-  // candidates; a budget on EXAMINED candidates (not just accepted ones) bounds the worst case
-  // regardless of acceptance rate, independent of the existing accepted-count cap below.
-  const maxCand=1200;
-  let cand=0;
-  const dir=opt.align==='cardinal'?{x:1,y:0}:(opt.dirHint||{x:1,y:0.18});
-  const perp=V.rot90(dir);
-  const cMin=opt.cell[0],cMax=opt.cell[1];
-  const cell=(cMin+cMax)/2;
-  const jitter=opt.jitter||0;
-  const origin=anchors.market;
-  const span=maxRF*1.9;
-  const nSteps=Math.ceil(span/cell);
-  for(let i=-nSteps;i<=nSteps;i++){
-    for(let j=-nSteps;j<=nSteps;j++){
-      const c=V.add(origin,V.add(V.mul(dir,i*cell),V.mul(perp,j*cell)));
-      if(c.x<30||c.y<30||c.x>site.Wm-30||c.y>site.Hm-30)continue;
-      if(V.dist(c,origin)>span)continue;
-      if(cand++>maxCand)return details;
-      if(urban(c))continue;
-      if(opt.waterOnly){if(site.riverDist(c)>100)continue;}
-      else if(site.isWater(c))continue;
-      const w=rng.range(cMin,cMax),d=rng.range(cMin,cMax);
-      const jc={x:c.x+rng.range(-jitter,jitter)*cell*0.4,y:c.y+rng.range(-jitter,jitter)*cell*0.4};
-      const poly=orientedRect(jc,dir,w*0.86,d*0.86);
-      if(poly.some(v=>site.isWater(v)))continue;
-      if(urban(polyCentroid(poly)))continue;
-      if(crossesStreet(g,poly))continue;
-      const kind=rng.chance(opt.pastureShare||0)?'pasture':'field';
-      details.push({id:'farm'+(did++),kind,poly,prov:opt.prov});
-      if(details.length>cap)return details;}}
-  return details;}
-// qanat oasis fan (Islamic/Palimpsest, M-FARM-3): irrigation wedges radiating from a mother-well
-// outlet sited on the dry/inland side of town within a bounded arc, not a full circle.
-function fanFields(rng,site,anchors,g,urban,maxRF,prov){
-  const details=[];let did=0;
-  let away={x:1,y:0.05};
-  if(!site.noWater){
-    // the gradient of distance-to-water, evaluated AT THE MARKET, points away from the water by
-    // construction — the same gradient technique buildChinampas already uses for its own opposite
-    // "into water" direction, just without that final negation. Replaces an earlier fixed
-    // array-index sample (site.river[len/2]) that used the river polyline's own geometric middle
-    // as a stand-in for "the nearby riverbank" — wrong whenever the market sits far along the
-    // river from that middle index (found via direct debugging: for a market near either end of
-    // the river, the computed direction pointed nowhere near the real nearest bank, and the origin
-    // it produced landed off the map entirely, at x>Wm — zero fields resulted, not a subtly wrong
-    // count, which is what actually surfaced this while reviewing this register's own test data).
-    const m=anchors.market,e=8;
-    const gx=site.riverDist({x:m.x+e,y:m.y})-site.riverDist({x:m.x-e,y:m.y});
-    const gy=site.riverDist({x:m.x,y:m.y+e})-site.riverDist({x:m.x,y:m.y-e});
-    if(Math.hypot(gx,gy)>1e-6)away=V.norm({x:gx,y:gy});}
-  const originAngle=Math.atan2(away.y,away.x);
-  // clamped, not just offset: a market already close to a map edge could still push the raw
-  // offset past the boundary even with the correct direction, so the origin is pinned to stay
-  // safely on-map regardless of magnitude, rather than only trusting the direction fix above.
-  const marginC=60;
-  const origin={
-    x:Math.max(marginC,Math.min(site.Wm-marginC,anchors.market.x+away.x*maxRF*0.95)),
-    y:Math.max(marginC,Math.min(site.Hm-marginC,anchors.market.y+away.y*maxRF*0.95))};
-  const nRays=rng.int(9,13),arc=rng.range(1.6,2.3);
-  const a0=originAngle-arc/2;
-  const halfAngStep=arc/(2*Math.max(1,nRays-1));
-  for(let i=0;i<nRays;i++){
-    const ang=a0+(nRays>1?(i/(nRays-1))*arc:0)+rng.range(-0.03,0.03);
-    const dir={x:Math.cos(ang),y:Math.sin(ang)};
-    const perp=V.rot90(dir);
-    let r0=rng.range(10,20);
-    for(let ring=0;ring<7;ring++){
-      const r1=r0+rng.range(30,55);
-      const halfW0=r0*Math.tan(halfAngStep)*0.85,halfW1=r1*Math.tan(halfAngStep)*0.85;
-      const p0=V.add(origin,V.mul(dir,r0)),p1=V.add(origin,V.mul(dir,r1));
-      const poly=[V.add(p0,V.mul(perp,-halfW0)),V.add(p1,V.mul(perp,-halfW1)),
-        V.add(p1,V.mul(perp,halfW1)),V.add(p0,V.mul(perp,halfW0))];
-      r0=r1;
-      if(poly.some(v=>v.x<20||v.y<20||v.x>site.Wm-20||v.y>site.Hm-20))continue;
-      if(poly.some(v=>site.isWater(v))||urban(polyCentroid(poly)))continue;
-      if(crossesStreet(g,poly))continue;
-      details.push({id:'farm'+(did++),kind:'field',poly,prov});
-      if(details.length>200)return details;}}
-  return details;}
-// Nile flood-basin agriculture (Egyptian, M-FARM-10): a handful of large irregular dike-bounded
-// blobs offset from the river/coast, elongated along the bank rather than perpendicular to it.
-function basinFields(rng,site,anchors,g,urban,maxRF,prov){
-  const details=[];let did=0;
-  if(site.noWater)return details;
-  const riv=site.river;
-  const nBasins=rng.int(4,7);
-  let tries=0;
-  while(details.length<nBasins&&tries<80){
-    tries++;
-    const i=rng.int(1,riv.length-2);
-    const A=riv[i-1],B=riv[i+1];
-    const tangent=V.norm(V.sub(B,A));
-    if(!isFinite(tangent.x)||!isFinite(tangent.y))continue;
-    const nrm=V.rot90(tangent);
-    const side=rng.chance(0.5)?1:-1;
-    const outw=rng.range(75,170);
-    const c=V.add(riv[i],V.mul(nrm,side*outw));
-    if(c.x<45||c.y<45||c.x>site.Wm-45||c.y>site.Hm-45)continue;
-    if(urban(c)||V.dist(c,anchors.market)<maxRF*0.75)continue;
-    const baseR=rng.range(55,95),sides=9,poly=[];
-    for(let k=0;k<sides;k++){const a=2*Math.PI*k/sides;
-      const rad=baseR*(1+rng.range(-0.3,0.3));
-      poly.push(V.add(c,V.add(V.mul(tangent,Math.cos(a)*rad*1.35),V.mul(nrm,Math.sin(a)*rad))));}
-    const smoothed=chaikin(poly,true);
-    if(smoothed.some(v=>site.isWater(v)||v.x<10||v.y<10||v.x>site.Wm-10||v.y>site.Hm-10))continue;
-    if(crossesStreet(g,smoothed))continue;
-    details.push({id:'farm'+(did++),kind:'field',poly:smoothed,prov});}
-  return details;}
-// canal long-lots (Mesopotamian, M-FARM-11): strips perpendicular to the river/canal bank,
-// mirroring buildChinampas' own perpendicular-offset technique but on the dry land side.
-function canalFields(rng,site,anchors,g,urban,maxRF,prov){
-  if(site.noWater)return stripFields(rng,site,anchors,g,urban,{prov:'Strip field (fallback: no watercourse to run canal long-lots from on this landlocked site): the pre-urban furlong fabric along the approach road (M-GRW-5).'});
-  const details=[];let did=0;
-  const riv=site.river;
-  for(let i=1;i<riv.length-1;i++){
-    const A=riv[i-1],B=riv[i+1];
-    const tangent=V.norm(V.sub(B,A));
-    if(!isFinite(tangent.x)||!isFinite(tangent.y))continue;
-    if(!rng.chance(0.5))continue;
-    const nrm=V.rot90(tangent);
-    const side=rng.chance(0.5)?1:-1;
-    const p=riv[i];
-    if(V.dist(p,anchors.market)<maxRF*0.85)continue;
-    const stripLen=rng.range(60,130),w=rng.range(6,10);
-    // clear the river's OWN half-width, not a fixed constant: a riverthrough site's channel can
-    // run up to 30 units wide (half-width up to 15), so a fixed 14-unit near offset sometimes left
-    // q1 still inside the water band — found via this register's own water audit reproducing as
-    // EVERY candidate failing specifically on riverthrough (16 water-rejects out of 16 survivors,
-    // not a handful), traced to this exact offset via direct instrumentation rather than assumed
-    // from the mechanism's own description; +4 is a small extra clearance margin past the bank.
-    const bankClear=site.riverW/2+4;
-    const q1=V.add(p,V.mul(nrm,side*bankClear)),q2=V.add(p,V.mul(nrm,side*(bankClear+stripLen)));
-    // the river can curve between the near and far ends of a strip this long, so the far point
-    // alone isn't enough — check the midpoint too, the same two-point discipline stripFields
-    // already uses for exactly this reason (found missing here via this register's own water
-    // audit: a real, reproducible failure specifically on the riverthrough site kind, where the
-    // channel bends most).
-    if(site.isWater(q1)||site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5))||urban(q2))continue;
-    if(q2.x<20||q2.y<20||q2.x>site.Wm-20||q2.y>site.Hm-20)continue;
-    const half=V.mul(tangent,w/2);
-    const poly=[V.sub(q1,half),V.add(q1,half),V.add(q2,half),V.sub(q2,half)];
-    if(crossesStreet(g,poly))continue;
-    details.push({id:'farm'+(did++),kind:'field',poly,prov});
-    if(details.length>220)break;}
-  return details;}
-// Andean andenes (Inca, M-FARM-13): contour-following terraces - the direction is resampled from
-// the real site.height/site.slope gradient at every step, so it genuinely bends with the terrain
-// rather than being a fixed decorative arc.
-function terraceFields(rng,site,anchors,g,urban,maxRF,prov){
-  const details=[];let did=0;
-  let best=null,bestSlope=-1;
-  for(let i=0;i<28;i++){
-    const ang=rng.u()*Math.PI*2;
-    const rad=maxRF*rng.range(0.85,1.5);
-    const p={x:anchors.market.x+Math.cos(ang)*rad,y:anchors.market.y+Math.sin(ang)*rad};
-    if(p.x<40||p.y<40||p.x>site.Wm-40||p.y>site.Hm-40)continue;
-    if(site.isWater(p))continue;
-    const s=site.slope(p);
-    if(s>bestSlope){bestSlope=s;best=p;}}
-  if(!best)return details;
-  const grad=(p)=>{const e=8;
-    return V.norm({x:site.height({x:p.x+e,y:p.y})-site.height({x:p.x-e,y:p.y}),
-                    y:site.height({x:p.x,y:p.y+e})-site.height({x:p.x,y:p.y-e})});};
-  const nTerraces=rng.int(7,11);
-  let p=best,dir=grad(best);
-  const step=rng.range(9,13);
-  for(let i=0;i<nTerraces;i++){
-    const g1=grad(p);
-    if(V.len(g1)>1e-6)dir=g1;
-    const along=V.rot90(dir);
-    const half=rng.range(30,55),w=rng.range(6,9);
-    const a=V.add(p,V.mul(along,-half)),b=V.add(p,V.mul(along,half));
-    if(!site.isWater(a)&&!site.isWater(b)&&!urban(a)&&!urban(b)){
-      const poly=[V.add(a,V.mul(dir,w/2)),V.add(b,V.mul(dir,w/2)),
-        V.add(b,V.mul(dir,-w/2)),V.add(a,V.mul(dir,-w/2))];
-      if(!crossesStreet(g,poly)){
-        details.push({id:'farm'+(did++),kind:'field',poly,prov});
-        if(details.length>60)break;}}
-    p=V.add(p,V.mul(dir,step));}
-  return details;}
 // Venus ring-farming bands (M-FARM-18): a design choice, not a historical claim - concentric
 // cultivation belts beyond the built rings, echoing the Garden City diagram.
 function ringFields(rng,site,anchors,g,urban,maxRF,prov){
@@ -3106,47 +2363,13 @@ function ringFields(rng,site,anchors,g,urban,maxRF,prov){
     r0=r1;}
   return details;}
 function buildFarmland(seed,site,anchors,g,wallState,maxRF,profile){
-  const spec=profile.id==='palimpsest'?FARM_SPEC.islamic:FARM_SPEC[profile.id];
-  if(!spec||spec.pattern==='none')return [];
+  const spec=FARM_SPEC[profile.id];
+  if(!spec)return [];
   const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
   const rng=stream(seed,'farmland');
   if(spec.pattern==='strip')return stripFields(rng,site,anchors,g,urban,spec);
-  if(spec.pattern==='grid'){
-    let dirHint={x:1,y:0.18};
-    if(spec.align!=='cardinal'){
-      let sx=0,sy=0,any=false;
-      for(const e of g.edges){
-        if(!e.alive||e.cls!=='primary')continue;
-        const d=V.sub(g.nodes[e.b],g.nodes[e.a]);
-        const len=V.len(d);if(len<1e-6)continue;
-        const ang=Math.atan2(d.y,d.x)*2; // double-angle: opposite directions average to the same axis
-        sx+=Math.cos(ang)*len;sy+=Math.sin(ang)*len;any=true;}
-      if(any){const meanAng=Math.atan2(sy,sx)/2;dirHint={x:Math.cos(meanAng),y:Math.sin(meanAng)};}}
-    return gridFields(rng,site,anchors,g,urban,maxRF,Object.assign({dirHint},spec));}
-  if(spec.pattern==='fan')return fanFields(rng,site,anchors,g,urban,maxRF,spec.prov);
-  if(spec.pattern==='basins')return basinFields(rng,site,anchors,g,urban,maxRF,spec.prov);
-  if(spec.pattern==='canal')return canalFields(rng,site,anchors,g,urban,maxRF,spec.prov);
-  if(spec.pattern==='terraces')return terraceFields(rng,site,anchors,g,urban,maxRF,spec.prov);
   if(spec.pattern==='ring')return ringFields(rng,site,anchors,g,urban,maxRF,spec.prov);
   return [];}
-
-/* Factory/mill (M-IND-2), the Industrial profile's one new building type: rather than siting a
- * new freestanding footprint (and risking exactly the kind of overlap this project audits
- * against), it re-tags the town's own largest already-placed warehouse/insula-block building —
- * reusing its collision-safe footprint outright — as the mill anchor, with a chimney marker
- * offset from its own centroid. Mutates buildings in place; a no-op if none exist. */
-function tagFactory(buildings){
-  const cands=buildings.filter(b=>b.kind==='warehouse'||b.kind==='insula block');
-  if(!cands.length)return;
-  let best=cands[0],bestArea=Math.abs(polyArea(best.poly));
-  for(const b of cands){const a=Math.abs(polyArea(b.poly));if(a>bestArea){best=b;bestArea=a;}}
-  best.kind='factory';
-  const c=polyCentroid(best.poly);
-  const edge=V.sub(best.poly[1],best.poly[0]);
-  const along=V.norm(edge);if(!isFinite(along.x))along={x:1,y:0};
-  best.chimney={x:c.x+along.x*bestArea**0.5*0.28,y:c.y+along.y*bestArea**0.5*0.28};
-  best.prov='Factory/mill: the town\'s largest warehouse/insula-class building repurposed as its defining industrial anchor, marked with a chimney stack (M-IND-2) — reuses that building\'s own already-sited footprint rather than new freestanding geometry.';
-}
 
 /* Post-collapse decay pass (M-PA-1): flags a deterministic seeded fraction of already-built,
  * non-churchyard parcels (and their buildings) as ruined — abandoned and uninhabited, but not
@@ -3217,16 +2440,12 @@ function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,max
   // orchards on some agrarian parcels — visually distinct from a plain garden tree (bigger,
   // more saturated fill, heavier stroke), not just a barely-different fill shade on the same
   // tiny dot, so the regular planting grid actually reads as an orchard at a glance. A profile
-  // flagged gardenBoost (FARM_SPEC, M-FARM register) gets a denser planting with its own
-  // provenance — Greek's olive groves (M-FARM-9), Byzantine's concentric garden belt (M-FARM-4)
-  // — reusing this same mechanism rather than a second orchard code path.
+  // flagged gardenBoost (FARM_SPEC, M-FARM register) gets a denser planting — a data-driven hook
+  // any future profile can opt into without a second orchard code path; no profile in the current
+  // two-culture roster sets it, so this always resolves to the plain 0.5 chance below.
   const farmSpec=FARM_SPEC[profile.id];
   const gardenBoost=!!(farmSpec&&farmSpec.gardenBoost);
-  const orchardProv=profile.id==='greek'
-    ?'Olive grove: intensive olive cultivation on the agrarian fringe, Attica\'s iconic cash crop (M-FARM-9).'
-    :profile.id==='byzantine'
-    ?'Garden belt: the innermost ring of the concentric-zonation model, kitchen gardens and orchards hard by the walls (M-FARM-4).'
-    :'Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).';
+  const orchardProv='Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).';
   for(const par of parcels){
     if(par.district!=='agrarian'||!par.empty)continue;
     const rb=stream(fnv1a(par.id),'orchard');
@@ -3280,17 +2499,19 @@ function generate(seed,opts){
   const ruined=!!opts.ruined;
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
-  // enclosures are optional (default on for the medieval pack); a lake-city profile (Aztec)
-  // never gets a European-style curtain — the lake, causeways and removable bridges were its
-  // defence (M-AZT-3) — regardless of the walls checkbox
+  // enclosures are optional (default on); profile.noWalls forces them off regardless of the walls
+  // checkbox — a data-driven hook for a profile whose defence was never a European-style curtain
+  // (a lake-city's causeways, a frontier boomtown that never fortified at all); no profile in the
+  // current two-culture roster sets it.
   const walls=opts.walls!==false&&!profile.noWalls;
   // a bastioned trace was a costly state investment for strategically important towns —
   // never hamlets; require a decent size (M-FOR-4). Below the threshold it stays a curtain.
   const fortMin=2500;
   const fortRequested=!!opts.fortified;
   // the bastioned trace italienne is a c.1500 gunpowder-artillery response (M-FOR-4) — anachronistic
-  // for a castrum-scheme (Roman) wall by well over a millennium, so that profile never gets one
-  // regardless of the request; it keeps its plain castrum-gated curtain instead (docs/07 §2).
+  // by well over a millennium for any wallGates scheme predating gunpowder artillery, so the
+  // anachronism guard only permits it for the 'organic' scheme both remaining profiles use
+  // (docs/07 §2); a future period-appropriate scheme could opt in the same way.
   const fortified=fortRequested&&popTarget>=fortMin&&walls&&profile.wallGates.scheme==='organic';
   // population -> street length + urban radius via intramural density (M-DEN-1, M-DEN-2,
   // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant. A low floor
@@ -3304,42 +2525,19 @@ function generate(seed,opts){
   const g=makeGraph();
   const wallState={ring:null,gates:[],epoch:0};
   // growth model (docs/07 §2, the single biggest culture fork): 'organic' epoch-loops least-cost
-  // routes into an accretive tangle; 'grid' lays a regular planned module in one act and has no
-  // epoch loop at all — the wall (if any) is founded with the colonia, not grown into later.
+  // routes into an accretive tangle; 'radial' (Venus) lays concentric rings and spokes around a
+  // central hub instead. A planned-grid mode (buildGridStreets) and a founded-then-encroached
+  // palimpsest mode both existed here through the tool's original 19-profile run; both are
+  // documented history now (docs/07 §3.10) rather than live options, since the cultures that
+  // used them were removed in the post-launch simplification pass.
   let plaza,harbour;
-  if(profile.planning==='grid'){
-    buildGridStreets(seed,site,anchors,g,{maxRF,gridSpacing:profile.gridSpacing});
-    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
-    if(site.through)addRiverBridges(seed,site,anchors,g,2);
-    if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified});
-    plaza=buildPlaza(seed,site,anchors,g);
-  }else if(profile.planning==='radial'){
+  if(profile.planning==='radial'){
     buildRadialStreets(seed,site,anchors,g,{maxRF});
     harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
     if(site.through)addRiverBridges(seed,site,anchors,g,2);
     // the circular irrigation canal (profile.waterway) supplies a wet moat when the star fort is
     // built, so the trace gets a WET ditch even on a landlocked site (M-VEN-3)
     if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified,wetMoat:profile.waterway});
-    plaza=buildPlaza(seed,site,anchors,g);
-  }else if(profile.planning==='palimpsest'){
-    // founded once, exactly like the Roman profile's grid (docs/, "Palimpsest Growth" §3) —
-    // the difference is everything that happens AFTER founding, not the founding act itself.
-    // pairing strip parcels (for the age-driven burgage-cycle subdivision, M-PAL-4) with a
-    // grid-founded network packs far more buildable frontage into a given radius than Roman's
-    // own insula parcels do at the same extent — the same "denser mesh needs a smaller footprint
-    // for the same population" finding as the Venus radial rework, scaled down accordingly here.
-    buildGridStreets(seed,site,anchors,g,{maxRF:maxRF*0.62,gridSpacing:profile.gridSpacing});
-    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
-    if(site.through)addRiverBridges(seed,site,anchors,g,2);
-    const PR=rules.palimpsest;
-    for(let ep=1;ep<=epochs;ep++){
-      const pressure=ep/epochs; // 0->1 encroachment intensity (M-PAL register)
-      narrowColonnades(seed,g,ep,pressure,PR);
-      growAlongFixedEdge(seed,site,anchors,g,ep,pressure,PR);
-    }
-    // the wall wraps the founded-then-encroached extent; built once the fabric has its final
-    // shape rather than mid-founding, same "substantial town" gating as the organic pack
-    if(walls)buildWall(seed,site,anchors,g,wallState,epochs,harbour,{fortified});
     plaza=buildPlaza(seed,site,anchors,g);
   }else{
     buildPrimaries(seed,site,anchors,g);
@@ -3348,116 +2546,38 @@ function generate(seed,opts){
     if(site.through)addRiverBridges(seed,site,anchors,g,2); // a river that bisects the town
     grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget,rules});
   }
-  // castrum gate scheme: relabel the (already-capped/placed) gates with the four traditional
-  // names where they sit on the maximus streets, rather than a wholly separate gate function
-  // (M-ROM-5) — the underlying wall/gate-placement machinery is reused unchanged (docs/07 §2).
-  if(profile.wallGates.scheme==='castrum'&&wallState.gates&&wallState.gates.length){
-    const F=anchors.market;
-    for(const gt of wallState.gates){
-      if(gt.water)continue;
-      if(Math.abs(gt.pt.y-F.y)<10)gt.name=gt.pt.x>=F.x?'Porta Praetoria':'Porta Decumana';
-      else if(Math.abs(gt.pt.x-F.x)<10)gt.name=gt.pt.y<F.y?'Porta Principalis Dextra':'Porta Principalis Sinistra';}
-  }
-  // Bab (gate) scheme (M-ISL-4): an organic circuit has no maximus axis to key off, so gates are
-  // named by compass quadrant from the wall's own centroid instead — the same reused wall/gate
-  // machinery, just labelled per this tradition (docs/07 §2 pattern, applied a second time).
-  if(profile.wallGates.scheme==='bab'&&wallState.ring&&wallState.gates&&wallState.gates.length){
-    const C=wallState.centroid||polyCentroid(wallState.ring);
-    for(const gt of wallState.gates){
-      if(gt.water)continue;
-      const ang=Math.atan2(gt.pt.y-C.y,gt.pt.x-C.x)*180/Math.PI; // 0=E,90=S,±180=W,-90=N (screen y-down)
-      gt.name=(ang>-45&&ang<=45)?'Bab ash-Sharq (East Gate)'
-        :(ang>45&&ang<=135)?'Bab al-Janub (South Gate)'
-        :(ang>135||ang<=-135)?'Bab al-Gharb (West Gate)'
-        :'Bab ash-Shamal (North Gate)';}
-  }
-  // Cardinal gate scheme (M-CHN-3): the Kaogongji tradition's walled, axial capital keys gates
-  // off the palace-centred N-S/E-W axes exactly like the castrum scheme (this profile reuses
-  // 'grid' planning, so the same maximus-axis geometry applies) — plain cardinal names rather
-  // than city-specific proper nouns (e.g. Beijing's named gates), which would overclaim a single
-  // city's history as generic.
-  if(profile.wallGates.scheme==='cardinal'&&wallState.gates&&wallState.gates.length){
-    const F=anchors.market;
-    for(const gt of wallState.gates){
-      if(gt.water)continue;
-      if(Math.abs(gt.pt.y-F.y)<10)gt.name=gt.pt.x>=F.x?'East Gate':'West Gate';
-      else if(Math.abs(gt.pt.x-F.x)<10)gt.name=gt.pt.y<F.y?'North Gate':'South Gate';}
-  }
-  // Compass gate scheme: a generic quadrant-from-centroid naming (same technique as Bab, M-ISL-4)
-  // for organic-growth traditions whose historical record doesn't hand us a specific naming
-  // convention to cite — plain "North/South/East/West Gate" rather than inventing period-flavoured
-  // proper nouns that would overclaim a sourced tradition (docs/07 §2 pattern, reused generically).
-  if(profile.wallGates.scheme==='compass'&&wallState.gates&&wallState.gates.length){
-    const C=wallState.centroid||polyCentroid(wallState.ring);
-    for(const gt of wallState.gates){
-      if(gt.water)continue;
-      const ang=Math.atan2(gt.pt.y-C.y,gt.pt.x-C.x)*180/Math.PI;
-      gt.name=(ang>-45&&ang<=45)?'East Gate':(ang>45&&ang<=135)?'South Gate':(ang>135||ang<=-135)?'West Gate':'North Gate';}
-  }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
-  // palimpsest's burgage-cycle intensifies over "several plot-cycles" (Conzen 1960): re-run the
-  // same interior-lane mechanism with a lower area floor, so blocks too small for the universal
-  // pass above still fragment further as the fabric matures (M-PAL-4)
-  if(profile.planning==='palimpsest')
-    for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs,12000*(1-rules.palimpsest.subdivisionPressure)))break;
   removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
   const blocks=buildBlocks(g,plaza,site);
   const parcels=buildParcels(seed,g,blocks,anchors,epochs,site,profile,rules);
   assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
   const buildings=buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware);
-  // runs after buildings exist so it can verify-then-reject any candidate segment against the
-  // real building set, rather than relying solely on construction to guarantee safety — blocks
-  // can be irregular/concave (a grid-founded network reshaped by growAlongFixedEdge), and a plain
-  // per-edge outward offset isn't reliably "outward" at a reflex vertex (found via this project's
-  // own audit: a small residual of segments still crossed a building until this verify step).
-  if(profile.planning==='palimpsest')dissolveWardWalls(seed,blocks,anchors,parcels,buildings,rules.palimpsest);
-  if(profile.factory)tagFactory(buildings);
   if(ruined)applyDecay(seed,parcels,buildings);
   const faith=opts.faith||profile.defaultFaith;
   // hamlets have no church/chapel; a religious building can also be turned off ('none')
   const hamlet=popTarget<600;
   const nChurch=(faith==='none'||hamlet)?0:Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // M-DEN-8
   const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith,site,harbour):[];
-  // occupancy per built parcel (M-DEN-2): a multi-storey insula apartment block (3-5 storeys,
-  // M-ROM-3) houses several times what a single-family domus or medieval house does — counting
-  // it as one household like the others would badly undercount a colonia's real density (M-ROM-7).
-  // More generally, a profile whose typical lot is simply BIGGER than the medieval strip-parcel
-  // baseline (fewer, larger lots per hectare at the same street length) can need a household-size
-  // correction too, even without Roman's multi-storey reason — e.g. a Chinese siheyuan compound
-  // usually housed an extended, multi-generational family, not a nuclear one (M-CHN-4) — but this
-  // only holds while the profile actually USES the bigger insula-pattern lot: several profiles
-  // that formerly paired courtyard-house-family grammars with insula parcels were converted to
-  // organic/strip platting (docs/03 M-CHN/M-AZT/M-GRK/M-EGY/M-COL), and their `householdMultiplier`
-  // was removed at the same time — a strip-platted lot is already the same size as every other
-  // organic profile's, so it needs no correction, the same reasoning that already applied to
-  // Islamic/Byzantine/Mesopotamian's own courtyard houses on strip parcels all along.
-  // uniformHousing (Venus Project) also produces 'insula block'-kind buildings on every parcel,
-  // but that's a single standardized modular apartment, not Rome's specific 3-5 storey tenement
-  // (M-ROM-7's actual justification for the 4x multiplier below) — excluded here so it falls
-  // through to the plain householdMult path instead of quadruple-counting every household.
-  // Industrial reuses domus-insula's multi-storey tenement form but, per the same conversion
-  // above, now grows it on strip parcels too — the 4x multiplier was calibrated for the FEWER,
-  // BIGGER lots insula platting produces, so it is gated on parcelPattern as well: strip platting
-  // already produces enough separate parcels per hectare that the multi-storey correction would
-  // double-count households the same way it would for a converted courtyard-house profile.
-  const insulaParcels=(profile.buildingGrammar==='domus-insula'&&!profile.uniformHousing&&profile.parcelPattern==='insula')
-    ?new Set(buildings.filter(b=>b.kind==='insula block').map(b=>b.parcel)):null;
-  const householdMult=profile.householdMultiplier||1;
+  // occupancy per built parcel (M-DEN-2): average household size, one household per built parcel.
+  // A household-size multiplier for profiles whose typical lot housed several times the medieval
+  // baseline (a multi-storey insula block, an extended-family compound) existed here through the
+  // tool's original 19-profile run; that correction and profile.householdMultiplier are documented
+  // history now (docs/07 §3.10) — medieval and Venus both house one household per parcel at the
+  // same baseline size, so no correction applies.
   // a ruined parcel's structure still stands (M-PA-1) but nobody lives there — excluded from the
   // head-count; with the ruined toggle off (the default), p.ruined is always undefined for every
   // parcel, so this filter is a no-op false||undefined check, unchanged from every prior version
   const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard&&!p.ruined)
-    .reduce((s,p)=>s+(insulaParcels&&insulaParcels.has(p.id)?5.2*4:5.2*householdMult),0));
+    .reduce((s,p)=>s+5.2,0));
   // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN).
-  // Markets are a medieval-specific economy (M-AMEN-1); a profile without them (e.g. Roman, whose
-  // commerce concentrates in the forum/macellum — docs/07 §2) is gated off rather than reusing
-  // medieval market thresholds under a different name.
+  // profile.markets (M-AMEN-1) is a data-driven hook for a profile whose commerce ran through a
+  // different institution entirely (a forum/macellum, temple-state redistribution) rather than a
+  // chartered market square — both medieval and Venus set it true, so this always runs today.
   const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
   const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
   const games=buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic);
   const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour,profile);
   details.push(...buildFarmland(seed,site,anchors,g,wallState,maxRF,profile));
-  if(profile.chinampas)details.push(...buildChinampas(seed,site,anchors,wallState,maxRF));
   // when the star fort is built canal-fed (M-VEN-3), the fort's own wet-moat rendering already
   // carries the canal visually — skip the separate decorative ring so it doesn't duplicate it
   if(profile.waterway&&!(wallState.fort&&wallState.fort.canalFed))
@@ -3561,11 +2681,6 @@ function render(){
   for(const d of model.details)if(d.kind==='pasture'){
     const e=el('path',{d:pd(d.poly),class:'pasture'},L.fields);
     reg(e,'Pasture','Pasture / grazing land',{},d.prov);}
-  // chinampas sit IN the water, so they must draw in a layer AFTER 'water' in z-order (L.fields
-  // is drawn before 'water' and would be invisible, entirely covered by the water fill)
-  for(const d of model.details)if(d.kind==='chinampa'){
-    const e=el('path',{d:pd(d.poly),class:'chinampa'},L.blocks);
-    reg(e,'Chinampa','Chinampa (raised-bed garden)',{},d.prov);}
   for(const d of model.details)if(d.kind==='waterway'){
     const e=el('path',{d:pd(d.poly),class:'waterway'},L.fields);
     reg(e,'Waterway','Circular irrigation waterway',{},d.prov);}
@@ -3575,17 +2690,6 @@ function render(){
     const e=el('path',{d:pd(b.poly),class:b.plaza?'plaza':'blockfill'},L.blocks);
     reg(e,b.plaza?'Market place':'Block',b.plaza?'Market place':'Urban block '+b.id,
       {area:(b.area/10000).toFixed(2)+' ha'},b.prov);}
-  // palimpsest ward walls (M-PAL-2): drawn last (L.details) so the standing/dissolved distinction
-  // is never covered by the road fill it sits just outside of
-  for(const b of model.blocks){
-    if(!b.wardWall)continue;
-    for(const [sa,sb] of b.wardWall.segs){
-      const e=el('path',{d:pl([sa,sb]),class:'wardwall'+(b.wardWall.dissolved?' dissolved':'')},L.details);
-      reg(e,'Ward wall',b.wardWall.dissolved?'Dissolved ward wall':'Standing ward wall',{},
-        b.wardWall.dissolved
-          ?'A former lifang-style ward enclosure, already opened onto the street by this snapshot — the Tang-to-Song "medieval urban revolution" (Skinner 1977, M-PAL-2).'
-          :'A residential ward\'s founding enclosure, still standing at this snapshot — walled and gated at curfew under the Tang pattern this profile founded from (M-PAL-2).');}}
-
   // specialised market squares (multiply with settlement rank)
   for(const mk of model.markets||[]){
     const e=el('path',{d:pd(mk.poly),class:'market2'},L.blocks);
@@ -3753,14 +2857,11 @@ function render(){
 
   // buildings
   const BLD_TITLE={main:'House (main range)',wing:'Rear wing','rear range':'Rear range',
-    warehouse:'Warehouse','atrium range':'Domus (atrium range)','peristyle range':'Domus (peristyle range)',
-    'insula block':'Insula (apartment block)','street range':'Courtyard house (street range)',
-    'single-room house':'Single-room house',longhouse:'Longhouse',roundhouse:'Roundhouse',
-    factory:'Factory/mill',pavilion:'Circular pavilion','modular apartment':'Modular apartment',machiya:'Machiya (rowhouse)'};
+    warehouse:'Warehouse','street range':'Courtyard house (street range)',
+    pavilion:'Circular pavilion','modular apartment':'Modular apartment',machiya:'Machiya (rowhouse)'};
   for(const b of model.buildings){
     const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')+(b.ruined?' ruined':'')+(b.kind==='pavilion'?' pavilion':'')},L.buildings);
     el('path',{d:pl(b.ridge),class:'ridge'+(b.ruined?' ruined':'')},L.buildings);
-    if(b.chimney)el('circle',{cx:b.chimney.x,cy:b.chimney.y,r:1.6,class:'chimney'},L.buildings);
     reg(e,'Building',(b.ruined?'Ruined ':'')+(BLD_TITLE[b.kind]||'Outbuilding'),
       {district:DISTRICT_INFO[b.district]?DISTRICT_INFO[b.district][0]:b.district,
        footprint:Math.abs(polyAreaApp(b.poly)).toFixed(0)+' m²',
@@ -3926,7 +3027,7 @@ function renderLedger(){
   if(!box)return;
   const ids=[...ledgerIds].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   box.innerHTML=`<div style="font-size:10.5px;color:#7d6c47;margin-bottom:5px">`+
-    `${ids.length} register entries (${model.culture==='roman'?'M-ROM + shared M-*':'M-*'}) are load-bearing for this town — full source/confidence/justification in `+
+    `${ids.length} register entries (M-*) are load-bearing for this town — full source/confidence/justification in `+
     `<code>docs/03-mathematical-assumptions.md</code>.</div>`+
     `<div>${ids.map(id=>`<span class="ledgerchip">${id}</span>`).join('')}</div>`;}
 
@@ -3945,14 +3046,8 @@ function renderLegend(){
     html+=`<span><span class="chip" style="background:#dcc985;border-color:#a4874a"></span>Field</span>`;
   if(model.details.some(d=>d.kind==='pasture'))
     html+=`<span><span class="chip" style="background:#c7d19a;border-color:#82945a"></span>Pasture</span>`;
-  if(model.details.some(d=>d.kind==='chinampa'))
-    html+=`<span><span class="chip" style="background:#c3d6a8;border-color:#8a9e6a"></span>Chinampa</span>`;
   if(model.details.some(d=>d.kind==='waterway'))
     html+=`<span><span class="chip" style="background:#8fa39e"></span>Waterway</span>`;
-  if(model.blocks.some(b=>b.wardWall))
-    html+=`<span><span class="chip" style="background:#8a7444"></span>Ward wall</span>`;
-  if(model.buildings.some(b=>b.kind==='factory'))
-    html+=`<span><span class="chip" style="background:#4a453c"></span>Factory/mill</span>`;
   if(model.buildings.some(b=>b.ruined))
     html+=`<span><span class="chip" style="background:#9a9184;border-color:#4a453c"></span>Ruin</span>`;
   lg.innerHTML=html;}

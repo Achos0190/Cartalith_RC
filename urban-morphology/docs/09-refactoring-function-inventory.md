@@ -43,7 +43,7 @@ Confirmed by grepping the actual v0.85 file rather than assumed from memory:
 | `render()` — full SVG redraw of the city model | `function render(){scheduleRender();}` at line 6400 — the world-map redraw scheduler | **Real collision, must rename.** `renderCityView()` or similar; Gen1's own `render` is a thin trampoline into its own `scheduleRender`, so this is a true same-scope clash, not a coincidence across unrelated modules. |
 | `mulberry32(a)` — the PRNG | `function mulberry32(a){...}` at line 1603, **verified byte-equivalent algorithm** (same magic constants `0x6D2B79F5`, `Math.imul` shifts; only whitespace differs) | **Not a conflict — reuse Gen1's own.** Drop Urban Morphology's copy entirely on port; the two were independently implementing the same public-domain algorithm. |
 | `fnv1a(str)` + `stream(seed,label)` — the **labeled-substream** RNG (a named, independent sub-stream per pipeline stage, so touching one stage's randomness never perturbs another's output) | No equivalent. Gen1's own `hash(x,y,s)` (line 1604) is a **2D coordinate+seed** spatial hash for noise sampling (`vnoise`/`pvnoise`) — a different purpose (terrain noise, not stage-isolated determinism) | **Genuine, non-conflicting addition.** Port `fnv1a`/`stream` as-is; this is exactly the mechanism a `cityGen()` needs to keep e.g. `stream(seed,'games')` independent of `stream(seed,'anchors')`, which nothing in Gen1 currently provides. |
-| `CULTURE_PROFILES` / "tradition" concept | **Does not exist.** `faction` in Gen1 is name + auto-colour only (`docs/06` §3.2, re-confirmed here: no `tradition` string anywhere in v0.85) | Confirms `docs/06`'s gap #2 is still open. The `traditionOf(place.faction)` mapping function docs/06 sketches does not exist yet on the Gen1 side; **this project's 19 `CULTURE_PROFILES` entries are the entire supply side of that mapping, ready to port unchanged.** |
+| `CULTURE_PROFILES` / "tradition" concept | **Does not exist.** `faction` in Gen1 is name + auto-colour only (`docs/06` §3.2, re-confirmed here: no `tradition` string anywhere in v0.85) | Confirms `docs/06`'s gap #2 is still open. The `traditionOf(place.faction)` mapping function docs/06 sketches does not exist yet on the Gen1 side; **this project's `CULTURE_PROFILES` entries (2 as of the post-launch simplification pass, docs/07 §3.10 — was 19) are the entire supply side of that mapping, ready to port unchanged, and the pattern for adding more back is a table row, not an engine change.** |
 | `V` (vector helpers), `polyArea`, `segInt`, `pointInPoly`, `distPtSeg`, `stadiumPoly`, `select`, `el`, `pd`, `pl`, `reg`, `applyVB`, `fitView`, `setupCamera`, `grow`, `regen` | No top-level collision found for any of these (checked directly) | Free to port under their current names, though several (`el`/`pd`/`pl`/`reg`/`select`) are generic enough to be worth namespacing (`cityEl`/`cityPd`/…) purely for readability in a 15k-line host file, not because of an actual clash. |
 
 ## 3. Complete function inventory
@@ -100,15 +100,15 @@ panel/editor DOM rather than copied verbatim.
 
 | Function / data | Purpose | Disposition |
 |---|---|---|
-| `CULTURE_PROFILES` (19 entries) | the entire data-driven tradition registry: `planning`/`parcelPattern`/`buildingGrammar`/`defaultFaith`/`defaultCivic`/`markets`/`wallGates`/`orientation`/`civicAnchorLabel` + per-profile flags (`noWalls`, `chinampas`, `factory`, `householdMultiplier` where still used, `defaultWalls`) | REUSE unchanged — this **is** the `traditionOf(place.faction)` mapping's supply side docs/06 §3.2 asked for; Gen1-side work is only the *lookup* (faction → one of these 19 keys), not the profiles themselves |
+| `CULTURE_PROFILES` (2 entries: medieval, venus — was 19 before the post-launch simplification pass, docs/07 §3.10) | the data-driven tradition registry: `planning`/`parcelPattern`/`buildingGrammar`/`defaultFaith`/`defaultCivic`/`markets`/`wallGates`/`orientation`/`civicAnchorLabel` + per-profile flags (`noWalls`, `defaultWalls` — no current entry sets `noWalls`, kept as a generic hook) | REUSE unchanged — this **is** the `traditionOf(place.faction)` mapping's supply side docs/06 §3.2 asked for, now with 2 keys to map rather than 19; a Gen1 port wanting more traditions can add table rows the same way this project once did, before culling most of them back out (docs/07 §3.10) |
 | `resolveProfile(id)` | `CULTURE_PROFILES[id]\|\|.medieval` fallback | REUSE |
-| `GAMES_SPEC` (18 keys: 16 non-empty + 2 empty — mesopotamian, venus; palimpsest has no entry of its own, inherited via a `profile.id==='palimpsest'` special-case lookup into `GAMES_SPEC.islamic` instead) | signature-games-building registry (kind/shape/siting/size/pop-gate/prov per culture) | REUSE unchanged |
+| `GAMES_SPEC` (2 keys: medieval non-empty, venus empty — was 18 before docs/07 §3.10; the palimpsest special-case lookup was removed along with palimpsest itself) | signature-games-building registry (kind/shape/siting/size/pop-gate/prov per culture) | REUSE unchanged |
 
 ### 3.5 Generation Rules (configurable parameters, docs/07 §3.4)
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `DEFAULT_RULES` | ~17 externalized street/parcel-growth constants, grouped `street`/`parcels`/`palimpsest`/`meta` | REUSE |
+| `DEFAULT_RULES` | ~17 externalized street/parcel-growth constants, grouped `street`/`parcels`/`meta` (the `palimpsest` group was removed with the profile, docs/07 §3.10 — it was never surfaced in the Generation Rules UI panel to begin with) | REUSE |
 | `cloneRules`, `resolveRules` | deep-clone / partial-merge against defaults | REUSE |
 | `applyWildness`, `applyPlotChaos` | meta-slider → underlying-field derivation | REUSE |
 
@@ -118,7 +118,7 @@ panel/editor DOM rather than copied verbatim.
 |---|---|---|
 | `placeAnchors` | sites the market anchor (flat, dry, above flood band, near the bridge/quay) | ADAPT — once `site` is real terrain, the scoring inputs (`slope`, `riverDist`) come from `siteFromTerrain`'s outputs instead of the synthetic analytic functions; logic unchanged |
 | `buildPrimaries` | least-cost route engine (Tobler-slope-weighted `astar` grid) siting the primary street skeleton | ADAPT — **also** where `docs/06` §2's "primary-route endpoints from `civWays` links" plugs in, replacing the PoC's synthetic map-edge endpoints with real neighbour-settlement directions |
-| `buildGridStreets` | one-act planned grid (Roman, and the Palimpsest founding act) | REUSE |
+| `buildGridStreets` | one-act planned grid (was: Roman, and the Palimpsest founding act) | REMOVED (docs/07 §3.10) — no caller remains; recoverable from git history for a future planned-grid profile |
 | `buildRadialStreets` | Venus's concentric-ring + radial-spoke growth | REUSE |
 | `buildWaterway` | Venus's circular irrigation canal | REUSE |
 | `buildPlaza` | market-square carving (widens the nearest primary edge) — **note for the games-building port**: the plaza polygon is not fully clear ground (docs/07 §3.8 finding: the original through-street still runs through it); anything sited off `plaza.poly` on the Gen1 side needs the same real-parcel check `buildGames`'s plaza-siting mode added, not just an edge-offset | REUSE (with that caveat carried forward) |
@@ -134,23 +134,23 @@ panel/editor DOM rather than copied verbatim.
 | `applyStarFort` | Naarden-trace bastioned enceinte | ADAPT — same era-signal dependency, plus `traits.fortified` gating already sketched in docs/06 §2 |
 | `clearFortZone` | field-of-fire clearing (removes overlapping buildings/parcels/streets/clutter) | REUSE |
 
-### 3.8 Palimpsest-specific encroachment (docs/03 M-PAL register)
+### 3.8 Post-growth encroachment passes
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `privatizeAlleys` | Islamic-family cul-de-sac encroachment (M-ISL-2) | REUSE |
-| `lanePass` | oversized-block interior-lane subdivision, reused at a lower area floor for Palimpsest's burgage cycle (M-PAL-4) | REUSE |
-| `narrowColonnades` | colonnaded-avenue-to-souk width narrowing (M-PAL-1) | REUSE |
-| `dissolveWardWalls` | ward-wall dissolution, verified per-building (M-PAL-2) | REUSE |
-| `growAlongFixedEdge` | post-disaster streets tracking a surviving fixed edge (M-PAL-3) | REUSE |
+| `privatizeAlleys` | cul-de-sac encroachment (M-ISL-2 in origin, but a generic mechanism: `profile.deadEndBias` + the Generation Rules panel's `street.deadEndBias` slider both feed it, so it's still user-reachable even though no current profile sets a nonzero floor) | REUSE |
+| `lanePass` | oversized-block interior-lane subdivision, generic (its caller-suppliable `minArea` was tuned by the now-removed Palimpsest's burgage cycle, M-PAL-4; every profile still gets the default-floor pass) | REUSE |
+| `narrowColonnades` | colonnaded-avenue-to-souk width narrowing (was: M-PAL-1) | REMOVED (docs/07 §3.10) — Palimpsest-only, no caller remains |
+| `dissolveWardWalls` | ward-wall dissolution, verified per-building (was: M-PAL-2) | REMOVED (docs/07 §3.10) — Palimpsest-only, no caller remains |
+| `growAlongFixedEdge` | post-disaster streets tracking a surviving fixed edge (was: M-PAL-3) | REMOVED (docs/07 §3.10) — Palimpsest-only, no caller remains |
 
 ### 3.9 Blocks & parcels
 
 | Function | Purpose | Disposition |
 |---|---|---|
 | `buildBlocks` | face-extraction → block polygons keyed to the plaza | REUSE |
-| `insulaLots` | axis-aligned-bounding-box lot subdivision (`parcelPattern:'insula'`) — **documented as unsafe on non-rectangular blocks** (docs/07 §3.6); only Roman still uses it | REUSE, with that documented caveat still binding on the Gen1 side too |
-| `buildParcels` | the per-profile parcel-pattern dispatcher (strip vs insula) + the population formula's `insulaParcels`/`householdMult` correction logic | REUSE — the two population bugs this project already found and fixed (docs/07 §3.6) are exactly the kind of thing to re-verify empirically again after the port, not assume still holds |
+| `insulaLots` | axis-aligned-bounding-box lot subdivision (`parcelPattern:'insula'`) — **documented as unsafe on non-rectangular blocks** (docs/07 §3.6); only Roman used it | REMOVED (docs/07 §3.10) — no profile sets `parcelPattern:'insula'` anymore; `buildParcels`'s dispatch on `parcelPattern` itself stays generic, so a future insula-pattern profile would need to reintroduce both the dispatch branch and this function |
+| `buildParcels` | the per-profile parcel-pattern dispatcher (strip vs insula) | REUSE — the population formula's `insulaParcels`/`householdMult` correction logic (for the now-removed `domus-insula` building grammar) was simplified out along with `insulaLots` (docs/07 §3.10); the two population bugs this project found and fixed for it (docs/07 §3.6) remain relevant if a future multi-storey-tenement grammar reintroduces that correction |
 | `assignDistricts` | district classification (market/burgher/artisan/craftriver/harbour/suburb/agrarian) + `terrainSuitability` scoring | ADAPT (see §3.3 — same site-model swap, same consumers) |
 | `bmap`, `rectPoly` | bilinear-patch parcel-quad helpers | REUSE |
 
@@ -158,8 +158,8 @@ panel/editor DOM rather than copied verbatim.
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `buildBuildings` | the building-grammar dispatcher (burgage/domus-insula/courtyard-house/longhouse/roundhouse/venus-mixed) + the opt-in `terrainAware` gate | ADAPT — same site-model dependency as §3.3/3.9 |
-| `_rectPts`, `_peristyle` | rectangle-corner and colonnade-column helpers for the domus/courtyard grammars | REUSE |
+| `buildBuildings` | the building-grammar dispatcher (burgage/venus-mixed — was burgage/domus-insula/courtyard-house/longhouse/roundhouse/venus-mixed before docs/07 §3.10 removed the 4 grammars whose profiles are gone; `venus-mixed` is fully self-contained and was unaffected) + the opt-in `terrainAware` gate | ADAPT — same site-model dependency as §3.3/3.9 |
+| `_rectPts`, `_peristyle` | rectangle-corner and colonnade-column helpers, actually used by `buildFaithSites` (temple/mosque/church geometry, §3.11) rather than a building grammar despite the placement here | REUSE |
 
 ### 3.11 Civic, economic, religious buildings
 
@@ -173,28 +173,30 @@ panel/editor DOM rather than copied verbatim.
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `ellipsePoly`, `orientedRect`, `stadiumPoly`, `ballcourtPoly` | the four reused shape primitives | REUSE |
-| `gamesShapeAt` | shape dispatcher keyed on `spec.shape` | REUSE |
+| `orientedRect` | the one shape primitive with a live caller post-simplification | REUSE |
+| `ellipsePoly`, `stadiumPoly`, `ballcourtPoly` | the other three shape primitives (ellipse/discorectangle/dogbone) | REMOVED (docs/07 §3.10) — every profile whose `GAMES_SPEC` entry used them is gone; medieval's surviving tiltyard and Venus's empty entry both resolve through `orientedRect` alone |
+| `gamesShapeAt` | shape dispatcher keyed on `spec.shape` | REUSE — simplified to always return `orientedRect(...)` now that it's the only reachable branch |
 | `buildGames` | population-gated per-culture monument, plaza-adjacent or peripheral siting per `GAMES_SPEC` | REUSE — already parcel-safety-checked for the plaza-siting mode (docs/07 §3.8), the newest and most rigorously collision-tested function in the register |
 
 ### 3.13 Culture-specific detail layers
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `buildChinampas` | Aztec raised-bed garden strips reclaimed from the shore | REUSE |
-| `tagFactory` | Industrial mill-anchor re-tagging (reuses an already-placed building, never new geometry) | REUSE |
+| `buildChinampas` | Aztec raised-bed garden strips reclaimed from the shore | REMOVED (docs/07 §3.10) — Aztec-only, no caller remains |
+| `tagFactory` | Industrial mill-anchor re-tagging (reuses an already-placed building, never new geometry) | REMOVED (docs/07 §3.10) — Industrial-only, no caller remains |
 | `applyDecay` | the `ruined` toggle's decay pass (docs/03 M-PA) — profile-agnostic by design | REUSE |
 | `buildDetails` | trees/wells/crosses/fences/bollards + the per-profile orchard-density/provenance boost (`gardenBoost`, docs/03 M-FARM register) — no longer contains the strip-field mechanism itself, which task #66 extracted into `stripFields` below | REUSE |
-| `FARM_SPEC` (18 keys: 17 with a pattern + Aztec's `{pattern:'none'}`; Palimpsest has no entry of its own, inherited via the same `profile.id==='palimpsest'` special-case lookup pattern `GAMES_SPEC` already established, resolving to `FARM_SPEC.islamic`) | per-culture farmland/pasture registry (docs/03 M-FARM register, docs/07 §3.9) — task #66, landed after this document's first draft | REUSE unchanged |
-| `crossesStreet` | shared street-crossing guard (spatial-hash `edgesNear()`+`segInt()`, the same technique `buildGames`' own `blocked()` already established) called from all seven farmland generators below — added after this register's own audit caught 1281 real crossings on first run, including 63 in the pre-existing `stripFields` mechanism alone | REUSE unchanged |
-| `stripFields` / `gridFields` / `fanFields` / `basinFields` / `canalFields` / `terraceFields` / `ringFields` | the seven farmland shape-family generators `buildFarmland` dispatches across via `FARM_SPEC.pattern` — `gridFields` alone serves four big-regular and four small-irregular cultures via cell-size/jitter/alignment parameters rather than eight near-duplicate functions; `terraceFields` is the one pattern that queries `site.height`/`site.slope` directly (real terrain-following geometry, not a decorative shape) | REUSE unchanged — `terraceFields`' direct `site.height`/`site.slope` calls are exactly the shape `siteFromTerrain`'s replacement fields need to support (docs/06 §3.1), a live consumer of that interface beyond `terrainSuitability` |
-| `buildFarmland` | per-profile farmland dispatcher (mirrors `buildGames`'s `GAMES_SPEC` lookup pattern exactly): resolves `FARM_SPEC`, computes a dominant-street-axis `dirHint` for non-cardinal grid alignments (a length-weighted circular mean over live primary edges), calls the matching generator | REUSE unchanged |
+| `FARM_SPEC` (2 keys: medieval, venus — was 18 before docs/07 §3.10; the palimpsest special-case lookup was removed along with palimpsest itself; medieval's entry gained a `pastureShare`/`pastureFar` in the same pass so the `pasture` detail kind — previously only exercised by the now-removed Byzantine/Viking entries — stays reachable) | per-culture farmland/pasture registry (docs/03 M-FARM register, docs/07 §3.9) | REUSE unchanged |
+| `crossesStreet` | shared street-crossing guard (spatial-hash `edgesNear()`+`segInt()`, the same technique `buildGames`' own `blocked()` already established) called from both surviving farmland generators below — added after this register's own audit caught 1281 real crossings on first run, including 63 in the pre-existing `stripFields` mechanism alone | REUSE unchanged |
+| `stripFields` / `ringFields` | the two farmland shape-family generators `buildFarmland` still dispatches to via `FARM_SPEC.pattern` (`'strip'`/`'ring'`) | REUSE unchanged |
+| `gridFields` / `fanFields` / `basinFields` / `canalFields` / `terraceFields` | the other five of the original seven farmland pattern generators — `terraceFields` was the one pattern querying `site.height`/`site.slope` directly (real terrain-following geometry) | REMOVED (docs/07 §3.10) — every profile that dispatched to these is gone; `terraceFields`' direct terrain-field usage is recoverable from git history if a future terrain-following profile wants it, still a relevant precedent for `siteFromTerrain` (docs/06 §3.1) even absent a live caller today |
+| `buildFarmland` | per-profile farmland dispatcher (mirrors `buildGames`'s `GAMES_SPEC` lookup pattern): resolves `FARM_SPEC`, calls the matching generator | REUSE — simplified along with the pattern-family trim above; the `dirHint` dominant-street-axis computation for non-cardinal grid alignments was removed with `gridFields`, its only consumer |
 
 ### 3.14 Metrics, generation entry point, export
 
 | Function | Purpose | Disposition |
 |---|---|---|
-| `computeMetrics` | morphometric validation bands (deg3/deg4 share, meshedness, median frontage, …) | REUSE — becomes the city module's own regression suite, exactly as `docs/06` §4 anticipates ("the PoC's 194-assertion headless suite… become the city module's suite" — a direct quote from docs/06 as originally written; the suite has since grown to **1233 assertions**, docs/06's own count simply predates most of this project's later work) |
+| `computeMetrics` | morphometric validation bands (deg3/deg4 share, meshedness, median frontage, …) | REUSE — becomes the city module's own regression suite, exactly as `docs/06` §4 anticipates ("the PoC's 194-assertion headless suite… become the city module's suite" — a direct quote from docs/06 as originally written; the suite grew to 1233 assertions across the full 19-profile roster, then shrank to **801** after the post-launch simplification pass trimmed the per-culture test blocks down to the 2 surviving profiles, docs/07 §3.10 — a smaller but still-comprehensive suite, not a coverage regression, since the removed assertions tested profiles that no longer exist) |
 | `generate(seed,opts)` | **the pipeline orchestrator** — every function above, called in the fixed order documented in `docs/07` | **RENAME** to `cityGen(placeContext)` (§2) + **ADAPT** its opts object to unpack a `placeContext` (docs/06 §4) instead of raw `{seed,pop,epochs,walls,fortified,site,harbourDefence,faith,civicStyle,culture,rules,terrainAware,ruined}` |
 | `hashModel(m)` | selective FNV hash over graph/blocks/parcels/buildings (civic/markets/games/details deliberately excluded — confirmed throughout docs/03's M-GAMES register write-up) — the cross-version neutrality mechanism | REUSE — becomes the city module's own determinism-regression tool, independent of whatever hashing (if any) Gen1's own EF pipeline uses for its `g-toggle round-trip` invariant |
 
@@ -254,7 +256,7 @@ incremental discipline this project has held itself to throughout:
 
 1. **Extract + rename.** Pull the engine block out verbatim (as `tests/run.sh` already does for
    headless testing), apply the two renames from §2 (`generate`→`cityGen`, `render`→
-   `renderCityView`), drop the redundant `mulberry32`. Verify: the existing 1199-assertion suite
+   `renderCityView`), drop the redundant `mulberry32`. Verify: the existing 801-assertion suite
    still passes unchanged against the renamed file — a pure mechanical refactor, zero behavior
    change, should be provable by diffing `hashModel()` output before/after.
 2. **Swap the site model.** Implement `siteFromTerrain(place, EF)` per docs/06 §3.1 /
@@ -268,8 +270,9 @@ incremental discipline this project has held itself to throughout:
    existing generator inputs, per the docs/06 §2 table verbatim. No new logic — every field this
    step needs already has a named home in `CULTURE_PROFILES`/`GAMES_SPEC`/the opts object.
 4. **`traditionOf(place.faction)`.** The one genuinely new piece of *Gen1-side* logic this
-   whole port needs — a mapping from faction to one of the 19 `CULTURE_PROFILES` keys. Everything
-   downstream of that lookup already exists.
+   whole port needs — a mapping from faction to one of the `CULTURE_PROFILES` keys (2 today; more
+   are a table-row addition away, docs/07 §3.10). Everything downstream of that lookup already
+   exists.
 5. **Era signal + UI rewire.** The `civYear`-dependent wall/fort gating (docs/06 §3.3), then the
    app-shell's real rebuild (§3.15-3.17 above) — left last because it depends on nothing upstream
    being unstable, and because it's the only phase with no existing Urban Morphology test coverage
@@ -285,10 +288,11 @@ incremental discipline this project has held itself to throughout:
 - **Where the fourth script block actually lives** — a genuine new block 4, or a lazy-loaded
   module fetched only when a settlement is opened? Docs/06 §4 floats both; this document doesn't
   pick one, since it's a Gen1-side packaging decision this project has no visibility into.
-- **Task #66 (per-culture farmland) has since landed** — `FARM_SPEC`/`buildFarmland` and the seven
-  shape-family generators are now in §3.13 above, all REUSE unchanged; this bullet is kept only as
-  a record that the disposition above was re-checked against the actual shipped code, not assumed
-  from this document's own first draft.
+- **Task #66 (per-culture farmland) has since landed, and the post-launch simplification pass
+  (docs/07 §3.10) has since trimmed it** — `FARM_SPEC`/`buildFarmland` and 2 of the original 7
+  shape-family generators (`stripFields`/`ringFields`) are REUSE in §3.13 above; the other 5 are
+  REMOVED. This bullet is kept only as a record that the disposition above was re-checked against
+  the actual shipped code at each stage, not assumed from this document's own first draft.
 - **A real timing characteristic, found incidentally while shipping task #66, worth carrying into
   the "is `cityGen()` fast enough to run synchronously" question above**: this PoC's own synthetic
   `buildSite` makes `isWater`/`riverDist` an O(shoreline-length) linear scan, and river/bay/coast

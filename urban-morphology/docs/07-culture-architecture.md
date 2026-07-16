@@ -87,6 +87,14 @@ The Roman profile:
 function that used to hard-code medieval behaviour now reads its choice off the resolved profile
 object passed down the call chain — never a global, never a second hidden branch.
 
+> **Reading note (post-launch simplification, §3.10 below):** §§3.1–3.9 narrate the historical
+> development of this architecture across the tool's original 19-profile roster. That roster has
+> since been culled to 2 (medieval + Venus) — §3.10 documents why and what changed. The narrative
+> below is left intact as engineering history (the schema decisions, the reused-primitive
+> discipline, and the bugs found and fixed all remain accurate and instructive), but a profile it
+> names may no longer be selectable in the shipped app; treat culture names in §§3.1–3.9 as
+> historical illustrations of the pattern, not a current feature list.
+
 ### 3.1 Schema fields added while shipping profiles 3–8 (Islamic → Mesopotamian)
 
 Each addition generalizes a mechanism first proven on Roman/Islamic rather than special-casing a
@@ -642,24 +650,114 @@ per culture.
   `model.details`, so this entire register is structurally incapable of affecting the cross-version
   neutrality every other addition in this project is held to.
 
-## 4. Roman planned-colony morphology — quantified (M-ROM register)
+### 3.10 Post-launch simplification: culling to two structurally-distinct profiles
 
-| Quantity | Value | Source |
-|---|---|---|
-| Grid layout | two principal streets, **cardo maximus** (N–S) and **decumanus maximus** (E–W), intersecting at/near the **forum**; minor cardines/decumani at regular spacing fill in the rest of the grid | [Roman city planning](https://www.theartnewbie.com/blog/rome/roman-city-planning); [Quadralectic: Roman grid towns](https://quadralectics.wordpress.com/4-representation/4-1-form/4-1-3-design-in-city-building/4-1-3-4-the-grid-model/4-1-3-4-3-the-roman-grid-towns/) |
-| Minor grid spacing | minor cardines ≈ **50–60 m** apart | Roman city planning (above) |
-| Insula size | typically **~80–120 m along the decumanus by ~30–50 m along the cardo** in major centres (Rome/Ostia); roughly 3×1 *actus* | [Insula (Roman city) — Wikipedia](https://en.wikipedia.org/wiki/Insula_(Roman_city)) |
-| Insula building | multi-storey **apartment block** (the *insula* building proper): ~300–400 m² footprint, ~15–20 m tall (3–5 storeys); wealthier lots instead carry a **domus** (atrium + peristyle courtyard house) | [Insula (building) — Wikipedia](https://en.wikipedia.org/wiki/Insula_(building)); [Missed History: Roman insulae](https://www.missedhistory.com/article/roman-insulae-ancient-apartment-buildings) |
-| Forum siting | at or immediately adjacent to the cardo/decumanus maximus crossing, ringed by the principal civic buildings (basilica, temple, curia) | [Roman city planning](https://www.theartnewbie.com/blog/rome/roman-city-planning) |
-| Castrum-derived gates | four gates on the military-camp-derived plan: **porta praetoria** (front), **porta decumana** (rear), **porta principalis dextra/sinistra** (flanks, astride the via principalis) | [Castra — Wikipedia](https://en.wikipedia.org/wiki/Castra); [UNRV: Castrum](https://www.unrv.com/military/castrum.php) |
-| Camp/colony proportions | a legionary castrum ran roughly **500 × 400 m** with rounded corners; a civilian colonia derived from the same module is typically smaller and squarer | Castra — Wikipedia |
-| Orientation | many colonial foundations show deliberate **cardinal or ritual/augural** alignment (solstice-aligned in some cases), contrasting with the organic pack's terrain/market-led orientation — this is a **testable statistical signature**: the Roman pack should show materially lower street-orientation entropy than the medieval pack (M-NET-1-family metric, reused, not reinvented) | [Roman towns oriented to sunrise/sunset on solstices (ResearchGate)](https://www.researchgate.net/publication/314577238_Roman_Towns_Oriented_to_Sunrise_and_Sunset_on_Solstices) |
+After §§3.1–3.9 shipped the full 19-profile roster (17 historical cultures + Venus + Palimpsest),
+a review of every profile's actual rendered output — not just its data/prov text — found that most
+of the 17 historical, organic-planning cultures produced towns that read as visually near-identical
+to the medieval baseline at the level this tool actually draws: same accretive street tangle, same
+burgage-style parcel comb, same building massing, differing mainly in prov-text citations and a few
+detail-layer flourishes (a games building, a field pattern) that don't register as a distinct *city
+shape* at a glance. This is a rendering/visual-distinctiveness finding, not a defect in the
+underlying research — every M-* citation these profiles carried remains valid and citable (recovered
+from git history if ever needed again) — but it meant shipping 19 selectable cultures that mostly
+looked like 2.
 
-Register entries to add to `docs/03-mathematical-assumptions.md` under a new "M-ROM" section:
-`M-ROM-1` (grid + minor spacing), `M-ROM-2` (insula dimensions), `M-ROM-3` (insula/domus building
-form), `M-ROM-4` (forum siting), `M-ROM-5` (castrum gate scheme), `M-ROM-6` (orientation /
-statistical signature) — added alongside the implementation in the next commit so the register
-and the code land together, per this project's own discipline.
+**Decision (user-directed):** delete the 17 near-identical profiles entirely — not archive behind a
+flag, not de-emphasize, actually remove the data rows, the dedicated functions they alone called,
+and the tests/docs sections describing them. Keep exactly two:
+
+- **medieval**, rebranded in its display name to **"Organic Growth (Medieval Western European)"**
+  — framing it as the general organic-planning pattern (which is what it always was) rather than one
+  culture among 18 near-equivalent others. The internal `id:'medieval'` is unchanged (it remains the
+  Phase-1 neutrality anchor and the fallback `resolveProfile()` resolves any unknown/removed culture
+  id to), and its own generation behaviour is otherwise untouched, aside from one small addition
+  (below).
+- **venus** (`planning:'radial'`) — kept because its concentric-ring/radial-spoke growth model is
+  *structurally* distinct from organic accretion, not just differently labelled. Softened per direct
+  feedback that its perfectly mathematical circles read as too mechanically exact against every
+  other profile's noisy, accretive streets (the one artificial-looking thing on the map) — see
+  below.
+
+**What was removed** (docs/03's per-culture register sections H–W and Z retain nothing but an
+archival pointer; the full text is in git history):
+
+- `CULTURE_PROFILES` entries, `GAMES_SPEC` entries, and `FARM_SPEC` entries for all 17: Roman,
+  Islamic, Byzantine, Chinese, Aztec, Viking, Celtic, Greek, Egyptian, Mesopotamian, Mayan, Inca,
+  Japanese, Colonial, Frontier, Industrial, Palimpsest.
+- Dedicated functions with no other caller once those profiles were gone: `buildGridStreets` (the
+  planned-grid street layout §3.2 describes), the whole Palimpsest growth block (`narrowColonnades`,
+  `dissolveWardWalls`, `growAlongFixedEdge`, §3.5), `buildChinampas` (Aztec's lake-city gardens),
+  `tagFactory` (Industrial's mill anchor), `insulaLots` (Roman's bounding-box parcel method), the
+  `domus-insula`/`courtyard-house`/`longhouse`/`roundhouse` building-grammar branches in
+  `buildBuildings`, the `castrum`/`bab`/`compass` wall-gate-scheme relabel blocks (plus a
+  pre-existing dead `cardinal` block, orphaned even earlier by §3.6's grid→organic conversion), and
+  five of the M-FARM register's seven pattern generators (`gridFields`, `fanFields`, `basinFields`,
+  `canalFields`, `terraceFields`, §3.9) along with `ellipsePoly`/`stadiumPoly`/`ballcourtPoly`
+  (M-GAMES register, §3.7–3.8).
+- The `insulaParcels`/`householdMultiplier` population-correction scaffolding (only relevant to
+  `domus-insula`-grammar profiles, all gone), 19→2 test blocks in `tests/test_tail.js` and
+  `tests/browser_check.js`, and the culture `<select>` dropdown's 17 now-invalid options.
+- Data-driven dispatch tables that survive with zero current entries for the removed keys — e.g.
+  `FARM_SPEC`'s `pattern` dispatch, `GAMES_SPEC`'s per-culture array, `parcelPattern`'s
+  `'strip'`/`'insula'` branch in `buildParcels` — are kept generic rather than hardcoded to exactly
+  2 profiles, so a 3rd/4th profile addition is a new table row (and, if its geometry is genuinely
+  novel, one new pattern function), not an engine change; this is the same "a new civilization is a
+  new table row" principle §1 already established, just proven again in reverse by how cleanly the
+  removal came apart along the same seams.
+
+**What changed for the two survivors:**
+
+- **Medieval** gained a `pastureShare`/`pastureFar` on its `FARM_SPEC` entry. Before this pass,
+  medieval's own baseline `stripFields` never produced the `pasture` detail kind — only the
+  now-removed Byzantine/Viking entries exercised it — so without this addition, a genuinely new
+  feature from §3.9 (the `pasture` kind, its own CSS class and legend chip) would have shipped
+  unreachable in the final 2-profile app. A modest common-pasture share, more prevalent farther from
+  the town, stands in for the open-field system's communally-grazed fallow shift and true
+  common/waste land at the village margins — well-attested for medieval England independent of this
+  project's own research, not an invented justification for keeping the mechanism alive.
+- **Venus**'s `buildRadialStreets` gained a seeded low-frequency wobble: each concentric ring's
+  radius is perturbed by a two-term summed sine (±5.5%, phase drifting per ring index the way real
+  tree-ring eccentricity does), and both the primary and cross spoke angles get a small jitter
+  (±0.045 rad) around their otherwise-even spacing. The spokes themselves stay geometrically
+  straight lines (not bent), so the radial skeleton — hub, concentric rings, spokes — is still
+  immediately legible; only the perfect-compass look is lost. Verified directly (not just by the
+  headless suite passing): ring-tagged street edges on a sample generation show 8–10% peak-to-peak
+  radius spread within each nominal ring, consistent with the ±5.5% design amplitude, confirming the
+  softening is genuinely active rather than a no-op. `buildWaterway` (the decorative irrigation
+  ring, M-VEN-3) was deliberately left un-wobbled — out of scope for a change framed around the
+  radial *street* growth mode specifically; revisit if the un-softened waterway starts to look
+  inconsistent against the now-organic ring streets it encircles.
+
+**Explicitly deferred, not attempted in this pass (both per direct user instruction):**
+
+- **Successive city walls → ring roads.** The historical mechanic where a growing settlement
+  outgrows its wall, a new outer wall is built around the expanded area, and the old inner wall is
+  eventually dismantled for building material — its foundation surviving as a ring road inside the
+  modern street plan (a real, well-attested pattern in many old European/Asian cities). Raised
+  during this same review; explicitly held for a future pass, not designed or implemented here. Any
+  future attempt should account for: multiple wall generations coexisting in the model at once
+  (current `wallState` assumes a single active ring), the demolition-to-road conversion needing new
+  render/data handling (a wall segment becoming a `street`-class edge is not something any existing
+  mechanism does), and interaction with the existing gate-placement and field-of-fire-clearing logic
+  for whichever wall generation is currently "active."
+- **Scale-up to 40–200 settlements.** The user flagged that today's per-building and per-road-segment
+  detail model — real for a single settlement — becomes far too complex and expensive to hold for a
+  regional view of many settlements at once. No redesign was attempted here; this is a note for
+  whenever that scale is actually reached, in the same spirit as this document's own §7 (explicitly
+  deferred, not silently dropped). Worth considering when the time comes: a level-of-detail scheme
+  where only a focused/selected settlement renders full per-building fidelity while others render as
+  a schematic footprint or a handful of aggregate stats; whether `model.details`/`model.buildings`
+  need to become lazily-generated rather than always-materialized; and whether the existing
+  `hashModel()` neutrality discipline needs a regional-scale equivalent.
+
+## 4. Roman planned-colony morphology — archived (was: quantified M-ROM register)
+
+This section quantified the Roman profile's grid layout, insula dimensions, forum siting, castrum
+gate scheme, and orientation signature. The Roman profile itself was removed in the post-launch
+simplification pass (§3.10); the full quantified table is recoverable from git history if a future
+grid-planned profile addition wants to reuse it. `docs/03-mathematical-assumptions.md`'s own M-ROM
+section carries the same archival pointer.
 
 ## 5. Environment-first pipeline (audit against the requested order)
 
@@ -670,7 +768,7 @@ Architecture → Rendering`. The existing `generate()` is audited against this o
 |---|---|---|
 | Environment | `buildSite` | Already first. ✓ |
 | Settlement Site | `placeAnchors` | Already second — anchor placement is site-conditioned. ✓ |
-| Transportation | `buildPrimaries`, `grow` (streets) | Already precedes buildings. For the grid profile this becomes `buildGridStreets`, same slot. ✓ (profile-branched, not reordered) |
+| Transportation | `buildPrimaries`, `grow` (streets) | Already precedes buildings. Venus's `planning:'radial'` branches to `buildRadialStreets` in the same slot; a since-removed planned-grid profile once branched to `buildGridStreets` here, per §3.10. ✓ (profile-branched, not reordered) |
 | Economic Nodes | `buildPlaza`, `buildHarbour`, `buildMarkets`, `buildCivic` | **Currently interleaved with growth/buildings rather than a distinct stage** — `buildPlaza`/`buildHarbour` run before `grow`, but `buildMarkets`/`buildCivic` run after `buildBuildings`. This is a real ordering gap: economic/civic anchor *sites* are chosen early (correctly informing growth), but the *buildings* that occupy them are built in the amenity pass at the end, which is fine (a market building depends on final parcels) — so no code move is needed, just documentation of the distinction between siting a node (early) and building on it (late, after the fabric exists to build into). |
 | Urban Growth | `buildBlocks`, `buildParcels`, `assignDistricts` | Unchanged order. ✓ |
 | Architecture | `buildBuildings`, `buildFaithSites`, `buildMarkets`, `buildCivic`, `buildDetails` | Unchanged order. ✓ |
