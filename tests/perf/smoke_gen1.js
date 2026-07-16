@@ -1118,6 +1118,38 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { hadPrevBeforeZoom, zoomStepMs, scheduledRebuild, expectedZ, finalZ, stillPending };
   });
 
+  // v0.93 hotfix (owner report: "lakes are blocky/pixilated again" + "tiles don't seem to be cached"):
+  // a REAL continuous zoom gesture (many ticks with no pause between them -- a back-to-back synchronous
+  // loop with no await/setTimeout reproduces this deterministically, since nothing yields to the event
+  // loop for the deferred overview rebuild to run) used to let the stretch-placeholder staleness compound
+  // without limit, because every tick's _lodScheduleOverviewRebuild call superseded the previous tick's
+  // still-pending one before any of them could land -- confirmed visually (checkerboarded, heavily
+  // blocky overview after 8 ticks). A hard ratio cap on any single stretch was tried and rejected -- it
+  // also blocked the legitimate single-big-jump case (one wheel tick straight to a deep zoom) that opt #1
+  // exists to keep fast. The actual fix bounds CONSECUTIVE un-landed stretches instead
+  // (_lodOverviewStretchStreak / LOD_OV_STRETCH_STREAK_CAP): a lone big jump still takes the fast path
+  // (streak 0->1), but a burst is forced into a synchronous resync once the streak gets too long.
+  // Regression guard: after a rapid multi-tick zoom with no settle time, (a) the streak counter itself
+  // never exceeds the cap (proving the forced-resync branch actually fired during the burst, not just
+  // that the counter kept climbing unchecked), and (b) the overview actually got refreshed at least once
+  // mid-burst (its captured view differs from the very first zoom-in step, proving it isn't just stuck
+  // showing the original whole-map capture the entire time).
+  R.lodOverviewStretchCap = await page.evaluate(async () => {
+    state.debug = 'off'; _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 1;
+    applyView(); renderNow();   // establish an initial prev overview
+    const steps = [2, 3, 5, 8, 12, 16, 20, 24];
+    let firstStepSpan = null;
+    for (const z of steps) {
+      _lodZoom = z; applyView(); renderNow();   // no waits: back-to-back, like a fast continuous wheel-scroll
+      if (firstStepSpan == null) firstStepSpan = _lodOverviewPrev.x1 - _lodOverviewPrev.x0;
+    }
+    const streakAfterBurst = _lodOverviewStretchStreak;
+    const finalOverviewSpan = _lodOverviewPrev.x1 - _lodOverviewPrev.x0;
+    const refreshedMidBurst = Math.abs(finalOverviewSpan - firstStepSpan) > 1e-9;
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { streakAfterBurst, refreshedMidBurst };
+  });
+
   // v0.93 optimization: refineVisibleTiles now dispatches pool-eligible batches to GENPOOL.runTiles
   // (task-parallel across cores) instead of computing every tile sequentially on the main thread.
   // Regression guard: the pool path must be measurably faster than the forced-sync path AND produce
@@ -1332,6 +1364,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.93 optimization: a zoom step with a previous overview in hand returns near-instantly (stretch + defer, not a full rebuild)', R.lodProgressiveOverview.hadPrevBeforeZoom === true && R.lodProgressiveOverview.zoomStepMs < 30);
   A('v0.93 optimization: the zoom step schedules a background rebuild instead of skipping it', R.lodProgressiveOverview.scheduledRebuild === true);
   A('v0.93 optimization: the deferred rebuild lands the correct (not stale) zoom level shortly after', R.lodProgressiveOverview.finalZ === R.lodProgressiveOverview.expectedZ && R.lodProgressiveOverview.stillPending === false);
+  A('v0.93 hotfix: a rapid multi-tick zoom gesture bounds the consecutive-stretch streak (was unbounded — "lakes blocky again")', R.lodOverviewStretchCap.streakAfterBurst <= 4);
+  A('v0.93 hotfix: the overview actually resyncs at least once during a rapid multi-tick burst (not stuck on the original capture)', R.lodOverviewStretchCap.refreshedMidBurst === true);
   A('v0.93 optimization: GENPOOL is usable in a real browser (Worker support present)', R.lodRefinePool.poolUsable === true);
   A('v0.93 optimization: refineVisibleTiles via the pool is faster than the forced-sync fallback', R.lodRefinePool.withPoolMs < R.lodRefinePool.syncOnlyMs);
   A('v0.93 optimization: pooled tile refinement produces the same data as the sync fallback', R.lodRefinePool.allMatch === true);

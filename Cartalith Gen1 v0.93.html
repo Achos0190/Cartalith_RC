@@ -8492,6 +8492,7 @@ let _lodTileCanvasCache=new Map(); const LOD_TILE_CANVAS_MAX=24;
 let _lodOverviewPrev=null;   /* {canvas,x0,y0,x1,y1,z,key,fieldGen} — last fully-rendered overview */
 let _lodEditGen=0;           /* bumped on any tile-edit mutation so caches never serve stale edits */
 let _lodOverviewRebuildPending=null;   /* v0.93: reqKey of an in-flight async overview rebuild, or null */
+let _lodOverviewStretchStreak=0;   /* v0.93 hotfix: consecutive stretch-only overview frames since the last landed rebuild (see drawLODView) */
 /* v0.93: split the tile-vs-debug colorization closure out of drawLODView() so the async overview
    rebuild below can rebuild it fresh from CURRENT state (not a stale closure captured before the
    ~0ms defer) without duplicating the branching logic. */
@@ -8548,6 +8549,7 @@ function _lodScheduleOverviewRebuild(rk,v,span,spanY,OVW,OVH){
     }
     const octx=_lodOverviewPrev.canvas.getContext('2d'); octx.clearRect(0,0,OVW,OVH); octx.drawImage(_lodScratch,0,0);
     Object.assign(_lodOverviewPrev,{x0:v.x0,y0:v.y0,x1:v.x1,y1:v.y1,z:v.z,key:rk,fieldGen:fg});
+    _lodOverviewStretchStreak=0;   // a real rebuild landed — subsequent ticks can stretch from a fresh baseline again
     renderNow();
   },0);
 }
@@ -8614,10 +8616,35 @@ function drawLODView(){
     const OV_TARGET_W=512, ovScale=Math.min(1, OV_TARGET_W/GW);
     const OVW=Math.max(64,Math.round(GW*ovScale)), OVH=Math.max(48,Math.round(GH*ovScale));
     const prev=_lodOverviewPrev;
+    /* v0.93 hotfix (owner report: "lakes are blocky/pixilated again" + "tiles don't seem to be
+       cached"): during a REAL continuous zoom gesture (rapid wheel ticks, no pause between them —
+       reproduced headlessly with a back-to-back synchronous loop, unlike the scripted single-jump-
+       then-wait verification this shipped with), every tick's `_lodScheduleOverviewRebuild` call
+       supersedes the previous tick's still-pending one (different reqKey each time — see that
+       function), so NONE of them ever run to completion while ticks keep arriving faster than one can
+       land. The stretch branch below had no limit on how many consecutive ticks could stretch the SAME
+       increasingly-stale `prev`, so a burst left the overview pinned to whatever view it was last
+       SUCCESSFULLY rebuilt at while every subsequent tick stretched it further — confirmed visually: a
+       fast multi-tick burst left the overview stretched ~5x past its last real capture, a heavily
+       blocky/checkerboarded frame. A cap on the STRETCH RATIO of any single frame was tried first and
+       rejected: it also blocked the legitimate single-big-jump case (e.g. one wheel tick going straight
+       from the whole map to a deep zoom) that opt #1 exists to keep fast — that case is exactly ONE
+       stretch away from a fresh `prev`, not a compounding burst, and must stay near-instant. The actual
+       problem is consecutive un-landed stretches, not the size of any one of them: `_lodOverviewStretchStreak`
+       counts how many stretch-only frames have been drawn since the last overview actually finished
+       rebuilding, and forces a synchronous resync (same ~100-130ms cost the v0.92 512px cap already
+       proved acceptable) once that streak gets too long — bounding how stale a burst can get while
+       leaving a single jump (streak 0→1) on the fast path. Every real rebuild (sync below, or the
+       deferred one in _lodScheduleOverviewRebuild) resets the streak to 0. Tile refinement (`_lodCache`)
+       is unaffected by this fix — its own 240ms debounce (`scheduleLodRefine`) already behaves the same
+       way and already self-corrects the moment input pauses (verified separately); what read as "tiles
+       never cache" was this same overview staleness making every frame during a fast gesture look
+       uncached, not a `_lodCache` defect. */
+    const LOD_OV_STRETCH_STREAK_CAP=4;
     if(prev && prev.key===rk && prev.z===v.z && Math.abs((prev.x1-prev.x0)-span)<1e-9 && Math.abs((prev.y1-prev.y0)-spanY)<1e-9){
       const dx=(prev.x0-v.x0)/span*GW, dy=(prev.y0-v.y0)/spanY*GH;
       vctx.drawImage(prev.canvas, 0,0,prev.canvas.width,prev.canvas.height, dx,dy,GW,GH);
-    } else if(prev && prev.key===rk){
+    } else if(prev && prev.key===rk && _lodOverviewStretchStreak<LOD_OV_STRETCH_STREAK_CAP){
       /* v0.93: `key` matching means content/style are IDENTICAL to prev (same terrain, same debug
          view, same opacity/sea-level/exag/sun — see _lodRenderKey) and only the VIEWPORT (zoom/pan)
          moved — exactly the "continuous zoom gesture" case the original v0.92 profiling found
@@ -8629,16 +8656,22 @@ function drawLODView(){
          — those are direct manipulations where the user expects the effect immediately, not a
          one-frame-stale preview (confirmed by the v0.91 opacity-slider regression this distinction
          fixes: an earlier cut of this gated on fieldGen alone, which let opacity changes take the
-         deferred path too, and a slider read stayed one frame behind). */
+         deferred path too, and a slider read stayed one frame behind). Bounded by
+         LOD_OV_STRETCH_STREAK_CAP above — too many consecutive stretches without a landed rebuild
+         falls through to the synchronous rebuild below instead of compounding indefinitely (see the
+         hotfix comment above). */
       const pdx=(prev.x0-v.x0)/span*GW, pdy=(prev.y0-v.y0)/spanY*GH;
       const pdw=(prev.x1-prev.x0)/span*GW, pdh=(prev.y1-prev.y0)/spanY*GH;
       vctx.drawImage(prev.canvas, 0,0,prev.canvas.width,prev.canvas.height, pdx,pdy,pdw,pdh);
+      _lodOverviewStretchStreak++;
       _lodScheduleOverviewRebuild(rk,v,span,spanY,OVW,OVH);
     } else {
-      /* first-ever overview for this world/session (nothing to stretch from), or `rk` changed —
-         a style/content change (opacity, debug view, sea level, ...), where the user is directly
-         manipulating something and expects the effect immediately, not a stale stretched preview —
-         rebuild synchronously, same as pre-v0.93. */
+      /* first-ever overview for this world/session (nothing to stretch from), `rk` changed — a
+         style/content change (opacity, debug view, sea level, ...), where the user is directly
+         manipulating something and expects the effect immediately, not a stale stretched preview
+         — or the stretch streak exceeded LOD_OV_STRETCH_STREAK_CAP (a fast zoom gesture has gone too
+         many consecutive ticks without a landed rebuild). Rebuild synchronously; this is also what
+         resets the streak so subsequent ticks can resume stretching from a fresh baseline. */
       let base=amplifyRegion(field, GW, GH, {x:v.x0, y:v.y0, w:span, h:spanY}, OVW, OVH, {detailAmp:0, sea:state.seaLevel});
       base=composeTileEdits(base, OVW, OVH, {x:v.x0, y:v.y0, w:span, h:spanY});
       _lodScratch.width=OVW; _lodScratch.height=OVH;
@@ -8649,6 +8682,7 @@ function drawLODView(){
       }
       const octx=_lodOverviewPrev.canvas.getContext('2d'); octx.clearRect(0,0,OVW,OVH); octx.drawImage(_lodScratch,0,0);
       Object.assign(_lodOverviewPrev,{x0:v.x0,y0:v.y0,x1:v.x1,y1:v.y1,z:v.z,key:rk,fieldGen:_fieldGen});
+      _lodOverviewStretchStreak=0;
     }
     /* 2) overlay the refined/baked tiles the user has generated/baked (baked image > refined; no work on
        navigate). Non-baked tiles get their overlapping edit-deltas composed in at full tile resolution.

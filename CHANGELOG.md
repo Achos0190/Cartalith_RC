@@ -12,6 +12,36 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.93 hotfix (2026-07-16)
+**Owner live-testing report: "On part of lakes, the edges are blocky/pixilated again. Also the
+generated LOD tiles don't seem to be cached."** Root-caused via a headless repro (not guessed):
+optimization #1's progressive overview (stretch + defer, above) has no problem with a single big
+zoom jump — that case is exactly what it's built for and stays fast — but a **real continuous zoom
+gesture** (many rapid ticks with no pause between them, unlike the single-jump-then-wait scenario
+the shipped verification exercised) lets every tick's `_lodScheduleOverviewRebuild` call supersede
+the previous tick's still-pending one before any of them land. `_lodOverviewPrev` then stays pinned
+at whatever view it was last successfully rebuilt at while each subsequent tick stretches it
+further — confirmed visually with an 8-tick, 15ms-spaced headless repro: the overview ended up
+stretched ~5x past its last real capture, a heavily blocky/checkerboarded frame exactly matching
+the report. (Tile refinement itself was never actually broken — `_lodCache` populates correctly the
+moment input pauses, verified separately; "tiles don't seem cached" was the same overview
+staleness making every frame during a fast gesture look unrefined.)
+- **First attempt (rejected before shipping)**: cap the stretch *ratio* of any single frame. This
+  broke the ALREADY-SHIPPED `R.lodProgressiveOverview` regression test — a single big jump (e.g.
+  whole-map to a deep zoom in one tick) legitimately needs a large one-time stretch, and capping
+  ratio blocked exactly the case opt #1 exists to keep fast, not just the runaway-burst case.
+- **Shipped fix**: bound *consecutive un-landed stretches* instead of stretch magnitude.
+  `_lodOverviewStretchStreak` counts stretch-only frames since the last overview actually finished
+  rebuilding (real rebuild, sync or the deferred async one, resets it to 0); once the streak hits
+  `LOD_OV_STRETCH_STREAK_CAP=4`, `drawLODView()` forces a synchronous resync (same ~100-130ms cost
+  the v0.92 512px cap already proved acceptable) instead of stretching further. A lone big jump
+  still takes the fast path (streak 0→1); only a genuine multi-tick burst gets throttled into
+  periodic resyncs. Two new smoke-suite regression guards (streak stays bounded after an 8-tick
+  synchronous burst; the overview genuinely resyncs at least once mid-burst, not stuck on the
+  original capture) alongside the pre-existing single-jump guard — all three green together.
+  `_lodOn`-gated only; render battery **ALL IDENTICAL to v0.92**, headless **923** unchanged, smoke
+  **157 → 159**.
+
 ### v0.93 (2026-07-16)
 **Owner /goal: "make the proposed optimisations in a new version, keep a focus on graphic fidelity
 (no pixelated views or blockyness when zooming in on terrain)."** Three LOD-render/tile-pipeline
