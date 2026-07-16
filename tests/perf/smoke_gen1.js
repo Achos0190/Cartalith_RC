@@ -1245,6 +1245,79 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   });
   R.lodCheckboxAutoRefine.noNewErrors = errors.length === errorsBeforeCheckbox;
 
+  // v0.94 (owner request: "draw rivers as ways, as in the legacy cartalith app"): a new default-on
+  // vector overlay (state.viz.riverWays, drawRiverWays()) layers stroked river-network splines on top
+  // of the existing raster water blend, on both the main canvas and under Tiled LOD (closing a
+  // pre-existing gap where the default LOD Biome view never showed the river network's color at all).
+  // Regression guard: the checkbox reflects/drives state.viz.riverWays, and toggling it produces a
+  // real, visible pixel difference on BOTH the main canvas and a LOD view zoomed onto a real river.
+  R.riverWays = await page.evaluate(async () => {
+    state.debug = 'off'; state.mode = 'biome'; _lodOn = false; _lodZoom = 1; applyView();
+    const chk = document.getElementById('riverWaysChk');
+    const checkboxReflectsDefault = !!chk && chk.checked === true && state.viz.riverWays === true;
+
+    if (!_riverNet) _riverNet = buildRiverNetwork(field, flowField, GW, GH, state.seaLevel, { world: state.world, riverDensity: (state.viz.riverDensity) || 1 });
+    // find a river cell to center the LOD view on (order >= 2, away from the map edge)
+    let spotX = GW / 2, spotY = GH / 2, found = false;
+    for (let y = 4; y < GH - 4 && !found; y++) for (let x = 4; x < GW - 4 && !found; x++) {
+      if (_riverNet.order[y * GW + x] >= 2) { spotX = x; spotY = y; found = true; }
+    }
+
+    renderNow();
+    const mainOn = vctx.getImageData(0, 0, GW, GH).data.slice();
+    state.viz.riverWays = false; chk.checked = false; renderNow();
+    const mainOff = vctx.getImageData(0, 0, GW, GH).data.slice();
+    state.viz.riverWays = true; chk.checked = true; renderNow();
+
+    let mainDiffPx = 0;
+    for (let i = 0; i < mainOn.length; i += 4) {
+      if (Math.abs(mainOn[i] - mainOff[i]) + Math.abs(mainOn[i + 1] - mainOff[i + 1]) + Math.abs(mainOn[i + 2] - mainOff[i + 2]) > 6) mainDiffPx++;
+    }
+
+    _lodOn = true; _lodCx = spotX; _lodCy = spotY; _lodZoom = 16; applyView(); renderNow();
+    await refineVisibleTiles(); renderNow();
+    const cv = document.getElementById('view'), cctx = cv.getContext('2d');
+    const lodOn = cctx.getImageData(0, 0, cv.width, cv.height).data.slice();
+    state.viz.riverWays = false; renderNow();
+    const lodOff = cctx.getImageData(0, 0, cv.width, cv.height).data.slice();
+    state.viz.riverWays = true; renderNow();
+
+    let lodDiffPx = 0;
+    for (let i = 0; i < lodOn.length; i += 4) {
+      if (Math.abs(lodOn[i] - lodOff[i]) + Math.abs(lodOn[i + 1] - lodOff[i + 1]) + Math.abs(lodOn[i + 2] - lodOff[i + 2]) > 6) lodDiffPx++;
+    }
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx };
+  });
+
+  // v0.94 (owner report: "when using a very long route where a split or partial is possible by sea
+  // or river... it opts to only use land based routes"). Root cause: _civMixedCostGrid's water cost
+  // (1.5) was tuned ABOVE typical flat land (~1.0), backwards from the journey planner's own ~2.5x
+  // sea-speed model, land cost ignored biome friction, and real rivers carried no cost at all. Fixed
+  // by rebalancing water below land, adding real river costing, and sharing the biome-penalty model.
+  // Regression guard: on a fixed seed/resolution (reproducible geography), a coastal point pair whose
+  // land-only route requires a real detour around the coastline (found via an independent Playwright
+  // probe against v0.93 vs this build: v0.93 committed a ~5-6% water route here, essentially
+  // all-land; v0.94 committed 35-50% water on the SAME pairs) must show a materially higher water
+  // fraction than the old behavior — asserted against a fixed threshold safely between the two
+  // observed values, not a live A/B (the new cost constants are `const`, not toggleable at runtime).
+  R.routingSeaShortcut = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    await generate();
+    const pairs = [
+      { x1: 810, y1: 530, x2: 754, y2: 602 },   // v0.93 waterFrac 0.051 -> v0.94 0.349 (independently measured)
+      { x1: 798, y1: 494, x2: 758, y2: 606 },   // v0.93 waterFrac 0.061 -> v0.94 0.500
+    ];
+    const out = pairs.map(p => {
+      const mixed = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'mixed');
+      const land = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'land');
+      if (!mixed || !mixed.pts) return { ok: false };
+      return { ok: true, waterFrac: _civPathWaterFrac(mixed.pts), mixedKm: mixed.km, landKm: land ? land.km : null };
+    });
+    return { pairs: out };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1374,6 +1447,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.93 optimization: bakeAllTiles via the pool is faster than the forced-sync fallback for a multi-level bake', R.bakeAllTilesPool.withPoolMs < R.bakeAllTilesPool.syncOnlyMs);
   A('v0.92 follow-up fix: checking "Tiled LOD view" alone (no pan/zoom) auto-refines the visible tile', R.lodCheckboxAutoRefine.cachedAfterCheck === true);
   A('v0.92 follow-up fix: unchecking the box before the deferred refine settles throws no errors', R.lodCheckboxAutoRefine.noNewErrors === true);
+  A('v0.94: "Draw rivers as ways" checkbox reflects the new default-on state', R.riverWays.checkboxReflectsDefault === true);
+  A('v0.94: a real river cell is found on the fixed-seed world (test precondition)', R.riverWays.foundRiverSpot === true);
+  A('v0.94: river ways toggle produces a real pixel difference on the main canvas', R.riverWays.mainDiffPx > 0);
+  A('v0.94: river ways toggle produces a real pixel difference under Tiled LOD (closes the old "LOD shows no river color" gap)', R.riverWays.lodDiffPx > 0);
+  A('v0.94 routing fix: both fixed-seed coastal detour pairs resolve to a valid mixed route', R.routingSeaShortcut.pairs.every(p => p.ok));
+  A('v0.94 routing fix: a coastal route with a land detour now uses a real sea shortcut (was ~5-6% water, now materially more)', R.routingSeaShortcut.pairs.every(p => p.waterFrac >= 0.2));
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

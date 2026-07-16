@@ -12,6 +12,78 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.94 (2026-07-16)
+**Owner /goal: "go on with the 4th proposal [colorization loop restructuring], draw rivers as ways
+as in the legacy cartalith app, and make route planning take sea-faring routes into account — at
+the moment ... it opts to only use land based routes [even] when a split or partial [route] by sea
+or river is possible."** Three pieces of work, each independently verified.
+
+**Part 1 — colorization-loop restructuring, revisited with a narrower scope.** v0.93 deferred this
+proposal outright; this pass re-scoped it per the two independent risks identified then. Fresh
+research (full call-site trace) **proved** `renderBiomeTileRGBA`'s RGBA output is never retained
+past its synchronous call anywhere in the codebase (always `putImageData`/`.set()`-copied or
+pixel-read immediately), so pooling its scratch buffers is provably alias-safe — but the same
+research measured tile-buffer allocation at 2-3 orders of magnitude cheaper than the ~651ms
+per-pixel compute loop it sits inside, so pooling was **evaluated and skipped as not worth the
+risk for a sub-1% gain**. Two changes shipped instead: (a) `sampleArr` row-hoisting —
+`sampleArrRowPrep(fy)`/`sampleArrRow(a,fx,prep)` eliminate the row-only part of `sampleArr`'s
+bilinear math (clamp/y0/y1/ty/row-offsets) being recomputed on every one of the 3 unconditional
+per-pixel calls in `renderBiomeTileRGBA`'s hot loop — proven bit-identical (a pure function of `fy`
+alone, no reordering of the actual data-blend arithmetic) and confirmed via the `--full` 35-config
+hash battery, ALL IDENTICAL. (b) Palette-function scratch-ification (`snowCol`/`rockCol`/etc.,
+next on the project's own performance-audit roadmap) was **designed, then also deferred** — it
+surfaced a genuine nested-call aliasing hazard (`grassCol` calls `ramp3` twice before consuming
+either result; a single shared scratch buffer would silently corrupt the second call's color into
+the first), which needs a proper multi-slot design rather than a rushed single-buffer one. Engine
+bit-identical to v0.93 hotfix at defaults; headless **923** unchanged.
+
+**Part 2 — rivers drawn as ways, as in the legacy Cartalith editor.** `Cartalith_V1.915.html` drew
+every travel network (river/road/rail/sea) as one shared stroked-polyline "way" abstraction; Gen1
+instead renders rivers as a per-pixel raster blend (`surfaceColor` sampling `_riverNet.intensity`/
+`depth`), with true vector strokes existing only inside the opt-in Strahler debug view. That
+existing spline pipeline (`traceRiverPolylines`→`rdpSimplify`→`catmullRomSample`→`riverSinuosity`,
+previously duplicated verbatim between the main-canvas and LOD debug-overlay code) is now factored
+into one shared `drawRiverWays(riverNet, reproj)` — `reproj=null` on the main canvas, `{px,py,
+inView,zk}` under Tiled LOD — and exposed as a new **"Draw rivers as ways"** checkbox
+(`state.viz.riverWays`) next to the existing "Show rivers" toggle. **Per owner decision this pass:
+overlays on top of** the existing raster water blend (both render — not a replacement) and **is
+the new default (ON)** for fresh worlds, a deliberate default-render change (`loadZip` back-compat
+guard keeps pre-v0.94 saves on the old raster-only look, same pattern as v0.80's ocean-currents
+flip). Also closes a pre-existing gap as a side effect: the default Tiled-LOD Biome view never
+showed the river network's water color at any zoom (only a decorative bank-tint SDF) — the vector
+overlay reads correctly at any zoom regardless of that raster limitation. Rendering-only (no
+engine/field change) ⇒ headless **923** unchanged, `field`/`temp`/`rain`/`flow` hashes identical in
+every hash-battery config; `rgba` differs at every biome-mode config by design (confirmed via a
+targeted A/B forcing `riverWays:false` on v0.94, which reproduces v0.93's default hash exactly —
+proving nothing else in the render path changed). Smoke **159 → 163** (checkbox reflects the new
+default; toggling it produces a real pixel difference on both the main canvas and under Tiled LOD).
+
+**Part 3 — sea/river-aware route planning.** Root-caused via full code trace (not guessed):
+`_civMixedCostGrid` — the one function deciding both the interactive Route tool's path and every
+journey — had three real defects. (1) `_CIV_WATER_COST=1.5` was tuned *above* typical flat land
+(`buildTravelCost`'s ≈1.0 baseline); the v0.73 comment says so explicitly ("stays above flat-land
+... so land is still the default on comparable distance") — backwards relative to what the journey
+planner's own speed model already believes (a Cog is 2.5× a walker's base speed; `JP_SHIPS`/
+`JP_LAND_TRANSPORTS`). (2) Land cost here was plain slope-only `buildTravelCost`, ignoring the
+biome-friction table `_civEnhancedTravelCost` already uses for the auto-network builder — under-
+costing land on top of over-costing sea. (3) Real flowing rivers carried **no cost information at
+all** in this grid — a river crossed exactly like dry ground. Fixed by rebalancing water to
+`_CIV_SEA_COST=0.6` (now genuinely cheaper than flat land, matching the ~2-2.5× real speed
+advantage), sharing `_civEnhancedTravelCost`'s biome-penalty table for land cells, and adding
+`_CIV_RIVER_COST_BASE=0.85` (order-scaled, taken as a floor against local land cost so a river
+never makes a cell more expensive, only potentially cheaper) for cells with real discharge (same
+`flowThresh` convention used elsewhere). **Scoped to the interactive Route tool / journey planner
+only** (per owner decision) — the auto-generated world road network (`_civHierarchicalNetwork`/
+`_civMstRoutes`) stays two disjoint land-only/water-only passes, flagged as a possible follow-up,
+not touched this pass. Verified via an independent Playwright A/B (not guessed): on a fixed seed/
+resolution, six coastal point-pairs whose land-only route requires a real detour around the
+coastline were run through `_civDijkstraPath(...,'mixed')` on both v0.93 and this build — every
+pair showed equal-or-higher water usage on v0.94, two dramatically so (5–6% water on v0.93,
+committing an essentially all-land route, → 35–50% water on v0.94, a genuine partial sea shortcut,
+on the *identical* start/end points). Civ layer only (block 2), no engine/field change ⇒ headless
+unaffected by construction; two new smoke-suite regression assertions lock in the two most dramatic
+pairs against a fixed threshold. Smoke **163 → 165**.
+
 ### v0.93 hotfix (2026-07-16)
 **Owner live-testing report: "On part of lakes, the edges are blocky/pixilated again. Also the
 generated LOD tiles don't seem to be cached."** Root-caused via a headless repro (not guessed):
