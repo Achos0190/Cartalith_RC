@@ -848,6 +848,35 @@ fieldsFinite('generate(world)');
   check('updateScaleBar hides when off', document.getElementById('scaleBar').style.display === 'none');
   state.viz.scaleBar = true;
 
+  // v0.88: lodMaxZoom scales with map width (owner report: "highest zoom stops at 20km, want 5km") —
+  // the reachable view span (mapWidthKm/zoom) must be able to reach ≤5km regardless of map size, while
+  // never being less generous than the old fixed ×64 cap for small/default maps.
+  {
+    const savedW = state.mapWidthKm;
+    state.mapWidthKm = 800; const zBig = lodMaxZoom();
+    state.mapWidthKm = 50; const zSmall = lodMaxZoom();
+    state.mapWidthKm = 4000; const zHuge = lodMaxZoom();
+    check('lodMaxZoom reaches ≤5km span at the default map width', zBig >= 800 / 5);
+    check('lodMaxZoom never drops below the legacy ×64 floor', zSmall === 64);
+    check('lodMaxZoom scales up for larger maps', zHuge >= 4000 / 5 && zHuge > zBig);
+    state.mapWidthKm = savedW;
+  }
+
+  // v0.88: updateScaleBar must reflect the LOD-zoomed-in span, not the full map width (root cause of the
+  // owner-reported "scale reading stuck" — the bar used to divide by the full map width at any zoom).
+  {
+    const savedOn = _lodOn, savedZoom = _lodZoom, savedW = state.mapWidthKm;
+    state.mapWidthKm = 800;
+    _lodOn = false; _lodZoom = 1; updateScaleBar();
+    const labelOut = document.getElementById('scaleBar').innerHTML;
+    check('lodSpanKm() reports the full map width when LOD is off', lodSpanKm() === 800);
+    _lodOn = true; _lodZoom = 160; updateScaleBar();
+    const labelIn = document.getElementById('scaleBar').innerHTML;
+    check('lodSpanKm() shrinks with _lodZoom while LOD is on', lodSpanKm() === 5);
+    check('updateScaleBar label changes between zoomed-out and zoomed-in LOD views', labelIn !== labelOut);
+    _lodOn = savedOn; _lodZoom = savedZoom; state.mapWidthKm = savedW;
+  }
+
   // sample pack on disk — proves STORED (sync unzipStore reads it) + manifest shape + PNG headers
   {
     const ab = fs.readFileSync('assets/sample_pack.zip');
@@ -2606,6 +2635,37 @@ if (typeof renderAffordanceTileRGBA === 'function') {
       return wl[p] === c[0] && wl[p + 1] === c[1] && wl[p + 2] === c[2];
     })());
     check('affordance tiles deterministic', (() => { const a = renderAffordanceTileRGBA(tile, W, H, bounds, 'soil'); for (let i = 0; i < a.length; i++) if (a[i] !== ws[i]) return false; return true; })());
+  }
+
+  /* v0.89 (owner report: "tiled LOD info-layers don't scale properly" — root cause: drawLODView() only
+     tiled off/lith/soil/water, so every other debug view fell through to a whole-map un-zoomed render
+     while the canvas stayed sized/fitted for the current zoom). renderAffordanceTileRGBA now covers every
+     non-'off' state.debug value via debugTileContext(); exercise the full vocabulary here. */
+  if (typeof debugTileContext === 'function') {
+    const W = 8, H = 8, bounds = { x: 20, y: 20, w: 8, h: 8 }, tile = new Float32Array(W * H).fill(0.6);
+    tile[0] = state.seaLevel - 0.2;   // one water cell
+    const ALL_DEBUG = ['plates', 'bounds', 'btype', 'oro', 'stress', 'age', 'geoid', 'tides', 'cterrain',
+      'landform', 'fjord', 'bclass', 'rsrc', 'carry', 'settle', 'popdensity', 'wildlife', 'windthrow',
+      'flood', 'koppen', 'wind', 'ocean', 'temp', 'rain', 'flow', 'velo', 'strahler'];
+    let allOk = true, allDet = true;
+    for (const which of ALL_DEBUG) {
+      const out = renderAffordanceTileRGBA(tile, W, H, bounds, which, debugTileContext(which));
+      for (let i = 0; i < out.length; i++) { if (!Number.isFinite(out[i])) { allOk = false; break; } if (i % 4 === 3 && out[i] !== 255) { allOk = false; break; } }
+      const out2 = renderAffordanceTileRGBA(tile, W, H, bounds, which, debugTileContext(which));
+      for (let i = 0; i < out.length; i++) if (out[i] !== out2[i]) { allDet = false; break; }
+    }
+    check('every non-off debug view tile-renders finite + opaque (' + ALL_DEBUG.length + ' views)', allOk);
+    check('every non-off debug view tile-render is deterministic', allDet);
+    // spot-check a few exact water-cell colours against the main-map debug branches (renderNow dbg==='...')
+    const koppenOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'koppen', debugTileContext('koppen'));
+    check('koppen tile: water cell matches main-map debug colour', koppenOut[0] === 18 && koppenOut[1] === 34 && koppenOut[2] === 64);
+    const landformOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'landform', debugTileContext('landform'));
+    check('landform tile: water cell matches main-map debug colour', landformOut[0] === 20 && landformOut[1] === 26 && landformOut[2] === 40);
+    const windthrowOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'windthrow', debugTileContext('windthrow'));
+    check('windthrow tile: water cell matches main-map debug colour', windthrowOut[0] === 18 && windthrowOut[1] === 34 && windthrowOut[2] === 64);
+    // temp has no water branch in the main map either (tempColor applies uniformly) — confirm tile parity
+    const tempOut = renderAffordanceTileRGBA(tile, W, H, bounds, 'temp', debugTileContext('temp'));
+    check('temp tile: water cell still colours by temperature (no water override, matches main map)', !(tempOut[0] === 18 && tempOut[1] === 34 && tempOut[2] === 64));
   }
 }
 

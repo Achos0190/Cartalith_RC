@@ -392,8 +392,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.evaluate(() => { state.finalized = false; applyFinalizedUI(); });
   R.phaseOff = await page.evaluate(() => document.body.classList.contains('phase-explore'));
   // v0.74: finalize control promoted to the FIRST block of Generate → World (id=finalizeSec),
-  //        out of the collapsed Tiles & LOD → Atlas accordion. Checked while not finalized so the
-  //        bake button is visible (applyFinalizedUI hides it once finalized).
+  //        out of the collapsed Atlas cache accordion (v0.92: split out of the old single
+  //        "Tiles & LOD" accordion). Checked while not finalized so the bake button is visible
+  //        (applyFinalizedUI hides it once finalized).
   R.finalizeTop = await page.evaluate(() => {
     const gw = document.getElementById('genWorld');
     const bab = document.getElementById('bakeAllBtn');
@@ -458,7 +459,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.waitForTimeout(100);
 
   // ---- v0.64 (§4.7): pinned selection inspector (shared by the Civ + Carto branches) ----
-  R.inspectorEmptyState = await page.$eval('#inspectorBody', el => el.textContent.includes('Select a settlement'));
+  // v0.90: settlements/POIs moved out to the map pop-up (owner request); the sidebar empty-state hint
+  // was reworded accordingly (no longer promises "select a settlement... to see it here").
+  R.inspectorEmptyState = await page.$eval('#inspectorBody', el => el.textContent.includes('label or icon') && !el.textContent.includes('Select a settlement'));
 
   // ---- v0.64 (§4.8): header Undo + confirm-gated destructive Clear buttons ----
   R.undoDisabledInitially = await page.$eval('#undoBtn', el => el.disabled === true);
@@ -480,10 +483,45 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   R.confirmedWhenNonEmpty = dialogMsg !== null;
   R.placesSurviveDismiss = await page.evaluate(() => state.places.length === 1);
 
-  // ---- v0.65 (§4.7, complete): pinned inspector hosts the FULL edit form; single selection ----
+  // v0.92 (owner report: "Clear places... leaves the routes" — ways carry no settlement-id
+  // reference, so a route to a deleted place doesn't error, it just silently keeps drawing a road
+  // to nowhere). Clear places & routes must wipe civWays/civJourneys along with state.places, same
+  // click. If this run's random seed happens to yield zero auto-populated settlements (matches this
+  // suite's existing no-retry convention for auto-populate elsewhere), hadWaysBefore is false and
+  // the assertion below treats the case as vacuously satisfied. Re-seeds the single-test-place
+  // fixture afterward (same shape the block above left behind) since the very next section relies
+  // on state.places[0] existing.
+  const before = await page.evaluate(() => {
+    state.places = [];
+    _civAutoWorld();
+    if (typeof _civAutoRoutes === 'function') _civAutoRoutes();
+    return { places: state.places.length, ways: civWays.length };
+  });
+  let clearAccepted = false;
+  const hAccept = async d => { clearAccepted = true; await d.accept(); };
+  page.on('dialog', hAccept);
+  await page.evaluate(() => document.getElementById('civClearPlacesBtn').click());
+  await page.waitForTimeout(150);
+  page.off('dialog', hAccept);
+  const after = await page.evaluate(() => ({ places: state.places.length, ways: civWays.length, journeys: civJourneys.length }));
+  R.clearPlacesAlsoClearsRoutes = {
+    hadWaysBefore: before.ways > 0,
+    dialogAccepted: clearAccepted,
+    placesCleared: after.places === 0,
+    waysCleared: after.ways === 0,
+    journeysCleared: after.journeys === 0,
+  };
+  await page.evaluate(() => { state.places.push({x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}); });
+
+  // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
+  // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
+  // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
+  // labels/icons are unchanged (still the sidebar-pinned inspector).
   await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
   await page.waitForTimeout(100);
-  R.editorInInspector = await page.$eval('#inspectorBody', el => !!el.querySelector('#_civPeName'));
+  R.editorInPopup = await page.$eval('#placeEditPopup', el => !!el.querySelector('#_civPeName') && el.style.display === 'block');
+  R.editorNotInInspector = await page.$eval('#inspectorBody', el => !el.querySelector('#_civPeName'));
+  R.popupOnScreen = await page.evaluate(() => { const r = document.getElementById('placeEditPopup').getBoundingClientRect(); return r.x >= 0 && r.x < window.innerWidth && r.y >= 0 && r.y < window.innerHeight; });
   R.noInlineEditorInList = await page.evaluate(() => document.getElementById('civSettlementList').querySelector('#_civPeName') === null);
   await page.fill('#_civPeName', 'Renamed');
   await page.dispatchEvent('#_civPeName', 'input');
@@ -497,9 +535,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.waitForTimeout(100);
   R.labelEditorSwapsIn = await page.$eval('#inspectorBody', el => !!el.querySelector('#_carLeName'));
   R.selectingLabelDeselectsPlace = await page.evaluate(() => _civSelectedPlace === null);
+  R.selectingLabelClosesPlacePopup = await page.$eval('#placeEditPopup', el => el.style.display === 'none');
   await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
   await page.waitForTimeout(100);
   R.selectingPlaceDeselectsLabel = await page.evaluate(() => _civSelectedLabel === null);
+  // v0.90: the × close button deselects the place and hides the popup
+  await page.click('#placeEditPopup .si-close');
+  await page.waitForTimeout(100);
+  R.popupCloseButtonWorks = await page.evaluate(() => _civSelectedPlace === null) && await page.$eval('#placeEditPopup', el => el.style.display === 'none');
 
   // ---- v0.65 (§4.10): per-layer hotkeys ----
   await page.click('#layersBtn');
@@ -511,6 +554,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.keyboard.press('KeyF');
   await page.waitForTimeout(100);
   R.debugAfterF = await page.evaluate(() => state.debug);
+  // v0.90: the place pop-up (and its #_civPeName field) was closed by the × button test above — reselect
+  // to reopen it before using that field for the "typing doesn't trigger hotkeys" check below.
+  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  await page.waitForTimeout(100);
   await page.click('#_civPeName');
   await page.keyboard.type('B');   // typing "B" while focused in a text input must not trigger the hotkey
   await page.waitForTimeout(100);
@@ -544,6 +591,62 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const stillOpen = m.classList.contains('open'); cb.click();
     return { hasImport, hasExport, stillOpenAfterFormClick: stillOpen };
   });
+  // v0.88 (owner report: "export/import take the atlas separately"): the standalone atlas-only round-trip
+  // is retired — "Load project .zip…"/"Export .zip" are the sole 100% import/export actions now.
+  R.atlasStandaloneGone = await page.evaluate(() => ({
+    noImportBtnInFileMenu: !document.getElementById('fileMenu').querySelector('#atlasImportBtn'),
+    noEmbedCheckbox: !document.getElementById('embedAtlasChk'),
+    noExportBtnInSidebar: !document.getElementById('atlasExportBtn'),
+    packStillInAssetsLibrary: !!document.getElementById('alImportPackBtn') && !!document.getElementById('alExportBtn')
+  }));
+
+  // v0.92 (save-export-architecture-audit.md §5A): exportZip() now (1) only includes layers/*.png when
+  // the new opt-in checkbox is ticked (previously unconditional) and (2) skips the redundant map.png/
+  // tiles bake for a FINALIZED world (whose Atlas pyramid already covers the whole map at every baked
+  // level). Verified by capturing the real entries array zipStore() receives — monkey-patched around a
+  // real exportZip() call, since trusting a browser download would need base64-roundtripping the whole
+  // zip through page.evaluate for no extra confidence. Only one of the two calls below (the first) pays
+  // for the real per-pixel map bake; the second is the finalized skip-bake fast path.
+  R.exportTrim = await page.evaluate(async () => {
+    const capture = async () => {
+      let names = null;
+      const orig = zipStore;
+      zipStore = (entries) => { names = entries.map(e => e.name); return orig(entries); };
+      try { await exportZip(); } finally { zipStore = orig; }
+      return names;
+    };
+    document.getElementById('bakeRes').value = '2048';
+    document.getElementById('bakeTiles').checked = false;
+    const lp = document.getElementById('layersPreviewChk');
+    lp.checked = false; setFinalized(false);
+    const namesDefault = await capture();
+    lp.checked = true; setFinalized(true);
+    const namesFinalizedWithLayers = await capture();
+    lp.checked = false; setFinalized(false);
+    return {
+      noLayersByDefault: !namesDefault.includes('layers/biome.png'),
+      mapPngWhenNotFinalized: namesDefault.includes('map.png'),
+      layersWhenChecked: ['layers/biome.png', 'layers/hillshade.png', 'layers/temperature.png', 'layers/rainfall.png'].every(n => namesFinalizedWithLayers.includes(n)),
+      noMapPngWhenFinalized: !namesFinalizedWithLayers.includes('map.png') && !namesFinalizedWithLayers.some(n => n.startsWith('tiles/')),
+    };
+  });
+
+  // v0.92 (save-export-architecture-audit.md §5B): the old single "Tiles & LOD" accordion (which
+  // bundled the live zoom view, the Atlas bake cache, and the standalone region-export flow under one
+  // label) is now three separately-labeled top-level sections. All element ids from the old accordion
+  // must still resolve (no JS wiring changed) and none of the summaries should still read "Tiles & LOD".
+  R.tilesLodSplit = await page.evaluate(() => {
+    const summaries = [...document.querySelectorAll('#genWorld > .sec > details.cat-acc > summary, #genWorld details.cat-acc > summary')].map(s => s.textContent.trim());
+    const idsPresent = ['lodChk', 'lodAutoChk', 'zoomDetailR', 'lodTileSeg', 'lodLevels', 'lodRefineBtn', 'lodBurnChk', 'lodMicroChk',
+      'lodBakeBtn', 'lodClearAtlasBtn', 'atlasStat', 'lodDbgSeg',
+      'refCols', 'refRows', 'refSize', 'refGzip', 'lodShowGrid', 'regionBtn', 'refineBtn'].every(id => !!document.getElementById(id));
+    return {
+      hasThreeLabels: summaries.includes('Tiled LOD view') && summaries.includes('Atlas cache') && summaries.includes('Region export'),
+      noOldCombinedLabel: !summaries.includes('Tiles & LOD'),
+      allIdsStillResolve: idsPresent,
+    };
+  });
+
   await page.click('#assetsHeaderBtn');
   await page.waitForTimeout(250);
   R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
@@ -699,6 +802,58 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { noPhantomZero, overwriteGuarded };
   });
 
+  // ---- v0.91 (owner request: "one home, real time-scale") ----
+  // Authoring (Add year/pills), scrubbing (slider+playback) and the collapse/recovery simulator all
+  // live in Explore → Timeline now — Civilization → Polity no longer has its own copy, and the old
+  // index-based slider (min=0, max=snapshot-count-1) was replaced with a real year-value scale.
+  R.timelineOneHome = await page.evaluate(() => {
+    const singleHome = !document.getElementById('civTlSlider') && !document.getElementById('civTlSliderRow');
+    const sec = document.getElementById('explTimelineSection');
+    const controlsInExplore = !!(sec && sec.querySelector('#civTlYear') && sec.querySelector('#civTlAddYearBtn')
+      && sec.querySelector('#civTimelinePanel') && sec.querySelector('#civSimulateBtn') && sec.querySelector('#explTimelineSlider'));
+    const polity = [...document.querySelectorAll('#genCiv details.cat-acc')].find(d => {
+      const s = d.querySelector('summary'); return s && s.textContent.trim() === 'Polity';
+    });
+    const controlsNotInPolity = !!polity && !polity.querySelector('#civTlYear') && !polity.querySelector('#civSimulateBtn');
+
+    civTimeline.length = 0; civYear = 0;
+    civAddYear(10);
+    const sliderHiddenAt1 = getComputedStyle(document.getElementById('explTimelineSliderRow')).display === 'none';
+    civAddYear(1000);
+    const slider = document.getElementById('explTimelineSlider'), dlist = document.getElementById('explTimelineTicks');
+    const sliderShownAt2 = getComputedStyle(document.getElementById('explTimelineSliderRow')).display !== 'none';
+    const realScale = +slider.min === 10 && +slider.max === 1000;   // was min=0/max=1 (an index range)
+    const ticksAtRealYears = [...dlist.querySelectorAll('option')].map(o => +o.value).sort((a, b) => a - b).join(',') === '10,1000';
+
+    slider.value = 950; slider.dispatchEvent(new Event('input'));   // closer to 1000 than to 10
+    const snappedNearest = +slider.value === 1000 && civYear === 1000;
+    slider.value = 300; slider.dispatchEvent(new Event('input'));   // closer to 10 than to 1000
+    const snappedToOther = +slider.value === 10 && civYear === 10;
+
+    civTimeline.length = 0; state.places = []; civWays = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof renderNow === 'function') renderNow();
+    return { singleHome, controlsInExplore, controlsNotInPolity, sliderHiddenAt1, sliderShownAt2, realScale, ticksAtRealYears, snappedNearest, snappedToOther };
+  });
+
+  // ---- v0.91 fix (owner report: "I dont see the timeline menu in explore") ----
+  // The first cut of v0.91 buried Timeline inside the filter funnel's collapsed popover, which reads
+  // as a filter control, not an editing surface, and is easy to miss entirely. Timeline is now a
+  // plain always-visible Explore sidebar section (same footing as Info/Journeys) — reachable without
+  // opening the funnel or expanding any <details>.
+  await page.evaluate(() => document.querySelector('[data-tab="explore"]').click());
+  await page.waitForTimeout(150);
+  R.timelineDiscoverable = await page.evaluate(() => {
+    const sec = document.getElementById('explTimelineSection');
+    const fab = document.getElementById('explFilterFab');
+    const notInFunnel = !!(sec && fab && !fab.contains(sec));
+    const inExplorePanel = !!(sec && document.getElementById('explorePanel').contains(sec));
+    const r = sec ? sec.getBoundingClientRect() : null;
+    const visibleWithoutClicks = !!(r && r.width > 0 && r.height > 0 && getComputedStyle(sec).display !== 'none');
+    const hasHeading = !!(sec && sec.querySelector('h2') && /timeline/i.test(sec.querySelector('h2').textContent));
+    return { notInFunnel, inExplorePanel, visibleWithoutClicks, hasHeading };
+  });
+
   // ---- v0.86: climate redraw, theme switch, credits modal, popover scroll containment ----
   const canvasHash86 = () => page.evaluate(() => { const c = document.getElementById('view');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 2166136261;
@@ -804,6 +959,165 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
   });
 
+  // v0.88 (owner report: "highest zoom stops at 20km, I'd like to drop down to 5km"): the LOD zoom cap now
+  // scales with the map's real-world width instead of a fixed ×64, and the scale bar shrinks its reading
+  // as you zoom in (it used to read the full map width no matter how far in you went).
+  R.lodZoomDeep = await page.evaluate(() => {
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    state.mapWidthKm = 800;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2;
+    _lodZoom = 1; applyView(); renderNow(); updateScaleBar();
+    const labelOut = document.getElementById('scaleBar').innerHTML;
+    const spanOut = lodSpanKm();
+    _lodZoom = lodMaxZoom(); applyView(); renderNow(); updateScaleBar();
+    const labelIn = document.getElementById('scaleBar').innerHTML;
+    const spanIn = lodSpanKm();
+    const maxZoom = lodMaxZoom();
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+    return { maxZoom, spanOut, spanIn, reachesFiveKm: spanIn <= 5, labelChanged: labelIn !== labelOut };
+  });
+
+  // v0.89 (owner report: "tiled LOD info-layers don't scale properly" — every debug/info view except
+  // off/lith/soil/water fell through to a whole-map un-zoomed render while the canvas stayed sized/fitted
+  // for the current zoom). Precise regression check: while LOD is on, renderNow() must NEVER reach the
+  // full (non-tiled) pixel loop for ANY debug view — drawLODView() should early-return every time. Also
+  // exercises the reprojected vector overlays (wind/ocean arrows, plate drift, boundary graph, river
+  // splines, settle/wildlife markers) for canvas-API errors, and confirms a debug tile actually varies
+  // (isn't a blank/solid stretch, the visual symptom of the old bug).
+  R.lodInfoLayers = await page.evaluate(() => {
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2;
+    const views = ['temp', 'rain', 'koppen', 'rsrc', 'wildlife', 'wind', 'ocean', 'btype', 'strahler', 'settle', 'plates', 'popdensity'];
+    const before = PERF.counters.renderPixelLoop;
+    const errors = [];
+    let differsFromOverview = true;   // the old bug: zoomed-in render was IDENTICAL to the whole-map render (stretched, not zoomed)
+    for (const dbg of views) {
+      state.debug = dbg;
+      _lodZoom = 1; try { applyView(); renderNow(); } catch (e) { errors.push(dbg + ' @1x: ' + e.message); }
+      const wide = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+      _lodZoom = 8; try { applyView(); renderNow(); } catch (e) { errors.push(dbg + ' @8x: ' + e.message); }
+      const zoomed = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+      let same = true; for (let i = 0; i < wide.length; i += 4 * 37) { if (wide[i] !== zoomed[i] || wide[i+1] !== zoomed[i+1] || wide[i+2] !== zoomed[i+2]) { same = false; break; } }
+      if (same) differsFromOverview = false;   // whole-map and zoomed-in pixels identical ⇒ not actually tiling to the zoom
+    }
+    const after = PERF.counters.renderPixelLoop;
+    state.debug = 'off'; _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+    return { neverFullPixelLoop: after === before, errors, differsFromOverview };
+  });
+
+  // v0.91 fix (owner report: "layer views arent responding to opacity anymore"): v0.89's LOD
+  // generalization made drawLODView() tile EVERY debug view, so renderNow()'s LOD early-return now
+  // always fires before the opacity blend — the slider went silently inert whenever LOD was on.
+  // Regression check: the same debug view, same zoom, opacity 100% vs 30%, must paint differently.
+  R.lodOpacity = await page.evaluate(() => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; state.debug = 'temp';
+    state.debugOpacity = 1; applyView(); renderNow();
+    const full = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+    state.debugOpacity = 0.3; applyView(); renderNow();
+    const dim = view.getContext('2d').getImageData(0, 0, view.width, view.height).data;
+    let same = true;
+    for (let i = 0; i < full.length; i += 4 * 29) { if (full[i] !== dim[i] || full[i+1] !== dim[i+1] || full[i+2] !== dim[i+2]) { same = false; break; } }
+    state.debugOpacity = 1; state.debug = 'off'; _lodOn = false; applyView(); renderNow();
+    return { differsWithOpacity: !same };
+  });
+
+  // v0.91 fix (owner report: settle/wildlife "arent clickable for their information anymore" — a
+  // pre-existing gap flagged as a known follow-up in the v0.89 CHANGELOG entry: evtToGrid() assumed
+  // the canvas always shows the full GW×GH world, which is only true off LOD, so every click-to-info
+  // hit-test was gated out entirely (`!_lodOn`) rather than reprojected. evtToGridLOD() (mirrors
+  // _civPlaceScreenPos's forward math, inverted) fixes the mapping; the click handlers now run under
+  // LOD instead of being blocked. Drives an actual mouse click at the marker's real LOD screen
+  // position (via _civPlaceScreenPos) and checks the info popup opens — if auto-populate's random
+  // seed happens to produce no settlements/wildlife regions this run, that half is vacuously true
+  // (matches this suite's existing no-retry convention for auto-populate elsewhere in this file). */
+  R.lodClickInfo = await page.evaluate(() => {
+    _civAutoWorld();
+    let settleOk = true, wildOk = true;
+    state.debug = 'settle'; _lodOn = true; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2;
+    applyView(); renderNow();
+    if (_settleSeeds && _settleSeeds.length) {
+      const s = _settleSeeds[0];
+      _lodZoom = 3; _lodCx = s.x; _lodCy = s.y; applyView(); renderNow();
+      const [sx, sy] = _civPlaceScreenPos(s.x, s.y);
+      hideSettleInfo();
+      const ev = new MouseEvent('click', { clientX: sx, clientY: sy, bubbles: true });
+      view.dispatchEvent(ev);
+      settleOk = document.getElementById('settleInfo').style.display === 'block';
+    }
+    state.debug = 'wildlife'; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
+    const wild = (typeof currentWildlife === 'function') ? currentWildlife() : null;
+    const rec = wild ? wild.regions.find(r => r.cells >= wild.markerMin) : null;
+    if (rec) {
+      _lodZoom = 3; _lodCx = rec.cx; _lodCy = rec.cy; applyView(); renderNow();
+      const [wx, wy] = _civPlaceScreenPos(rec.cx, rec.cy);
+      hideWildInfo();
+      const ev = new MouseEvent('click', { clientX: wx, clientY: wy, bubbles: true });
+      view.dispatchEvent(ev);
+      wildOk = document.getElementById('wildInfo').style.display === 'block';
+    }
+    state.debug = 'off'; _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    state.places = []; state.roads = null;
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    return { settleOk, wildOk, hadSettleSeed: !!(_settleSeeds && _settleSeeds.length), hadWildRegion: !!rec };
+  });
+
+  // v0.92 fix (owner report: "slow when zooming in even when tiles are baked" — profiling with
+  // tests/perf found the bottleneck: drawLODView()'s "instant overview" backdrop was rebuilt at full
+  // GW×GH resolution through the same expensive per-pixel colorization used for real tiles, on EVERY
+  // zoom-level change (any frame that isn't an exact pan-reuse hit) -- ~940ms measured at a modest
+  // 1024px world, unaffected by whether the Atlas had anything baked (the backdrop is built straight
+  // from `field`, never consults the atlas). First fix downscaled it by a flat /4 ratio; a follow-up
+  // owner report ("lakes are blocky/pixilated again", "aspect ratio goes weird") traced to that ratio
+  // starving small water bodies of source samples (lakes get no coastSDF smoothing, unlike the ocean
+  // edge) -- fixed by capping the overview to a fixed 512px target width instead of a ratio, which
+  // bounds render cost independent of world resolution (measured ~100-130ms at both 1024px and 2048px)
+  // while spending full resolution on worlds already <=512px wide.
+  // Regression guard: an overview rebuild (new zoom level, atlas baked, tile canvases still warm so
+  // ONLY the backdrop is being timed) must stay well under the old ~940-1200ms baseline.
+  R.lodOverviewPerf = await page.evaluate(async () => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; state.debug = 'off';
+    _lodZoom = 6; applyView(); renderNow();   // settle at a starting zoom level
+    const n = await bakeAllTiles(2, () => {});   // small pyramid so this stays fast to set up
+    setFinalized(true);
+    _lodZoom = 8; applyView(); renderNow();   // move to a new (now-baked) zoom level once, populate caches
+    _lodOverviewPrev = null;   // invalidate ONLY the overview-reuse cache (simulates a tiny pan/zoom
+                                // step) -- tile canvases and the atlas stay warm, isolating backdrop cost
+    const t0 = performance.now();
+    renderNow();
+    const overviewRebuildMs = performance.now() - t0;
+    // v0.92 follow-up: overview canvas should be capped to the 512px target width (not GW itself,
+    // and not a naive GW/4) -- this is the direct behavioral guard for the blocky-lakes regression.
+    const overviewW = _lodOverviewPrev && _lodOverviewPrev.canvas.width;
+    const overviewH = _lodOverviewPrev && _lodOverviewPrev.canvas.height;
+    state.debug = 'off'; _lodOn = false; setFinalized(false); _lodZoom = 1; applyView(); renderNow();
+    return { overviewRebuildMs, chunksBaked: n, overviewW, overviewH, GW, GH };
+  });
+
+  // v0.92 follow-up fix (owner report: "graphic fidelity seems to have degraded also"): every OTHER
+  // way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already scheduled a
+  // refine so the sharp tile overlay replaces the coarse overview after a beat -- the `lodChk`
+  // checkbox itself never did, so ticking it and just looking (no pan/zoom yet) left the user on the
+  // coarse overview indefinitely. Regression guard: checking the box alone (a real click, not a
+  // synthetic zoom/pan) must populate the visible tile's render cache without any further gesture.
+  const errorsBeforeCheckbox = errors.length;
+  R.lodCheckboxAutoRefine = await page.evaluate(async () => {
+    _lodOn = false; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2;   // clean, predictable whole-map state regardless of what earlier tests left behind
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = false;
+    lodCacheClear();
+    _atlasBaked.clear(); _atlasImg.clear();   // the preceding perf test baked z=0..2 to the atlas -- clear it so this tests the real "nothing baked yet" scenario the fix targets (refineVisibleTiles() skips already-baked coverage by design)
+    const acc = lc.closest('details'); if (acc) acc.open = true;
+    lc.checked = true; lc.dispatchEvent(new Event('change'));
+    await new Promise(res => setTimeout(res, 600));   // withBusy's ~20ms defer + the refine itself
+    const v = lodViewRect();
+    const keys = visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1);
+    const cachedAfterCheck = keys.length > 0 && keys.every(k => !!lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile)));
+    lc.checked = false; lc.dispatchEvent(new Event('change'));
+    await new Promise(res => setTimeout(res, 400));   // let any in-flight deferred refine settle before the Node-side errors check below
+    _lodOn = false; applyView(); renderNow();
+    return { cachedAfterCheck };
+  });
+  R.lodCheckboxAutoRefine.noNewErrors = errors.length === errorsBeforeCheckbox;
+
   await browser.close();
 
   // ---- assertions ----
@@ -881,14 +1195,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('destructive buttons carry .al-danger (>=8)', R.dangerButtons.length >= 8);
   A('Clear places does not prompt when empty', R.noConfirmWhenEmpty === true);
   A('Clear places prompts when non-empty', R.confirmedWhenNonEmpty === true);
+  A('v0.92: Clear places & routes also wipes ways/journeys, not just settlements', !R.clearPlacesAlsoClearsRoutes.hadWaysBefore ||
+    (R.clearPlacesAlsoClearsRoutes.dialogAccepted && R.clearPlacesAlsoClearsRoutes.placesCleared && R.clearPlacesAlsoClearsRoutes.waysCleared && R.clearPlacesAlsoClearsRoutes.journeysCleared));
   A('dismissing the confirm preserves the place', R.placesSurviveDismiss === true);
-  A('pinned inspector hosts the FULL place editor', R.editorInInspector === true);
+  A('v0.90: selecting a place opens the editor in the map pop-up (not the sidebar)', R.editorInPopup === true && R.editorNotInInspector === true);
+  A('v0.90: the place pop-up is positioned on-screen', R.popupOnScreen === true);
   A('settlement list no longer has an inline editor', R.noInlineEditorInList === true);
-  A('editing the inspector name field updates the model', R.liveModelUpdate === true);
-  A('the row summary patches live from the inspector edit', R.liveRowPatch === true);
+  A('editing the pop-up name field updates the model', R.liveModelUpdate === true);
+  A('the row summary patches live from the pop-up edit', R.liveRowPatch === true);
   A('selecting a label swaps the inspector to the label editor', R.labelEditorSwapsIn === true);
   A('selecting a label deselects the place (single selection)', R.selectingLabelDeselectsPlace === true);
+  A('v0.90: selecting a label closes the place pop-up', R.selectingLabelClosesPlacePopup === true);
   A('selecting the place again deselects the label', R.selectingPlaceDeselectsLabel === true);
+  A('v0.90: the pop-up × button closes it and deselects the place', R.popupCloseButtonWorks === true);
   A('Layers popover shows hotkey badges (>=6)', R.keyBadges.length >= 6);
   A('pressing B sets the Biomes layer', R.debugAfterB === 'bclass');
   A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
@@ -896,6 +1215,27 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
   A('v0.87: consolidated File ▾ dropdown opens with both Import and Export sections', R.fileMenuOpen === true && R.fileMenuHasBoth.hasImport && R.fileMenuHasBoth.hasExport);
   A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
+  A('v0.88: standalone atlas import/export retired; File → Export .zip is the sole 100% round-trip', R.atlasStandaloneGone.noImportBtnInFileMenu && R.atlasStandaloneGone.noEmbedCheckbox && R.atlasStandaloneGone.noExportBtnInSidebar);
+  A('v0.88: dedicated asset-pack import/export stays in the Assets Library menu', R.atlasStandaloneGone.packStillInAssetsLibrary === true);
+  A('v0.92: layers/*.png previews are opt-in (off by default), not unconditional', R.exportTrim.noLayersByDefault);
+  A('v0.92: layers/*.png previews appear when the new checkbox is ticked', R.exportTrim.layersWhenChecked);
+  A('v0.92: map.png still bakes for a non-finalized export (unchanged default behavior)', R.exportTrim.mapPngWhenNotFinalized);
+  A('v0.92: map.png/tiles skipped for a finalized export (Atlas pyramid already covers the map)', R.exportTrim.noMapPngWhenFinalized);
+  A('v0.92: "Tiles & LOD" split into three labeled sections (Tiled LOD view / Atlas cache / Region export)', R.tilesLodSplit.hasThreeLabels && R.tilesLodSplit.noOldCombinedLabel);
+  A('v0.92: every id from the old combined accordion still resolves after the split', R.tilesLodSplit.allIdsStillResolve);
+  A('v0.88: LOD zoom cap reaches a ≤5km view span at the default 800km map width', R.lodZoomDeep.reachesFiveKm === true && R.lodZoomDeep.maxZoom >= 160);
+  A('v0.88: scale bar reading shrinks as LOD zoom deepens (was frozen at the full map width)', R.lodZoomDeep.labelChanged === true && R.lodZoomDeep.spanIn < R.lodZoomDeep.spanOut);
+  A('v0.89: every info-layer stays tiled while LOD is on (renderNow never falls through to the full un-zoomed pixel loop)', R.lodInfoLayers.neverFullPixelLoop === true);
+  A('v0.89: LOD-zoomed info layers + their reprojected overlays render without errors', R.lodInfoLayers.errors.length === 0);
+  A('v0.89: LOD-zoomed info-layer tiles genuinely differ from the whole-map render (not a stretched copy)', R.lodInfoLayers.differsFromOverview === true);
+  A('v0.91 fix: the opacity slider still affects the map while Tiled LOD is on', R.lodOpacity.differsWithOpacity === true);
+  A('v0.91 fix: settlement click-to-info works under Tiled LOD', R.lodClickInfo.settleOk === true);
+  A('v0.91 fix: wildlife click-to-info works under Tiled LOD', R.lodClickInfo.wildOk === true);
+  A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now capped to a 512px target width)', R.lodOverviewPerf.overviewRebuildMs < 400);
+  A('v0.92 follow-up fix: overview canvas is capped at 512px wide, not a flat GW/4 (was 256px at this 1024px world → blocky lakes)', R.lodOverviewPerf.overviewW === 512);
+  A('v0.92 follow-up fix: overview canvas keeps GW/GH aspect ratio', Math.abs(R.lodOverviewPerf.overviewW / R.lodOverviewPerf.overviewH - R.lodOverviewPerf.GW / R.lodOverviewPerf.GH) < 0.01);
+  A('v0.92 follow-up fix: checking "Tiled LOD view" alone (no pan/zoom) auto-refines the visible tile', R.lodCheckboxAutoRefine.cachedAfterCheck === true);
+  A('v0.92 follow-up fix: unchecking the box before the deferred refine settles throws no errors', R.lodCheckboxAutoRefine.noNewErrors === true);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
@@ -916,6 +1256,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.85 fix: saturated-destination overflow re-flows while system headroom remains (doc §5)', R.collapseSim.overflowReflows);
   A('v0.85 fix: empty-timeline simulation conjures no phantom year-0 era', R.collapseSimUI2.noPhantomZero);
   A('v0.85 fix: overwriting authored timeline years is confirm-guarded (dismiss aborts)', R.collapseSimUI2.overwriteGuarded);
+  A('v0.91: the old Polity-section slider is gone — one slider now, in Explore', R.timelineOneHome.singleHome);
+  A('v0.91: Add year / pills / Simulate all live inside Explore → Timeline', R.timelineOneHome.controlsInExplore);
+  A('v0.91: Civilization → Polity no longer duplicates the timeline/simulate controls', R.timelineOneHome.controlsNotInPolity);
+  A('v0.91: the slider+playback row is hidden with <2 recorded years, shown with >=2', R.timelineOneHome.sliderHiddenAt1 && R.timelineOneHome.sliderShownAt2);
+  A('v0.91: slider min/max are the real recorded years, not a 0..count-1 index', R.timelineOneHome.realScale);
+  A('v0.91: tick marks (datalist) sit at the real recorded years', R.timelineOneHome.ticksAtRealYears);
+  A('v0.91: dragging the slider snaps to the nearest recorded year on both sides', R.timelineOneHome.snappedNearest && R.timelineOneHome.snappedToOther);
+  A('v0.91 fix: Timeline is not hidden inside the filter funnel popover', R.timelineDiscoverable.notInFunnel && R.timelineDiscoverable.inExplorePanel);
+  A('v0.91 fix: Timeline is visible in Explore with no clicks (not behind a closed funnel/details)', R.timelineDiscoverable.visibleWithoutClicks);
+  A('v0.91 fix: Timeline section has its own heading, like Info/Journeys', R.timelineDiscoverable.hasHeading);
   A('v0.86: "Simulate weather" repaints the map (climate bake-cache keyed on _climGen)', R.climateRedraw.changed);
   A('v0.86: theme switch flips :root[data-theme]=light, persists, and toggles back to dark', R.theme.wentLight && R.theme.stored === 'light' && R.theme.backToDark && R.theme.startDark);
   A('v0.86: credits modal opens (3 principle sections + Strahler/gravity/V1.915 citations)', R.credits.open && R.credits.sections === 3 && R.credits.hasStrahler && R.credits.hasGravity && R.credits.hasV1915);
