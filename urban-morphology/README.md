@@ -195,7 +195,11 @@ unprotected — so a harbour outside the walls is still defended per the histori
 (M-AMEN-2); the **religious building is optional** (a "none" rite).
 **Amenities scale with rank:** market squares multiply and specialise (shambles → fish/corn →
 cloth → cattle) and a town-hall/guildhall appears once a place is a chartered town — a village
-and an imperial seat differ visibly in the services they carry (M-AMEN-1).
+and an imperial seat differ visibly in the services they carry (M-AMEN-1). The civic hall's own
+**footprint** scales with population too, not just whether it exists (M-AMEN-3): every style's
+base dimensions were raised well past the largest ordinary house, then multiplied further as
+population grows toward the 20,000 cap, so a small town's hall and a big city's read as
+visibly different buildings rather than the same box at every scale.
 **Rite is selectable (M-BLD-8):** the place of worship can be a Christian **church** (cross-plan),
 a classical **temple** (colonnaded cella on a podium with frontal steps, Roman/Greek), a
 **shrine**, or a **mosque** (prayer hall + courtyard + minaret); and the civic hall a **town
