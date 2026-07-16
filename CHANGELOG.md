@@ -12,6 +12,85 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.93 (2026-07-16)
+**Owner /goal: "make the proposed optimisations in a new version, keep a focus on graphic fidelity
+(no pixelated views or blockyness when zooming in on terrain)."** Three LOD-render/tile-pipeline
+performance optimizations, all additive/opt-in on the LOD path — no engine changes; render battery
+**ALL IDENTICAL to v0.92**; headless **923** unchanged; Playwright UI smoke **157/157** (+3 new
+regression assertions on top of v0.92's suite, mirroring the pattern each of the three optimizations
+below already established for its own opt-in fast path).
+
+**#1 — progressive (non-blocking) overview rebuild on zoom.** Every zoom step used to synchronously
+rebuild the LOD overview backdrop from scratch — even when a perfectly good previous overview already
+existed to approximate the new view from — reintroducing the ~940–1200ms stall v0.92 had just fixed
+for the *first* build. `drawLODView()` now branches three ways: an exact-viewport pan reuses the
+cached overview via a translate-blit (unchanged from v0.92); a **zoom/pan change against a matching
+render key** (`_lodRenderKey()` — content/style state, not viewport) stretches the cached overview
+canvas immediately (near-instant, <30ms) and schedules the real rebuild via a new
+`_lodScheduleOverviewRebuild()` on a deferred `setTimeout(...,0)`, re-checking `_fieldGen`/`GW`/`GH`
+before applying results so a regenerate or resize mid-flight can't land stale data; anything else
+(first build, or a style/content change — `_lodRenderKey()` differs) falls through to the original
+synchronous v0.92 rebuild. `_lodBuildTileRGBA()` extracted from `drawLODView()` so both the
+synchronous and deferred paths build the same tile-colorization closures from current state, fixing
+an early `dbg is not defined` regression caught via console-warning capture (a naive timing-only test
+missed it, since `drawLODView()` silently falls back to `_lodOn=false` on error).
+*Fidelity note: the stretched placeholder is a **soft-scaled preview of the same coarse overview**
+used since v0.92's 512px-cap fix — never a blocky/quantized frame — and the deferred rebuild lands the
+correct sharp result well under a second later.*
+
+**#2 — GENPOOL extended to tile refinement (`refineVisibleTiles`).** GENPOOL (the multicore Worker
+pool already used for `generate()`'s heavy row-split fills) gains a second, task-parallel dispatch
+mode: `runTiles(coarse,cW,cH,jobs)`/`_runTiles(...)`, round-robining independent
+`{z,col,row,tileSize,opts}` tile jobs one-per-worker (vs. the existing row-split `run()`, which splits
+one big job across workers). `refineVisibleTiles()` (now `async`) batches pool-eligible tiles through
+`GENPOOL.runTiles` instead of computing every visible tile sequentially on the main thread — measured
+**~3.1× faster** (243ms pool vs. 760ms sync-fallback for 4 tiles), bit-identical output, guarded by
+`_lodGen` so a regenerate mid-flight discards stale results. A **cold-Worker JIT penalty** was found
+during profiling (~20× slower on a fresh Worker's first call, interpreted vs. TurboFan-compiled) and
+fixed with a `GENPOOL.warmup()` step at `init()` that dispatches one throwaway job per worker before
+marking the pool `usable`, so production usage never pays it. (A red herring along the way: an
+apparent 10×+ slowdown under headless/SwiftShader traced to canvas-GPU readback contention delaying
+`onmessage` delivery on the main thread, not a pool defect — confirmed by an isolated no-canvas-
+activity test completing in ~315ms.) The three pre-existing call sites (`lodChk` checkbox, "Refine"
+button, `scheduleLodRefine`'s debounce) now `await` the async function; headless call sites are
+unaffected since `GENPOOL.usable` is permanently `false` there (no `Worker` global), so the function
+always takes its synchronous fallback body with no `await` reached.
+
+**#3 — parallel atlas baking (`bakeVisibleTiles`/`bakeAllTiles`).** Both now batch each pyramid
+level's not-yet-cached, pool-eligible tiles through `GENPOOL.runTiles` before the (unchanged,
+still-sequential) PNG-encode/IndexedDB-write loop, instead of computing every tile's terrain data on
+the main thread first. `bakeAllTiles`'s per-level batching preserves the exact `done`/`onP`/already-
+baked-skip progress-callback order via a two-pass structure (build a level array with `{skip:true}`
+placeholders in the original row-major order, batch-dispatch the `need` subset, then iterate again
+doing the encode/write + progress callback exactly as before). Measured **~25% faster** for a 3-level
+bake (21 tiles) once isolated from a same-page-first-call measurement artifact (an initial single-shot
+test showed the pool *slower* — traced to whichever path ran first in a fresh page paying extra
+per-shape JIT warm-up on the main thread's `tilePngBytes`/`atlasPut` call sites; a fair alternating
+sync/pool/sync/pool measurement showed a stable, repeatable ~12.0–12.2s pool vs. ~15.9–16.1s sync),
+correctness confirmed by identical baked-chunk sets both ways.
+
+**#5 — lazy seasonal field allocation.** `tempJulField`/`tempJanField`/`rainJulField`/`rainJanField`
+(4 × `GW×GH` Float32Arrays) used to be allocated unconditionally in `allocate()` even though seasons
+default off. Now `null` until `computeSeasons()`'s first real call, which allocates them on demand;
+every consumer already gated its reads behind `state.climate.seasons`/`_seasonK`/an explicit
+`computeSeasons()` call (invariant 4's null-check pattern), so this is a pure allocation-timing change
+— confirmed bit-identical (923 headless, hash battery ALL IDENTICAL).
+
+**Evaluated, not shipped:** a 4th proposal (restructuring `renderBiomeTileRGBA`'s per-pixel
+colorization loop — hoisting per-row-constant math, pooling scratch buffers) was scoped and then
+dropped: pooling the tile-render scratch/output buffers risks aliasing with cached tile data (a
+correctness bug that would manifest as exactly the visual corruption this version's fidelity mandate
+exists to prevent), and hoisting math out of `sampleArr`'s per-pixel calls risks floating-point
+reordering that the cross-version bit-identity invariant doesn't tolerate. Left for a future version
+with a narrower, independently-verifiable scope.
+
+**Fidelity verification** (owner's explicit requirement): fixed-seed (424242) Playwright screenshots
+at whole-map overview, immediately after a deep zoom step (stretched placeholder), after settling
+(pooled-refined tiles), and at the LOD zoom cap (~1km scale) — all show smooth, continuously-textured
+terrain with no blocky/quantized artifacts; a canvas pixel-diff between the immediate and settled
+frames confirms real (non-trivial, ~14% of pixels, subtle magnitude) detail improvement from
+refinement rather than a no-op.
+
 ### v0.92 (2026-07-13)
 **Owner /goal: "carry out the reported fixes [from the save-export architecture audit], then analyze
 why the program is so slow when zooming in even when tiles are baked."** Followed same-day by an owner

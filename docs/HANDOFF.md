@@ -9,10 +9,43 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.92.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.93.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.91` are kept and never edited.
+  (v0.94 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.92` are kept and never edited.
+- **v0.93 — owner /goal: "make the proposed optimisations in a new version, keep a focus on
+  graphic fidelity (no pixelated views or blockyness when zooming in on terrain)."** A prior
+  session (on request) had produced a ranked list of 6 LOD-render/tile-pipeline optimization
+  proposals (the engine's `generate()` stages were excluded from consideration — the bit-identity
+  invariants make that path too risky to touch for speed alone). This version implements 3 of the
+  6, all opt-in on the LOD path — render battery **ALL IDENTICAL to v0.92**, headless **923**
+  unchanged, smoke **157/157** (+3 new assertions): (1) **progressive overview rebuild** — a zoom
+  step with a previous overview in hand now stretches it and returns in <30ms instead of blocking
+  on a full synchronous rebuild, with the real rebuild deferred to a background pass
+  (`_lodScheduleOverviewRebuild`) guarded by `_fieldGen`/render-key checks against a regenerate
+  landing mid-flight; (2) **GENPOOL extended to tile refinement** — a new task-parallel
+  `runTiles()` dispatch mode (vs. the existing row-split `run()`) lets `refineVisibleTiles()`
+  compute pool-eligible tiles across cores instead of one-by-one on the main thread (~3.1× faster,
+  bit-identical output); found and fixed a genuine cold-Worker JIT cliff (~20× penalty on a
+  fresh Worker's first call) with a `GENPOOL.warmup()` step at init; (3) **parallel atlas baking**
+  — `bakeVisibleTiles()`/`bakeAllTiles()` batch each pyramid level's tile compute through the same
+  pool before the still-sequential PNG-encode/write loop (~25% faster for a multi-level bake). A
+  4th proposal (`renderBiomeTileRGBA` colorization-loop restructuring) was scoped, then
+  deliberately **not shipped** — pooling its scratch/output buffers risks aliasing with cached
+  tile data (a correctness bug that would manifest as exactly the visual corruption the owner's
+  fidelity mandate exists to prevent) and per-pixel `sampleArr` hoisting risks floating-point
+  reordering the bit-identity invariant doesn't tolerate; left for a future version with a
+  narrower, independently-verifiable scope. A 5th, lower-risk proposal (lazy seasonal-field
+  allocation — `tempJul/tempJan/rainJul/rainJan` now allocate on `computeSeasons()`'s first real
+  call instead of unconditionally in `allocate()`, since seasons default off) shipped alongside the
+  three LOD ones. **Fidelity explicitly verified** per the owner's stated concern: fixed-seed
+  (424242) Playwright screenshots at overview / immediate-post-zoom (stretched placeholder) /
+  settled (pooled-refined) / LOD zoom-cap (~1km scale) all show smooth, continuously-textured
+  terrain, no blocky/quantized artifacts; a canvas pixel-diff confirmed refinement genuinely adds
+  detail (not a no-op) rather than just being fast. See CHANGELOG for full profiling numbers,
+  including two debugging arcs (a headless/SwiftShader canvas-GPU-contention red herring during
+  pool profiling, and a same-page-first-call measurement artifact during bake-pool profiling) that
+  turned out not to be real defects once isolated.
 - **v0.92 — owner /goal: "carry out the [save-export audit's] reported fixes, then analyze why
   the program is so slow when zooming in even when tiles are baked"**, followed same-day by a
   bug report on the resulting fix (render battery ALL IDENTICAL to v0.91, headless **923**
@@ -504,7 +537,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.92), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.93), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -528,6 +561,15 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **LOD performance optimizations — 3 of 6 proposed shipped in v0.93** (progressive overview
+  rebuild, pooled tile refine, pooled atlas bake — see the v0.93 entry above and CHANGELOG for
+  full detail). **Explicitly deferred, not forgotten:** (a) `renderBiomeTileRGBA` colorization-loop
+  restructuring — scoped, risk (buffer-aliasing / float-reorder vs. bit-identity) judged to
+  outweigh the speculative gain for this pass; a future attempt should scope buffer reuse and
+  per-row math hoisting as two independently-verifiable changes rather than one combined pass.
+  (b) A 6th proposal from the original list was never detailed in this thread — re-derive or ask
+  the owner if further LOD/render perf work is wanted. Both are candidates for v0.94 if the owner
+  asks for more optimization work; neither is a known bug or regression.
 - **Save/export architecture restructuring — SHIPPED in v0.92.** `docs/research/save-export-architecture-
   audit.md` (read-only audit, 2026-07-13) found the real bloat was `exportZip()` writing overlapping map
   imagery from three independent code paths for the same terrain, and a separate, lower-risk naming/IA
