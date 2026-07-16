@@ -137,17 +137,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const near = s.rivers ? featuresNear(currentFeatures().rivers[0].mouth.x, currentFeatures().rivers[0].mouth.y, 6) : [];
     return { summary: s, hasRivers: s.rivers > 0, hasPeaks: s.peaks > 0, queryWorks: !s.rivers || near.length > 0 };
   });
-  R.lodView = await page.evaluate(() => new Promise(res => {
+  R.lodView = await page.evaluate(async () => {
     const lc = document.getElementById('lodChk'); lc.checked = true; lc.dispatchEvent(new Event('change'));
     _lodZoom = 4; renderNow();                       // overview render → caches an overview canvas
     const cachedAfterFirst = !!_lodOverviewPrev && !!_lodOverviewPrev.key;
     const t0 = performance.now(); renderNow();       // second draw at the same view: overview reuse path
     const secondMs = performance.now() - t0;
-    refineVisibleTiles(); renderNow();               // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
+    await refineVisibleTiles(); renderNow();         // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
     const tileCacheN = _lodTileCanvasCache.size;
     lc.checked = false; lc.dispatchEvent(new Event('change'));
-    res({ cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true });
-  }));
+    return { cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true };
+  });
   // ── v0.72: deep-zoom (z≥8) tributary + local-incision morphology on a live tile ──
   R.tribs = await page.evaluate(() => {
     const bc = document.getElementById('lodBurnChk'); if (bc) { bc.checked = true; bc.dispatchEvent(new Event('change')); }
@@ -1093,6 +1093,101 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { overviewRebuildMs, chunksBaked: n, overviewW, overviewH, GW, GH };
   });
 
+  // v0.93 optimization: a zoom step used to pay the full overview-rebuild cost (above) synchronously
+  // on every step, even when a perfectly good previous overview exists to approximate the new view
+  // from. Regression guard: with a `prev` overview in hand (unlike the invalidated-cache case above),
+  // a zoom step's renderNow() call must return near-instantly (stretch + defer, not a full rebuild),
+  // and the deferred rebuild must still land the CORRECT sharp result shortly after.
+  R.lodProgressiveOverview = await page.evaluate(async () => {
+    state.debug = 'off'; _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 1;
+    applyView(); renderNow();   // establishes a `prev` overview (first-ever build, synchronous by necessity)
+    const hadPrevBeforeZoom = !!_lodOverviewPrev;
+
+    _lodZoom = 5; applyView();
+    const t0 = performance.now();
+    renderNow();
+    const zoomStepMs = performance.now() - t0;
+    const scheduledRebuild = !!_lodOverviewRebuildPending;
+    const expectedZ = lodViewRect().z;
+
+    await new Promise(res => setTimeout(res, 300));   // let the deferred rebuild land
+    const finalZ = _lodOverviewPrev.z;
+    const stillPending = !!_lodOverviewRebuildPending;
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { hadPrevBeforeZoom, zoomStepMs, scheduledRebuild, expectedZ, finalZ, stillPending };
+  });
+
+  // v0.93 optimization: refineVisibleTiles now dispatches pool-eligible batches to GENPOOL.runTiles
+  // (task-parallel across cores) instead of computing every tile sequentially on the main thread.
+  // Regression guard: the pool path must be measurably faster than the forced-sync path AND produce
+  // byte-identical tile data (same pyramidTile output, just computed off the main thread).
+  R.lodRefinePool = await page.evaluate(async () => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 6; applyView(); renderNow();
+    _atlasBaked.clear(); _atlasImg.clear();   // an earlier perf test baked z=0..2 to the atlas -- clear it so bakedCover() doesn't make `need` empty here (refineVisibleTiles has nothing to do if everything's already baked)
+    const v0 = lodViewRect();
+    const keyCount = visibleTileKeys(v0.z, v0.x0, v0.y0, v0.x1, v0.y1).length;
+
+    lodCacheClear();
+    const t0 = performance.now();
+    await refineVisibleTiles();
+    const withPoolMs = performance.now() - t0;
+    const poolUsable = GENPOOL.usable;
+
+    const v = lodViewRect();
+    const poolSamples = [];
+    for (const k of visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1)) {
+      const t = lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile));
+      if (t) poolSamples.push({ col: k.col, row: k.row, w: t.w, h: t.h, sample: Array.from(t.data.slice(0, 3)) });
+    }
+
+    lodCacheClear();
+    const origUsableForTiles = GENPOOL.usableForTiles;
+    GENPOOL.usableForTiles = () => false;   // force the sync fallback for a fair A/B on this same view
+    const t1 = performance.now();
+    await refineVisibleTiles();
+    const syncOnlyMs = performance.now() - t1;
+    GENPOOL.usableForTiles = origUsableForTiles;
+
+    let allMatch = poolSamples.length > 0;
+    for (const pr of poolSamples) {
+      const s = lodCacheGet(lodCacheKey(v.z, pr.col, pr.row, _lodTile));
+      if (!s || s.w !== pr.w || s.h !== pr.h) { allMatch = false; break; }
+      for (let i = 0; i < 3; i++) if (s.data[i] !== pr.sample[i]) { allMatch = false; break; }
+    }
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { keyCount, withPoolMs, syncOnlyMs, poolUsable, allMatch };
+  });
+
+  // v0.93 optimization: bakeAllTiles batches each pyramid level's pool-eligible tiles through
+  // GENPOOL.runTiles before the (unchanged, still-sequential) PNG-encode/IndexedDB write loop,
+  // instead of computing every tile on the main thread. Regression guard: a multi-level bake via
+  // the pool finishes faster than the forced-sync fallback AND bakes the identical chunk set.
+  R.bakeAllTilesPool = await page.evaluate(async () => {
+    _lodOn = true;
+    const allKeys = [];
+    for (let z = 0; z <= 2; z++) { const side = 1 << z; for (let row = 0; row < side; row++) for (let col = 0; col < side; col++) allKeys.push(atlasChunkKey(z, col, row, _lodTile)); }
+
+    _atlasBaked.clear(); _atlasImg.clear();
+    const origUsableForTiles = GENPOOL.usableForTiles;
+    GENPOOL.usableForTiles = () => false;   // forced-sync baseline runs first
+    const t0 = performance.now();
+    const nBakedSync = await bakeAllTiles(2, () => {});
+    const syncOnlyMs = performance.now() - t0;
+    GENPOOL.usableForTiles = origUsableForTiles;
+    const syncBaked = allKeys.every(k => _atlasBaked.has(k));
+
+    _atlasBaked.clear(); _atlasImg.clear();
+    const t1 = performance.now();
+    const nBaked = await bakeAllTiles(2, () => {});
+    const withPoolMs = performance.now() - t1;
+    const poolBaked = allKeys.every(k => _atlasBaked.has(k));
+
+    _lodOn = false;
+    return { syncOnlyMs, withPoolMs, nBakedSync, nBaked, syncBaked, poolBaked, poolUsable: GENPOOL.usable };
+  });
+
   // v0.92 follow-up fix (owner report: "graphic fidelity seems to have degraded also"): every OTHER
   // way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already scheduled a
   // refine so the sharp tile overlay replaces the coarse overview after a beat -- the `lodChk`
@@ -1234,6 +1329,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now capped to a 512px target width)', R.lodOverviewPerf.overviewRebuildMs < 400);
   A('v0.92 follow-up fix: overview canvas is capped at 512px wide, not a flat GW/4 (was 256px at this 1024px world → blocky lakes)', R.lodOverviewPerf.overviewW === 512);
   A('v0.92 follow-up fix: overview canvas keeps GW/GH aspect ratio', Math.abs(R.lodOverviewPerf.overviewW / R.lodOverviewPerf.overviewH - R.lodOverviewPerf.GW / R.lodOverviewPerf.GH) < 0.01);
+  A('v0.93 optimization: a zoom step with a previous overview in hand returns near-instantly (stretch + defer, not a full rebuild)', R.lodProgressiveOverview.hadPrevBeforeZoom === true && R.lodProgressiveOverview.zoomStepMs < 30);
+  A('v0.93 optimization: the zoom step schedules a background rebuild instead of skipping it', R.lodProgressiveOverview.scheduledRebuild === true);
+  A('v0.93 optimization: the deferred rebuild lands the correct (not stale) zoom level shortly after', R.lodProgressiveOverview.finalZ === R.lodProgressiveOverview.expectedZ && R.lodProgressiveOverview.stillPending === false);
+  A('v0.93 optimization: GENPOOL is usable in a real browser (Worker support present)', R.lodRefinePool.poolUsable === true);
+  A('v0.93 optimization: refineVisibleTiles via the pool is faster than the forced-sync fallback', R.lodRefinePool.withPoolMs < R.lodRefinePool.syncOnlyMs);
+  A('v0.93 optimization: pooled tile refinement produces the same data as the sync fallback', R.lodRefinePool.allMatch === true);
+  A('v0.93 optimization: GENPOOL is usable for the bakeAllTiles pool path', R.bakeAllTilesPool.poolUsable === true);
+  A('v0.93 optimization: bakeAllTiles via the pool bakes the same chunk set as the forced-sync fallback', R.bakeAllTilesPool.nBaked === R.bakeAllTilesPool.nBakedSync && R.bakeAllTilesPool.syncBaked && R.bakeAllTilesPool.poolBaked);
+  A('v0.93 optimization: bakeAllTiles via the pool is faster than the forced-sync fallback for a multi-level bake', R.bakeAllTilesPool.withPoolMs < R.bakeAllTilesPool.syncOnlyMs);
   A('v0.92 follow-up fix: checking "Tiled LOD view" alone (no pan/zoom) auto-refines the visible tile', R.lodCheckboxAutoRefine.cachedAfterCheck === true);
   A('v0.92 follow-up fix: unchecking the box before the deferred refine settles throws no errors', R.lodCheckboxAutoRefine.noNewErrors === true);
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
