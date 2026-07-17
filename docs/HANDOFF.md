@@ -9,10 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.94.html`.** One self-contained HTML file, three
-  script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
+- **Current tool file: `Cartalith Gen1 v0.95.html`.** One self-contained HTML file, four
+  script blocks (generator engine / civ-politics layer / asset library / urban-morphology
+  engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.95 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.93` are kept and never edited.
+  (v0.96 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.94` are kept and never edited.
+- **v0.95 — owner request: refactor the `urban-morphology/` proof-of-concept (a standalone
+  procedural city-layout generator) into Cartalith, with a deep-zoom reveal (settlement pin fades
+  into its generated street layout, main roads locked to the region's own route network), a
+  map-wide opt-in toggle, and settlement-popup Age/Fortifications controls inferred from
+  population/tier by default.** Shipped as a new 4th `<script>` block (the PoC's pure, DOM-free
+  engine, `UME.cityGen`) plus a civ-layer adapter/renderer on top of it, all opt-in
+  (`state.viz.urbanLayouts`, default off) so render bit-identity to v0.94 holds at defaults
+  (`hash_gen1.js` ALL IDENTICAL). Full detail — the `_umPlaceContext` adapter's age/wall
+  inference and real-terrain site classification, the `routeEnds` road-locking hook, the
+  `lodSpanKm()`-gated pin/layout crossfade renderer, the per-settlement generation cache/queue,
+  and the popup fields — is in the CHANGELOG v0.95 entry (long, this was a full subsystem port).
+  Verified: engine `tests/run.sh` **923/923** unaffected (script block 1 untouched); new
+  `tests/run_um.sh` (ported PoC suite against the embedded block) **831/831**; `hash_gen1.js`
+  A/B vs v0.94 **ALL IDENTICAL**; `smoke_gen1.js` **165 → 173** (+8 v0.95 assertions), **173/173**;
+  fixed-seed Playwright screenshots confirm the crossfade reads correctly at 40/20/14/6 km spans
+  (faint street web bleeding through a faded pin at mid-zoom → full walled-town layout with
+  region roads visibly continuing into the settlement at deep zoom). **Deferred** (see CHANGELOG
+  for the full list): faction→culture mapping (culture fixed to `'medieval'`), full terrain-
+  sourced site geometry (currently type-classification only, not the river curve/bridge/harbour
+  placement), the PoC's parcels layer + fine detail objects (trees/wells/crosses/etc.) in the
+  canvas renderer, an era signal driving wall-vs-star-fort epochs over time.
 - **v0.94 — owner /goal: "go on with the 4th proposal [colorization loop restructuring], draw
   rivers as ways as in the legacy cartalith app, and make route planning take sea-faring routes
   into account... when a split or partial [route] by sea or river is possible it opts to only use
@@ -582,8 +604,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.94), CPU paths of the engine block. Extend
-   `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.95), CPU paths of the engine block. Extend
+   `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`. Script block 4 (urban
+   morphology, v0.95+) is pure/DOM-free like block 1 and gets its own harness, `tests/run_um.sh`
+   (831 assertions, ported from `urban-morphology/tests/`) — but the civ-layer adapter/renderer
+   that calls it is block 2, so that half still needs `tests/perf/smoke_gen1.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
    seed 12345, 256px, region mode. `tests/perf/hash_gen1.js` is the Playwright A/B battery for
@@ -606,6 +631,18 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Urban morphology (v0.95) — the requested feature is fully shipped; several scope cuts are
+  documented, not forgotten.** Faction→culture/tradition mapping (the PoC ships 2 culture
+  profiles; every settlement currently generates as `'medieval'` — worth revisiting once/if
+  factions carry a culture concept of their own). Full terrain-sourced site GEOMETRY: the port
+  currently classifies real terrain into a site TYPE (river/riverthrough/bay/coast/landlocked)
+  but the river curve/bridge/harbour placement stays the PoC's own self-consistent synthetic
+  generation (mixing synthetic geometry with real `isWater()` was judged unsafe without a full
+  redesign — see the CHANGELOG v0.95 entry's reasoning). The PoC's parcels layer and fine detail
+  objects (trees/wells/market crosses/cranes/bollards) aren't drawn in the canvas renderer yet
+  (kept out of v1 for per-frame draw cost — blocks/walls/streets/buildings are). No era signal
+  (`civYear`) drives wall-vs-star-fort epochs over simulated time yet. None of these were asked
+  for explicitly; pick up only if the owner wants deeper fidelity.
 - **LOD/render performance optimizations — 4 of 6 originally-proposed shipped across v0.93/v0.94**
   (progressive overview rebuild, pooled tile refine, pooled atlas bake, `sampleArr` row-hoisting —
   see the v0.93/v0.94 entries and CHANGELOG for full detail). **Explicitly deferred, not

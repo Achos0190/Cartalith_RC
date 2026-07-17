@@ -12,6 +12,114 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.95 (2026-07-17)
+**Owner request: "There is an urban Morphology proof of concept in a subfolder. I want you to
+think about how you will refractor the code into cartalith and upgrade the settlement menus with
+the additional information. The main idea is that when the zoom goes deep enough the current
+symbol/circle gets faded out and the settlement lay-out becomes apparent and it's roads lock to
+the route's that the program already generates. (just the main in roads, other roads from the
+settlement generator can persist) I want a separate toggle to start settlement generation. In a
+map wife base but also, in the settlement specific menu toggles for the settlement age and
+fortifications. Base settlement age and size should be inferred by the already made. Population
+size."**
+
+`urban-morphology/Urban Morphology v0.1.html` is a standalone, deliberately-isolated PoC: a pure,
+DOM-free procedural historical-city-layout generator (streets → blocks → parcels → buildings →
+walls/fortifications → districts → detail, ~88 headlessly-testable functions returning one plain
+model object), with its own 801-assertion suite and purpose-written integration docs
+(`docs/06-cartalith-integration-map.md`, `docs/09-refactoring-function-inventory.md`). This
+version ports it in as Gen1's **new 4th `<script>` block** (`UME`, ~2.6k lines, namespaced IIFE —
+CLAUDE.md's "three sequential script blocks" architecture note is now four), and builds the civ-
+layer bridge/renderer requested on top of it — all opt-in, default off, so cross-version
+neutrality holds throughout.
+
+**Port** — the engine's own `mulberry32` was dropped in favor of Gen1's byte-identical copy
+(verified same constant/algorithm; JS scoping resolves it at runtime in the browser without a
+duplicate definition), `generate` was renamed `cityGen` at the export boundary to avoid ambiguity
+with Gen1's own `generate()`, and a single surgical hook (`if(opts.routeEnds&&opts.routeEnds.
+length)site.routeEnds=opts.routeEnds;`, right after `buildSite()`) was added so the host app can
+override the PoC's synthetic map-edge approach-road endpoints with real ones — the one
+integration point the docs flagged as needing a bridge, and the whole mechanism the road-locking
+requirement needed. `UM-ENGINE-START`/`UM-ENGINE-END` comment markers carry over so
+`tests/run_um.sh` can extract the block from the merged file exactly like the PoC's own harness
+extracted it from the standalone one.
+
+**`_umPlaceContext(p)` adapter** (civ layer, script block 2) bridges an existing settlement to
+`UME.cityGen`'s inputs: **pop** clamped to the PoC's domain; **age** (`p.umAge`, else inferred —
+`clamp(round(60+240·log10(max(1,pop)/100)),30,1000)`, pop 100→60y / 1k→~300y / 10k→~540y) with
+`wallGenerations:true` so age genuinely paces successive wall rings; **walls** (`p.umWalls`, else
+inferred true for the `fortified` trait or tier rank ≥2 — town and up); **fortified** (star fort)
+from the `fortified` trait, gated by the PoC's own pop≥2500 anachronism check; **site kind**
+(`_umSiteKindFromTerrain`) classified from real terrain (field/flowField near `p`, sea level) into
+river/riverthrough/bay/coast/landlocked — deliberately scoped to TYPE only, not full site
+geometry: the PoC's `buildSite` derives its river curve/bridge/harbour placement from its own
+synthetic `isWater`/`height` functions, so swapping only some of those out would produce an
+internally-inconsistent site (a bridge on a synthetic river a real `isWater()` disagrees with);
+full terrain-sourced site geometry is deferred, flagged below. **`routeEnds`** — the road-locking
+requirement — built from `civWays` actually connected to `p` (`aIdx`/`bIdx` match against the
+settlement-filtered places array, `_civNetworkMetrics`'s own resolution pattern, plus endpoint-
+snap fallback for manual ways), turned into approach bearings that `buildPrimaries`' A* grows the
+town's main roads from — so a generated town's PRIMARY roads lock onto the region's real route
+network while its internal streets/lanes stay the engine's own procedural growth, exactly the
+split the owner asked for.
+
+**Rendering — pin/layout crossfade at deep zoom.** New §2.5 in `drawCivLayer`, drawn before §3
+Places so pins/labels stay visually on top while both are partially visible. Gated on real km via
+`lodSpanKm()` (not raw `_lodZoom`, whose numeric meaning scales with map size): fade begins at a
+24 km view span, full layout / pin fully faded at 10 km. `_umDrawLayout` maps the generated
+model's meters (relative to `model.anchors.market`, the town's own generated centre) onto the
+settlement's real grid position and draws water/blocks/wall(or bastioned fort)/streets(by class,
+primary widest)/buildings as `civCtx` vector fills/strokes — a simplified pass vs. the PoC's SVG
+layer stack (parcels and fine clutter — trees/wells/crosses — deferred, flagged below). A
+settlement's pin only fades once ITS OWN model is actually ready to draw (`_umRevealedSet`, keyed
+per-frame) — generation is queued/async, so a settlement mid-generation keeps its full pin rather
+than leaving a bare gap. Verified visually via fixed-seed Playwright screenshots at 40/20/14/6 km
+spans: pin only → faint street web bleeding through a faded pin → full walled-town layout with
+blocks/buildings and connected region roads visibly running into the settlement, with no console
+errors at any step.
+
+**Generation, caching, invalidation.** `_umModelFor(p)` builds `_umPlaceContext`, runs
+`UME.cityGen`, and caches the result in a module `Map` keyed on every input that affects the
+layout (seed/pop/age/walls/fortified/site/routeEnds) — an editor change or a road-network rebuild
+simply produces a different key next call, so a stale entry is never touched again rather than
+needing explicit invalidation wiring; cache clears wholesale on world regen (`_fieldGen`). At
+most one settlement's model is generated per frame (`_umScheduleGenStep`, mirrors the
+`_lodScheduleOverviewRebuild` deferred-work precedent) so a zoom-in over a cluster never freezes a
+frame; a cache miss returns `null` immediately (renderer keeps showing the pin, not a stall) and
+triggers a background `renderNow()` once the model lands. Never serialized (transient/
+deterministic from inputs, Invariant 6).
+
+**UI.** Map-wide toggle (`state.viz.urbanLayouts`, **default off**) — "Generate settlement
+layouts (urban morphology)" — in Civilization → Settlements next to the metropolis-tier checkbox;
+`loadZip`'s viz-defaults `Object.assign` carries the `false` default forward for old saves the
+same way every other opt-in viz flag does. Settlement popup (`_civPopulatePlaceEditor`) gains
+**Age (years)** (number input, placeholder shows the live inferred value, blank = auto → `p.
+umAge`) and **Fortifications** (checkbox, `indeterminate` while unset = inferred, a click commits
+an explicit override → `p.umWalls`) — both default `null` via `_civEnsurePlaceDefaults`, both new
+nullable fields round-trip automatically through the existing whole-object `state.places`
+serialization (no whitelist to touch).
+
+**Verification.** Engine (script block 1) untouched ⇒ `tests/run.sh` **923/923** unaffected. New
+`tests/run_um.sh` + `tests/um_test_tail.js` (ported from `urban-morphology/tests/`, `.generate(`
+calls mechanically renamed to `.cityGen(`, extraction script adapted to pull script block 4 from
+the merged file and prepend a standalone `mulberry32` copy so the extracted module has no
+unresolved global) — **831/831** passed. `hash_gen1.js` A/B against v0.94: **ALL IDENTICAL**
+(toggle defaults off). `smoke_gen1.js` **165 → 173** (+8: toggle default-off + wiring, a real
+civ-canvas pixel difference once enabled at deep zoom, pin-fade gating on the model actually being
+ready, popup Age/Fortifications fields exist, editing Age changes the cache key and clearing it
+back to blank restores the auto key, layout generation is deterministic for identical inputs) —
+**173/173** passed. All four batteries green in one pass; docs/CLAUDE.md/README updated for the
+new four-script-block architecture.
+
+**Deferred** (documented, not built this pass): faction→culture/tradition mapping (the PoC ships
+2 culture profiles; culture is fixed to `'medieval'` for now); `estimateCarryingCapacity`'s
+placeholder body, compatible but not swapped for Cartalith's real capacity field; an era signal
+(`civYear`) driving wall-vs-star-fort epochs over time; trimming a region way's visual overlap
+where it enters a revealed layout (v1 just draws the layout on top); full terrain-sourced site
+GEOMETRY (river polyline/height field/bridge-harbour placement) beyond the current real-terrain
+site-TYPE classification; the PoC's parcels layer and fine detail objects (trees/wells/market
+crosses/cranes/bollards) in the canvas renderer, simplified out of the v1 pass for per-frame cost.
+
 ### v0.94 (2026-07-16)
 **Owner /goal: "go on with the 4th proposal [colorization loop restructuring], draw rivers as ways
 as in the legacy cartalith app, and make route planning take sea-faring routes into account — at

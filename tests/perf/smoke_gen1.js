@@ -1318,6 +1318,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { pairs: out };
   });
 
+  // v0.95 (owner: refactor the urban-morphology PoC into Cartalith; at deep zoom a settlement's pin
+  // fades into its own generated street layout, main roads locked to the region network, gated by a
+  // map-wide opt-in toggle; settlement popup gains Age/Fortifications, inferred from population by
+  // default). Regression guard: default-off toggle + wiring, a real pixel difference between the
+  // toggle on/off states once the deep-zoom crossfade band + a generated model are both in effect (and
+  // the pin fades — _umRevealedSet gates on the model actually being ready, not just the zoom band),
+  // the popup's Age/Fortifications fields exist and editing either changes _umPlaceContext's cache key
+  // (so the layout regenerates), and generation is deterministic for identical inputs.
+  R.urbanMorph = await page.evaluate(async () => {
+    try { _civAutoWorld(); } catch (e) {}
+    const settle = state.places.find(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    if (!settle) return { ok: false, error: 'no settlement' };
+
+    const chk = document.getElementById('civUrbanLayoutsChk');
+    const defaultOff = (state.viz && state.viz.urbanLayouts) === false;
+    const checkboxReflectsDefault = !!chk && chk.checked === false;
+
+    const lc = document.getElementById('lodChk'); if (lc) { lc.checked = true; lc.dispatchEvent(new Event('change')); }
+    _lodCx = settle.x; _lodCy = settle.y; _lodZoom = Math.max(4, (state.mapWidthKm || 800) / 6);
+    state.viz.urbanLayouts = false; renderNow();
+    const civOff = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+
+    state.viz.urbanLayouts = true;
+    let model = null;
+    for (let i = 0; i < 50 && !model; i++) { renderNow(); model = _umModelFor(settle, false); if (!model) await new Promise(r => setTimeout(r, 20)); }
+    renderNow();
+    const civOn = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+    let diffPx = 0;
+    for (let i = 0; i < civOn.length; i += 4) {
+      if (Math.abs(civOn[i] - civOff[i]) + Math.abs(civOn[i + 1] - civOff[i + 1]) + Math.abs(civOn[i + 2] - civOff[i + 2]) + Math.abs(civOn[i + 3] - civOff[i + 3]) > 6) diffPx++;
+    }
+    const revealedWithModel = !!model && _umRevealedSet.has(settle);
+
+    _civSelectedPlace = settle; _civRenderPlaceEditor();
+    const ageEl = document.getElementById('_civPeAge'), wallsEl = document.getElementById('_civPeWalls');
+    const hasAgeEl = !!ageEl, hasWallsEl = !!wallsEl;
+    const key0 = _umCacheKey(_umPlaceContext(settle));
+    if (ageEl) { ageEl.value = '600'; ageEl.dispatchEvent(new Event('input')); }
+    const key1 = _umCacheKey(_umPlaceContext(settle));
+    const cacheInvalidatesOnAgeEdit = key0 !== key1;
+    if (ageEl) { ageEl.value = ''; ageEl.dispatchEvent(new Event('input')); }
+    const key2 = _umCacheKey(_umPlaceContext(settle));
+    const ageBackToAuto = key2 === key0;
+
+    const ctx = _umPlaceContext(settle);
+    const mA = UME.cityGen(ctx.seed, ctx), mB = UME.cityGen(ctx.seed, ctx);
+    const deterministic = UME.hashModel(mA) === UME.hashModel(mB);
+
+    _lodOn = false; _lodZoom = 1; state.viz.urbanLayouts = false; applyView(); renderNow();
+    return {
+      ok: true, defaultOff, checkboxReflectsDefault, diffPx, revealedWithModel,
+      hasAgeEl, hasWallsEl, cacheInvalidatesOnAgeEdit, ageBackToAuto, deterministic
+    };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1491,6 +1546,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.86: Assets header button toggles into the library ("← Map") and back to the canvas', R.assetsToggle.inAssets && R.assetsToggle.back);
   A('v0.86: every Layers-popover view has a visible, non-empty legend', R.allLegends.total > 25 && R.allLegends.bad === 0);
   A('v0.86: geological Resources layer is full-map (present below sea) and re-derives on a sea-level change', R.resources.fullMap && R.resources.reDerivedAfterSeaMove && R.resources.persistsUnderRaisedSea);
+
+  // ── v0.95: urban morphology (deep-zoom settlement layouts) ──
+  A('v0.95: settlement found on the auto-populated world (test precondition)', R.urbanMorph.ok === true);
+  A('v0.95: "Generate settlement layouts" toggle defaults off (state + checkbox)', R.urbanMorph.defaultOff === true && R.urbanMorph.checkboxReflectsDefault === true);
+  A('v0.95: enabling the toggle at deep zoom produces a real pixel difference on the civ canvas', R.urbanMorph.diffPx > 0);
+  A('v0.95: a settlement whose model is ready is marked revealed (pin fades complementary to the layout)', R.urbanMorph.revealedWithModel === true);
+  A('v0.95: settlement popup gains Age (years) and Fortifications fields', R.urbanMorph.hasAgeEl === true && R.urbanMorph.hasWallsEl === true);
+  A('v0.95: editing Age invalidates the cached layout (cache key changes)', R.urbanMorph.cacheInvalidatesOnAgeEdit === true);
+  A('v0.95: clearing Age back to blank restores the auto-inferred cache key', R.urbanMorph.ageBackToAuto === true);
+  A('v0.95: layout generation is deterministic for identical inputs (hashModel matches)', R.urbanMorph.deterministic === true);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
