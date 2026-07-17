@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.97**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.98**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.97.html` | **Current** unified tool (~20.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.96.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.98.html` | **Current** unified tool (~20.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.97.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
@@ -84,10 +84,23 @@ to `UME.cityGen`, whose `buildPrimariesFromPaths` adds them as the primary-stree
 `grow()`/`buildBlocks`/`buildWall` build around. So the through-road IS the town's high street
 (enters/exits at gates), not a separate parallel line. Falls back to `_umRouteEnds` (v0.96
 aligned-bearings, `buildPrimaries` synthesis) when no roads connect. Internal streets/lanes/parcels
-stay the engine's own procedural growth. Rivers/lakes are next (Stages 2–3): feeding the real river
-centerline / shoreline into `buildSite` the same way. Generation is deferred one-
-settlement-per-frame (`_umScheduleGenStep`) and cached (`_umModelFor`, keyed on every input that
-affects the layout) so a cache miss shows the pin, not a stall, until the model lands.
+stay the engine's own procedural growth. **v0.98 (seamless refactor Stage 2 — water):** the town's
+WATER is the map's water too. `_umWaterCtx(p)` packages the real water near the settlement into the
+layout's local box frame (orient forced to 0, referenced to the box centre C = the settlement's real
+position): (a) the nearest real river centerline (`traceRiverPolylines`' nearest stem, with a
+resolution-aware search radius — at a coarse 512px region the whole ~1.7 km town box is barely one
+grid cell) and (b) a coarse local raster of ALL real water over the box (sea + sub-sea-level lakes,
+river band stamped in) plus its chamfer distance transform. `buildSite(seed,Wm,Hm,kind,opts)` then,
+when `opts.water` is present, sources `isWater`/`riverDist` from that mask/DT and takes `river` as the
+real centerline (or, for a purely coastal town, a shoreline extracted from the mask) — so the town's
+bridge/bank/quay/coastline all match the map, and it never builds in the sea; the synthetic-water path
+(no `opts.water`, the headless UME suite) is untouched and bit-identical. `generate()` pins the market
+onto C (nudging off water if C is in the channel) so town water AND roads land on the map pixel-for-
+pixel. A town whose nearest river is genuinely a couple of cells off gets NO wrong synthetic river.
+(Flagged follow-up: coastal wall/harbour aesthetics; "river through town" reads best at 1K/2K.)
+Generation is deferred one-settlement-per-frame (`_umScheduleGenStep`) and cached (`_umModelFor`,
+keyed on every input that affects the layout — including a water signature) so a cache miss shows the
+pin, not a stall, until the model lands.
 
 ### Engine (block 1) essentials
 
