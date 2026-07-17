@@ -1373,6 +1373,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     };
   });
 
+  // v0.96 regression guard for the coordinate-based _umRouteEnds fix (the town's main roads lock to the
+  // map's connected roads). Deterministic form: a road whose endpoint is snapped to the settlement must
+  // yield a route end, while a way that only PASSES NEAR the settlement (endpoint not at it) must NOT —
+  // the old aIdx/bIdx match couldn't tell those apart (several split runs of one edge share aIdx/bIdx,
+  // so it pulled bearings from way-interior junctions). Bearing-vs-bearing angle matching is left to the
+  // dedicated probes (chance-sensitive with many primaries; not a stable pass/fail in the smoke world).
+  R.umRoadEnds = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    await generate();
+    try { _civAutoWorld(); } catch (e) { return { ok: false, reason: 'autoworld: ' + e.message }; }
+    const eps = Math.max(1.0, GW / 250);
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    const cc = p => { let n = 0; for (const w of civWays) { if (w.sea || w.hidden || !w.pts || w.pts.length < 2) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - p.x, a.y - p.y) < eps || Math.hypot(b.x - p.x, b.y - p.y) < eps) n++; } return n; };
+    let best = null, bn = -1; for (const p of settles) { const c = cc(p); if (c > bn) { bn = c; best = p; } }
+    if (!best || bn < 1) return { ok: false, reason: 'no connected settlement' };
+    const re = _umRouteEnds(best, UME.SITE_WM, UME.SITE_HM, 0);
+    // a placeholder far from any settlement endpoint must get no route ends (proves it's not matching by
+    // proximity/aIdx alone) — find an empty spot
+    let farP = null; for (let gy = 5; gy < GH - 5 && !farP; gy += 7) for (let gx = 5; gx < GW - 5; gx += 7) { let near = false; for (const w of civWays) { if (!w.pts) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - gx, a.y - gy) < eps * 4 || Math.hypot(b.x - gx, b.y - gy) < eps * 4) { near = true; break; } } if (!near && field[gy * GW + gx] >= (state.seaLevel || 0.42)) { farP = { x: gx, y: gy }; break; } }
+    const reFar = farP ? _umRouteEnds(farP, UME.SITE_WM, UME.SITE_HM, 0) : null;
+    return { ok: true, conns: bn, connectedGetsEnds: !!re && re.length > 0, disconnectedGetsNone: !reFar };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1556,6 +1579,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.95: editing Age invalidates the cached layout (cache key changes)', R.urbanMorph.cacheInvalidatesOnAgeEdit === true);
   A('v0.95: clearing Age back to blank restores the auto-inferred cache key', R.urbanMorph.ageBackToAuto === true);
   A('v0.95: layout generation is deterministic for identical inputs (hashModel matches)', R.urbanMorph.deterministic === true);
+  // ── v0.96: urban-morphology fixes ──
+  A('v0.96: a connected settlement yields route ends from its real roads (road-lock precondition)', R.umRoadEnds.ok === true && R.umRoadEnds.connectedGetsEnds === true);
+  A('v0.96: a spot with no road endpoint at it yields no route ends (coordinate match, not aIdx/proximity)', R.umRoadEnds.ok !== true || R.umRoadEnds.disconnectedGetsNone === true);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

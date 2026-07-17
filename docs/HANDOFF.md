@@ -9,11 +9,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.95.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v0.96.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.96 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.94` are kept and never edited.
+  (v0.97 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.95` are kept and never edited.
+- **v0.96 — owner live-QA on v0.95's urban morphology + two map-render asks.** Batch of fixes
+  from the owner testing v0.95 in-browser. Urban-morphology fixes (all still opt-in, default off):
+  right-click a settlement works again under deep zoom (`evtToGridLOD` in the context menu — the
+  Age/Fortifications fields were unreachable because of this); the town's main roads now lock to
+  the map roads (`_umRouteEnds` matches on the way endpoint COORDINATE at the settlement, not the
+  `aIdx`/`bIdx` that several split runs of one edge share); the layout is rotated to the real
+  terrain (`_umTerrainOrient` — river axis from a PCA of nearby high-flow cells, or the sea
+  direction, or 0 landlocked — so a river town's river runs the same way as the map river and a
+  landlocked town has none, with road bearings pre-rotated to compensate); the city wall draws
+  the CLOSED ring so it goes around the town; Age/Walls edits repaint; the layout is opaque at
+  full zoom (solid fills, crossfade via the layer alpha only); harbour size scales with port
+  population (`_umHarbourScale`, bit-identical to the PoC at default). Two map-render changes
+  (intentional default-render adjustments, engine fields bit-identical, only `rgba` moves):
+  rivers-as-ways redrawn in water-blue that deepens with order (the old hsl ramp went cyan→GREEN
+  →orange) and de-"barcoded" by starting the vector ways at order 2 (the ~5,000 order-1 trickles
+  stay in the raster water tint). **Deferred/known limitation:** blocky water borders at deep LOD
+  zoom (coarse 512px field magnified past its resolution at the land/water threshold — pre-existing,
+  same class as v0.92's blocky-lakes work; needs procedural sub-cell coast detail in the fragile
+  tile renderer, scoped as a focused follow-up). Verified: engine **923/923**, UME **831/831**,
+  smoke **173/173**, hash battery field/temp/rain/flow identical (rgba differs by the river
+  restyle), fixed-seed screenshots (opaque walled towns, roads through gates, river aligned;
+  global rivers clean blue).
 - **v0.95 — owner request: refactor the `urban-morphology/` proof-of-concept (a standalone
   procedural city-layout generator) into Cartalith, with a deep-zoom reveal (settlement pin fades
   into its generated street layout, main roads locked to the region's own route network), a

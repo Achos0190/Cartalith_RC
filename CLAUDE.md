@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.95**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.96**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.95.html` | **Current** unified tool (~20.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.94.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.96.html` | **Current** unified tool (~20.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.95.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
@@ -68,14 +68,18 @@ init, not `setTimeout(...,0)`).
 
 Opt-in (`state.viz.urbanLayouts`, default `false`) deep-zoom reveal: past a real-km crossfade
 band (`lodSpanKm()` between `UM_FADE_FAR_KM=24` and `UM_FADE_NEAR_KM=10`), a settlement's pin
-fades out and its own procedurally-generated street layout fades in, drawn as `civCtx` vector
-strokes/fills in `drawCivLayer` (`_umDrawLayout`), positioned by mapping the generated model's
-meters around `model.anchors.market` onto the settlement's real grid coordinate. The adapter
-(`_umPlaceContext`) infers age/wall defaults from the settlement's existing population/tier
-(overridable per-settlement via the popup's Age/Fortifications fields, `p.umAge`/`p.umWalls`,
-both nullable = infer) and builds `routeEnds` from the settlement's real connected `civWays` so
-the generated town's PRIMARY roads lock onto the region's own route network — internal
-streets/lanes/parcels stay the engine's own procedural growth. Generation is deferred one-
+fades out and its own procedurally-generated street layout fades in, drawn (opaque; the crossfade
+is the layer `globalAlpha`) as `civCtx` vector strokes/fills in `drawCivLayer` (`_umDrawLayout`),
+positioned by mapping the generated model's meters around `model.anchors.market` onto the
+settlement's real grid coordinate **and rotated by `model._umOrient`** (v0.96 `_umTerrainOrient`:
+`buildSite` grows its river west→east in a local frame, so the drawing is turned to line that up
+with the real river axis / sea direction — landlocked ⇒ 0). The adapter (`_umPlaceContext`) infers
+age/wall/harbour-size defaults from the settlement's existing population/tier (age/walls overridable
+per-settlement via the popup's Age/Fortifications fields, `p.umAge`/`p.umWalls`, both nullable =
+infer) and builds `routeEnds` from the settlement's real connected `civWays` — matched on the way
+endpoint COORDINATE at the settlement (v0.96; NOT `aIdx`/`bIdx`, which several split runs of one
+edge share) and pre-rotated by `−orient` — so the generated town's PRIMARY roads lock onto the
+region's own route network. Internal streets/lanes/parcels stay the engine's own procedural growth. Generation is deferred one-
 settlement-per-frame (`_umScheduleGenStep`) and cached (`_umModelFor`, keyed on every input that
 affects the layout) so a cache miss shows the pin, not a stall, until the model lands.
 

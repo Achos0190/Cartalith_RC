@@ -12,6 +12,79 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.96 (2026-07-17)
+**Owner live-QA on v0.95's urban morphology, plus two map-render asks.** A batch of fixes and
+refinements from the owner testing v0.95 in-browser. All urban-morphology changes stay opt-in
+(`state.viz.urbanLayouts` still default off); the two river changes are intentional default-render
+adjustments (like v0.94's rivers-as-ways), so the engine fields stay bit-identical and only `rgba`
+moves in the hash battery.
+
+**Urban morphology fixes:**
+- **Right-click a settlement works again under deep zoom** (owner: "right clicking a settlement
+  doesnt work anymore" — which also made the Age/Fortifications fields unreachable). The viewport
+  context menu used `evtToGrid`, which maps wrong while Tiled LOD is on (the canvas shows only
+  `lodViewRect()`'s sub-rectangle) — exactly the zoom where the layouts appear. Switched to the
+  LOD-aware `evtToGridLOD` (the same fix v0.91 gave click-to-info). The editor (and its Age/Walls
+  rows) is reachable again.
+- **Town roads now lock to the map's roads** (owner: layouts "dont align/connect"). Root cause: a
+  single road edge is split into several runs that ALL inherit the same `aIdx`/`bIdx`, but only the
+  run truly reaching the settlement has its endpoint snapped to the settlement coordinate — the
+  interior runs start at a junction. `_umRouteEnds` matched on `aIdx`/`bIdx`, so it pulled approach
+  bearings from those junctions and the town's primaries pointed the wrong way. It now matches on
+  the way endpoint COORDINATE being at the settlement, and takes a stable bearing over a minimum
+  walk-out distance. Verified: on a fixed seed the town's primary-road bearings (25°, −164°, −179°)
+  match the real connected-road bearings (24°, −162°, −174°) to within a few degrees.
+- **Layout aligned to real terrain** (owner: landlocked towns still drew a river, river towns'
+  rivers didn't meet the map river). New `_umTerrainOrient`: `buildSite` always grows its river
+  west→east in a local frame; this computes the rotation that lines that local frame up with the
+  real terrain — the river axis from a PCA of the nearby high-flow cells, or (coastal) the mean
+  sub-sea direction, or 0 (landlocked). `_umRouteEnds` pre-rotates the road bearings by −orient and
+  `_umDrawLayout` rotates the whole drawing back by +orient, so the town's own river/coast runs the
+  same way as the map's water AND the roads still exit toward the real neighbours. Landlocked towns
+  (classified from terrain) get no water at all.
+- **City wall goes around the town again** (owner: "the city wall is a mess and doesnt go around a
+  city"). The renderer drew `landArc` as an OPEN path — but for a landlocked town `landArc` IS the
+  full ring, so it showed a gap. Now draws the CLOSED containment ring (`wall.ring`), or the closed
+  star-fort trace for bastioned towns, with spurs and gate markers, at a floored line width so it
+  reads at any zoom.
+- **Fortifications / Age toggles now repaint** (owner: "toggling on or off nothing happens"). An
+  Age/Walls edit changes `_umPlaceContext`'s inputs (so the cached model misses and regenerates),
+  but nothing kicked a redraw to run that path — both handlers now call `drawCivLayerAuto()`.
+- **Layouts are opaque at full zoom** (owner: "settlements still look see-trough instead of
+  opaque"). The block/building/water fills were <1 alpha, so terrain showed through even at full
+  crossfade. Fills are now solid colours (crossfade handled solely by the layer `globalAlpha`);
+  streets draw casing-then-fill so the network reads as continuous roads.
+- **Harbour scales with the port's size** (owner: "the bigger a settlement if its port city the
+  bigger its harbor"). New `_umHarbourScale(pop,site)` — quay length, pier count and mole grow with
+  a gentle power (~0.4) of population (waterfront ~ throughput ~ trade, sub-linear), clamped 0.6–3×,
+  threaded into `buildHarbour` (default 1 ⇒ bit-identical to the source PoC, so the UME suite path
+  is unchanged).
+
+**Map-render asks:**
+- **Rivers redrawn in the settlement's water-blue, and de-"barcoded"** (owner: liked the settlement
+  river style, wanted it global; also "river density is very high ... almost a barcode style
+  look"). `drawRiverWays`' old hsl ramp swept cyan→GREEN→orange with order, so mid-order rivers
+  rendered green and read as hatching, not water; and it stroked every one of the ~5,000 order-1
+  trickles → a dense barcode. Now: a straight water-blue that only deepens with order (matching the
+  settlement layout's river), and the vector ways start at order 2 (order-1 stays in the raster
+  water tint underneath), so only real rivers draw as clean blue lines. The "Min stream order"
+  Style slider still raises the floor.
+
+**Deferred / known limitation:** the owner also reported blocky water borders at deep LOD zoom
+("solid block instead of smooth borders according to the heightmap"). This is the coarse working
+field (512px) being magnified past its resolution at the land/water threshold — the same class as
+v0.92's blocky-lakes work, and pre-existing (not introduced by the urban-morphology feature). A
+proper fix needs procedural sub-cell coast detail in the refined tiles (the fragile LOD tile
+renderer), so it's scoped as a focused follow-up rather than risked in this batch.
+
+**Verification:** engine `tests/run.sh` **923/923** (block-1 pipeline unchanged — the only block-1
+edit is `drawRiverWays`, pure canvas render, not in the headless path); `tests/run_um.sh`
+**831/831** (harbour scaling bit-identical at default opts); `smoke_gen1.js` **173/173**;
+`hash_gen1.js` A/B vs v0.95 shows the engine fields (field/temp/rain/flow) identical with `rgba`
+differing at biome configs by design (the river restyle). Browser-verified with fixed-seed
+screenshots: opaque walled towns with roads entering through gates and the river running through
+aligned to the map river; global rivers clean blue, no green barcode.
+
 ### v0.95 (2026-07-17)
 **Owner request: "There is an urban Morphology proof of concept in a subfolder. I want you to
 think about how you will refractor the code into cartalith and upgrade the settlement menus with
