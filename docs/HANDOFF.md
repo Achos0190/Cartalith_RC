@@ -669,6 +669,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Seamless region↔settlement refactor — Stage 1 (roads) SHIPPED in v0.97; Stages 2 (rivers) and
+  3 (lakes/coast) are the next work, owner-approved (full staged refactor).** The design is settled
+  and the coordinate trick is worked out — capture it here so the next session can execute directly:
+  - **Stage 2 (rivers, v0.98):** feed the REAL river centerline into `buildSite` instead of its
+    synthetic west→east river. Adapter: `traceRiverPolylines(_riverNet.order,_riverNet.recv,GW,GH,1)`
+    → pick the polyline passing nearest the settlement → clip to the town footprint → pass as
+    `opts.riverPath` (a polyline in local box metres) + `opts.riverWidthM`. Engine: when `riverPath`
+    is supplied and the site is river-kind, set `site.river = riverPath` at the TOP of `buildSite`;
+    everything downstream (`riverDist`/`isWater`/`waterPoly`/`bridgePt`/`bridgeDir`/`bankSide`/
+    `harbourIdx`) already derives from `site.river`, so it recomputes consistently for free.
+  - **The coordinate trick (the crux — non-obvious):** for the drawn river to land EXACTLY on the
+    map river, force **`anchors.market = box centre C`** and reference the real geometry to C
+    (offsets from the settlement, at **orient=0** — real geometry needs no rotation). The draw
+    transform is `grid = p + R(orient)·(local − market)·gridPerMeter`; with market=C and the river
+    passed as `C + R(0)·(realGrid − p)/gridPerMeter`, the `(C − market)` shift is zero, so the river
+    (and the roads, which already anchor at market) draw pixel-for-pixel on the map river. Market at
+    C is correct anyway (C = the settlement's real position = the town centre, on land near the
+    river since settlements sit on the bank, not the channel). Set `orient=0` on the real-geometry
+    path (the v0.96 `_umTerrainOrient` rotation was only a workaround for the synthetic river).
+  - **Stage 3 (lakes/coast, v0.99):** same shape — feed the real shoreline (from the water-body mask
+    / sea level) as `opts.coastPath`; `buildSite`'s coastal branch uses it for `yAtX`/`isWater`/
+    `waterPoly`/`harbourIdx`.
+  - Risk: `buildSite` is the most intricate engine function; swap the river polyline at the top and
+    lean on its existing derivations rather than rewriting them. Verify per stage: engine 923, UME
+    831 (default-opts path unchanged), hash ALL-IDENTICAL (default-off), smoke, and fixed-seed
+    screenshots showing the town river continuous with the map river through the settlement.
 - **Urban morphology (v0.95) — the requested feature is fully shipped; several scope cuts are
   documented, not forgotten.** Faction→culture/tradition mapping (the PoC ships 2 culture
   profiles; every settlement currently generates as `'medieval'` — worth revisiting once/if
