@@ -38,7 +38,7 @@ function makeEl(id, tag){
     addEventListener(){}, removeEventListener(){}, dispatchEvent(){},
     appendChild(c){ this.children.push(c); return c; }, removeChild(){},
     closest(){ return null; }, querySelector(){ return null; }, querySelectorAll(){ return []; },
-    setAttribute(){}, getAttribute(){ return null; }, focus(){}, blur(){}, click(){},
+    setAttribute(){}, getAttribute(){ return null; }, removeAttribute(){}, focus(){}, blur(){}, click(){},
     getBoundingClientRect(){ return { left: 0, top: 0, width: this.width || 512, height: this.height || 328 }; }
   };
   return el;
@@ -65,7 +65,8 @@ global.document = {
   querySelector(){ return null; },
   querySelectorAll(){ return []; },
   addEventListener(){},
-  body: makeEl('body')
+  body: makeEl('body'),
+  documentElement: makeEl('html')   // v0.86: theme switch reads/sets document.documentElement[data-theme]
 };
 
 global.window = new Proxy(global, { get: (t, k) => (k === 'devicePixelRatio' ? 1 : t[k]) });

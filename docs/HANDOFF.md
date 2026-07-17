@@ -9,10 +9,178 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.85.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.92.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.86 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.84` are kept and never edited.
+  (v0.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.91` are kept and never edited.
+- **v0.92 — owner /goal: "carry out the [save-export audit's] reported fixes, then analyze why
+  the program is so slow when zooming in even when tiles are baked"**, followed same-day by a
+  bug report on the resulting fix (render battery ALL IDENTICAL to v0.91, headless **923**
+  unchanged, smoke **137 → 148**). Four parts:
+  (1) **audit fixes** (`docs/research/save-export-architecture-audit.md` §5, compatibility break
+  accepted per owner): `exportZip()` now skips the redundant `map.png`/`tiles/*` flat bake when
+  `state.finalized` (the Atlas pyramid already covers the whole map at every baked level — a
+  precise signal, only ever true after `bakeAllTiles` finishes clean); the 4 `layers/*.png`
+  preview PNGs are now opt-in (a new checkbox, same footing as the existing channel-atlas
+  checkbox) instead of unconditional; the "Tiles & LOD" accordion (which buried "Atlas" two
+  levels deep and bundled three unrelated features under one label) is split into three
+  top-level sections — **Tiled LOD view** / **Atlas cache** / **Region export** — same element
+  ids throughout, markup-only. (2) **the deeper question, root-caused with real profiling**: the
+  reported "slow when zooming even with tiles baked" was real, but not the mechanism the owner
+  suspected — the sharp TILE overlay correctly serves from the atlas when baked, but it draws on
+  top of an "instant overview" backdrop that's rebuilt from scratch (full `GW×GH` canvas, the same
+  expensive per-pixel colorization used for real tiles) on every zoom-level change, *always*,
+  because it's built straight from `field` and never consults the atlas at all — measured **~940ms
+  per zoom step at a modest 1024px world, unaffected by bake state** (baked vs. unbaked timings
+  were the same order of magnitude). Since that backdrop is already documented as deliberately
+  low-fidelity ("NO procedural detail"), rendering it at quarter resolution and letting the canvas
+  stretch it (no signature changes needed — the resample/colorize functions already take
+  independent output-resolution params) cut a full overview rebuild from **655ms → 53ms (12.3×)**,
+  and the isolated backdrop-only cost (tile canvases + atlas already warm — the truest measure of
+  a mid-zoom-gesture frame) from **1186ms → 71ms (16.6×)**. Visually verified unchanged character
+  (screenshots of the same deep-zoom unrefined spot, before/after) since the backdrop was already
+  a coarse placeholder standing in until the sharp tile overlay covers the same ground. Locked in
+  with a permanent smoke-suite timing regression guard. See `CHANGELOG.md` for the full profiling
+  numbers and reasoning. (3) **Follow-up bug report — "aspect ratio goes weird ... lakes are
+  blocky/pixilated again on their edges."** The quarter-res downscale from part (2) starved small
+  lakes (no `_coastSDF` smoothing — that only covers the ocean's sea-level threshold) of source
+  samples: an 8-12px lake shrinks to 2-3px, and the 4× upscale turns an invisible native-res
+  stair-step into a visibly faceted blob. "Aspect ratio weird" is the same artifact described
+  differently — a round shape's *local* aspect getting mangled, not a canvas/CSS distortion (every
+  measured aspect ratio checked out at ~1.56 consistently). A flat `/2` ratio fixes quality at
+  1024px but re-regresses to ~420-440ms at 2048px, since a ratio's cost scales with the world.
+  Fixed instead with a **512px fixed target output width** (`ovScale=min(1,512/GW)`), which bounds
+  the overview's cost independent of world resolution (~100-130ms measured at both 1024px and
+  2048px) while spending full resolution on worlds already ≤512px wide. Verified with fixed-seed
+  screenshot A/Bs (lake shapes back to round, matching full-res) and two new smoke-suite
+  regression guards (overview canvas width == 512px at the 1024px test world; aspect preserved).
+  (4) **Second same-day follow-up — "Graphic fidelity seems to have degraded also."** The 512px
+  cap fixed lakes/coastlines, but a broader softness remained at whole-map zoom (screenshots: v0.91's
+  fine surface grain reads as a coarser blotch pattern in v0.92). Root cause wasn't the cap itself —
+  every OTHER way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already
+  schedules `refineVisibleTiles()` after a 240ms settle, which draws a full-detail sharp tile over
+  the coarse overview; a controlled before/after screenshot confirmed this genuinely restores full
+  sharpness once triggered. But the **`lodChk` checkbox's own change handler never triggered it** —
+  ticking "Tiled LOD view" and just looking left the user on the coarse overview indefinitely. This
+  gap always existed but was invisible pre-v0.92 (the un-refined overview used to be full native
+  resolution already); the resolution cap above is what finally exposed it. Fixed by having the
+  checkbox call `withBusy('sharpening view…', refineVisibleTiles+renderNow)` immediately when
+  checked (same pattern the explicit "Refine" button already uses), guarded by a re-check of
+  `_lodOn` inside the deferred callback so a since-unchecked box can't race it. Verified with a real
+  `.click()` on the checkbox confirming the visible tile populates with no further gesture. One new
+  smoke-suite regression guard. Full battery green (923 headless, bit-identity ALL IDENTICAL,
+  148/148 smoke).
+- **v0.91 — owner /goal: "…how in explore the timeline should work. Currently it works, bit
+  rather clunky"** (no engine changes — script block 2 civ-UI only; render battery ALL IDENTICAL
+  to v0.90, headless **923** unchanged, smoke **123 → 130**): the second half of the v0.90 /goal
+  request. Chosen direction (`AskUserQuestion`): **"one home, real time-scale."** (1) **One
+  home** — timeline authoring (Add year + pills), scrubbing (slider + Animate) and the v0.85
+  collapse/recovery simulator, previously split across Civilization → Polity (the controls) and
+  Explore → Timeline (a second, synced read-only slider), now all live in Explore → Timeline;
+  Simulate sits behind its own nested `<details>` so the common path stays uncluttered. Every
+  moved element kept its id, so only markup moved — click/input handlers are untouched. The old
+  duplicate slider (`#civTlSlider`) is retired; `#explTimelineSlider` is the only one now.
+  (2) **Real time-scale** — `_civWireYearSlider()` used `slider.max = snapshotCount-1` and
+  `slider.value = <array index>`, so uneven year gaps rendered as evenly-spaced ticks. Now
+  `min`/`max`/`value` are the actual recorded years, with a `<datalist>` giving proportional tick
+  marks (screenshot-verified at 3× zoom); dragging still snaps to the nearest recorded year
+  (no interpolation model between discrete snapshots exists). (3) Fixed a latent gating bug while
+  moving the markup: the Explore Timeline section used to hide itself until `civTimeline.length>0`,
+  which would have made it impossible to add the *first* year from Explore — it's now always
+  visible, only the slider+playback row gates on `length>1`.
+  **Same-day follow-up (owner reports, live QA on the shipped v0.91)**, smoke **130 → 136**:
+  (a) *"I dont see the timeline menu in explore"* — the first cut buried Timeline inside the filter
+  funnel's collapsed popover alongside Polity/Settlements/Roads, which reads as a filter, not an
+  editing surface, and was genuinely easy to miss. Moved to `#explTimelineSection`, a plain
+  always-visible `.sec` with its own `<h2>`, same footing as Info/Journeys — no funnel click needed.
+  (b) *"layer views arent responding to opacity anymore"* — a real regression from this session's own
+  v0.89 work: generalizing `drawLODView()` to tile every debug view means `renderNow()`'s LOD early-
+  return now always fires before the opacity-blend code, so the slider went inert under Tiled LOD for
+  all ~29 views. Fixed by blending the affordance tile against the ordinary base tile
+  (`renderBiomeTileRGBA`/`renderHeightTileRGBA`) inside `drawLODView()` itself, skipped at alpha=1 for
+  zero added cost; `_lodRenderKey()` gained `debugOpacity` so the tile caches invalidate when the
+  slider moves. (c) *"settlement/wildlife ones arent clickable...anymore"* — a gap explicitly flagged
+  as a known follow-up in the v0.89 CHANGELOG: click-to-inspect was gated `!_lodOn` outright since
+  `evtToGrid()` assumes the canvas shows the full world, untrue under LOD. New `evtToGridLOD(e)` (the
+  inverse of v0.90's `_civPlaceScreenPos`) replaces the block with a correct reprojection. All three
+  Playwright-verified via real interaction (dispatched clicks, opacity pixel-diff), render battery
+  still ALL IDENTICAL to v0.90, headless 923 unchanged (canvas-interaction/LOD-render fixes — CLAUDE.md
+  invariant #3, not headlessly testable).
+  **Second same-day follow-up**, smoke **136 → 137**: (d) *"roads nearly miss settlements when zooming
+  in"* — `_civSmoothPath()` (every way builder's shared smoothing chokepoint) `Math.round()`ed its own
+  first/last point along with every interior point, up to half a grid cell of drift that Tiled LOD
+  amplifies into a visible gap between a road and the pin it's meant to reach. Fixed by restoring full
+  precision at each run's own endpoints post-round; `_civHierarchicalNetwork()` (the primary auto-
+  route/auto-populate builder) had a second, compounding source — its raw points are downsampled
+  routing-grid cell centers, not the settlement's real coordinate — fixed by substituting the true
+  place coordinate in for each edge's actual first/last run (interior junction-to-junction runs are
+  untouched, on purpose — they meet at a shared junction, not a settlement). Verified via a controlled
+  probe (two real settlements, fractional coordinates, builders called directly): endpoint distance
+  0.0 grid cells post-fix (was up to ~1). (e) *"[Clear places] leaves the routes"* — `civWays`/
+  `civJourneys` carry no settlement-id, so deleting settlements left orphaned roads. `civClearPlacesBtn`
+  (now labeled "Clear places & routes") clears both, mirroring `civClearRoadsBtn`. Civ layer (block 2)
+  only; headless 923 unchanged, render battery ALL IDENTICAL to v0.90 (way geometry isn't in the
+  battery).
+- **v0.90 — owner request: "editing a settlement should open a pop-up in the viewscreen with the
+  settlement properties and information"** (no engine changes — script block 2 civ-UI only; render
+  battery ALL IDENTICAL to v0.89, headless **923** unchanged, smoke **120 → 123**): the settlement/POI
+  editor moved out of the sidebar-pinned `#inspectorBody` (v0.65) into a floating `#placeEditPopup`
+  anchored at the place's own screen position — the `showSettleInfo`/`showWildInfo` popup idiom, made
+  editable, reusing `_civPopulatePlaceEditor`'s field logic unchanged. New `_civPlaceScreenPos(gx,gy)`
+  projects world coords → screen px (both normal pan/zoom and `_lodOn`) so the popup opens correctly
+  regardless of how the place was selected. Per the owner's chosen option, the sidebar "All settlements"/
+  "All POIs" lists stay for browsing — their row-click/Edit button now calls `_civMoveViewTo` first (the
+  existing "📍 Move viewer here" handler) so the popup opens already centered. Labels/icons are unchanged
+  (still the sidebar inspector). Next queued: the Explore timeline rework (see "Next / open" below).
+- **v0.89 — owner report: "tiled LOD info-layers don't scale properly"** (no engine changes; render
+  battery ALL IDENTICAL to v0.88, headless **917 → 923**, smoke **117 → 120**): root cause was
+  `drawLODView()` only tiling `state.debug` ∈ {off, lith, soil, water} — every other debug/info view
+  (~26 of them: temp/rain/koppen/resources/wildlife/popdensity/tectonics/wind/ocean/rivers/…) fell through
+  to the full un-zoomed `renderNow` pixel loop while the canvas stayed CSS-fitted for the current LOD zoom,
+  so switching to e.g. Temperature while zoomed just stretched the whole world into the zoomed box.
+  `renderAffordanceTileRGBA` is now generalized to cover every non-'off' debug value (samples the live
+  coarse field at world coords — bilinear for continuous, nearest for categorical — and applies the exact
+  main-map colour formula); new `debugTileContext(dbg)` builds precomputed fields once per render (not per
+  tile); new `tileShade()` gives relief-lit views a tile-local hillshade. Per the owner's explicit "yes,
+  overlays too": new `drawLODDebugOverlays()` reprojects wind/ocean arrows, plate-drift arrows, the T1
+  boundary graph, Strahler river splines, and settle/wildlife markers onto the current LOD view rect, with
+  zoom-scaled (capped at 8×) line/glyph sizes. Known non-regression: Settlement/Wildlife click-to-inspect
+  stays `!_lodOn`-gated (pre-existing — `evtToGrid()` has no LOD-zoom awareness); flagged as a follow-up.
+- **v0.88 — two owner-reported items** (no engine changes; render battery ALL IDENTICAL to v0.87,
+  headless **911 → 917**, smoke **113 → 117**): (1) **LOD zoom capped too shallow** ("highest zoom stops
+  at 20km, want 5km") — the ×64 zoom cap was fixed regardless of map width, and `updateScaleBar()` divided
+  by the *full* map width even while LOD-zoomed in (the bar's reading never actually changed as you zoomed,
+  reading as "stuck"). New `lodMaxZoom()` (scales to `mapWidthKm/5`, floor 64) replaces the ×64 cap at all
+  three zoom sites (button/wheel/pinch); new `lodSpanKm()` (the real on-screen width — `mapWidthKm/_lodZoom`
+  while LOD is on) now feeds the scale bar. (2) **Export/Import took the atlas separately** — retired the
+  standalone **Export atlas…**/**Import atlas…** action pair (header + Tiles & LOD sidebar) and the
+  **Embed baked atlas** checkbox; `exportZip()`/`loadZip()` already unconditionally embed/restore the atlas
+  + asset library, so **File → Export .zip**/**Load project .zip** are now the sole 100%-round-trip actions.
+  The Assets Library's own **Import pack…**/**Export pack .zip** stays as the dedicated asset-pack-only
+  pair, per the owner's ask. Both items UI/browser-chrome only ⇒ bit-identical render.
+- **v0.87 — two owner-reported UI items** (no engine changes; render battery ALL IDENTICAL to v0.86,
+  headless **911** unchanged, smoke **111 → 113**): (1) **LOD/atlas viewport regression** — in LOD mode the
+  CSS transform is identity, so the canvas sat at its intrinsic GW×GH size (small tile in a big viewport).
+  New `_lodFitCanvas()` letterbox-fits the `#view` element to the `.canvas-wrap` content box while `_lodOn`
+  (cleared on exit); transparent to LOD input since `evtToGrid`/LOD-pan read `getBoundingClientRect()`;
+  called from `applyView()` + window resize. (2) **Import + Export merged into one "File ▾" header menu**
+  (`#fileMenu`, Import section + Export form) — all element ids unchanged so wiring is untouched; the
+  `#exportMenu` CSS retargeted to `#fileMenu`; single-shot Import rows + Export .zip close the menu, form
+  clicks don't.
+- **v0.86 — seven owner-reported fixes/additions** (no engine-simulation changes; render battery ALL
+  IDENTICAL to v0.85, headless **909 → 911**, smoke **103 → 111**): (1) **climate redraw** — added a
+  `_climGen` counter (bumped by the climate field-writers) to `_civBakeKey`/`_lodRenderKey`, so "Simulate
+  weather" repaints instead of serving a stale bitmap; (2) **mobile Assets exit** — the header 🎨 button is
+  now a toggle ("← Map", `_carExitAssetsMode`), always visible; (3) **mobile Export dropdown** — pinned to
+  the viewport at ≤860px so it no longer clips off-screen; (4) **Layers-popover scroll** — `stopPropagation`
+  on the popover's wheel so scrolling the list no longer zooms the map under it (all 31 views already have
+  legends — now smoke-locked); (5) **Credits & academic-principles modal** (header ⓘ) — code sources
+  studied + the tectonics/climate/civ academic principles, all cited; (6) **Light theme switch** (header
+  ☀/🌙, ported from V1.915's Light theme) via `:root[data-theme="light"]` + localStorage, UI-chrome only so
+  the map canvas is untouched; (7) **geological Resources layer** — the sea-level handler now invalidates
+  the whole affordance/civ derived-cache set (was stale on sea change), and `buildResourcePotentials`
+  computes over the **full map** (bedrock potential exists below sea too) instead of masking to exposed
+  land. Bit-identity preserved throughout (all changes are UI/off-default-render or debug-view-only).
 - **v0.85 — mechanistic collapse/recovery timeline simulator** (owner: "research the mathematics in regards
   to population mechanics (survival and migration rates…) and how to use this new function in regards to the
   timeline"). New `docs/research/collapse-timeline-dynamics.md` (network-robustness/gravity-migration/
@@ -336,7 +504,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (909 as of v0.79), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.92), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -360,6 +528,39 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Save/export architecture restructuring — SHIPPED in v0.92.** `docs/research/save-export-architecture-
+  audit.md` (read-only audit, 2026-07-13) found the real bloat was `exportZip()` writing overlapping map
+  imagery from three independent code paths for the same terrain, and a separate, lower-risk naming/IA
+  muddle in "Tiles & LOD" burying "Atlas" two levels deep. Owner's /goal ("carry out the reported fixes")
+  shipped both: the audit's §5A (skip the redundant flat bake for a finalized world; make the 4
+  `layers/*.png` previews opt-in) and §5B/C (split into Tiled LOD view / Atlas cache / Region export). See
+  the v0.92 CHANGELOG entry for the full list. `biome_raster.bin` vs `biome_baked.bin` (the owner's own
+  "double data" example) is intentionally **not** touched — the audit found they're two genuinely
+  different classifiers for two different consumers, not duplication. Nothing queued from this thread.
+- **LOD zoom performance — root-caused and fixed in v0.92, then quality-corrected same day.** Same
+  /goal, second half: "why is zooming in slow even when tiles are baked." Real answer (found via
+  `performance.now()` profiling, not guesswork): the sharp tile overlay *does* correctly serve from the
+  atlas when baked — the actual bottleneck was the "instant overview" backdrop underneath it, rebuilt at
+  full `GW×GH` resolution through the same expensive per-pixel colorizer on every zoom step, never
+  consulting the atlas at all (~940ms/step measured, identical whether baked or not). First fix rendered
+  that backdrop at a flat quarter resolution (12.3-16.6× faster) — but this starved small lakes (no
+  `_coastSDF` smoothing outside the ocean coastline) of samples, reported back same-day as "lakes are
+  blocky/pixilated again" + "aspect ratio goes weird" (the same artifact, described two ways). Replaced
+  the flat ratio with a **512px fixed target output width**, which bounds the overview's cost
+  independent of world resolution (~100-130ms at both 1024px and 2048px, vs. the rejected flat-`/2`
+  alternative's ~420-440ms at 2048px) while giving small worlds full resolution. A same-day second
+  report ("graphic fidelity seems to have degraded also") traced to a *pre-existing* gap the cap
+  exposed rather than caused: the `lodChk` checkbox never scheduled the sharpen-on-settle pass every
+  other LOD entry point already gets, so ticking it and just looking left the user on the coarse
+  overview indefinitely. Fixed by triggering that pass immediately on checkbox-check. All three fixes
+  locked in with permanent smoke-suite regression guards (timing + overview-canvas-size/aspect +
+  checkbox-triggers-refine). Nothing queued — if the owner reports zooming still feels slow after this,
+  the next place to look is the TILE overlay's own per-tile colorization cost (not yet profiled in
+  isolation) or the debug-overlay vector drawing pass (`drawLODDebugOverlays`), not the overview
+  backdrop these fixes already addressed.
+- **The owner's 2026-07-12 /goal (settlement pop-up + Explore timeline rework) is now fully shipped**
+  across v0.90 (settlement editor → map pop-up) and v0.91 (timeline: one home, real time-scale — see
+  above). No queued follow-up on either; nothing else outstanding from that request.
 - The queued work tracked at the end of the pre-merge era (browser passes above) plus whatever
   the user asks next. Check `docs/ROADMAP.md` for the long arcs; recent `CHANGELOG.md` entries
   state per-feature follow-ups (e.g. cross-tile seam editing is the one genuinely open LOD item).
