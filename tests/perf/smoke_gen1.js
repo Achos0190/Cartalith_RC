@@ -1396,6 +1396,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { ok: true, conns: bn, connectedGetsEnds: !!re && re.length > 0, disconnectedGetsNone: !reFar };
   });
 
+  // v0.97 regression guard: the town is built AROUND the real roads (primaryPaths) and still forms a
+  // proper structure — a wall for a walled settlement + primaries reaching a real extent. The first cut
+  // resampled the km-spaced civWay vertices too sparsely (2-3 pts), so injected primaries were 2-pt
+  // stubs (~250 m), the built mass landed entirely on the far river bank, and the wall never formed;
+  // the arc-length resample fixed it. Also checks the paths are dense (many points), not raw vertices.
+  R.umBuildAround = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+    await generate();
+    try { _civAutoWorld(); } catch (e) { return { ok: false, reason: 'autoworld: ' + e.message }; }
+    const eps = Math.max(1.0, GW / 250);
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind) && _umInferWalls(p));
+    const cc = p => { let n = 0; for (const w of civWays) { if (w.sea || w.hidden || !w.pts || w.pts.length < 2) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - p.x, a.y - p.y) < eps || Math.hypot(b.x - p.x, b.y - p.y) < eps) n++; } return n; };
+    let best = null, bn = -1; for (const p of settles) { const c = cc(p); if (c > bn) { bn = c; best = p; } }
+    if (!best || bn < 1) return { ok: false, reason: 'no connected walled settlement' };
+    const ctx = _umPlaceContext(best);
+    const usesPaths = !!ctx.primaryPaths && ctx.primaryPaths.length > 0;
+    const dense = usesPaths && ctx.primaryPaths.every(pa => pa.length >= 8);   // resampled, not raw km-spaced vertices
+    const m = UME.cityGen(ctx.seed, ctx);
+    const anc = m.anchors.market, N = m.graph.nodes; let maxPrim = 0;
+    for (const e of m.graph.edges) { if (e.cls !== 'primary') continue; for (const nid of [e.a, e.b]) { const nd = N[nid]; if (nd) maxPrim = Math.max(maxPrim, Math.hypot(nd.x - anc.x, nd.y - anc.y)); } }
+    return { ok: true, conns: bn, usesPaths, dense, wallRing: !!(m.wall && m.wall.ring), maxPrim: Math.round(maxPrim) };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1582,6 +1605,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // ── v0.96: urban-morphology fixes ──
   A('v0.96: a connected settlement yields route ends from its real roads (road-lock precondition)', R.umRoadEnds.ok === true && R.umRoadEnds.connectedGetsEnds === true);
   A('v0.96: a spot with no road endpoint at it yields no route ends (coordinate match, not aIdx/proximity)', R.umRoadEnds.ok !== true || R.umRoadEnds.disconnectedGetsNone === true);
+  // ── v0.97: town built around the real roads ──
+  A('v0.97: a connected walled settlement feeds dense resampled road paths into the generator', R.umBuildAround.ok === true && R.umBuildAround.usesPaths === true && R.umBuildAround.dense === true);
+  A('v0.97: the town built around real roads still forms a wall and full-extent primaries (not stubs)', R.umBuildAround.ok !== true || (R.umBuildAround.wallRing === true && R.umBuildAround.maxPrim > 400));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

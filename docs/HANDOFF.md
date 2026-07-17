@@ -9,11 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.96.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v0.97.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.97 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.95` are kept and never edited.
+  (v0.98 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.96` are kept and never edited.
+- **v0.97 — owner: "build the city around the roads that connect the settlements" + "refactor ...
+  to get a seamless whole" (+ "same for rivers and lakes").** Stage 1 of a staged, owner-approved
+  refactor toward a seamless region↔settlement whole (Stage 2 = real river centerline into
+  `buildSite`; Stage 3 = real lake/coast shoreline — both **pending**). The real inter-settlement
+  roads reaching a settlement now ARE the town's arterial skeleton: `_umPrimaryPaths` resamples the
+  connected `civWays` by arc length (~55 m — civWay vertices are km apart, which starved the first
+  cut into 2-pt stubs and broke the wall), transforms them into the layout's local frame (exact
+  inverse of the draw transform, so the injected road overlays the map road pixel-for-pixel), and
+  passes them as `opts.primaryPaths` to `UME.cityGen`; the new `buildPrimariesFromPaths` adds them
+  as the primary skeleton and `grow()`/`buildBlocks`/`buildWall` build around them. So the
+  through-road enters at a gate, runs through the town as its high street, and exits at the far gate
+  — seamless. Falls back to v0.96 aligned-bearings when nothing connects. Verified: engine
+  **923/923**, UME **831/831** (fallback path unchanged), hash A/B vs v0.96 **ALL IDENTICAL**
+  (default-off), smoke **175 → 177** (+2 guards: town-around-roads still forms a wall + full-extent
+  primaries; paths densely resampled). Browser-verified (map road runs straight through a walled
+  town via gates). **Next: Stage 2 (rivers).**
 - **v0.96 — owner live-QA on v0.95's urban morphology + two map-render asks.** Batch of fixes
   from the owner testing v0.95 in-browser. Urban-morphology fixes (all still opt-in, default off):
   right-click a settlement works again under deep zoom (`evtToGridLOD` in the context menu — the

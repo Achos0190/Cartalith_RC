@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.96**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.97**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.96.html` | **Current** unified tool (~20.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.95.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.97.html` | **Current** unified tool (~20.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.96.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
@@ -76,10 +76,16 @@ settlement's real grid coordinate **and rotated by `model._umOrient`** (v0.96 `_
 with the real river axis / sea direction — landlocked ⇒ 0). The adapter (`_umPlaceContext`) infers
 age/wall/harbour-size defaults from the settlement's existing population/tier (age/walls overridable
 per-settlement via the popup's Age/Fortifications fields, `p.umAge`/`p.umWalls`, both nullable =
-infer) and builds `routeEnds` from the settlement's real connected `civWays` — matched on the way
-endpoint COORDINATE at the settlement (v0.96; NOT `aIdx`/`bIdx`, which several split runs of one
-edge share) and pre-rotated by `−orient` — so the generated town's PRIMARY roads lock onto the
-region's own route network. Internal streets/lanes/parcels stay the engine's own procedural growth. Generation is deferred one-
+infer). **v0.97 (seamless refactor Stage 1):** the town is built AROUND the real roads — the
+`civWays` reaching the settlement are resampled by arc length (~55 m; civWay vertices are km apart),
+transformed into the layout's local frame (the exact inverse of `_umDrawLayout`'s transform, so an
+injected road drawn back overlays the map road pixel-for-pixel), and passed as `opts.primaryPaths`
+to `UME.cityGen`, whose `buildPrimariesFromPaths` adds them as the primary-street skeleton that
+`grow()`/`buildBlocks`/`buildWall` build around. So the through-road IS the town's high street
+(enters/exits at gates), not a separate parallel line. Falls back to `_umRouteEnds` (v0.96
+aligned-bearings, `buildPrimaries` synthesis) when no roads connect. Internal streets/lanes/parcels
+stay the engine's own procedural growth. Rivers/lakes are next (Stages 2–3): feeding the real river
+centerline / shoreline into `buildSite` the same way. Generation is deferred one-
 settlement-per-frame (`_umScheduleGenStep`) and cached (`_umModelFor`, keyed on every input that
 affects the layout) so a cache miss shows the pin, not a stall, until the model lands.
 
