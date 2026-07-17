@@ -36,6 +36,8 @@ svg.panning{cursor:grabbing}
 .leg{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:11px}
 .leg span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .chip{width:11px;height:11px;border:1px solid #00000033;display:inline-block}
+.ledgerchip{display:inline-block;white-space:nowrap;background:#e9e0c4;border:1px solid #b8a877;
+  padding:1px 5px;border-radius:3px;margin:0 3px 3px 0;font-size:10.5px}
 #metrics table{width:100%;border-collapse:collapse;font-size:11px}
 #metrics td{padding:1px 3px;border-bottom:1px dotted #e4dabb}
 #metrics td.v{text-align:right;font-variant-numeric:tabular-nums}
@@ -51,6 +53,7 @@ svg.panning{cursor:grabbing}
 .plaza{fill:#e9ddbd;stroke:#a8916a;stroke-width:.5}
 .market2{fill:#e6d9b6;stroke:#a8916a;stroke-width:.6}
 .townhall{fill:#9a8f6a;stroke:#3a2e18;stroke-width:.6}
+.games{fill:#c2b280;stroke:#5a4a2e;stroke-width:.7}
 .belfry{fill:#6f5a86;stroke:#463758;stroke-width:.5}
 .chain{fill:none;stroke:#4a3a22;stroke-width:1;stroke-dasharray:1.5 2.5}
 .chaintower{fill:#5d4a2c;stroke:#3a2e18;stroke-width:.5}
@@ -77,9 +80,12 @@ svg.panning{cursor:grabbing}
 .minaret{fill:#5c7a63;stroke:#3a4a3a;stroke-width:.5}
 .spire{fill:#6f5a86;stroke:#463758;stroke-width:.5}
 .ridge{stroke:#f6e9db;stroke-width:.55;fill:none;opacity:.75}
+.bld.ruined{fill:#9a9184;stroke:#4a453c;stroke-width:.5;stroke-dasharray:1.4 1;opacity:.6}
+.ridge.ruined{opacity:.3}
 .roadcase{fill:none;stroke:#6d5a37;stroke-linecap:round;stroke-linejoin:round}
 .roadfill{fill:none;stroke:#f8f3e4;stroke-linecap:round;stroke-linejoin:round}
 .roadfill.lane{stroke:#efe8d2}
+.roadfill.ringroad{stroke:#f2e2b8}
 .bridgedeck{fill:#e8dcc0;stroke:#6d5a37;stroke-width:.8}
 .wall{fill:none;stroke:#4a3a22;stroke-width:3.2;stroke-linejoin:round;stroke-linecap:round}
 .wallditch{fill:none;stroke:#9d8d66;stroke-width:.8;stroke-dasharray:3 3;opacity:.8}
@@ -95,11 +101,15 @@ svg.panning{cursor:grabbing}
 .coveredway{fill:none;stroke:#b3a276;stroke-width:1.4;stroke-dasharray:2 3;opacity:.8}
 .causeway{fill:#e2d6b4;stroke:#6d5a37;stroke-width:.7}
 .tree{fill:#9aa96e;stroke:#6b7a45;stroke-width:.4}
-.tree.orchard{fill:#a9b478}
+.tree.orchard{fill:#8a9e52;stroke:#5c6b34;stroke-width:.7}
 .well{fill:#cfd6d4;stroke:#4a3a22;stroke-width:.7}
 .cross{stroke:#4a3a22;stroke-width:1;fill:none}
 .fence{fill:none;stroke:#8a7444;stroke-width:.45;stroke-dasharray:2.2 2.2}
-.field{fill:none;stroke:#cbbd92;stroke-width:.55;opacity:.9}
+.field{fill:#dcc985;stroke:#a4874a;stroke-width:.6;opacity:.75}
+.pasture{fill:#c7d19a;stroke:#82945a;stroke-width:.6;opacity:.7}
+.civicdome{fill:#5c7a8a;stroke:#2e4a54;stroke-width:.6}
+.bld.pavilion{fill:#b98a4a;stroke:#6b4e26}
+.waterway{fill:none;stroke:#8fa39e;stroke-width:5;opacity:.75}
 .fieldedge{fill:none;stroke:#b3a276;stroke-width:.6;opacity:.8}
 .grave{fill:#8d8d7a}
 .lbl{font:italic 10px Georgia,serif;fill:#5c4a28;pointer-events:none}
@@ -107,6 +117,19 @@ svg.panning{cursor:grabbing}
 .scalebar{stroke:#4a3a22;stroke-width:1.2}
 .scalelbl{font:9px Georgia,serif;fill:#4a3a22}
 [data-um]{cursor:pointer}
+#rulesBox .row{align-items:center}
+#rulesBox select,#rulesBox button{font:11px Georgia,serif}
+#rulesBox button{padding:1px 6px}
+.rbtnrow{display:flex;flex-wrap:wrap;gap:3px;margin:3px 0 5px}
+.rrow{display:flex;align-items:center;gap:5px;margin:2px 0;font-size:10.5px}
+.rrow label{flex:0 0 128px;color:#5c4a28}
+.rrow input[type=range]{flex:1}
+.rval{flex:0 0 40px;text-align:right;font-variant-numeric:tabular-nums}
+.rmeta{border-bottom:1px dashed #c9bb96;padding-bottom:5px;margin-bottom:5px}
+.rgrouphdr{font-size:10.5px;font-weight:bold;color:#7a5c2e;margin:5px 0 1px}
+#rulesCompare table{width:100%;border-collapse:collapse}
+#rulesCompare td{padding:1px 3px;font-size:10px}
+#rulesCompare td.hi{color:#a05a2c;font-weight:bold}
 </style>
 </head>
 <body>
@@ -117,11 +140,15 @@ svg.panning{cursor:grabbing}
     <h2>Generation</h2>
     <div class="row"><label>Seed</label><input id="seed" type="number" value="12345">
       <button id="gen">Generate</button><button id="rnd">Random</button></div>
+    <div class="row"><label>Civilization</label><select id="culture" style="font:12px Georgia,serif">
+      <option value="medieval">Organic Growth (Medieval Western European)</option>
+      <option value="venus">The Venus Project (circular city)</option></select></div>
     <div class="row"><label>Site</label><select id="siteKind" style="font:12px Georgia,serif">
       <option value="river">River crossing (bridge + river port)</option>
       <option value="riverthrough">River through the town (both banks)</option>
       <option value="bay">Bay harbour</option>
-      <option value="coast">Open coast (mole)</option></select></div>
+      <option value="coast">Open coast (mole)</option>
+      <option value="landlocked">Landlocked (no water)</option></select></div>
     <div class="row"><label>Harbour</label><select id="harbourDefence" style="font:12px Georgia,serif">
       <option value="auto">Defence: auto (by site)</option>
       <option value="none">Unprotected</option>
@@ -132,19 +159,49 @@ svg.panning{cursor:grabbing}
       <option value="church">Church (Christian)</option>
       <option value="temple">Classical temple (Roman/Greek)</option>
       <option value="shrine">Shrine</option>
-      <option value="mosque">Mosque</option></select></div>
+      <option value="mosque">Mosque</option>
+      <option value="orthodox">Orthodox church (Byzantine)</option>
+      <option value="none">None (no religious building)</option></select></div>
     <div class="row"><label>Civic hall</label><select id="civicStyle" style="font:12px Georgia,serif">
       <option value="auto">Auto (by rite)</option>
       <option value="townhall">Town hall + belfry</option>
       <option value="basilica">Basilica (Roman)</option>
       <option value="loggia">Guild loggia</option>
+      <option value="keep">Castle keep</option>
       <option value="none">None</option></select></div>
     <div class="row"><label>Population</label><input id="pop" type="number" value="5000" min="400" max="20000" step="100">
       <button id="fit">Fit view</button></div>
     <div class="row"><label>Growth epochs</label><input id="epochs" type="number" value="8" min="2" max="14" style="width:52px"></div>
     <div class="row"><label style="flex:0 0 auto"><input id="walls" type="checkbox" checked> city wall</label>
       <label style="margin-left:10px;flex:0 0 auto"><input id="fortified" type="checkbox"> star fort</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="Prototype (docs/08): excludes parcels whose ground is too steep and/or too flood-prone from building, leaving them vacant. Off by default — purely additive, does not change any existing town."><input id="terrainAware" type="checkbox"> terrain-aware placement (experimental)</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="A state any settlement can be in, not a civilization of its own (M-PA register): flags a seeded ~35-45% of the already-built stock as ruined and abandoned, on top of whichever culture is selected above."><input id="ruined" type="checkbox"> ruined (post-apocalyptic)</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="M-GRW-2, organic growth only: once the current wall's interior is genuinely full AND growth has spilled beyond it (ribbon suburbs), the old ring is demolished and a bigger one rises around both, with the old wall's foundation surviving as a ring road (Vienna's Ringstrasse, Paris's Grands Boulevards). Growth pacing ties age to a placeholder carrying-capacity factor (samples this engine's own terrain-suitability score) — a PoC stand-in Cartalith's real resource system is meant to replace. Off by default — purely additive, does not change any existing town."><input id="wallGenerations" type="checkbox"> successive wall generations (experimental)</label></div>
+    <div class="row"><label style="flex:0 0 auto" title="How long this settlement has existed, spreading growth epochs across real years — gates how many wall circuits its own history can plausibly afford: successive circuits need ~70-170 years apart historically (Cologne, Florence, Paris), so a young settlement's whole lifespan can't fit a second one, while an old settlement's epochs are each worth many years. Only read when 'successive wall generations' is on.">Settlement age (yr)</label><input id="settlementAge" type="number" value="300" min="30" max="1000" step="10"></div>
     <div id="status"></div>
+  </div>
+  <div class="box" id="rulesBox">
+    <h2>Generation Rules <small>docs/07 §3.4</small></h2>
+    <div class="row"><label>Profile</label><select id="rulesProfile" style="flex:1"></select></div>
+    <div class="rbtnrow">
+      <button id="rNew" title="Create a new named profile from the current defaults">New</button>
+      <button id="rDup" title="Duplicate the current profile under a new name">Duplicate</button>
+      <button id="rRename" title="Rename the current saved profile">Rename</button>
+      <button id="rSave" title="Save the current values under this profile's name">Save</button>
+      <button id="rDelete" title="Delete this saved profile">Delete</button>
+      <button id="rReset" title="Reset current values to the engine defaults">Reset</button>
+      <button id="rExport" title="Export the current values as a JSON file">Export</button>
+      <button id="rImport" title="Import a JSON rules file">Import</button>
+      <input id="rImportFile" type="file" accept="application/json" style="display:none">
+    </div>
+    <div class="rmeta">
+      <div class="rrow"><label title="Primary organic-vs-planned control">Wildness</label>
+        <input id="rWildness" type="range" min="0" max="2" step="0.02" value="1"><span class="rval" id="rWildnessVal">1.00</span></div>
+      <div class="rrow"><label title="Parcel-level irregularity, independent of the street network">Plot Chaos</label>
+        <input id="rPlotChaos" type="range" min="0" max="2" step="0.02" value="1"><span class="rval" id="rPlotChaosVal">1.00</span></div>
+    </div>
+    <div id="rulesDetail"></div>
+    <div id="rulesCompare"></div>
   </div>
   <div class="box" id="insp"><h2>Inspector — click any object</h2>
     <div class="none">Nothing selected. Every road, parcel, building, wall, tree and well is
@@ -152,12 +209,15 @@ svg.panning{cursor:grabbing}
     (rule + evidence register reference).</div></div>
   <div class="box"><h2>Legend</h2><div class="leg" id="legend"></div></div>
   <div class="box" id="metrics"><h2>Morphometrics vs. historical bands</h2><div id="mBody"></div></div>
+  <div class="box"><h2>Evidence ledger</h2><div id="ledger"></div></div>
   <div class="box"><h2>About</h2>
-    <div style="font-size:11px">Deterministic growth simulation: site &rarr; anchors &rarr; least-cost
-    primary routes &rarr; epoch-looped street growth (densification + exploration) &rarr; planar-face
-    blocks &rarr; series-platted strip parcels &rarr; grammar buildings &rarr; derived districts &rarr;
-    wall &amp; gates &rarr; details. The renderer draws only what the simulation produced.
-    Evidence register: <code>docs/03-mathematical-assumptions.md</code> (M-* refs in the inspector).
+    <div style="font-size:11px">Deterministic growth simulation: environment/site &rarr; anchors &rarr;
+    culture-profiled street growth (Organic Growth: epoch-looped densification + exploration over
+    least-cost routes; Venus Project: concentric rings + radial spokes around a central hub) &rarr;
+    planar-face blocks &rarr; culture-profiled parcels &rarr; grammar buildings &rarr; derived
+    districts &rarr; wall &amp; gates &rarr; details. The renderer draws
+    only what the simulation produced. Evidence register: <code>docs/03-mathematical-assumptions.md</code>
+    (M-* refs in the inspector and the Evidence Ledger panel); architecture: <code>docs/07-culture-architecture.md</code>.
     Drag to pan, wheel to zoom.</div></div>
 </div>
 <div id="map"><div id="svgHost"></div></div>
@@ -186,6 +246,95 @@ function stream(seed,label){
     chance:(p)=>f()<p};
   return r;
 }
+
+/* ---------------- culture profiles (docs/07-culture-architecture.md) ----------------
+ * The core engine (geometry kernel, graph, growth mechanics, environment/site) never branches
+ * on a culture; every tradition-specific choice — growth model, parcel metrology, building
+ * grammar, default rite/civic hall, market economy, wall/gate scheme, street orientation — is
+ * data on the resolved profile object, read once in generate() and threaded down the call
+ * chain. Adding a 3rd/4th civilization is a new table row, not an engine change. */
+const CULTURE_PROFILES={
+  medieval:{id:'medieval',name:'Organic Growth (Medieval Western European)',
+    planning:'organic',parcelPattern:'strip',buildingGrammar:'burgage',
+    defaultFaith:'church',defaultCivic:'auto',markets:true,
+    wallGates:{scheme:'organic'},orientation:'terrain',civicAnchorLabel:'market',
+    prov:'Accretive growth over centuries: epoch-looped organic streets, series-platted burgage strip parcels, a parish church per few thousand souls, market squares that specialise with rank (docs/01 §1.1; docs/03 M-* register). Presented as the general "Organic Growth" pattern rather than one culture among many: a post-launch review across this register\'s original 19 profiles found every other organic-planning culture (Islamic, Byzantine, Chinese, Aztec, Viking, Celtic, Greek, Egyptian, Mesopotamian, Mayan, Inca, Japanese, Colonial, Frontier, Industrial, Palimpsest) rendering near-indistinguishably from this one at the level this tool actually draws — a rendering/visual-distinctiveness problem, not a defect in their underlying research, which remains valid and citable but is no longer separately modelled here (docs/07 §3.10). Kept as this pattern\'s concrete, best-attested reference point, alongside the radial Venus Project as the one structurally distinct alternative.'},
+  venus:{id:'venus',name:'The Venus Project (resource-based circular city)',
+    planning:'radial',parcelPattern:'strip',buildingGrammar:'venus-mixed',
+    defaultFaith:'none',defaultCivic:'dome',markets:true,
+    wallGates:{scheme:'organic'},orientation:'radial',civicAnchorLabel:'Center for Resource Management',
+    defaultWalls:false,waterway:true,
+    prov:'Jacque Fresco\'s Venus Project circular city (thevenusproject.com/resource-based-economy/environment/circular-city), taken here as a deliberate design fusion rather than a literal reconstruction: several concentric ring streets at regular intervals connected by radial spokes (with extra cross-spokes in the wider outer band) to a domed central hub, the Center for Resource Management (M-VEN-2) — a genuinely new radial planning mode (M-VEN-1), not a re-skin of the grid or organic models, using the shape-aware bisector parcel method rather than the bounding-box-based insula method since the wedge-shaped ring blocks need lot boundaries that respect the true (curved) block outline. Per the brief, the clean circular geometry is mixed with the lived-in amenity richness of medieval-European and Asian/Japanese towns (M-VEN-5): circular pavilions cluster at the hub and inner rings, the residential rings blend the standardized modular apartment with Asian courtyard houses and Japanese machiya rowhouses, market/amenity squares scale with rank, and the outermost ring carries the logistics warehouses. Fortification is optional and off by default (defaultWalls:false — the UI unchecks the wall box on selecting this profile), but the medieval curtain wall and the bastioned star fort are both available on request (wallGates.scheme:\'organic\', so the anachronism guard permits the trace). A circular irrigation waterway (M-VEN-3) encircles the built city: when the star fort is built the canal supplies its wet moat around the bastions even on a landlocked site, otherwise it is the irrigation ring outside the (optional) curtain wall — drawn as a fully-closed circle capped to the map so it never terminates in a straight clipped edge. The concentric rings and spokes carry a seeded low-frequency wobble (post-review organic softening, M-VEN-1) so the radial skeleton reads as hand-drawn rather than compass-drawn, consistent with this tool\'s own hand-drawn-cadastral aesthetic.'},
+};
+function resolveProfile(id){return CULTURE_PROFILES[id]||CULTURE_PROFILES.medieval;}
+
+/* ---------------- generation rules: configurable parameters, not hardcoded constants ----------------
+ * Every value below was previously an inline literal inside grow()/buildParcels()/buildWall()'s
+ * bridgehead check. DEFAULT_RULES reproduces those exact literals, so generate() with no `rules`
+ * option (or `rules` merged from a partial user object) is BYTE-IDENTICAL to every prior version —
+ * the same cross-version neutrality discipline this project already holds itself to for profiles.
+ * `meta.wildness`/`meta.plotChaos` are not consumed directly by the engine; they are UI-side
+ * compound sliders (applyWildness/applyPlotChaos below) that compute new values for the individual
+ * street/parcel fields — the fields themselves remain the single source of truth generate() reads. */
+const DEFAULT_RULES={
+  street:{
+    branchAngleJitter:0.26,        // sigma, radians (~15°) — deviation from perpendicular when branching (M-NET-3)
+    continuationJitter:0.22,       // sigma, radians (~12.6°) — wander of dead-end exploration continuations (M-GRW-1)
+    explorationStart:0.55,         // exploration share at epoch 1 (M-GRW-1)
+    explorationDecay:0.05,         // per-epoch decay
+    explorationMinimum:0.12,       // floor
+    segmentLengthMedian:56,        // metres (M-NET-4)
+    segmentLengthVariance:0.5,     // sigma
+    pierceChance:0.10,             // chance a candidate crosses a street instead of T-junctioning
+    junctionAngleLimit:0.44,       // radians (~25°) — acute junctions below this are rejected (M-NET-3)
+    marketGradientDecay:200,       // divisor in 1/(1+dM/decay), M-DEN-3
+    parallelStreetSpacing:24,      // metres, minimum near-parallel street spacing (M-BLK-4)
+    deadEndBias:0,                 // fraction of minor streets privatized into cul-de-sacs (M-ISL-2); profile.deadEndBias is the per-culture floor this adds to
+    bridgeheadDistance:190,        // metres from the bridge point the far-bank bridgehead is confined to
+    bridgeheadProbability:0.35},   // chance a far-bank candidate is kept at all
+  parcels:{
+    frontageWidthVariance:0.22,    // sigma (median frontage 11 m stays fixed, M-PAR-1)
+    plotDepthVariance:0.28,        // sigma (median depth 22/30 m by core-vs-fringe stays fixed, M-PAR-2)
+    subdivisionCap:2},             // max burgage-cycle re-subdivisions of a frontage grant
+  settlement:{                    // successive wall generations (M-GRW-2), opt-in wallGenerations toggle only
+    wallGenerationThreshold:0.8,   // interior-only built hull fills this fraction of the active wall's area -> eligible
+    wallGenerationMinAgeGap:120,   // years since the active wall was built before another may supersede it
+                                   // (real successive-circuit gaps: Cologne ~74y, Florence ~94-111y, Paris ~158-168y)
+    wallGenerationExtramuralShare:0.15, // exterior (ribbon-suburb) built nodes must reach this share of interior ones too
+    maxWallGenerations:3,          // M-GRW-2: "1-3 typical for towns that persist"
+    carryingCapacityWeight:1.0},   // 0=ignore the placeholder carrying-capacity factor, 1=full effect
+  meta:{wildness:1.0,plotChaos:1.0}};
+function cloneRules(r){return JSON.parse(JSON.stringify(r));}
+function resolveRules(partial){
+  const out=cloneRules(DEFAULT_RULES);
+  if(partial)for(const grp of Object.keys(out))
+    if(partial[grp])Object.assign(out[grp],partial[grp]);
+  return out;}
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+/* Wildness (0-2, 1.0=DEFAULT_RULES baseline): the primary organic-vs-planned control. Formulas are
+ * a PoC convention (monotonic, clamped to the ranges in the design spec), not independently
+ * sourced — the same honesty flag this project already uses for tuned-not-measured constants. */
+function applyWildness(rules,w){
+  const s=rules.street;
+  s.branchAngleJitter=clamp(0.26*w,0.15,0.70);
+  s.continuationJitter=clamp(0.22*w,0.10,0.50);
+  s.segmentLengthVariance=clamp(0.5*w,0.25,1.1);
+  s.explorationStart=clamp(0.55*w,0.20,0.90);
+  s.explorationMinimum=clamp(0.12*w,0.05,0.30);
+  s.pierceChance=clamp(0.10*(2-w),0,0.15);
+  s.junctionAngleLimit=clamp(0.44*(2-w)/1,0.14,0.52);
+  s.parallelStreetSpacing=clamp(24*(2-w)/1,10,30);
+  s.deadEndBias=clamp(s.deadEndBias+(w-1)*0.15,0,0.40);
+  s.bridgeheadProbability=clamp(0.35*w,0.1,0.7);
+  rules.meta.wildness=w;
+  return rules;}
+function applyPlotChaos(rules,c){
+  const p=rules.parcels;
+  p.frontageWidthVariance=clamp(0.22*c,0.10,0.50);
+  p.plotDepthVariance=clamp(0.28*c,0.10,0.60);
+  p.subdivisionCap=Math.round(clamp(2*c,1,4));
+  rules.meta.plotChaos=c;
+  return rules;}
 
 /* ---------------- vector / polygon helpers ---------------- */
 const V={ add:(a,b)=>({x:a.x+b.x,y:a.y+b.y}), sub:(a,b)=>({x:a.x-b.x,y:a.y-b.y}),
@@ -463,6 +612,7 @@ function astar(cost,W,H,start,goal){
 function buildSite(seed,Wm,Hm,kind){
   kind=kind||'river';
   const through=(kind==='riverthrough');
+  const noWater=(kind==='landlocked'); // a completely dry inland site — no river, sea or harbour
   const rk=(kind==='river'||through); // river-like (a channel, not a sea half-plane)
   const r=stream(seed,'site');
   // analytic height proxy: inland rise + gentle undulation; water carves its terrace
@@ -470,7 +620,10 @@ function buildSite(seed,Wm,Hm,kind){
   for(let i=0;i<3;i++)hills.push({x:r.range(0.15,0.9)*Wm,y:r.range(0.05,0.45)*Hm,
     amp:r.range(0.06,0.16),rad:r.range(300,650)});
   let river,riverW,waterPoly,bridgePt=null,bridgeDir=null,harbourIdx,yAtX=null;
-  if(rk){
+  if(noWater){
+    river=[{x:-1e4,y:-1e4},{x:-1e4+1,y:-1e4+1}]; // a far dummy so water queries are all "dry"
+    riverW=0;waterPoly=[];harbourIdx=0;
+  }else if(rk){
     // river: west -> east; through the middle (bisecting) or around the lower third
     const pts=[];const n=14;const baseY=(through?r.range(0.44,0.54):r.range(0.58,0.72))*Hm;
     let y=baseY+r.range(-40,40);
@@ -505,8 +658,8 @@ function buildSite(seed,Wm,Hm,kind){
   function riverDist(p){let d=Infinity;
     for(let i=0;i<river.length-1;i++)d=Math.min(d,distPtSeg(p,river[i],river[i+1]));
     return d;}
-  const isWater=rk
-    ?(p)=>riverDist(p)<riverW/2+2
+  const isWater=noWater?(()=>false)
+    :rk?(p)=>riverDist(p)<riverW/2+2
     :(p)=>p.y>yAtX(p.x)-1;
   function height(p){
     let h=0.4+0.00008*(Hm-p.y);
@@ -543,12 +696,12 @@ function buildSite(seed,Wm,Hm,kind){
       left.push(V.add(river[i],V.mul(nl,riverW/2)));
       right.push(V.add(river[i],V.mul(nl,-riverW/2)));}
     waterPoly=left.concat(right.reverse());
-  }else{
+  }else if(!noWater){
     waterPoly=river.concat([{x:Wm,y:Hm},{x:0,y:Hm}]);
   }
   // external route endpoints (M-REG-1: routes to neighbouring places); sea sites
-  // trade seaward, so they get one land route fewer
-  const gatesDir=rk?[
+  // trade seaward, so they get one land route fewer; landlocked sites are all-land
+  const gatesDir=(rk||noWater)?[
     {x:r.range(0.08,0.3)*Wm,y:0},
     {x:Wm,y:r.range(0.1,0.4)*Hm},
     {x:0,y:r.range(0.15,0.45)*Hm},
@@ -561,17 +714,49 @@ function buildSite(seed,Wm,Hm,kind){
     for(let i=0;i<river.length-1;i++){const d=distPtSeg(p,river[i],river[i+1]);if(d<bd){bd=d;bi=i;}}
     const a=river[bi],b=river[bi+1];
     return Math.sign(V.cross(V.sub(b,a),V.sub(p,a)))||1;}
-  return {kind,through,Wm,Hm,river,riverW,waterPoly,riverDist,height,slope,bridgePt,bridgeDir,
+  return {kind,through,noWater,Wm,Hm,river,riverW,waterPoly,riverDist,height,slope,bridgePt,bridgeDir,
     routeEnds:gatesDir,bankSide,isWater,
-    harbour:{idx:harbourIdx,pt:river[harbourIdx]}};}
+    harbour:noWater?{idx:-1,pt:null}:{idx:harbourIdx,pt:river[harbourIdx]}};}
+
+/* ---------------- terrain suitability for buildings (Cartalith-port groundwork, docs/08) ----------------
+ * A first, deliberately small terrain-awareness layer, combining two independent physical
+ * constraints into one [0,1] score per point — McHarg's (1969) overlay-analysis method: layer
+ * constraints and combine them, rather than special-case one factor (docs/08 §2). Always
+ * computed and attached to every parcel as `par.suitability` (assignDistricts) — informational
+ * only; hashModel() does not hash it, so this cannot affect the cross-version neutrality every
+ * other addition in this file has been held to. `opts.terrainAware` (default off) is the
+ * separate switch that actually lets the score exclude the worst parcels from building at all
+ * (buildBuildings) — additive and opt-in, the same discipline as GenerationRules (docs/07 §3.4).
+ * Multiplicative, not additive: a flood-prone flat is still bad because it floods, and a dry
+ * steep slope is still bad because it's steep — either factor alone should be able to drag the
+ * score down, so neither can cancel the other out. */
+function terrainSuitability(site,p){
+  // slope: reuses this engine's existing analytic slope() proxy unchanged (already load-bearing
+  // for route costs, M-REG-5) rather than inventing a second terrain signal. The empirical
+  // distribution of slope() near a settlement core is roughly 0.05-0.5 in this engine's own
+  // units (docs/08 §1); real-world construction-suitability slope bands (0-2% ideal, 4-8%
+  // preferred residential, 15%+ costs rise, 25%+ often prohibited outright) motivate the
+  // shape of the falloff below, not a literal unit conversion, since slope() is itself already
+  // a schematic proxy, not a physical grade measurement.
+  const s=Math.min(1,site.slope(p)); // clip the rare coastline isWater() step-discontinuity
+  const slopeScore=Math.exp(-(s*s)/(2*0.3*0.3));
+  // hydrology: reuses the SAME flood-band margin already load-bearing elsewhere in this file
+  // (placeAnchors' market siting, buildWall's wet-ditch feed) rather than a new invented
+  // constant; ~30m+half-channel-width sits comfortably inside the 8-90m+ riparian-setback
+  // range standard in real floodplain regulation (docs/08 §1).
+  const margin=(site.riverW||0)/2+30;
+  const rd=site.isWater(p)?0:site.riverDist(p);
+  const floodScore=Math.max(0,Math.min(1,rd/margin));
+  return slopeScore*floodScore;
+}
 
 /* ---------------- anchors ---------------- */
 function placeAnchors(seed,site){
   const r=stream(seed,'anchors');
   // market: on flat land above the flood band, close to the break-of-bulk point —
   // the bridge for crossings, the quay for harbours (lit.review §4-5; M-REG-6)
-  const ref=site.bridgePt||site.harbour.pt;
-  const dBand=site.kind==='river'?[60,240]:[60,180];
+  const ref=site.bridgePt||(site.harbour&&site.harbour.pt)||{x:site.Wm*0.52,y:site.Hm*0.42};
+  const dBand=(site.kind==='river'||site.kind==='riverthrough')?[60,240]:[60,180];
   let best=null,bs=-Infinity;
   for(let i=0;i<400;i++){
     const ang=r.range(-Math.PI,0); // landward side (water lies south)
@@ -586,7 +771,9 @@ function placeAnchors(seed,site){
     if(score>bs){bs=score;best=p;}}
   const market=best||{x:ref.x,y:ref.y-120};
   return {market,
-    prov:site.kind==='river'
+    prov:site.noWater
+      ?'Market sited on flat, dry ground where the land routes converge — an inland market town with no water frontage (M-REG-1, lit. review §4).'
+      :(site.kind==='river'||site.kind==='riverthrough')
       ?'Market sited on flat land above the flood band, close to the bridge crossing (route convergence). Refs: M-REG-6, lit. review §4.'
       :'Market sited on the shore flat just behind the quay: goods change mode at the break-of-bulk point (harbour-city family, lit. review §4-5).'};}
 
@@ -621,6 +808,112 @@ function buildPrimaries(seed,site,anchors,g){
   const prov='Primary route: least-cost path over slope/water cost field with trail reinforcement (Helbing 1997, Tobler kernel M-REG-5); immutable backbone (M-GRW-3).';
   for(const rt of routes)addPolylineStreet(g,rt.pts,'primary',7,0,prov); // width M-NET-8
   return routes;}
+
+/* ---------------- radial streets: concentric-ring city (Venus Project, M-VEN-1) ----------------
+ * A second planning mode, genuinely different from 'organic' (accreted tangle): concentric ring
+ * streets connected by radial spokes to a central hub, each ring a regular polygon standing in
+ * for a circle, and leaning on the core engine's unchanged planar-face block detector to turn
+ * ring x spoke crossings into annular-wedge blocks — only the LAYOUT RULE differs (docs/07 §2).
+ * Distance-based district assignment (assignDistricts, keyed to distance
+ * from anchors.market with no cardinal-direction assumption) needs no change at all to read this
+ * as concentric zones — market-adjacent parcels ring the hub, agrarian/suburb parcels fall
+ * outside the built rings, exactly matching Fresco's concentric-zone concept for free. */
+function buildRadialStreets(seed,site,anchors,g,opts){
+  const C=anchors.market;
+  const maxRF=opts.maxRF;
+  // organic softening (post-review): perfectly mathematical concentric circles read as too
+  // mechanically exact against this tool's own hand-drawn-cadastral aesthetic — every other
+  // profile's streets are noisy/accretive, so a flawless compass-drawn ring stood out as the one
+  // artificial-looking thing on the map. A seeded low-frequency wobble (two summed sine terms,
+  // phase drifting slightly ring-to-ring like real tree-ring eccentricity) keeps the radial
+  // skeleton — a hub, concentric rings, straight spokes — structurally recognizable while losing
+  // the geometrically-exact look; spoke angles get the same small jitter treatment.
+  const rOrg=stream(seed,'radial-organic');
+  const wobPhase1=rOrg.range(0,Math.PI*2),wobPhase2=rOrg.range(0,Math.PI*2);
+  const wobFreq1=rOrg.int(3,5),wobFreq2=rOrg.int(6,9);
+  const wobAmp=0.055; // +-5.5% radius variation, small enough consecutive rings never cross
+  const wobble=(ang,ringIdx)=>1+wobAmp*
+    (Math.sin(ang*wobFreq1+wobPhase1+ringIdx*0.35)*0.6+Math.sin(ang*wobFreq2+wobPhase2+ringIdx*0.5)*0.4);
+  const spokes=12; // evenly-spaced primary radial streets, the spine of the concentric-zone city
+  // outermost built (residential) ring: several concentric rings + cross-spokes pack far more
+  // buildable frontage into a given radius than the original 2-ring layout did, so the radius
+  // is scaled down accordingly — a denser mesh needs a smaller footprint for the same target
+  // population, not a bigger one (empirically tuned to ~90-105% realization, M-VEN-1)
+  const outerR=Math.max(90,maxRF*0.38);
+  const hubR=Math.max(24,outerR*0.13);   // small central hub ring around the dome (kept open)
+  const nRings=5; // Fresco's plans show several concentric circuits, not just two
+  const land=(p)=>!site.isWater(p)&&site.riverDist(p)>(site.riverW?site.riverW/2+8:0)&&
+    p.x>25&&p.y>25&&p.x<site.Wm-25&&p.y<site.Hm-25;
+  // a straight spoke can have both endpoints on dry land and still clip through open water in
+  // between — checking only the endpoints missed this (a real "impossible intersection": a plain
+  // street can't cross a river with no bridge). Sample along the whole segment instead, matching
+  // the wet-parcel fix's own "check every point, not just one" discipline elsewhere in this file.
+  const landSeg=(p0,p1)=>{const n=12;
+    for(let k=0;k<=n;k++)if(!land(V.lerp(p0,p1,k/n)))return false;
+    return true;};
+  const provRing='Ring street: one of several concentric circuits at regular intervals linking the radial spokes, each ring a regular polygon standing in for a circle at city scale (M-VEN-1).';
+  const provSpoke='Radial spoke: a straight route from the central Resource Management hub outward to the residential ring — the spine of the concentric-zone city (M-VEN-1).';
+  const provCross='Cross-spoke: an intermediate radial in the wider outer band, added where the larger circumference wants more crossings than the inner spokes alone provide (M-VEN-1).';
+  // ring radii: the hub ring, then nRings evenly spaced out to the residential ring
+  const ringR=[hubR];
+  for(let i=1;i<=nRings;i++)ringR.push(hubR+(outerR-hubR)*i/nRings);
+  const drawRing=(radius,ringIdx,cls,w)=>{
+    const sides=Math.max(24,Math.round(radius/8)); // vertex ~every 8 m so the circle reads smooth
+    const pts=[];
+    for(let k=0;k<=sides;k++){const a=2*Math.PI*k/sides;const rad=radius*wobble(a,ringIdx);
+      pts.push({x:C.x+Math.cos(a)*rad,y:C.y+Math.sin(a)*rad});}
+    // split into contiguous on-land runs so a ring never gets drawn uncapped across water
+    let run=[];
+    const flush=()=>{if(run.length>1)addPolylineStreet(g,run,cls,w,0,provRing);run=[];};
+    for(const p of pts){if(land(p))run.push(p);else flush();}
+    flush();};
+  // every ring stays 'street'-class: these are internal mesh, not through-routes reaching the
+  // wall — only the primary spokes below are tagged so buildWall's gate logic actually sees them
+  // (an untagged edge never gets a land gate at all, M-VEN-1 / infrastructure-safety audit)
+  ringR.forEach((rr,idx)=>drawRing(rr,idx,'street',idx===ringR.length-1?6.5:4.5));
+  // primary spokes: the only edges meant to reach the outermost ring/wall boundary, so these are
+  // the only radial streets tagged 'primary' — buildWall's gate-placement loop only creates a
+  // land gate for cls==='primary' edges; leaving these untagged (as an earlier version did) left
+  // a fortified Venus town with zero land gates at all, an impossible intersection caught by the
+  // standing audit once walls became a real option here.
+  for(let i=0;i<spokes;i++){
+    const a=2*Math.PI*i/spokes+rOrg.range(-0.045,0.045); // jittered spacing, still a straight radius
+    const p0={x:C.x+Math.cos(a)*hubR,y:C.y+Math.sin(a)*hubR};
+    const p1={x:C.x+Math.cos(a)*outerR,y:C.y+Math.sin(a)*outerR};
+    if(landSeg(p0,p1))addStreet(g,p0.x,p0.y,p1.x,p1.y,'primary',5,0,provSpoke);}
+  // intermediate cross-spokes, offset by half a sector, spanning only the wider outer band —
+  // these stop ONE RING SHORT of the outermost (residential) ring, never reaching the wall
+  // boundary at all, so they can never need a gate of their own — they add mesh density in the
+  // interior without ever becoming a through-route candidate.
+  const midR=ringR[Math.max(1,Math.floor(nRings/2))];
+  const crossOuter=ringR[ringR.length-2];
+  for(let i=0;i<spokes;i++){
+    const a=2*Math.PI*(i+0.5)/spokes+rOrg.range(-0.045,0.045);
+    const p0={x:C.x+Math.cos(a)*midR,y:C.y+Math.sin(a)*midR};
+    const p1={x:C.x+Math.cos(a)*crossOuter,y:C.y+Math.sin(a)*crossOuter};
+    if(landSeg(p0,p1))addStreet(g,p0.x,p0.y,p1.x,p1.y,'street',4.5,0,provCross);}
+  return {center:C,rings:ringR,spokes,outerR};}
+
+/* ---------------- circular waterway: Venus Project irrigation canal (M-VEN-3) ----------------
+ * The one genuinely new infrastructure detail for this profile: a closed decorative ring drawn
+ * beyond the outermost built ring's radius, i.e. entirely outside the street network's reach —
+ * so it can never overlap a building or parcel BY CONSTRUCTION (no block/parcel/building geometry
+ * is ever generated out there in the first place), the same defensive "generate it somewhere
+ * geometry can't reach" pattern the opt-in ruined-decay pass (applyDecay) also relies on. Never a
+ * parcel or building, so it carries none of the "must not sit in water" invariant that applies to
+ * built fabric — sitting past the built city is the point. */
+function buildWaterway(seed,site,anchors,radius){
+  const C=anchors.market,sides=64;
+  // cap the radius so the whole circle sits inside the map with a margin — this is the fix for
+  // the earlier "straight clipped termination" (the ring used to run off the map edge and get
+  // cut flat there); a fully-closed circle never terminates in a straight edge (M-VEN-3).
+  const edgeR=Math.min(C.x,C.y,site.Wm-C.x,site.Hm-C.y)-12;
+  radius=Math.min(radius,edgeR);
+  if(radius<40)return [];
+  const pts=[];
+  for(let k=0;k<=sides;k++){const a=2*Math.PI*k/sides;pts.push({x:C.x+Math.cos(a)*radius,y:C.y+Math.sin(a)*radius});}
+  return [{kind:'waterway',poly:pts,
+    prov:'Circular irrigation waterway: a fully-closed canal encircling the built city outside the residential ring, drawing on and returning to the agricultural belt it borders; the same ring supplies the star fort\'s wet moat when the town is fortified (M-VEN-3).'}];}
 
 /* ---------------- plaza: widened market street (M-DEN-6, additive mode) ---------------- */
 function buildPlaza(seed,site,anchors,g){
@@ -764,7 +1057,7 @@ function buildHarbour(seed,site,anchors,g,opts){
     prov:'Harbour: sheltered landing with quay, piers'+(mole?' and breakwater mole (open coasts need artificial shelter)':' (the bay provides natural shelter)')+(defence?'; protected by '+defence.type:'; unprotected')+'.'};}
 
 /* ---------------- extra bridges for a river that runs through the town ---------------- */
-function addRiverBridges(seed,site,g,count){
+function addRiverBridges(seed,site,anchors,g,count){
   const r=stream(seed,'bridges');const n=site.river.length;
   for(let k=1;k<=count;k++){
     const i=Math.max(1,Math.min(n-2,Math.floor(n*(0.28+0.44*k/(count+1)))));
@@ -772,7 +1065,14 @@ function addRiverBridges(seed,site,g,count){
     const nl=V.rot90(V.norm(V.sub(b,a)));const half=site.riverW/2+16;
     const p1=V.add(p,V.mul(nl,half)),p2=V.add(p,V.mul(nl,-half));
     addStreet(g,p1.x,p1.y,p2.x,p2.y,'primary',6,0,
-      'Bridge: one of several crossings of a river that runs through the town (bridge-town family; M-REG-6).');}}
+      'Bridge: one of several crossings of a river that runs through the town (bridge-town family; M-REG-6).');
+    // connect each bridgehead into the fabric so it is not a stranded segment (and so later
+    // growth radiates from it) — a short approach toward the market on each bank
+    for(const end of [p1,p2]){
+      const dm=V.norm(V.sub(anchors.market,end));
+      const stub=V.add(end,V.mul(dm,Math.min(V.dist(end,anchors.market),120)));
+      if(!site.isWater(stub))addStreet(g,end.x,end.y,stub.x,stub.y,'street',4,0,
+        'Bridge approach linking the crossing into the town (M-REG-6).');}}}
 
 /* ---------------- amenities that scale with settlement rank (M-AMEN, M-ADMIN) ----------------
  * The seat of an empire and a village differ vastly in the services they carry. Markets
@@ -809,7 +1109,7 @@ function buildMarkets(seed,site,anchors,g,plaza,pop,parcels,buildings){
 // belfry, a Roman-style basilica (long hall + apse + colonnade), or an open guild loggia
 function buildCivic(seed,anchors,plaza,pop,style,faith){
   if(!plaza||pop<1500)return null; // a civic hall appears once a place is a chartered town
-  if(style==='auto'||!style)style=(faith==='temple'||faith==='shrine')?'basilica':(faith==='mosque')?'none':'townhall';
+  if(style==='auto'||!style)style=(faith==='temple'||faith==='shrine'||faith==='orthodox')?'basilica':(faith==='mosque')?'none':'townhall';
   if(style==='none')return null; // e.g. Islamic governance was not a monumental civic building
   const c=plaza.center,p0=plaza.poly[0],p1=plaza.poly[1];
   const mid=V.lerp(p0,p1,0.5);
@@ -821,8 +1121,17 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
     V.add(V.add(cc,V.mul(perp,ww/2)),V.mul(inl,dd/2)),
     V.add(V.add(cc,V.mul(perp,-ww/2)),V.mul(inl,dd/2))];
   const out={style,center:base,columns:[],belfry:null,apse:null};
+  // civic-hall scale by settlement rank (M-AMEN-3): a small chartered town's hall and a
+  // 20,000-strong city's should not read as the same building — a real, well-documented
+  // effect (a market town's modest hall vs. Bruges' Cloth Hall or Siena's Palazzo Pubblico) —
+  // 1.0x at the pop:1500 gate (this style's own base dimensions, unchanged as the floor) up to
+  // ~1.9x at the 20,000 population cap; log-scaled so the earliest growth (chartered town ->
+  // market town) reads as clearly as the later growth (market town -> city). The specific curve
+  // is a PoC convention (L confidence, same honesty flag as every other tuned-not-measured
+  // constant here, e.g. M-FOR-4's threshold) standing in for a real wealth/rank signal.
+  const sizeMult=1+0.9*Math.log10(Math.max(pop,1500)/1500)/Math.log10(20000/1500);
   if(style==='basilica'){
-    const w=r.range(22,30),d=r.range(10,13);
+    const w=r.range(30,42)*sizeMult,d=r.range(14,18)*sizeMult;
     out.hall=rect(base,w,d);out.name='Basilica';
     // semicircular apse at one short end
     const ex=V.add(base,V.mul(perp,w/2));const ap=[];
@@ -832,27 +1141,253 @@ function buildCivic(seed,anchors,plaza,pop,style,faith){
     for(let k=-3;k<=3;k++)out.columns.push(V.add(V.add(base,V.mul(perp,k*w*0.14)),V.mul(inl,-d/2-1.4)));
     out.prov='Basilica: the Roman civic hall (law-court + assembly) — a long colonnaded hall with an apse — standing in for the town hall in a classical rite (M-ADMIN; docs/05 §2.1).';
   }else if(style==='loggia'){
-    const w=r.range(16,22),d=r.range(8,11);
+    const w=r.range(22,30)*sizeMult,d=r.range(11,15)*sizeMult;
     out.hall=rect(base,w,d);out.name='Guild loggia';
     for(let k=-3;k<=3;k++)out.columns.push(V.add(V.add(base,V.mul(perp,k*w*0.15)),V.mul(inl,-d/2)));
     out.prov='Guild loggia: an open ground-floor arcade on the market where the guilds and merchants met and traded (M-ADMIN; docs/05 §2.2).';
+  }else if(style==='keep'){
+    const w=r.range(26,36)*sizeMult,d=r.range(20,26)*sizeMult;
+    out.hall=rect(base,w,d);out.name='Castle keep';
+    // tiered donjon (tenshu): a smaller inset roofline drawn on the same footprint, reusing the
+    // apse render path rather than new tiered-roof geometry (M-JPN-3); corner turret markers
+    // reuse the column-circle render path instead of a colonnade line
+    out.apse=rect(base,w*0.52,d*0.52);
+    out.columns=out.hall.slice();
+    out.prov='Castle keep (tenshu): a tiered stone-and-timber donjon at the jokamachi\'s core, the daimyo\'s seat of military and administrative authority (M-JPN-3).';
+  }else if(style==='dome'){
+    // circular drum + dome: a regular polygon standing in for a circle, rather than the
+    // rectangular rect() helper — the one civic hall style that isn't a rectangle re-skin.
+    const rad=r.range(13,18)*sizeMult,nSides=16,hall=[];
+    for(let k=0;k<nSides;k++){const a=2*Math.PI*k/nSides;hall.push({x:base.x+Math.cos(a)*rad,y:base.y+Math.sin(a)*rad});}
+    out.hall=hall;out.name='Center for Resource Management';out.dome=true;
+    for(let k=0;k<12;k++){const a=2*Math.PI*k/12;out.columns.push({x:base.x+Math.cos(a)*rad*0.82,y:base.y+Math.sin(a)*rad*0.82});}
+    out.prov='Center for Resource Management: a domed circular hub housing the cybernated system coordinating resource management, education, health and communications at the centre of the circular city (M-VEN-2).';
   }else{
-    const w=r.range(15,21),d=r.range(9,13);
+    const w=r.range(22,30)*sizeMult,d=r.range(13,17)*sizeMult;
     out.hall=rect(base,w,d);out.name=pop>=10000?'Town hall':'Guildhall';
     out.belfry={x:base.x+perp.x*(w*0.32),y:base.y+perp.y*(w*0.32)};
     out.prov='Town hall/guildhall on the market square, with a belfry — the communal movement (late 12th–13th c.) made civic self-government a building; a rank marker (M-ADMIN; docs/05 §2.3).';
   }
   return out;}
 
+/* Signature games/spectacle building(s) (docs/03 M-GAMES register; docs/07 §3.7): one
+ * population-gated monument per culture, reusing an oriented-rectangle closure identical in
+ * spirit to buildCivic's own local rect() rather than inventing a new per-culture shape.
+ * Collision safety follows the Venus-waterway precedent: every candidate is generated, range-
+ * and water/street-checked, and a doomed candidate is simply retried at another bearing/radius
+ * rather than forced in; an empty result is an honest, valid outcome (the same discipline
+ * buildCivic already uses when its own gate isn't met). Sized by fixed per-culture ranges, not
+ * scaled to population, matching buildCivic's own hall dimensions. The register originally
+ * covered ellipse/stadium/ballcourt shapes too (docs/03 §AA retains that research); only the
+ * plain oriented-rectangle case has a live caller since the post-launch simplification pass
+ * (docs/07 §3.10). */
+const GAMES_SPEC={
+  medieval:[{kind:'tiltyard',name:'Tiltyard',shape:'rect',siting:'plaza',w:[30,42],d:[10,14],minPop:3000,
+    prov:'Tiltyard: for an ordinary town (not a royal palace), tournaments were staged directly in the town\'s own marketplace (Brussels\' Grote Markt; also Lille, Cambrai) — dedicated palace tiltyards (Hampton Court, Whitehall, Kenilworth) were the exception, not the norm (Damen 2016, M-GAMES-1).'}],
+  venus:[],
+};
+function orientedRect(center,along,w,d){ // along: unit vector for the w-axis; its perpendicular carries d
+  const perp=V.rot90(along);
+  return [V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,-d/2)),
+    V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,-d/2)),
+    V.add(V.add(center,V.mul(along,w/2)),V.mul(perp,d/2)),
+    V.add(V.add(center,V.mul(along,-w/2)),V.mul(perp,d/2))];}
+function gamesShapeAt(spec,center,along,w,d){
+  return orientedRect(center,along,w,d); // every surviving spec uses a plain oriented rectangle
+}
+function buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic){
+  const specs=GAMES_SPEC[profile.id];
+  if(!specs||!specs.length)return [];
+  const r=stream(seed,'games');
+  // precompute a cheap bounding-circle index per parcel once, not per candidate: the plaza-
+  // adjacent search (below) is NOT beyond the built radius the way the peripheral search is, so
+  // it cannot assume "no real building here" by construction — it has to check parcels for real.
+  const parcelInfo=[];
+  let builtR=0;
+  for(const p of parcels){
+    let cx=0,cy=0;for(const v of p.poly){cx+=v.x;cy+=v.y;}
+    cx/=p.poly.length;cy/=p.poly.length;
+    let pr=0;for(const v of p.poly)pr=Math.max(pr,Math.hypot(v.x-cx,v.y-cy));
+    parcelInfo.push({poly:p.poly,cx,cy,r:pr});
+    for(const v of p.poly)builtR=Math.max(builtR,V.dist(v,anchors.market));}
+  if(wallState.ring)for(const v of wallState.ring)builtR=Math.max(builtR,V.dist(v,anchors.market));
+  const plazaCenter=plaza?plaza.center:anchors.market;
+  let plazaR=0;
+  if(plaza)for(const v of plaza.poly)plazaR=Math.max(plazaR,V.dist(v,plazaCenter));
+  const out=[],placedAt=[];
+  let gid=0;
+  const margin=25;
+  const overlapsParcels=(poly,cx,cy,rad)=>{
+    for(const pi of parcelInfo){
+      if(Math.hypot(cx-pi.cx,cy-pi.cy)>rad+pi.r+2)continue;
+      for(let k=0;k<poly.length;k++){
+        const A=poly[k],B=poly[(k+1)%poly.length];
+        for(let j=0;j<pi.poly.length;j++)
+          if(segInt(A,B,pi.poly[j],pi.poly[(j+1)%pi.poly.length]))return true;}
+      if(pointInPoly(poly[0],pi.poly)||pointInPoly(pi.poly[0],poly))return true;}
+    return false;};
+  // shared collision check for both siting modes: map bounds, water, the live street graph
+  // (edgesNear+segInt, the same pair grow() itself uses), and the civic hall if one exists —
+  // a doomed candidate is rejected here and retried elsewhere, never forced in
+  const blocked=(poly)=>{
+    if(poly.some(v=>v.x<margin||v.y<margin||v.x>site.Wm-margin||v.y>site.Hm-margin))return true;
+    if(poly.some(v=>site.isWater(v)))return true;
+    for(let k=0;k<poly.length;k++){
+      const A=poly[k],B=poly[(k+1)%poly.length];
+      for(const eid of edgesNear(g,A,B)){
+        const e=g.edges[eid];if(!e||!e.alive)continue;
+        if(segInt(A,B,g.nodes[e.a],g.nodes[e.b]))return true;}
+      if(civic&&civic.hall)for(let j=0;j<civic.hall.length;j++)
+        if(segInt(A,B,civic.hall[j],civic.hall[(j+1)%civic.hall.length]))return true;}
+    return false;};
+  for(const spec of specs){
+    if(popTarget<spec.minPop)continue;
+    const w=r.range(spec.w[0],spec.w[1]);
+    const d=r.range(spec.d[0],spec.d[1]);
+    const half=Math.max(w,d)/2;
+    let found=null;
+    // plaza-adjacent siting (docs/03 M-GAMES register, historical-placement revision): most of
+    // this register's buildings were genuinely intramural, immediately beside the main square/
+    // palace, not out past the town's edge. Searched as an expanding ring around the plaza (or
+    // the market anchor on a profile with no plaza) — the same "candidate, check, retry
+    // elsewhere" discipline as the peripheral search below, just centred on a much smaller
+    // reference radius (the plaza's own footprint, not the whole town), and — because this zone
+    // is NOT guaranteed empty the way the far periphery is — also checked against every real
+    // parcel, a check the peripheral search doesn't need (found necessary only after an initial
+    // "attach to the plaza's far edge" design kept failing: the plaza rectangle is built by
+    // widening an existing through-street, which keeps running live through its middle, so a
+    // fixed edge offset cannot assume the square itself is clear of real street geometry).
+    if(spec.siting==='plaza'){
+      const nAng=14,a0=r.u()*Math.PI*2;
+      for(const tier of [20,70,140,230]){
+        if(found)break;
+        const candR=plazaR+half+tier;
+        for(let i=0;i<nAng;i++){
+          const ang=a0+i*(2*Math.PI/nAng);
+          const center={x:plazaCenter.x+Math.cos(ang)*candR,y:plazaCenter.y+Math.sin(ang)*candR};
+          if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
+          if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+20))continue;
+          const radial=V.norm(V.sub(center,plazaCenter));
+          const poly=gamesShapeAt(spec,center,V.rot90(radial),w,d);
+          if(blocked(poly))continue;
+          if(overlapsParcels(poly,center.x,center.y,half))continue;
+          found={center,poly};break;
+        }
+      }
+    }
+    // peripheral siting (docs/07 §3.7), or a plaza search above found nowhere safe: beyond the
+    // town's own realized extent (guaranteed clear of every parcel by construction, so no parcel
+    // check needed here), retried at another bearing/radius on any collision
+    if(!found){
+      const nAng=16,a0=r.u()*Math.PI*2;
+      for(const extra of [0,90,180,280]){
+        if(found)break;
+        const candR=builtR+half+40+extra;
+        for(let i=0;i<nAng;i++){
+          const ang=a0+i*(2*Math.PI/nAng);
+          const center={x:anchors.market.x+Math.cos(ang)*candR,y:anchors.market.y+Math.sin(ang)*candR};
+          if(center.x<margin||center.y<margin||center.x>site.Wm-margin||center.y>site.Hm-margin)continue;
+          if(placedAt.some(o=>V.dist(center,o.center)<half+o.half+40))continue;
+          const radial=V.norm({x:Math.cos(ang),y:Math.sin(ang)});
+          const poly=gamesShapeAt(spec,center,V.rot90(radial),w,d);
+          if(blocked(poly))continue;
+          found={center,poly};break;
+        }
+      }
+    }
+    if(!found)continue; // no safe site found: an honest omission, never forced in
+    placedAt.push({center:found.center,half});
+    const inner=null; // the ushnu platform-shape inset (docs/03 M-GAMES-12) has no live caller since docs/07 §3.10
+    out.push({id:'games'+(gid++),kind:spec.kind,name:spec.name,poly:found.poly,inner,center:found.center,prov:spec.prov});
+  }
+  return out;}
+
+// normalized logistic curve mapping [0,1]->[0,1]: exactly the same floor/ceiling as the plain
+// linear ramp it replaces (0 at t=0, 1 at t=1), but growth is slow while the settlement is young,
+// accelerates once established, and tapers as it matures — age and population growth expressed as
+// an S-curve rather than a straight line. PoC convention: the steepness constant is tuned for a
+// visibly-staged silhouette across this engine's typical 6-14 epoch range, not independently
+// measured (same honesty flag as every other tuned-not-measured constant in this file).
+function logisticRamp(t){
+  const k=6.5;
+  const f=(x)=>1/(1+Math.exp(-k*(x-0.5)));
+  const f0=f(0),f1=f(1);
+  return (f(t)-f0)/(f1-f0);
+}
+// PLACEHOLDER for Cartalith integration (M-GRW-2's carrying-capacity hook): Cartalith owns the
+// real resource/carrying-capacity model this belongs to. This PoC stands in with the engine's OWN
+// already-computed M-TER-1 terrainSuitability(), sampled in a ring around the market at roughly
+// the settlement's eventual growth radius and averaged into one factor — reusing real, already-
+// computed data rather than inventing a parallel scoring system. Integration contract for a real
+// port: same signature (site,anchors,maxRF) -> one number in ~[0.3,1.0] (never a hard 0 — a site
+// this engine already generated a market on is buildable by construction); every consumer already
+// treats it as "whatever this returns," so replacing this one function's body is the entire port.
+function estimateCarryingCapacity(site,anchors,maxRF){
+  const N=12;
+  let sum=0;
+  for(let i=0;i<N;i++){
+    const ang=2*Math.PI*i/N;
+    const p={x:anchors.market.x+Math.cos(ang)*maxRF*0.6,y:anchors.market.y+Math.sin(ang)*maxRF*0.6};
+    sum+=terrainSuitability(site,p);
+  }
+  return clamp(0.3+0.7*(sum/N),0.3,1.0);
+}
+// M-GRW-2a trigger metric: how full IS the current wall's interior, and has growth also spilled
+// past it (ribbon suburbs)? Distinct from builtMassHull (which sizes a NEW wall from every nearby
+// node, in and out) -- this measures occupancy strictly INSIDE the given ring, operationalizing
+// M-GRW-2's "built-up >= ~80% of enclosed area" citation directly. A first cut instead compared a
+// freshly recomputed all-nodes hull (which already includes any extramural growth at all) against
+// the wall's own area -- but since the wall itself IS that same hull construction inflated by only
+// ~10%+16m growth reserve, any new growth whatsoever (even a couple of stray ribbon-suburb nodes)
+// made a fresh hull exceed the old wall's area almost immediately: direct epoch-by-epoch
+// instrumentation showed generation 2 firing the very epoch after generation 1 was built, with the
+// interior barely begun and only a handful of exterior nodes -- ring roads appearing well ahead of
+// real growth, not after it, exactly the ordering bug a user review caught. fillFraction here is
+// naturally bounded well under 1 (interior nodes can never exceed the ring's own footprint), so a
+// 0.8 threshold is a real, non-trivial "the reserve is now mostly used up" signal.
+function wallOccupancy(g,ring){
+  const isBuilt=(n)=>n.adj.filter(id=>g.edges[id].alive).length>=2;
+  const interior=[],exterior=[];
+  for(const n of g.nodes){
+    if(!isBuilt(n))continue;
+    (pointInPoly(n,ring)?interior:exterior).push(n);
+  }
+  const wallArea=Math.abs(polyArea(ring));
+  let fillFraction=0;
+  if(wallArea>0&&interior.length>=8){
+    const hull=convexHull(interior.map(n=>({x:n.x,y:n.y})));
+    if(hull.length>=3)fillFraction=Math.abs(polyArea(hull))/wallArea;
+  }
+  return {fillFraction,interiorCount:interior.length,exteriorCount:exterior.length};
+}
 /* ---------------- epoch growth loop (densification + exploration) ---------------- */
 function grow(seed,site,anchors,g,epochs,wallState,opts){
   const targetLen=opts.targetLen; // m of streets, derived from target population (M-DEN-1/2)
   const mktSide=site.bankSide(anchors.market);
+  const rules=opts.rules||DEFAULT_RULES;
+  const S=rules.street; // configurable generation rules
+  // successive wall generations (M-GRW-2, experimental opt-in): organic/medieval growth only —
+  // Venus's radial branch lays every ring/spoke in one shot with no epoch loop to hang this on,
+  // and never sets opts.wallGenerations, so wallGens is always false there.
+  const wallGens=!!opts.wallGenerations;
+  const ST=rules.settlement;
+  // carrying-capacity factor: computed once (site/anchors/maxRF don't change per epoch), not per
+  // try. carryingCapacityWeight=0 pins it to 1 (placeholder fully disabled, isolating the
+  // logistic-ramp-only effect); weight=1 is the full placeholder effect.
+  const ccFactor=wallGens
+    ?(1-ST.carryingCapacityWeight)+ST.carryingCapacityWeight*estimateCarryingCapacity(site,anchors,opts.maxRF)
+    :1;
+  const fireEpoch=Math.max(3,Math.floor(epochs*0.6)); // M-GRW-2: town has substance by here
+  // settlement age (years), spread evenly across this run's epochs, so each epoch has a real-year
+  // scale to gate successive wall generations against (M-GRW-2b): a young settlement's whole
+  // lifespan can't afford the real-world gap a second circuit needs, so it simply never affords
+  // one; an old settlement's epochs are each worth many years, so several circuits fit naturally.
+  const yearsPerEpoch=wallGens?Math.max(1,opts.settlementAge||300)/epochs:0;
   let placedLen=0;
   const kept=[];
   for(let ep=1;ep<=epochs;ep++){
     const r=stream(seed,'grow/e'+ep);
-    const exploreShare=Math.max(0.12,0.55-0.05*ep); // M-GRW-1: exploration fades
+    const exploreShare=Math.max(S.explorationMinimum,S.explorationStart-S.explorationDecay*ep); // M-GRW-1: exploration fades
     const budget=targetLen/epochs;
     const primEdges=g.edges.filter(e=>e.alive&&e.cls==='primary');
     let len=0,tries=0;
@@ -862,7 +1397,11 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
       // T-junctions, M-NET-3; branching AT junctions would breed 4-ways, M-NET-1),
       // or the continuation of a dead-end during exploration (Strano, M-GRW-1)
       const explore=r.chance(exploreShare);
-      const maxR=opts.maxRF*(0.38+0.62*ep/epochs); // urbanisation front advances by epoch
+      // urbanisation front advances by epoch: linear by default; with wallGenerations, age maps
+      // through a logistic curve and the whole ramp is scaled by the carrying-capacity placeholder
+      const maxR=wallGens
+        ?opts.maxRF*ccFactor*(0.38+0.62*logisticRamp(ep/epochs))
+        :opts.maxRF*(0.38+0.62*ep/epochs);
       let O,ang;
       if(explore&&r.chance(0.55)){
         const n=g.nodes[r.int(0,g.nodes.length-1)];
@@ -872,7 +1411,7 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
         const e0=g.edges[liveAdj[0]];
         const o=g.nodes[e0.a===n.id?e0.b:e0.a];
         O={x:n.x,y:n.y};
-        ang=Math.atan2(n.y-o.y,n.x-o.x)+r.norm()*0.22; // continue outward
+        ang=Math.atan2(n.y-o.y,n.x-o.x)+r.norm()*S.continuationJitter; // continue outward
       }else{
         const e0=g.edges[r.int(0,g.edges.length-1)];
         if(!e0||!e0.alive)continue;
@@ -880,7 +1419,7 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
         if(V.dist(a0,b0)<38)continue; // keep split halves out of the short-segment tail (M-NET-4)
         O=V.lerp(a0,b0,r.range(0.35,0.65));
         const edgeAng=Math.atan2(b0.y-a0.y,b0.x-a0.x);
-        ang=edgeAng+(r.chance(0.5)?1:-1)*(Math.PI/2)+r.norm()*0.26; // sigma ~15deg, M-NET-3
+        ang=edgeAng+(r.chance(0.5)?1:-1)*(Math.PI/2)+r.norm()*S.branchAngleJitter; // sigma ~15deg, M-NET-3
       }
       // demand decays from the market — and from the quay in port towns, which are
       // densest at the waterfront (harbour-city family, lit. review §1.1 #22)
@@ -893,17 +1432,17 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
       // (bridge-town family, lit. review §1.1 #23); sea sites have no far bank
       const oSide=site.bankSide(O);
       if(site.kind==='river'&&oSide!==mktSide){
-        if(V.dist(O,site.bridgePt)>190)continue;
-        if(r.u()>0.35)continue;}
+        if(V.dist(O,site.bridgePt)>S.bridgeheadDistance)continue;
+        if(r.u()>S.bridgeheadProbability)continue;}
       // once walled, extramural growth clings to the approach roads (ribbon suburbs, M-GRW-1)
       if(wallState.ring&&oSide===mktSide&&!pointInPoly(O,wallState.ring)){
         let nearPrim=false;
         for(const pe of primEdges)
           if(distPtSeg(O,g.nodes[pe.a],g.nodes[pe.b])<90){nearPrim=true;break;}
         if(!nearPrim)continue;}
-      const w=1/(1+dM/200); // demand decays from the market (Clark gradient, M-DEN-3)
+      const w=1/(1+dM/S.marketGradientDecay); // demand decays from the market (Clark gradient, M-DEN-3)
       if(!explore&&r.u()>w*1.35)continue;
-      const L=Math.min(125,Math.max(30,r.logn(56,0.5))); // segment lengths M-NET-4
+      const L=Math.min(125,Math.max(30,r.logn(S.segmentLengthMedian,S.segmentLengthVariance))); // segment lengths M-NET-4
       let B={x:O.x+Math.cos(ang)*L,y:O.y+Math.sin(ang)*L};
       // ---- local constraints (Parish-Mueller legalization) ----
       // stop at the first street met: attach as a T-junction (M-NET-3 near-perpendicular
@@ -913,14 +1452,14 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
         const e2=g.edges[eid2];if(!e2||!e2.alive)continue;
         const h=segInt(O,B,g.nodes[e2.a],g.nodes[e2.b]);
         if(h&&h.u>1e-3&&h.u<1-1e-3&&h.t>0.03&&h.t<hitT){hitT=h.t;hitPt=h.pt;hitE=e2;}}
-      if(hitPt&&!r.chance(0.10)){
+      if(hitPt&&!r.chance(S.pierceChance)){
         B={x:hitPt.x,y:hitPt.y};
         if(V.dist(O,B)<18)continue;
         // no acute sliver at the junction: reject shallow-angle attachments (M-NET-3)
         const a2=g.nodes[hitE.a],b2=g.nodes[hitE.b];
         const eAng=Math.atan2(b2.y-a2.y,b2.x-a2.x);
         let dd=Math.abs(((ang-eAng)%Math.PI+Math.PI)%Math.PI);dd=Math.min(dd,Math.PI-dd);
-        if(dd<0.44)continue;}
+        if(dd<S.junctionAngleLimit)continue;}
       if(B.x<40||B.y<40||B.x>site.Wm-40||B.y>site.Hm-40)continue;
       if(site.slope(V.lerp(O,B,0.5))>0.34||site.slope(B)>0.34)continue; // M-REG-5
       // never cross water (bridge already exists)
@@ -944,7 +1483,7 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
         const a2=g.nodes[e2.a],b2=g.nodes[e2.b];
         if(distPtSeg(O,a2,b2)<1.5)continue; // the frontage being tapped
         const d=distPtSeg(midp,a2,b2);
-        if(d<24){
+        if(d<S.parallelStreetSpacing){
           const ang2=Math.atan2(b2.y-a2.y,b2.x-a2.x);
           let dd=Math.abs(((ang-ang2)%Math.PI+Math.PI)%Math.PI);dd=Math.min(dd,Math.PI-dd);
           if(dd<0.5){tooClose=true;break;}}}
@@ -958,12 +1497,58 @@ function grow(seed,site,anchors,g,epochs,wallState,opts){
       if(made.length)kept.push(made[0].id);
     }
     placedLen+=len;
-    // wall episode (M-GRW-2): optional enclosure, built once the town has substance
-    if(opts.walls&&!wallState.ring&&ep===Math.max(3,Math.floor(epochs*0.6))){
-      buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
+    // wall episode(s) (M-GRW-2): optional enclosure, built once the town has substance. Without
+    // wallGenerations this fires exactly once, exactly as before (the !wallGens branch below is
+    // byte-identical to the original single-fire condition). With it: the first circuit still
+    // rises at the same fireEpoch; from then on, a new circuit needs BOTH real time to have passed
+    // (age-gated, M-GRW-2b) AND the historical pattern itself — the interior actually full AND
+    // growth already spilling past the wall (M-GRW-2a) — not either alone.
+    if(opts.walls){
+      if(!wallGens){
+        if(!wallState.ring&&ep===fireEpoch)buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
+      }else if(!wallState.ring){
+        if(ep===fireEpoch)buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
+      }else if((wallState.generation||1)<ST.maxWallGenerations
+          &&(ep-wallState.epoch)>=ST.wallGenerationMinAgeGap/yearsPerEpoch){
+        const occ=wallOccupancy(g,wallState.ring);
+        if(occ.fillFraction>=ST.wallGenerationThreshold
+            &&occ.exteriorCount>=Math.max(10,occ.interiorCount*ST.wallGenerationExtramuralShare))
+          supersedeWall(seed,site,anchors,g,wallState,ep,opts);
+      }
     }
   }
   return placedLen;}
+// M-GRW-2: a wall generation superseded by a bigger one is stashed into wallState.history (same
+// shape wallState itself has) and its land-facing arc — never the harbour-mouth/river frontage
+// that was never walled, M-FOR-5 — is demolished for material, its foundation surviving as a ring
+// road (Vienna's Ringstrasse, Paris's Grands Boulevards on the Fermiers-Généraux wall are the real-
+// world referents). The road is laid through the SAME addPolylineStreet/addStreet primitive every
+// other street in this engine uses, so it snaps into the existing network, and any stretch that
+// would cross open water where no bridge exists (a spans-water circuit's old water-gate crossings)
+// is cleanly removed afterward by the generic removeWaterCrossings pass — no special-casing here.
+// model.wall keeps meaning "the active/current/outermost wall" throughout: buildWall below
+// overwrites ring/gates/style/fort/etc in place, exactly as it does on a first build.
+function supersedeWall(seed,site,anchors,g,wallState,ep,opts){
+  const gen=wallState.generation||1;
+  // the exact occupancy this generation was superseded AT (recomputed once more here rather than
+  // threaded through the caller): makes the "why now" auditable in the inspector/evidence ledger,
+  // the same explainability discipline this project already holds every other provenance string to
+  const occ=wallOccupancy(g,wallState.ring);
+  wallState.history=wallState.history||[];
+  wallState.history.push({ring:wallState.ring,gates:wallState.gates,landArc:wallState.landArc,
+    waterWalls:wallState.waterWalls,spurs:wallState.spurs,spansWater:wallState.spansWater,
+    style:wallState.style,fort:wallState.fort,prov:wallState.prov,epoch:wallState.epoch,generation:gen,
+    fillFractionAtSupersession:occ.fillFraction,exteriorNodesAtSupersession:occ.exteriorCount});
+  if(wallState.landArc&&wallState.landArc.length>1){
+    const roadProv='Ring road: wall circuit '+gen+' of this town, demolished once its interior filled to '+
+      Math.round(occ.fillFraction*100)+'% of the enclosure and '+occ.exteriorCount+' buildings\' worth of '+
+      'ribbon suburb had already grown up outside it — its foundation surviving as a road inside the '+
+      'newer enceinte (M-GRW-2; Florence/Cologne circuit histories).';
+    addPolylineStreet(g,wallState.landArc,'ringroad',7.5,ep,roadProv);
+  }
+  wallState.generation=gen+1;
+  buildWall(seed,site,anchors,g,wallState,ep,opts.harbour,opts);
+}
 function ringCrossings(ring,a,b){
   const out=[];
   for(let i=0;i<ring.length;i++){
@@ -1015,7 +1600,13 @@ function townBank(site,anchors){
     }else out.push({x:line[i].x,y:line[i].y-5}); // shoreline, town is landward (north)
   }
   return out;}
-function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
+// the built-up mass as a hull, independent of any wall: every node with real degree (junction,
+// not a dead-end stub) within reach of the market, far-bank nodes folded in once they carry a
+// real share of the built mass (bridge-town), cut at the 85th-percentile distance and inflated
+// for growth reserve. Shared by buildWall (its wall follows this hull) and, for the
+// wall-generations toggle, the repeatable expansion trigger (which compares this hull's area
+// against the currently active wall's enclosed area — same proxy, no wall required to compute it).
+function builtMassHull(site,anchors,g){
   const rk=(site.kind==='river'||site.kind==='riverthrough');
   const mktSide=site.bankSide(anchors.market);
   const near=[],far=[];
@@ -1025,7 +1616,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
     if(rk&&site.riverDist(n)<site.riverW/2+14)continue;
     if(!rk&&site.isWater(n))continue;
     if(rk&&site.bankSide(n)!==mktSide)far.push(n);else near.push(n);}
-  if(near.length<8)return;
+  if(near.length<8)return null;
   // "the wall crosses the water only once the city has grown around it": include the far
   // bank only when it carries a substantial share of the built mass (bridge-town, §1.1 #23);
   // a river-THROUGH town is on both banks by definition, so it always spans
@@ -1034,11 +1625,18 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
   const ds=massNodes.map(n=>V.dist(n,anchors.market)).sort((a,b)=>a-b);
   const cut=ds[Math.floor(ds.length*0.85)]*1.12;
   const pts=massNodes.filter(n=>V.dist(n,anchors.market)<=cut).map(n=>({x:n.x,y:n.y}));
-  if(pts.length<8)return;
+  if(pts.length<8)return null;
   let hull=convexHull(pts);
   const c=polyCentroid(hull); // growth reserve ~15% (M-NET-9)
   hull=hull.map(p=>V.add(c,V.mul(V.sub(p,c),1.10)));
   hull=hull.map(p=>V.add(p,V.mul(V.norm(V.sub(p,c)),16)));
+  return {hull,spansWater};}
+function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
+  const bmh=builtMassHull(site,anchors,g);
+  if(!bmh)return;
+  const {hull,spansWater}=bmh;
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  const mktSide=site.bankSide(anchors.market);
 
   const isLand=(p)=> rk
     ? (site.bankSide(p)===mktSide&&site.riverDist(p)>site.riverW/2+1)
@@ -1051,7 +1649,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
     return V.mul(V.norm({x:gx,y:gy}),-1);}; // toward the channel
   const spurDepth=rk?site.riverW/2+9:20;
 
-  let ring,landArc,waterWalls=[],spurs=[],waterGates=[];
+  let ring,landArc,waterWalls=[],spurs=[],waterGates=[],waterClosure=null;
   const bank=townBank(site,anchors);
 
   if(spansWater){
@@ -1098,7 +1696,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
           prov:'Wall spur: the circuit dips into the water at its end so the shore cannot be rounded on foot (defensive closure).'});}
       // closed ring for containment follows the bank with no gap (water already runs from
       // the landArc-end side back to the landArc-start side, so no reversal)
-      ring=landArc.concat(water);
+      ring=landArc.concat(water);waterClosure=water;
       // drawn water wall: leave the harbour mouth open (never cordon the quay, §1.1 #22)
       if(harbour&&harbour.quay&&harbour.quay.length){
         const hp=harbour.pt;const gapR=48;
@@ -1113,7 +1711,7 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
   if(!ring||ring.length<6)return;
 
   wallState.ring=ring;wallState.landArc=landArc;wallState.waterWalls=waterWalls;
-  wallState.spurs=spurs;wallState.spansWater=spansWater;
+  wallState.spurs=spurs;wallState.spansWater=spansWater;wallState._waterClosure=waterClosure;
   wallState.style='curtain';wallState.epoch=ep;wallState.centroid=polyCentroid(ring);
   wallState.prov=spansWater
     ?'Wall circuit: the town outgrew one bank, so the enceinte encloses both and the river passes under it at two water-gates (M-NET-9, M-GRW-2, lit. review §1.1 #23).'
@@ -1140,7 +1738,26 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
   for(const wp of waterGates)
     if(!gates.some(gt=>V.dist(gt.pt,wp)<40))
       gates.push({pt:wp,water:true,prov:'Water-gate: the river passes under the wall where the town grew across both banks (M-NET-9).'});
-  wallState.gates=gates;}
+  // a bastioned enceinte keeps only a FEW land gates (Naarden's hexagon has just two): every
+  // other approach was historically re-routed to converge on one of them, since more breaches
+  // in the magistral line meant more places to defend and more customs posts to man. Keep the
+  // land gates closest to the market (busiest approaches) up to a small cap, angularly spread
+  // so they don't cluster on one front; the rest are dropped here and their primaries are swept
+  // by clearFortZone below (which kills any road crossing the field of fire away from a gate).
+  if(wallState.style==='bastioned'){
+    const land=gates.filter(g=>!g.water),water=gates.filter(g=>g.water);
+    const cap=Math.max(2,Math.min(3,Math.round((wallState.fort.bastions.length||6)/3)));
+    land.sort((a,b)=>V.dist(a.pt,anchors.market)-V.dist(b.pt,anchors.market));
+    const kept=[];
+    for(const gt of land){
+      if(kept.length>=cap)break;
+      const ang=Math.atan2(gt.pt.y-wallState.centroid.y,gt.pt.x-wallState.centroid.x);
+      if(kept.some(k=>{const a2=Math.atan2(k.pt.y-wallState.centroid.y,k.pt.x-wallState.centroid.x);
+        let da=Math.abs(ang-a2);if(da>Math.PI)da=2*Math.PI-da;return da<0.9;}))continue;
+      kept.push(gt);}
+    for(const gt of land)if(!kept.includes(gt)&&kept.length<cap)kept.push(gt); // fill the cap if angular spread was too strict
+    wallState.gates=kept.concat(water);
+  }else wallState.gates=gates;}
 
 /* ---------------- star fort: bastioned trace (trace italienne) ----------------
  * From c.1500 (Pisa's 1500 defence of an earthwork rampart against French siege guns),
@@ -1151,68 +1768,76 @@ function buildWall(seed,site,anchors,g,wallState,ep,harbour,opts){
  * Bastion fort (Wikipedia); Vauban's magistral geometry (face = 2/7 of the polygon side). */
 function applyStarFort(seed,site,anchors,wallState,opts){
   const r=stream(seed,'starfort');
-  const land=wallState.landArc;
-  if(!land||land.length<3)return;
-  // land arc length → number of curtains (one bastion per corner). Curtain lengths are set
-  // to effective musket range so adjacent bastions cover each other (M-FOR-2).
-  let arc=0;for(let i=0;i<land.length-1;i++)arc+=V.dist(land[i],land[i+1]);
-  const curtain=230; // m, within musket range (M-FOR-2)
-  const nSeg=Math.max(2,Math.min(6,Math.round(arc/curtain)));
-  // resample the land arc into nSeg+1 evenly spaced corner points
-  const Pc=[land[0]];
-  for(let s=1;s<nSeg;s++){
+  // A late-stage bastioned enceinte is a compact, CLOSED, convex-ish polygon — Naarden's
+  // hexagon is the model: a full bastion at EVERY corner, a curtain on every side, a ravelin
+  // before every curtain, and the whole trace wrapped by a continuous ditch, covered way and
+  // glacis. We therefore base the trace on the convex hull of the containment ring (NOT the
+  // open bank-following land arc), so no smooth-wall/bastion seam and no open-ended offset
+  // "flap" can form at the water. The outworks are continuous rings; where a front faces the
+  // river the water itself is the wet ditch, so the renderer lets the river show through the
+  // land-side works. Refs M-FOR-1..7; Naarden / Vauban magistral geometry.
+  const base=convexHull(wallState.ring);
+  if(!base||base.length<3)return;
+  const C=polyCentroid(base);
+  let arc=0;for(let i=0;i<base.length;i++)arc+=V.dist(base[i],base[(i+1)%base.length]);
+  const curtain=230; // m, within musket range so adjacent bastions cross-cover (M-FOR-2)
+  const nSeg=Math.max(4,Math.min(9,Math.round(arc/curtain)));
+  // resample the CLOSED hull into nSeg evenly spaced corners (one bastion each)
+  const Pc=[];
+  for(let s=0;s<nSeg;s++){
     const target=arc*s/nSeg;let acc=0;
-    for(let i=0;i<land.length-1;i++){const d=V.dist(land[i],land[i+1]);
-      if(acc+d>=target){Pc.push(V.lerp(land[i],land[i+1],(target-acc)/d));break;}acc+=d;}}
-  Pc.push(land[land.length-1]);
-  const C=wallState.centroid||polyCentroid(wallState.ring);
-  // bastion geometry (M-FOR-1/3)
-  const sb=18,fh=13,bd=r.range(34,42);
-  const trace=[];const bastions=[];const curtains=[];
+    for(let i=0;i<base.length;i++){const A=base[i],B=base[(i+1)%base.length],d=V.dist(A,B);
+      if(acc+d>=target){Pc.push(V.lerp(A,B,(target-acc)/d));break;}acc+=d;}}
+  if(Pc.length<3)return;
+  // push EVERY corner outward past the built-fabric bulge so each straight curtain encloses the
+  // town (a chord of the hull cuts inside and would slice houses) — the magistral line lies
+  // outside all fabric, so nothing is drawn through.
+  let maxBulge=0;
   for(let i=0;i<Pc.length;i++){
-    const P=Pc[i];
-    const out=V.norm(V.sub(P,C));
-    const du=i>0?V.norm(V.sub(P,Pc[i-1])):V.norm(V.sub(Pc[i+1],P));
-    const dw=i<Pc.length-1?V.norm(V.sub(Pc[i+1],P)):V.norm(V.sub(P,Pc[i-1]));
-    if(i===0||i===Pc.length-1){
-      // demi-bastion at the waterline ends: a single flank + salient, then meet the water
-      const dir=(i===0)?dw:V.mul(du,-1);
-      const S=V.add(P,V.mul(out,bd*0.8));
-      const sh=V.add(V.add(P,V.mul(dir,sb)),V.mul(out,fh));
-      if(i===0){trace.push(P,S,sh);bastions.push({salient:S,outline:[P,S,sh],demi:true});}
-      else{trace.push(sh,S,P);bastions.push({salient:S,outline:[sh,S,P],demi:true});}
-    }else{
-      const cIn=V.add(P,V.mul(du,-sb)),cOut=V.add(P,V.mul(dw,sb));
-      const shIn=V.add(cIn,V.mul(out,fh)),shOut=V.add(cOut,V.mul(out,fh));
-      const S=V.add(P,V.mul(out,bd));
-      trace.push(cIn,shIn,S,shOut,cOut);
-      bastions.push({salient:S,outline:[cIn,shIn,S,shOut,cOut],demi:false});}
-  }
-  // curtains: straight runs between successive bastion throats (for gate placement)
-  for(let i=0;i<bastions.length-1;i++){
+    const A=Pc[i],B=Pc[(i+1)%Pc.length],AB=V.sub(B,A),Lb=V.len(AB)||1,d=V.mul(AB,1/Lb);
+    let nrm={x:-d.y,y:d.x};if(V.dot(nrm,V.sub(A,C))<0)nrm=V.mul(nrm,-1);
+    for(const q of wallState.ring){const t=V.dot(V.sub(q,A),d)/Lb;if(t<-0.05||t>1.05)continue;
+      const o=V.dot(V.sub(q,A),nrm);if(o>maxBulge)maxBulge=o;}}
+  const push=maxBulge+16;
+  for(let i=0;i<Pc.length;i++)Pc[i]=V.add(Pc[i],V.mul(V.norm(V.sub(Pc[i],C)),push));
+  // full pentagonal bastion at every corner (two faces + two flanks + salient) — M-FOR-1
+  const sb=18,fh=13,bd=r.range(34,42);
+  const trace=[],bastions=[];
+  for(let i=0;i<Pc.length;i++){
+    const P=Pc[i],out=V.norm(V.sub(P,C));
+    const du=V.norm(V.sub(P,Pc[(i-1+Pc.length)%Pc.length]));
+    const dw=V.norm(V.sub(Pc[(i+1)%Pc.length],P));
+    const cIn=V.add(P,V.mul(du,-sb)),cOut=V.add(P,V.mul(dw,sb));
+    const shIn=V.add(cIn,V.mul(out,fh)),shOut=V.add(cOut,V.mul(out,fh));
+    const S=V.add(P,V.mul(out,bd));
+    trace.push(cIn,shIn,S,shOut,cOut);
+    bastions.push({salient:S,outline:[cIn,shIn,S,shOut,cOut],demi:false});}
+  // curtains between successive bastion throats (closed loop)
+  const curtains=[];
+  for(let i=0;i<bastions.length;i++){
     const a=bastions[i].outline[bastions[i].outline.length-1];
-    const b=bastions[i+1].outline[0];
+    const b=bastions[(i+1)%bastions.length].outline[0];
     curtains.push({a,b,mid:V.lerp(a,b,0.5)});}
-  // outworks. Every current site has water access, so the ditch is WET — the late-stage
-  // Old Dutch System (Naarden): a flooded moat, doubled on larger works, with ravelins as
-  // islands, a covered way, and a glacis that is a cleared field of fire (M-FOR-6/7).
+  // outworks as continuous RINGS around the closed trace (M-FOR-6/7). A wet ditch needs water
+  // at hand to flood it (M-FOR-6): measure the trace's nearest approach to the waterline; an
+  // inland/landlocked trace gets a DRY ditch.
   const ditchW=22,coveredW=8,glacisW=48;
-  // a WET ditch is only feasible if a water body is close enough to feed it (you cannot
-  // flood a moat with no water to draw from, nor pump it uphill) — M-FOR-6. Measure the
-  // nearest approach of the trace to the waterline; a hilltop/inland trace gets a DRY ditch.
   let minWaterD=Infinity;
-  for(const p of trace)minWaterD=Math.min(minWaterD,site.riverDist(p));
-  const wet=minWaterD<175;
+  if(!site.noWater)for(const p of trace)minWaterD=Math.min(minWaterD,site.riverDist(p));
+  // a natural waterline within reach floods the ditch (M-FOR-6); opts.wetMoat is an explicit
+  // supply of water on hand even when landlocked — the Venus Project's circular irrigation canal
+  // feeds the moat around the bastions (M-VEN-3)
+  const wet=minWaterD<175||!!(opts&&opts.wetMoat);
+  const canalFed=!(minWaterD<175)&&!!(opts&&opts.wetMoat);
   const offsetOut=(poly,d)=>poly.map(p=>V.add(p,V.mul(V.norm(V.sub(p,C)),d)));
   const counterscarp=offsetOut(trace,ditchW);
-  const ditchBand=trace.concat(counterscarp.slice().reverse()); // wet-moat fill (closed ribbon)
-  const doubleMoat=wet&&bastions.length>=5; // Naarden-style double wet moat on larger forts
   const coveredWay=offsetOut(trace,ditchW+coveredW);
-  const outerMoat=doubleMoat
-    ? offsetOut(trace,ditchW+coveredW).concat(offsetOut(trace,ditchW+coveredW+ditchW*0.9).slice().reverse())
-    : null;
+  const doubleMoat=wet&&bastions.length>=5; // Naarden-style double wet moat on larger works
   const glacisOff=(doubleMoat?ditchW+coveredW+ditchW*0.9:ditchW+coveredW)+glacisW;
-  const glacis=offsetOut(trace,glacisOff);
+  // rings stored {outer,inner}; drawn with an even-odd fill so the town shows through the hole
+  const ditch={outer:counterscarp,inner:trace};
+  const outerMoat=doubleMoat?{outer:offsetOut(trace,ditchW+coveredW+ditchW*0.9),inner:coveredWay}:null;
+  const glacis={outer:offsetOut(trace,glacisOff),inner:coveredWay};
   const ravelins=[];
   for(const cu of curtains){
     const out=V.norm(V.sub(cu.mid,C));
@@ -1223,39 +1848,30 @@ function applyStarFort(seed,site,anchors,wallState,opts){
     const apex=V.add(cu.mid,V.mul(out,ditchW+coveredW*0.5));
     ravelins.push([base1,apex,base2]);}
   wallState.style='bastioned';
-  wallState.landArc=trace; // the bastioned trace is now the drawn land wall
-  wallState.fort={trace,bastions,curtains,counterscarp,ditchBand,coveredWay,outerMoat,
-    glacis,glacisOff,ravelins,wetDitch:wet,doubleMoat,
-    prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): angled bastions flank the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow causeways swept by fire (M-FOR-1..7).'};
-  wallState.prov='Bastioned enceinte: a late-stage artillery fortification wrapping the town — angled bastions, curtains at musket range, a '+(wet?'wet moat'+(doubleMoat?' (doubled, Naarden-style)':''):'dry ditch')+', ravelins, covered way and glacis (M-FOR-1..7). Built only for strategically important towns.';}
+  wallState.landArc=trace; // the closed bastioned trace is the drawn wall (all sides)
+  wallState.waterWalls=[]; // no smooth water wall any more — the trace wraps every front
+  // containment ring = the GORGE polygon through the bastion throats (cIn→cOut of each), i.e.
+  // the true enclosed area bounded by the curtains and bastion gorges — NOT the convex hull of
+  // the salients (which balloons past the curtains into the bastion re-entrants and would let a
+  // road or house sitting outside a curtain read as "inside"). Everything outside this ring and
+  // within the glacis is swept, so nothing is drawn through a curtain (M-FOR-7).
+  const gorge=[];for(const b of bastions){gorge.push(b.outline[0],b.outline[b.outline.length-1]);}
+  wallState.ring=gorge;
+  wallState.centroid=polyCentroid(wallState.ring);
+  wallState.fort={trace,bastions,curtains,counterscarp,ditch,coveredWay,outerMoat,
+    glacis,glacisOff,ravelins,wetDitch:wet,doubleMoat,canalFed,
+    prov:'Bastioned trace (trace italienne, c.1500; late-stage Old Dutch System): a closed, compact enceinte with a full angled bastion at every corner flanking the curtains with no dead ground; a '+(wet?'WET':'dry')+' ditch'+(canalFed?' (fed by the circular irrigation canal, M-VEN-3, rather than a natural waterline)':'')+(doubleMoat?' doubled into two concentric moats (as at Naarden)':'')+', detached ravelins as islands in the moat, a covered way and a cleared glacis defeat siege artillery — approaches are forced onto narrow gate causeways swept by fire (M-FOR-1..7).'};
+  wallState.prov='Bastioned enceinte: a late-stage artillery fortification wrapping the town in a closed polygon — a bastion at every corner, curtains at musket range, a '+(wet?'wet moat'+(canalFed?' (canal-fed)':'')+(doubleMoat?' (doubled, Naarden-style)':''):'dry ditch')+', ravelins, covered way and glacis (M-FOR-1..7). Built only for strategically important towns.';}
 
 /* ---------------- clear the fortification field of fire (the esplanade/glacis) ----------------
  * A fort's glacis was kept clear for fields of fire; a town wall had a cleared rampart strip.
  * Buildings, parcels, extramural streets and clutter inside that footprint are swept away —
  * which is both historically correct and removes the wall/fort overlapping roads & houses. */
-function clearFortZone(site,wallState,g,parcels,buildings,details){
-  if(!wallState.ring||!wallState.landArc)return;
-  const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
-  const clearDist=wallState.style==='bastioned'?((fort&&fort.glacisOff||60)+8):15;
-  const inClear=(p)=> !pointInPoly(p,ring)&&distToLine(p,land)<clearDist;
-  for(let i=buildings.length-1;i>=0;i--)
-    if(inClear(polyCentroid(buildings[i].poly)))buildings.splice(i,1);
-  for(const par of parcels)
-    if(inClear(polyCentroid(par.poly)))par.cleared=true;
-  for(let i=details.length-1;i>=0;i--){
-    const d=details[i];
-    const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
-    if(p&&inClear(p))details.splice(i,1);}
-  const gates=wallState.gates||[];
-  const kill=(e)=>{e.alive=false;
-    const a=g.nodes[e.a],b=g.nodes[e.b];
-    let k=a.adj.indexOf(e.id);if(k>=0)a.adj.splice(k,1);
-    k=b.adj.indexOf(e.id);if(k>=0)b.adj.splice(k,1);};
-  for(const e of g.edges){
-    if(!e.alive||e.cls==='primary'||e.cls==='quay')continue;
-    const mid=V.lerp(g.nodes[e.a],g.nodes[e.b],0.5);
-    if(inClear(mid)&&!gates.some(gt=>V.dist(gt.pt,mid)<clearDist*0.9))kill(e);}
-  // cutting streets can strand small fragments; keep only the largest connected component
+function _killEdge(g,e){e.alive=false;const a=g.nodes[e.a],b=g.nodes[e.b];
+  let k=a.adj.indexOf(e.id);if(k>=0)a.adj.splice(k,1);
+  k=b.adj.indexOf(e.id);if(k>=0)b.adj.splice(k,1);}
+// cutting edges can strand fragments; keep only the largest connected component
+function pruneLargest(g){
   const adj=new Map();
   for(const e of g.edges){if(!e.alive)continue;
     if(!adj.has(e.a))adj.set(e.a,[]);if(!adj.has(e.b))adj.set(e.b,[]);
@@ -1266,17 +1882,107 @@ function clearFortZone(site,wallState,g,parcels,buildings,details){
     while(q.length){const u=q.pop();n++;for(const v of adj.get(u))if(!comp.has(v)){comp.set(v,cid);q.push(v);}}
     sizes.push(n);cid++;}
   if(sizes.length){let best=0;for(let i=1;i<sizes.length;i++)if(sizes[i]>sizes[best])best=i;
-    for(const e of g.edges)if(e.alive&&comp.get(e.a)!==best)kill(e);}}
+    for(const e of g.edges)if(e.alive&&comp.get(e.a)!==best)_killEdge(g,e);}}
+// remove street/lane edges that run through the water channel (only bridges/quay may cross);
+// growth avoids water but planarization splits and route smoothing can leave a straggler
+function removeWaterCrossings(site,g){
+  if(site.noWater)return;
+  const rk=(site.kind==='river'||site.kind==='riverthrough');
+  const wetAt=(p)=> rk? site.riverDist(p)<site.riverW/2+0.5 : site.isWater(p);
+  for(const e of g.edges){
+    if(!e.alive||e.cls==='primary'||e.cls==='quay')continue; // bridges & the quay are legitimate
+    const a=g.nodes[e.a],b=g.nodes[e.b];let wet=0;
+    for(let i=1;i<10;i++)if(wetAt(V.lerp(a,b,i/10)))wet++;
+    if(wet>=2)_killEdge(g,e);}
+  pruneLargest(g);}
+/* ---------------- alley privatization: cul-de-sac formation (M-ISL-2) ----------------
+ * Traditional Islamic residential quarters show a MUCH higher dead-end share than the medieval
+ * European pack — a well-documented, quantifiable morphological signature (network of narrow,
+ * winding, privacy-oriented cul-de-sacs off the souk artery). The historical MECHANISM was
+ * encroachment: residents progressively built across a shared through-lane once it served no
+ * one but them, converting a connecting alley into a private cul-de-sac. Modelled here as a
+ * profile-gated post-growth pass, not a growth-loop change (keeps every other profile's growth
+ * mechanics untouched): closes a target share of minor 'street' edges, but ONLY non-bridge
+ * edges (removing one must not disconnect the network — verified by BFS reachability without
+ * the candidate edge, exactly the kind of connectivity check this file's own goal calls for). */
+function privatizeAlleys(seed,profile,g,rules){
+  // the rules-level fraction (docs/07 §3.4, Wildness-derived) ADDS to the profile's own baseline
+  // rather than replacing it, so Islamic's documented 0.16 floor is never diluted by a rules panel
+  // left at its neutral default; clamped to the same 0-0.40 range the design spec calls for.
+  const bias=clamp((profile.deadEndBias||0)+((rules||DEFAULT_RULES).street.deadEndBias||0),0,0.40);
+  if(!bias)return;
+  const r=stream(seed,'privatize');
+  const reachableWithout=(skipId,fromId)=>{
+    const seen=new Set([fromId]);const q=[fromId];
+    while(q.length){const u=q.pop();
+      for(const eid of g.nodes[u].adj){
+        if(eid===skipId)continue;const e=g.edges[eid];if(!e.alive)continue;
+        const v=e.a===u?e.b:e.a;if(!seen.has(v)){seen.add(v);q.push(v);}}}
+    return seen;};
+  const candidates=g.edges.filter(e=>e.alive&&e.cls==='street');
+  const target=Math.round(candidates.length*bias);
+  let closed=0;
+  for(const e of candidates){
+    if(closed>=target)break;
+    if(!e.alive)continue;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    if(a.adj.filter(id=>g.edges[id].alive).length<2||b.adj.filter(id=>g.edges[id].alive).length<2)continue;
+    if(!r.chance(0.5))continue;
+    if(!reachableWithout(e.id,a.id).has(b.id))continue; // a bridge/articulation edge — never sever it
+    _killEdge(g,e);closed++;}
+}
+function clearFortZone(site,wallState,g,parcels,buildings,details){
+  if(!wallState.ring||!wallState.landArc)return;
+  const ring=wallState.ring,land=wallState.landArc,fort=wallState.fort;
+  const clearDist=wallState.style==='bastioned'?((fort&&fort.glacisOff||60)+8):15;
+  const inClear=(p)=> !pointInPoly(p,ring)&&distToLine(p,land)<clearDist;
+  // clear by FOOTPRINT, not just centroid: any building/parcel with a vertex inside the drawn
+  // wall/moat/glacis band is swept, so no house is left poking into (i.e. drawn over by) the
+  // fortification. A polygon straddling the enceinte itself is cut by the wall — also cleared.
+  const polyInClear=(poly)=>{ if(inClear(polyCentroid(poly)))return true;
+    for(const q of poly)if(inClear(q))return true; return false; };
+  for(let i=buildings.length-1;i>=0;i--)
+    if(polyInClear(buildings[i].poly))buildings.splice(i,1);
+  for(const par of parcels)
+    if(polyInClear(par.poly))par.cleared=true;
+  for(let i=details.length-1;i>=0;i--){
+    const d=details[i];
+    const p=(d.x!==undefined)?{x:d.x,y:d.y}:(d.a?V.lerp(d.a,d.b,0.5):(d.poly?polyCentroid(d.poly):null));
+    if(p&&inClear(p))details.splice(i,1);}
+  // clear the field of fire of ALL roads (incl. primaries that grazed a bastion/moat/glacis)
+  // except a corridor at each gate, where the approach road crosses on its causeway.
+  // A proximity-only test (mid/endpoints within clearDist of the land curve) MISSES a real
+  // ring-boundary crossing whenever the edge is long/oblique or the ring and the sampled land
+  // curve aren't perfectly coincident — an impossible intersection (a road piercing the wall
+  // with no gate) that proximity sampling alone won't catch. Detect the TRUE geometric crossing
+  // via ringCrossings (the same technique buildWall itself uses to place gates) and require
+  // every actual crossing point — not just a nearby sample — to be covered by a gate.
+  const gates=wallState.gates||[];
+  for(const e of g.edges){
+    if(!e.alive||e.cls==='quay')continue; // the quay hugs the water, not the land wall
+    const a=g.nodes[e.a],b=g.nodes[e.b],mid=V.lerp(a,b,0.5);
+    const crossPts=ringCrossings(ring,a,b);
+    const graze=inClear(mid)||inClear(a)||inClear(b);
+    if(!crossPts.length&&!graze)continue;
+    const keepR=e.cls==='primary'?clearDist+16:clearDist*0.85; // gate approach corridor
+    const checkPts=crossPts.length?crossPts:[mid];
+    if(checkPts.every(pt=>gates.some(gt=>V.dist(gt.pt,pt)<keepR)))continue;
+    _killEdge(g,e);}
+  pruneLargest(g);}
 
 /* ---------------- interior lane pass: split oversized central blocks ---------------- */
-function lanePass(seed,site,anchors,g,epoch){
+function lanePass(seed,site,anchors,g,epoch,minArea){
+  minArea=minArea===undefined?12000:minArea; // a caller-supplied threshold that scales with
+  // encroachment pressure (M-PAL-4) had no live caller since the post-launch simplification pass
+  // (docs/07 §3.10) removed the profile it was built for; the parameter stays tunable rather than
+  // hardcoded so a future profile with its own re-subdivision pressure can reuse it.
   const r=stream(seed,'lanes/'+epoch);
   const faces=extractFaces(g);
   let added=0;
   for(const f of faces){
     if(f.outer)continue;
     const A=Math.abs(f.area);
-    if(A<12000||A>140000)continue;
+    if(A<minArea||A>140000)continue;
     const c=polyCentroid(f.poly);
     if(V.dist(c,anchors.market)>520)continue;
     if(site.isWater(c))continue;
@@ -1325,8 +2031,19 @@ function buildBlocks(g,plaza,site){
         :'Urban block: a face of the planar street graph, inset by half the width of each fronting street (+ verge).'});}
   return blocks;}
 
-/* ---------------- parcels: series platting via bisector edge-cells ---------------- */
-function buildParcels(seed,g,blocks,anchors,epochs,site){
+/* ---------------- parcels: series platting via bisector edge-cells ----------------
+ * The vertex-bisector method handles any convex-ish block shape, including the wedge-shaped
+ * annular blocks Venus's radial rings produce — its lot boundaries respect the true (curved)
+ * block outline rather than assuming an axis-aligned rectangle, which is what let Venus adopt
+ * this same generic mechanism unchanged rather than needing its own parcel method (M-VEN-1). A
+ * bounding-box insula-lot method (regular rows within a planned block's own bounding box,
+ * dispatched on profile.parcelPattern) existed here through the tool's original 19-profile run;
+ * it has no live caller since the post-launch simplification pass (docs/07 §3.10) — both
+ * medieval and Venus set parcelPattern:'strip', so a future insula-pattern profile would need to
+ * reintroduce the dispatch as well as the method. */
+function buildParcels(seed,g,blocks,anchors,epochs,site,profile,rules){
+  profile=profile||CULTURE_PROFILES.medieval;
+  const P=(rules||DEFAULT_RULES).parcels; // configurable generation rules
   const parcels=[];let pid=0;
   for(const blk of blocks){
     if(blk.plaza)continue;
@@ -1337,7 +2054,7 @@ function buildParcels(seed,g,blocks,anchors,epochs,site){
     const cand=[]; // per-block candidates; filtered for overlap + area conservation below
     const dM=V.dist(polyCentroid(poly),anchors.market);
     // block-uniform target plot depth (M-PAR-2), shallower at the core where land is dear
-    const depthTarget=Math.max(14,Math.min(46,rB.logn(dM<160?22:30,0.28)));
+    const depthTarget=Math.max(14,Math.min(46,rB.logn(dM<160?22:30,P.plotDepthVariance)));
     // vertex bisectors, capped by ray-cast to the opposite boundary
     const bis=[],cap=[];
     for(let i=0;i<n;i++){
@@ -1383,9 +2100,9 @@ function buildParcels(seed,g,blocks,anchors,epochs,site){
       const age=eref?Math.max(0,epochs-eref.epoch):epochs;
       const widths=[];let acc=0;
       while(acc<eLen-3){
-        let w=Math.max(4.5,Math.min(16,rB.logn(11,0.22))); // 2-3 perch grants, M-PAR-1
+        let w=Math.max(4.5,Math.min(16,rB.logn(11,P.frontageWidthVariance))); // 2-3 perch grants, M-PAR-1
         let parts=[w];
-        const splits=Math.min(2,Math.floor(age/3));
+        const splits=Math.min(P.subdivisionCap,Math.floor(age/3));
         for(let s=0;s<splits;s++){
           const np=[];
           for(const pw of parts){
@@ -1405,10 +2122,17 @@ function buildParcels(seed,g,blocks,anchors,epochs,site){
         const Q0=V.lerp(backA,backB,f0),Q1=V.lerp(backA,backB,Math.min(1,f1));
         const quad=[P0,P1,Q1,Q0];
         const area=Math.abs(polyArea(quad));
-        const qc=polyCentroid(quad);
-        const wetPar=site&&(site.isWater(qc)||
-          site.riverDist(qc)<(site.kind==='river'?site.riverW/2+1:3));
-        if(!wetPar&&area>=26&&area<=2600){
+        // check the full footprint, not just the centroid: a harbour-district warehouse can run
+        // to ~85% of the parcel's depth (M-BLD-2), so a parcel whose centroid is dry but whose
+        // back corners (Q0/Q1) dip into the water would still float a building in the channel.
+        const margin=site&&(site.kind==='river'?site.riverW/2+1:3);
+        const wetPar=site&&quad.some(q=>site.isWater(q)||site.riverDist(q)<margin);
+        // reject a twisted (self-intersecting/bowtie) quad outright: at a reflex vertex on a
+        // noisy boundary the front/back bisector correspondence can flip, producing a shape
+        // whose area-weighted centroid lands OUTSIDE the visible quad entirely — which is how a
+        // parcel with every corner on dry land was still reported "in the water" (the centroid,
+        // not the footprint, was wet). A self-intersecting footprint isn't a buildable lot at all.
+        if(!wetPar&&area>=26&&area<=2600&&!polySelfIntersects(quad)){
           cand.push({id:'par'+(pid++),poly:quad,block:blk.id,
             frontage:V.dist(P0,P1),depth:(V.dist(P0,Q0)+V.dist(P1,Q1))/2,
             area,age,edgeCls:eref?eref.cls:'street',
@@ -1440,6 +2164,7 @@ function assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour){
     const c=polyCentroid(par.poly);
     const dM=V.dist(c,anchors.market);
     const rd=site.riverDist(c);
+    par.suitability=terrainSuitability(site,c); // docs/08: informational by default (M-TER-1)
     let d;
     if(plaza&&distPtSeg(c,plaza.poly[0],plaza.poly[1])<par.depth+22&&dM<120)d='market';
     else if(dM<140)d='market';
@@ -1468,13 +2193,78 @@ function bmap(par,u,v){ // bilinear patch over parcel quad
   return V.lerp(e0,e1,v);}
 function rectPoly(par,u0,u1,v0,v1){
   return [bmap(par,u0,v0),bmap(par,u1,v0),bmap(par,u1,v1),bmap(par,u0,v1)];}
-function buildBuildings(seed,parcels,plaza,anchors){
+function buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware){
+  profile=profile||CULTURE_PROFILES.medieval;
   const out=[];let bid=0;
+  // radial banding extent for the Venus profile: the max parcel distance from the hub, so the
+  // grammar can place circular pavilions in the inner band and logistics warehouses in the outer.
+  let venusMaxR=0;
+  if(profile.buildingGrammar==='venus-mixed'){
+    for(const p of parcels){const c={x:(p.F0.x+p.F1.x+p.B0.x+p.B1.x)/4,y:(p.F0.y+p.F1.y+p.B0.y+p.B1.y)/4};
+      venusMaxR=Math.max(venusMaxR,Math.hypot(c.x-anchors.market.x,c.y-anchors.market.y));}}
   for(const par of parcels){
     const r=stream(fnv1a(par.id),'bld');
     const d=par.district;
     if(d==='agrarian'&&r.chance(0.45)){par.empty=true;continue;} // paddocks
     if(par.frontage<3.2||par.depth<6){par.empty=true;continue;}
+    // terrain-aware placement (docs/08, M-TER-2): opt-in only (default false) — a parcel whose
+    // ground is too steep and/or too flood-prone is left unbuilt (a vacant/cleared lot, same
+    // rendering as any other .empty parcel) rather than silently ignoring the terrain, matching
+    // the same additive/opt-in discipline as GenerationRules (docs/07 §3.4). Threshold 0.5: a
+    // parcel is flagged once EITHER factor alone reaches its own "moderate concern" reference
+    // point (slope alone at the ~15%-grade-equivalent reference scores ~0.6; flood alone at
+    // half the setback margin scores 0.5) — either constraint alone can already drag a real
+    // site below this bar, matching the "neither factor can cancel the other out" design (docs/08 §2).
+    if(terrainAware&&par.suitability<0.5){par.empty=true;par.unsuitable=true;continue;}
+    // Venus Project blended grammar (M-VEN-5): a deliberate fusion, not a reconstruction. Banded
+    // by distance from the hub — circular pavilions (regular polygons standing in for a circle)
+    // near the centre/inner rings, a seeded blend of the standardized modular apartment / Asian
+    // courtyard house / Japanese machiya through the residential rings, and logistics warehouses
+    // on the outermost built ring.
+    if(profile.buildingGrammar==='venus-mixed'&&d!=='harbour'){
+      const cx=(par.F0.x+par.F1.x+par.B0.x+par.B1.x)/4,cy=(par.F0.y+par.F1.y+par.B0.y+par.B1.y)/4;
+      const rNorm=venusMaxR>0?Math.hypot(cx-anchors.market.x,cy-anchors.market.y)/venusMaxR:0.5;
+      const emit=(rectset,courtyard)=>{
+        for(const rc of rectset){
+          const poly=rectPoly(par,rc.u0,rc.u1,rc.v0,rc.v1);
+          if(Math.abs(polyArea(poly))<9)continue;
+          const wU=V.dist(poly[0],poly[1]),wV=V.dist(poly[1],poly[2]);
+          let ridge;
+          if(rc.gable)ridge=[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+          else if(wU>=wV)ridge=[V.lerp(poly[0],poly[3],0.5),V.lerp(poly[1],poly[2],0.5)];
+          else ridge=[V.lerp(poly[0],poly[1],0.5),V.lerp(poly[3],poly[2],0.5)];
+          const ins=0.16;ridge=[V.lerp(ridge[0],ridge[1],ins),V.lerp(ridge[0],ridge[1],1-ins)];
+          out.push({id:'bld'+(bid++),poly,ridge,parcel:par.id,kind:rc.kind,district:d,age:0,courtyard:!!courtyard,prov:rc.prov});}};
+      // inner band → circular pavilion (civic/amenity), the "circular buildings at the centre/spokes"
+      if(rNorm<0.42&&r.chance(0.55)){
+        const rad=Math.max(3,Math.min(9,Math.min(par.frontage,par.depth)/2-0.6));
+        const nSides=14,poly=[];
+        for(let k=0;k<nSides;k++){const a=2*Math.PI*k/nSides;poly.push({x:cx+Math.cos(a)*rad,y:cy+Math.sin(a)*rad});}
+        if(Math.abs(polyArea(poly))>=9)
+          out.push({id:'bld'+(bid++),poly,ridge:[{x:cx-rad*0.35,y:cy},{x:cx+rad*0.35,y:cy}],parcel:par.id,kind:'pavilion',district:d,age:0,courtyard:false,
+            prov:'Circular pavilion: a round civic/amenity building clustered at the hub and inner spokes, echoing the circular buildings of Fresco\'s plans (M-VEN-5).'});
+        par.built=true;continue;}
+      // outer band → logistics warehouse (the distribution belt)
+      if(rNorm>0.8){
+        emit([{u0:0.06,u1:0.94,v0:0.04,v1:Math.min(0.9,Math.max(0.4,14/Math.max(par.depth,1)+0.2)),kind:'warehouse',gable:true,
+          prov:'Logistics warehouse: a deep gable-fronted store on the outer ring — the distribution belt of the resource-based city (M-VEN-5).'}]);
+        par.built=true;continue;}
+      // residential rings → seeded blend: modular apartment / Asian courtyard house / Japanese machiya
+      const pick=r.chance(0.45)?'modular':r.chance(0.55)?'courtyard':'machiya';
+      if(pick==='courtyard'&&par.frontage>=8&&par.depth>=12){
+        emit([
+          {u0:0,u1:1,v0:0,v1:0.24,kind:'street range',prov:'Courtyard-house street range: an Asian-influenced inward-facing dwelling woven into the residential ring (M-VEN-5).'},
+          {u0:0,u1:0.24,v0:0.22,v1:0.8,kind:'wing',prov:'Courtyard wing opening onto the private central court (M-VEN-5).'},
+          {u0:0.76,u1:1,v0:0.22,v1:0.8,kind:'wing',prov:'Courtyard wing opening onto the private central court (M-VEN-5).'},
+          {u0:0,u1:1,v0:0.78,v1:0.98,kind:'rear range',prov:'Rear range closing the courtyard house (M-VEN-5).'}],true);
+      }else if(pick==='machiya'){
+        emit([{u0:0.06,u1:0.94,v0:0,v1:Math.min(0.82,Math.max(0.4,12/Math.max(par.depth,1)+0.15)),kind:'machiya',gable:true,
+          prov:'Machiya rowhouse: a narrow-fronted, deep Japanese townhouse, mixed into the residential ring for variety (M-VEN-5).'}]);
+      }else{
+        emit([{u0:0.04,u1:0.96,v0:0.04,v1:0.96,kind:'modular apartment',
+          prov:'Modular apartment: the standardized prefabricated residential block of the resource-based city — the base fabric the courtyard houses and machiya are mixed into (M-VEN-5).'}]);}
+      par.built=true;continue;
+    }
     const rects=[]; // in (u,v) space
     const isWare=d==='harbour';
     // warehouses run deep to the plot tail (goods storage); houses stop at roof-span depth
@@ -1544,9 +2334,9 @@ function _peristyle(rx,ry,w,h,sp){const cols=[],cn=_rectPts(rx,ry,w,h);
  * classical Roman/Greek temple (colonnaded cella on a podium, frontal steps to the forum);
  * shrine (a small cella); mosque (prayer hall on the qibla + courtyard + minaret). The
  * churchyard/temenos site-selection & clearing is common; only the building form differs. */
-function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
+function buildFaithSites(seed,parcels,buildings,anchors,count,faith,site,harbour){
   faith=faith||'church';
-  const NAME={church:'Church',temple:'Temple',shrine:'Shrine',mosque:'Mosque'};
+  const NAME={church:'Church',temple:'Temple',shrine:'Shrine',mosque:'Mosque',orthodox:'Orthodox church'};
   const sites=[];
   for(let ci=0;ci<count;ci++){
     const r=stream(seed,'faith/'+ci);
@@ -1554,9 +2344,14 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
     let best=null,bs=Infinity;
     for(const par of parcels){
       if(par.churchyard)continue;
+      // worship sits in the civic/residential core, NOT on the working waterfront — skip the
+      // harbour quarter, the noxious riverside crafts, and the immediate quay/water edge
+      if(par.district==='harbour'||par.district==='craftriver')continue;
       const c=polyCentroid(par.poly),dM=V.dist(c,anchors.market);
       if(dM<dMin||dM>dMax)continue;
       if(par.frontage<7||par.depth<10)continue;
+      if(harbour&&harbour.quay&&distToLine(c,harbour.quay)<70)continue;
+      if(site&&!site.noWater&&site.riverDist(c)<45)continue;
       if(sites.some(s=>V.dist(c,s.center)<180))continue;
       const sc=dM+r.range(0,40);if(sc<bs){bs=sc;best=par;}}
     if(!best)continue;
@@ -1597,6 +2392,27 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
       s.tower={x:cx-L/2+2,y:cy-H*0.25,r:2.4,kind:'minaret'};   // minaret at a courtyard corner
       s.ridge=[{x:cx-L/2+2,y:cy+H*0.25},{x:cx+L/2-2,y:cy+H*0.25}];
       s.prov='Mosque: a covered prayer hall on the qibla side with an open courtyard (sahn) and a minaret — the Islamic rite (M-BLD-8).';
+    }else if(faith==='orthodox'){
+      // cross-in-square: a domed naos on four columns (nine-bay), a narthex (entrance hall)
+      // toward the town, an apsed bema behind — the mature Middle Byzantine plan (M-BYZ-1)
+      const side=Math.max(8,Math.min(ci===0?18:14,Math.min(exX,exY)-2*mg));
+      s.polys.push(_rectPts(cx,cy,side,side));
+      let inl=V.norm(V.sub(anchors.market,{x:cx,y:cy}));if(!isFinite(inl.x))inl={x:0,y:1};
+      const perp=V.rot90(inl);
+      const nd=side*0.34,nw=side*0.9;
+      const narthexC=V.add({x:cx,y:cy},V.mul(inl,side/2+nd/2));
+      s.polys.push([V.add(V.add(narthexC,V.mul(perp,-nw/2)),V.mul(inl,-nd/2)),
+        V.add(V.add(narthexC,V.mul(perp,nw/2)),V.mul(inl,-nd/2)),
+        V.add(V.add(narthexC,V.mul(perp,nw/2)),V.mul(inl,nd/2)),
+        V.add(V.add(narthexC,V.mul(perp,-nw/2)),V.mul(inl,nd/2))]);
+      const apseC=V.sub({x:cx,y:cy},V.mul(inl,side/2));
+      const apseR=side*0.26,ap=[];
+      for(let k=0;k<=8;k++){const a=(-Math.PI/2)+Math.PI*k/8;
+        ap.push(V.add(V.add(apseC,V.mul(perp,Math.cos(a)*apseR)),V.mul(inl,-Math.sin(a)*apseR)));}
+      s.polys.push(ap);
+      s.tower={x:cx,y:cy,r:2.6,kind:'dome'}; // central dome on the crossing
+      s.ridge=[{x:cx-side/2+1.5,y:cy},{x:cx+side/2-1.5,y:cy}];
+      s.prov='Orthodox church: cross-in-square plan — a domed naos on four columns, a narthex (entrance hall) toward the town, an apsed bema behind — the mature Middle Byzantine rite, 9th-12th c. (M-BYZ-1).';
     }else{
       const L=Math.max(9,Math.min(ci===0?30:22,exX-2*mg));
       const Wn=Math.max(4.5,Math.min(L*0.42,exY*0.5-mg));
@@ -1615,9 +2431,128 @@ function buildFaithSites(seed,parcels,buildings,anchors,count,faith){
   return sites;}
 
 /* ---------------- details: wells, trees, fences, fields (M-DEN-7, M-GRW-5) ---------------- */
-function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour){
-  const r=stream(seed,'details');
+/* ---------------- per-culture farmland/pasture (M-FARM register) ----------------
+ * The hinterland around a town was, until this register was introduced, the exact same generic
+ * strip-field-plus-orchard prop for every profile. FARM_SPEC still dispatches by pattern rather
+ * than hardcoding a shape inline, so a future third profile only needs a new table row plus (if
+ * its geometry is genuinely novel) one more pattern function — the dispatch itself needs no
+ * change (docs/07 §2). Only two shape families survive the post-launch simplification pass
+ * (docs/07 §3.10): medieval's baseline selion strips (stripFields, M-GRW-5, unchanged since
+ * before this register existed) and Venus's concentric ring-farming bands (ringFields, M-FARM-18,
+ * a deliberate design choice with no historical claim). The grid/fan/basin/canal/terrace pattern
+ * families this register also built remain valid, citable research (docs/03 §BB retains their
+ * write-ups) — they simply have no live caller now that the cultures they served are gone. */
+const FARM_SPEC={
+  medieval:{pattern:'strip',pastureShare:0.3,pastureFar:true,
+    prov:'Strip field: the pre-urban furlong fabric along the approach road (M-GRW-5) - later growth fossilizes these lines; already the correct baseline (M-FARM-1). A modest common-pasture share, more prevalent farther from the town, stands in for the open-field system\'s communally-grazed fallow shift and true common/waste land at the village margins - added during the post-launch simplification pass (docs/07 §3.10) so this register\'s pasture mechanism, previously exercised by the now-removed Byzantine/Viking entries, stays reachable on the one organic profile that remains (M-FARM-1).'},
+  venus:{pattern:'ring',
+    prov:'Ring-farming bands: concentric cultivation belts beyond the built rings, echoing Ebenezer Howard\'s Garden City concentric-ring diagram (1898) - a deliberate design choice, not a historical claim, since no historical culture applies (N/A by design, M-FARM-18).'},
+};
+// shared street-crossing guard for every farmland generator (M-FARM register): reuses the exact
+// spatial-hash edgesNear()+segInt() technique buildGames' own blocked() already established for
+// games buildings. The exterior hinterland is NOT free of streets — primary routes reach well
+// past the urban core toward neighbouring settlements (M-REG-1) — and this project's own test
+// data caught real crossings once actually audited, across every pattern family including the
+// pre-existing, unchanged medieval strip mechanism: found empirically (a dedicated audit, not
+// assumed safe just because a candidate sits beyond urban()/isWater()), then fixed here rather
+// than left as a latent gap the new, more thorough farmland test happened to be the first to
+// actually check for.
+function crossesStreet(g,poly){
+  for(let i=0;i<poly.length;i++){
+    const A=poly[i],B=poly[(i+1)%poly.length];
+    for(const eid of edgesNear(g,A,B)){
+      const e=g.edges[eid];if(!e||!e.alive)continue;
+      if(segInt(A,B,g.nodes[e.a],g.nodes[e.b]))return true;}}
+  return false;}
+function stripFields(rng,site,anchors,g,urban,opt){
+  const details=[];let did=0;
+  const pastureShare=opt.pastureShare||0,pastureFar=!!opt.pastureFar;
+  for(const e of g.edges){
+    if(!e.alive||e.cls!=='primary')continue;
+    const a=g.nodes[e.a],b=g.nodes[e.b];
+    const mid=V.lerp(a,b,0.5);
+    if(urban(mid))continue;
+    if(V.dist(mid,anchors.market)<330)continue;
+    const dir=V.norm(V.sub(b,a));const nl=V.rot90(dir);
+    const L=V.dist(a,b);
+    const rf=stream(fnv1a('f'+e.id),'fields');
+    for(let t=18;t<L-12;t+=rf.range(28,40)){ // selion-width strips (M-GRW-5)
+      const p=V.add(a,V.mul(dir,t));
+      const stripW=rf.range(4,7),half=V.mul(dir,stripW/2);
+      for(const s of [1,-1]){
+        const q1=V.add(p,V.mul(nl,s*9)),q2=V.add(p,V.mul(nl,s*rf.range(70,140)));
+        // q1 itself, not just the far point/midpoint: on a riverthrough site a road can run close
+        // enough alongside the channel that the near end of a strip already dips in, a residual
+        // gap this register's own water audit still caught even after the other two points passed.
+        if(site.isWater(q1)||site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5)))continue;
+        if(urban(q2))continue;
+        const poly=[V.sub(q1,half),V.add(q1,half),V.add(q2,half),V.sub(q2,half)];
+        if(crossesStreet(g,poly))continue;
+        let kind='field';
+        if(pastureShare>0){
+          const distFrac=pastureFar?Math.max(0,Math.min(1,(V.dist(q2,anchors.market)-330)/550)):1;
+          if(rf.chance(pastureShare*(pastureFar?(0.1+0.9*distFrac):1)))kind='pasture';}
+        details.push({id:'farm'+(did++),kind,poly,prov:opt.prov});}}
+    if(details.length>260)break;}
+  return details;}
+// Venus ring-farming bands (M-FARM-18): a design choice, not a historical claim - concentric
+// cultivation belts beyond the built rings, echoing the Garden City diagram.
+function ringFields(rng,site,anchors,g,urban,maxRF,prov){
+  const details=[];let did=0;
+  const nRings=rng.int(3,4);
+  let r0=maxRF*1.02;
+  for(let ring=0;ring<nRings;ring++){
+    const r1=r0+rng.range(45,70);
+    const nSeg=rng.int(14,20);
+    const a0=rng.u()*Math.PI*2;
+    for(let i=0;i<nSeg;i++){
+      const a1=a0+(i/nSeg)*Math.PI*2,a2=a0+((i+1)/nSeg)*Math.PI*2;
+      const poly=[
+        {x:anchors.market.x+Math.cos(a1)*r0,y:anchors.market.y+Math.sin(a1)*r0},
+        {x:anchors.market.x+Math.cos(a2)*r0,y:anchors.market.y+Math.sin(a2)*r0},
+        {x:anchors.market.x+Math.cos(a2)*r1,y:anchors.market.y+Math.sin(a2)*r1},
+        {x:anchors.market.x+Math.cos(a1)*r1,y:anchors.market.y+Math.sin(a1)*r1}];
+      if(poly.some(v=>site.isWater(v)||v.x<15||v.y<15||v.x>site.Wm-15||v.y>site.Hm-15))continue;
+      if(urban(polyCentroid(poly)))continue;
+      if(crossesStreet(g,poly))continue;
+      const kind=rng.chance(0.3)?'pasture':'field';
+      details.push({id:'farm'+(did++),kind,poly,prov});
+      if(details.length>200)return details;}
+    r0=r1;}
+  return details;}
+function buildFarmland(seed,site,anchors,g,wallState,maxRF,profile){
+  const spec=FARM_SPEC[profile.id];
+  if(!spec)return [];
   const urban=(p)=>wallState.ring?pointInPoly(p,wallState.ring):V.dist(p,anchors.market)<maxRF*0.7;
+  const rng=stream(seed,'farmland');
+  if(spec.pattern==='strip')return stripFields(rng,site,anchors,g,urban,spec);
+  if(spec.pattern==='ring')return ringFields(rng,site,anchors,g,urban,maxRF,spec.prov);
+  return [];}
+
+/* Post-collapse decay pass (M-PA-1): flags a deterministic seeded fraction of already-built,
+ * non-churchyard parcels (and their buildings) as ruined — abandoned and uninhabited, but not
+ * removed or altered geometrically. Deliberately profile-agnostic: "ruined" is a STATE any
+ * settlement can be found in (a collapsed Roman colonia, a collapsed Aztec lake-city, a
+ * collapsed medieval town), not a civilization of its own, so this reads only parcels/buildings
+ * and is gated purely by the opts.ruined toggle in generate() — never by which culture is
+ * selected (docs/03 M-PA register). Deliberately a data/render-only overlay, not a physical-
+ * rubble model: an actual breached wall or a road blocked mid-span would be exactly the
+ * "impossible intersection" this project audits against elsewhere, so full ruin modelling
+ * (breached walls, blocked streets, reclaimed blocks) is explicitly deferred rather than
+ * implemented — this pass can never introduce one, because it never moves or removes a single
+ * vertex of already-validated geometry. */
+function applyDecay(seed,parcels,buildings){
+  const r=stream(seed,'decay');
+  const frac=r.range(0.35,0.45); // M-PA-1: roughly a third to a half of the built stock abandoned
+  for(const p of parcels){
+    if(!p.built||p.churchyard)continue;
+    if(r.chance(frac))p.ruined=true;}
+  const ruinedIds=new Set(parcels.filter(p=>p.ruined).map(p=>p.id));
+  for(const b of buildings)if(ruinedIds.has(b.parcel))b.ruined=true;
+}
+
+function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour,profile){
+  const r=stream(seed,'details');
   const details=[];let did=0;
   // wells: one per ~250-400 residents (M-DEN-7), at well-connected nodes away from each other
   const nWells=Math.max(2,Math.round(pop/320));
@@ -1660,34 +2595,23 @@ function buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,max
     if(par.district!=='agrarian'&&!(par.district==='suburb'&&par.empty))continue;
     details.push({id:'det'+(did++),kind:'fence',poly:par.poly,
       prov:'Plot fence: low-density holdings are enclosed rather than built to the line (M-BLD-5).'});}
-  // strip fields fossilizing along the approach roads (M-GRW-5)
-  for(const e of g.edges){
-    if(!e.alive||e.cls!=='primary')continue;
-    const a=g.nodes[e.a],b=g.nodes[e.b];
-    const mid=V.lerp(a,b,0.5);
-    if(urban(mid))continue;
-    if(V.dist(mid,anchors.market)<330)continue;
-    const dir=V.norm(V.sub(b,a));const nl=V.rot90(dir);
-    const L=V.dist(a,b);
-    const rf=stream(fnv1a('f'+e.id),'fields');
-    for(let t=18;t<L-12;t+=rf.range(28,40)){ // selion-width strips (M-GRW-5)
-      const p=V.add(a,V.mul(dir,t));
-      for(const s of [1,-1]){
-        const q1=V.add(p,V.mul(nl,s*9)),q2=V.add(p,V.mul(nl,s*rf.range(70,140)));
-        if(site.isWater(q2)||site.isWater(V.lerp(q1,q2,0.5)))continue;
-        if(urban(q2))continue;
-        details.push({id:'det'+(did++),kind:'field',a:q1,b:q2,
-          prov:'Strip-field boundary: the pre-urban furlong fabric along the approach road (M-GRW-5); later growth fossilizes these lines.'});}}
-    if(details.filter(d=>d.kind==='field').length>260)break;}
-  // orchards on some agrarian parcels
+  // orchards on some agrarian parcels — visually distinct from a plain garden tree (bigger,
+  // more saturated fill, heavier stroke), not just a barely-different fill shade on the same
+  // tiny dot, so the regular planting grid actually reads as an orchard at a glance. A profile
+  // flagged gardenBoost (FARM_SPEC, M-FARM register) gets a denser planting — a data-driven hook
+  // any future profile can opt into without a second orchard code path; no profile in the current
+  // two-culture roster sets it, so this always resolves to the plain 0.5 chance below.
+  const farmSpec=FARM_SPEC[profile.id];
+  const gardenBoost=!!(farmSpec&&farmSpec.gardenBoost);
+  const orchardProv='Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).';
   for(const par of parcels){
     if(par.district!=='agrarian'||!par.empty)continue;
     const rb=stream(fnv1a(par.id),'orchard');
-    if(!rb.chance(0.5))continue;
+    if(!rb.chance(gardenBoost?0.8:0.5))continue;
     for(let u=0.18;u<0.9;u+=0.24)for(let v=0.2;v<0.9;v+=0.26){
       const p=bmap(par,u,v);
-      details.push({id:'det'+(did++),kind:'tree',orchard:true,x:p.x,y:p.y,rr:2.1,
-        prov:'Orchard row on an agrarian fringe holding (regular planting; M-DEN-4 family).'});}
+      details.push({id:'det'+(did++),kind:'tree',orchard:true,x:p.x,y:p.y,rr:3.2,
+        prov:orchardProv});}
   }
   return details;}
 
@@ -1723,49 +2647,121 @@ function computeMetrics(g,blocks,parcels){
 /* ---------------- top-level generate ---------------- */
 function generate(seed,opts){
   opts=opts||{};
+  const profile=resolveProfile(opts.culture);
+  const rules=resolveRules(opts.rules); // configurable generation rules (docs/07 §3.4)
+  const terrainAware=!!opts.terrainAware; // opt-in terrain-suitability building gate (docs/08)
+  // ruined (M-PA register): a STATE any settlement can be found in, not a civilization of its
+  // own — applyDecay() was always profile-agnostic (it reads only parcels/buildings, never
+  // profile), so this is a plain opt-in toggle over whichever culture is selected, the same
+  // additive discipline as terrainAware/GenerationRules, not a dedicated 'postapoc' profile.
+  const ruined=!!opts.ruined;
+  // successive wall generations (M-GRW-2, experimental, docs/07 §3.11): organic growth only —
+  // threaded into grow()'s opts below; never read on the radial (Venus) branch, so it is simply
+  // inert there rather than special-cased.
+  const wallGenerations=!!opts.wallGenerations;
+  // settlement age (years): only meaningful when wallGenerations is on (gates the real-year
+  // spacing between successive circuits, M-GRW-2b); reported back regardless, same pattern as the
+  // other opt-in fields above.
+  const settlementAge=Math.max(30,Math.min(1000,opts.settlementAge||300));
   const epochs=opts.epochs||8;
   const popTarget=Math.max(400,Math.min(20000,opts.pop||5000));
-  const walls=opts.walls!==false; // enclosures are optional (default on for the medieval pack)
+  // enclosures are optional (default on); profile.noWalls forces them off regardless of the walls
+  // checkbox — a data-driven hook for a profile whose defence was never a European-style curtain
+  // (a lake-city's causeways, a frontier boomtown that never fortified at all); no profile in the
+  // current two-culture roster sets it.
+  const walls=opts.walls!==false&&!profile.noWalls;
   // a bastioned trace was a costly state investment for strategically important towns —
   // never hamlets; require a decent size (M-FOR-4). Below the threshold it stays a curtain.
   const fortMin=2500;
   const fortRequested=!!opts.fortified;
-  const fortified=fortRequested&&popTarget>=fortMin&&walls;
+  // the bastioned trace italienne is a c.1500 gunpowder-artillery response (M-FOR-4) — anachronistic
+  // by well over a millennium for any wallGates scheme predating gunpowder artillery, so the
+  // anachronism guard only permits it for the 'organic' scheme both remaining profiles use
+  // (docs/07 §2); a future period-appropriate scheme could opt in the same way.
+  const fortified=fortRequested&&popTarget>=fortMin&&walls&&profile.wallGates.scheme==='organic';
   // population -> street length + urban radius via intramural density (M-DEN-1, M-DEN-2,
-  // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant
-  const targetLen=Math.max(3500,Math.min(42000,popTarget*2.1));
+  // M-PAR-1): ~150 p/ha and ~8 m frontages give ~2.1 m of street per inhabitant. A low floor
+  // lets a hamlet stay a small crossroads cluster rather than a full town (M-AMEN-2)
+  const targetLen=Math.max(1600,Math.min(42000,popTarget*2.1));
   const maxRF=Math.min(720,Math.sqrt(popTarget*21)*1.35+80);
   const Wm=1700,Hm=1250;
   const siteKind=opts.site||'river';
   const site=buildSite(seed,Wm,Hm,siteKind);
   const anchors=placeAnchors(seed,site);
   const g=makeGraph();
-  const routes=buildPrimaries(seed,site,anchors,g);
-  const plaza=buildPlaza(seed,site,anchors,g);
-  const harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
-  if(site.through)addRiverBridges(seed,site,g,2); // a river that bisects the town
   const wallState={ring:null,gates:[],epoch:0};
-  grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget});
+  // growth model (docs/07 §2, the single biggest culture fork): 'organic' epoch-loops least-cost
+  // routes into an accretive tangle; 'radial' (Venus) lays concentric rings and spokes around a
+  // central hub instead. A planned-grid mode (buildGridStreets) and a founded-then-encroached
+  // palimpsest mode both existed here through the tool's original 19-profile run; both are
+  // documented history now (docs/07 §3.10) rather than live options, since the cultures that
+  // used them were removed in the post-launch simplification pass.
+  let plaza,harbour;
+  if(profile.planning==='radial'){
+    buildRadialStreets(seed,site,anchors,g,{maxRF});
+    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
+    if(site.through)addRiverBridges(seed,site,anchors,g,2);
+    // the circular irrigation canal (profile.waterway) supplies a wet moat when the star fort is
+    // built, so the trace gets a WET ditch even on a landlocked site (M-VEN-3)
+    if(walls)buildWall(seed,site,anchors,g,wallState,1,harbour,{fortified,wetMoat:profile.waterway});
+    plaza=buildPlaza(seed,site,anchors,g);
+  }else{
+    buildPrimaries(seed,site,anchors,g);
+    plaza=buildPlaza(seed,site,anchors,g);
+    harbour=buildHarbour(seed,site,anchors,g,{harbourDefence:opts.harbourDefence});
+    if(site.through)addRiverBridges(seed,site,anchors,g,2); // a river that bisects the town
+    grow(seed,site,anchors,g,epochs,wallState,{targetLen,maxRF,walls,harbour,fortified,pop:popTarget,rules,wallGenerations,settlementAge});
+  }
   for(let lp=0;lp<3;lp++)if(!lanePass(seed,site,anchors,g,epochs))break;
+  removeWaterCrossings(site,g); // no street may run through the channel (only bridges/quay)
   const blocks=buildBlocks(g,plaza,site);
-  const parcels=buildParcels(seed,g,blocks,anchors,epochs,site);
+  const parcels=buildParcels(seed,g,blocks,anchors,epochs,site,profile,rules);
   assignDistricts(site,anchors,plaza,wallState,parcels,maxRF,harbour);
-  const buildings=buildBuildings(seed,parcels,plaza,anchors);
-  const faith=opts.faith||'church';
-  const nChurch=Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // parishes, M-DEN-8
-  const churches=buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith);
-  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard).length*5.2); // M-DEN-2
-  // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN)
-  const markets=buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings);
-  const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle,faith);
-  const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour);
+  const buildings=buildBuildings(seed,parcels,plaza,anchors,profile,terrainAware);
+  if(ruined)applyDecay(seed,parcels,buildings);
+  const faith=opts.faith||profile.defaultFaith;
+  // hamlets have no church/chapel; a religious building can also be turned off ('none')
+  const hamlet=popTarget<600;
+  const nChurch=(faith==='none'||hamlet)?0:Math.max(1,Math.min(4,Math.round((popTarget/5.2)/500))); // M-DEN-8
+  const churches=nChurch>0?buildFaithSites(seed,parcels,buildings,anchors,nChurch,faith,site,harbour):[];
+  // occupancy per built parcel (M-DEN-2): average household size, one household per built parcel.
+  // A household-size multiplier for profiles whose typical lot housed several times the medieval
+  // baseline (a multi-storey insula block, an extended-family compound) existed here through the
+  // tool's original 19-profile run; that correction and profile.householdMultiplier are documented
+  // history now (docs/07 §3.10) — medieval and Venus both house one household per parcel at the
+  // same baseline size, so no correction applies.
+  // a ruined parcel's structure still stands (M-PA-1) but nobody lives there — excluded from the
+  // head-count; with the ruined toggle off (the default), p.ruined is always undefined for every
+  // parcel, so this filter is a no-op false||undefined check, unchanged from every prior version
+  const pop=Math.round(parcels.filter(p=>p.built&&!p.churchyard&&!p.ruined)
+    .reduce((s,p)=>s+5.2,0));
+  // amenities scale with rank: specialised markets multiply, a civic hall appears (M-AMEN/ADMIN).
+  // profile.markets (M-AMEN-1) is a data-driven hook for a profile whose commerce ran through a
+  // different institution entirely (a forum/macellum, temple-state redistribution) rather than a
+  // chartered market square — both medieval and Venus set it true, so this always runs today.
+  const markets=profile.markets?buildMarkets(seed,site,anchors,g,plaza,popTarget,parcels,buildings):[];
+  const civic=buildCivic(seed,anchors,plaza,popTarget,opts.civicStyle||profile.defaultCivic,faith);
+  const games=buildGames(seed,site,anchors,g,parcels,wallState,popTarget,profile,plaza,civic);
+  const details=buildDetails(seed,site,anchors,g,blocks,parcels,wallState,plaza,pop,maxRF,harbour,profile);
+  details.push(...buildFarmland(seed,site,anchors,g,wallState,maxRF,profile));
+  // when the star fort is built canal-fed (M-VEN-3), the fort's own wet-moat rendering already
+  // carries the canal visually — skip the separate decorative ring so it doesn't duplicate it
+  if(profile.waterway&&!(wallState.fort&&wallState.fort.canalFed))
+    details.push(...buildWaterway(seed,site,anchors,maxRF*0.95));
+  // Islamic-family cul-de-sac encroachment (M-ISL-2, no-op for profiles without deadEndBias):
+  // runs AFTER blocks/parcels/buildings are built from the full graph, so privatizing a lane
+  // closes THROUGH ACCESS only — it does not retroactively delete the dwellings that already
+  // fronted onto it (real encroachment converted a lane's use, it didn't demolish the houses).
+  privatizeAlleys(seed,profile,g,rules);
   // sweep the fortification's field of fire clear (esplanade/glacis): removes buildings,
   // parcels, extramural streets and clutter that the wall/fort would otherwise overlap
   if(wallState.ring)clearFortZone(site,wallState,g,parcels,buildings,details);
   const metrics=computeMetrics(g,blocks,parcels);
-  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,Wm,Hm,site:{kind:site.kind,through:site.through,river:site.river,riverW:site.riverW,
+  return {seed,epochs,popTarget,walls,fortified,fortRequested,fortMin,terrainAware,ruined,wallGenerations,settlementAge,Wm,Hm,
+    culture:profile.id,cultureName:profile.name,
+    site:{kind:site.kind,through:site.through,noWater:site.noWater,river:site.river,riverW:site.riverW,
       waterPoly:site.waterPoly,bridgePt:site.bridgePt,bridgeDir:site.bridgeDir,routeEnds:site.routeEnds},
-    anchors,plaza,harbour,markets,civic,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
+    anchors,plaza,harbour,markets,civic,games,graph:{nodes:g.nodes,edges:g.edges.filter(e=>e.alive)},
     wall:wallState,blocks,parcels,buildings,churches,details,pop,metrics,through:site.through};}
 
 /* stable serialization + FNV hash for determinism goldens */
@@ -1778,7 +2774,8 @@ function hashModel(m){
   for(const b of m.buildings)parts.push(b.id,b.kind,Math.round(polyArea(b.poly)*10));
   return fnv1a(parts.join('|'));}
 
-return {generate,hashModel,stream,fnv1a,
+return {generate,hashModel,stream,fnv1a,CULTURE_PROFILES,resolveProfile,
+  DEFAULT_RULES,resolveRules,cloneRules,applyWildness,applyPlotChaos,
   _test:{polyArea,polyCentroid,pointInPoly,segInt,insetPoly,clipConvex,extractFaces,
     makeGraph,addStreet,ensureCCW,convexHull,simplify,chaikin,astar,distPtSeg}};
 })();
@@ -1797,6 +2794,11 @@ const NS='http://www.w3.org/2000/svg';
 const host=document.getElementById('svgHost');
 let model=null,svg=null,selected=null;
 const entityIndex=new Map();
+// evidence ledger (docs/07 §6): every M-*/M-ROM-* register id actually referenced by the
+// currently generated town, collected as each object registers its provenance — formalizes
+// the assumptions register (docs/03) as in-app, queryable data rather than only a markdown file
+const ledgerIds=new Set();
+const LEDGER_RE=/\bM-[A-Z]+-\d+[a-z]?\b/g;
 
 const DISTRICT_INFO={
   market:['Market district','#eddfb9'],burgher:['Burgher district','#e9e0c4'],
@@ -1814,10 +2816,11 @@ function pl(pts){return pts.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixe
 function reg(elm,type,title,fields,prov){
   const id='um'+entityIndex.size;
   elm.setAttribute('data-um',id);
-  entityIndex.set(id,{type,title,fields,prov,elm});}
+  entityIndex.set(id,{type,title,fields,prov,elm});
+  if(prov){const hits=prov.match(LEDGER_RE);if(hits)for(const h of hits)ledgerIds.add(h);}}
 
 function render(){
-  entityIndex.clear();selected=null;
+  entityIndex.clear();ledgerIds.clear();selected=null;
   host.innerHTML='';
   svg=el('svg',{viewBox:`0 0 ${model.Wm} ${model.Hm}`,preserveAspectRatio:'xMidYMid meet'},host);
   const L={};
@@ -1826,25 +2829,33 @@ function render(){
 
   // terrain: light height contours for orientation (site model visualization)
   // (contours are decorative site context; every simulated object below is selectable)
-  // water
-  const wp=el('path',{d:pd(model.site.waterPoly),class:'water'},L.water);
-  reg(wp,'River','River',{width:model.site.riverW.toFixed(0)+' m'},
-    'Site model: the river bounds growth and sites the bridge; banks carry the noxious trades (lit. review §4).');
-  el('path',{d:pl(model.site.river),class:'riverline'},L.water);
+  // water (none on a landlocked site)
+  if(model.site.waterPoly&&model.site.waterPoly.length){
+    const wp=el('path',{d:pd(model.site.waterPoly),class:'water'},L.water);
+    reg(wp,'River','River',{width:model.site.riverW.toFixed(0)+' m'},
+      'Site model: the river bounds growth and sites the bridge; banks carry the noxious trades (lit. review §4).');
+    if(model.site.kind==='river'||model.site.kind==='riverthrough')
+      el('path',{d:pl(model.site.river),class:'riverline'},L.water);}
 
-  // strip fields + fences + trees(details layer later)
-  for(const d of model.details){
-    if(d.kind==='field'){
-      const e=el('path',{d:pl([d.a,d.b]),class:'field'},L.fields);
-      reg(e,'Strip field','Strip-field boundary',{},d.prov);}
-  }
+  // strip fields (land-side, under the water layer is fine — they never overlap it): filled
+  // cultivated strips, not bare boundary lines (see buildDetails' own comment on this fix)
+  for(const d of model.details)if(d.kind==='field'){
+    const e=el('path',{d:pd(d.poly),class:'field'},L.fields);
+    reg(e,'Strip field','Cultivated field strip',{},d.prov);}
+  // pasture (M-FARM register): the same filled-polygon treatment as a cultivated field, a
+  // visually distinct grazing-land colour so the two read apart at a glance
+  for(const d of model.details)if(d.kind==='pasture'){
+    const e=el('path',{d:pd(d.poly),class:'pasture'},L.fields);
+    reg(e,'Pasture','Pasture / grazing land',{},d.prov);}
+  for(const d of model.details)if(d.kind==='waterway'){
+    const e=el('path',{d:pd(d.poly),class:'waterway'},L.fields);
+    reg(e,'Waterway','Circular irrigation waterway',{},d.prov);}
 
   // blocks
   for(const b of model.blocks){
     const e=el('path',{d:pd(b.poly),class:b.plaza?'plaza':'blockfill'},L.blocks);
     reg(e,b.plaza?'Market place':'Block',b.plaza?'Market place':'Urban block '+b.id,
       {area:(b.area/10000).toFixed(2)+' ha'},b.prov);}
-
   // specialised market squares (multiply with settlement rank)
   for(const mk of model.markets||[]){
     const e=el('path',{d:pd(mk.poly),class:'market2'},L.blocks);
@@ -1855,7 +2866,8 @@ function render(){
     const e=el('path',{d:pd(p.poly),class:'parcel d-'+(p.district||'artisan')},L.parcels);
     reg(e,'Parcel','Parcel '+p.id+' — '+(DISTRICT_INFO[p.district]?DISTRICT_INFO[p.district][0]:p.district),
       {frontage:p.frontage.toFixed(1)+' m',depth:p.depth.toFixed(1)+' m',
-       area:p.area.toFixed(0)+' m²','street age':'epoch '+(model.epochs-p.age)},
+       area:p.area.toFixed(0)+' m²','street age':'epoch '+(model.epochs-p.age),
+       'terrain suitability':typeof p.suitability==='number'?(100*p.suitability).toFixed(0)+'%'+(p.unsuitable?' (left unbuilt)':''):'n/a'},
       p.prov+(p.provDistrict?' — '+p.provDistrict:''));}
 
   // fences
@@ -1870,20 +2882,26 @@ function render(){
       s+=Math.hypot(pts[i].x-pts[(i+1)%pts.length].x,pts[i].y-pts[(i+1)%pts.length].y);return s;};
     if(W.style==='bastioned'&&W.fort){
       const F=W.fort;
-      // glacis (cleared field of fire) → wet moat(s) → covered way → counterscarp →
-      // ravelin islands → causeways → the bastioned enceinte + salients (bottom to top)
-      el('path',{d:pd(F.glacis),class:'glacis'},L.walls);
+      // even-odd ring: outer boundary + inner hole, so the enclosed town shows through
+      const ring2=(rg,cls,layer)=>el('path',{d:pd(rg.outer)+' '+pd(rg.inner),'fill-rule':'evenodd',class:cls},layer);
+      // glacis ring → wet ditch ring(s) → [river shows through the water-facing works] →
+      // covered way → counterscarp → ravelin islands → causeways → closed trace + salients
+      ring2(F.glacis,'glacis',L.walls);
       if(F.wetDitch){
-        const m1=el('path',{d:pd(F.ditchBand),class:'moat'},L.walls);
+        const m1=ring2(F.ditch,'moat',L.walls);
         reg(m1,'Wet ditch','Wet ditch (flooded moat)',{},
           'Water-filled ditch — the late-stage Old Dutch System floods the moat where water is at hand; it stops escalade, mining and easy approach (M-FOR-6).');
         if(F.outerMoat){
-          const m2=el('path',{d:pd(F.outerMoat),class:'moat'},L.walls);
+          const m2=ring2(F.outerMoat,'moat',L.walls);
           reg(m2,'Outer moat','Outer wet moat (double moat)',{},
             'Second concentric wet moat, the Naarden-style double moat of a large late-stage fort (M-FOR-6).');}
       }
-      el('path',{d:pl(F.coveredWay),class:'coveredway'},L.walls);
-      el('path',{d:pl(F.counterscarp),class:'counterscarp'},L.walls);
+      // let the river/sea show through the land-side works on a water-facing front: there the
+      // water itself IS the wet ditch, so no dry glacis is left lying across the channel (§1.1 #22)
+      if(model.site.waterPoly&&model.site.waterPoly.length&&!model.site.noWater)
+        el('path',{d:pd(model.site.waterPoly),class:'water'},L.walls);
+      el('path',{d:pd(F.coveredWay),class:'coveredway'},L.walls);
+      el('path',{d:pd(F.counterscarp),class:'counterscarp'},L.walls);
       for(const rv of F.ravelins){
         const e=el('path',{d:pd(rv),class:'ravelin'},L.walls);
         reg(e,'Ravelin','Ravelin (island outwork)',{},'Detached triangular ravelin, an island in the wet moat, covering the curtain and its gate-causeway from direct fire (M-FOR-3/6).');}
@@ -1898,19 +2916,14 @@ function render(){
         const cw=el('path',{d:pd([a1,b1,b2,a2]),class:'causeway'},L.walls);
         reg(cw,'Causeway','Gate causeway across the moat',{},
           'Causeway/dike across the wet moat — the single dry approach to the gate, deliberately funnelling attackers under fire from the flanking bastions and ravelin (M-FOR-6/7).');}
-      // water side stays a plain sea/river wall
-      for(const ww of W.waterWalls||[]){
-        const e=el('path',{d:pl(ww),class:'wall'},L.walls);
-        reg(e,'Sea wall','Waterfront wall',{length:perim(ww,false).toFixed(0)+' m'},
-          'Waterfront wall along the quay/bank; the harbour mouth is left open (§1.1 #22).');}
-      // the bastioned trace itself
-      const tr=el('path',{d:pl(F.trace),class:'fortwall'},L.walls);
+      // the closed bastioned trace itself (all fronts)
+      const tr=el('path',{d:pd(F.trace),class:'fortwall'},L.walls);
       reg(tr,'Bastioned wall','Bastioned enceinte (epoch '+W.epoch+')',
         {curtains:F.curtains.length,bastions:F.bastions.length,gates:W.gates.length,
          moat:F.wetDitch?(F.doubleMoat?'wet, doubled':'wet'):'dry'},F.prov);
       for(const b of F.bastions){
         const e=el('circle',{cx:b.salient.x,cy:b.salient.y,r:2.4,class:'salient'},L.walls);
-        reg(e,'Bastion','Bastion'+(b.demi?' (demi, at the water)':''),{},
+        reg(e,'Bastion','Bastion',{},
           'Angled bastion: two faces and two flanks sweep the adjacent curtains with flanking fire, leaving no dead ground (trace italienne, M-FOR-1).');}
     }else{
       // curtain wall: land arc + water walls
@@ -1938,24 +2951,24 @@ function render(){
     for(const gt of W.gates){
       const cls=gt.water?'watergate':'gate';
       const ge=el('rect',{x:gt.pt.x-6,y:gt.pt.y-6,width:12,height:12,class:cls,transform:`rotate(45 ${gt.pt.x} ${gt.pt.y})`},L.walls);
-      reg(ge,gt.water?'Water-gate':'Gate',gt.water?'Water-gate':'Town gate',{},gt.prov);}}
+      reg(ge,gt.water?'Water-gate':'Gate',gt.name||(gt.water?'Water-gate':'Town gate'),{},gt.prov);}}
 
   // roads (casing + fill), bridge deck
-  const byCls={primary:[],street:[],lane:[],quay:[]};
+  const byCls={primary:[],street:[],lane:[],quay:[],ringroad:[]};
   for(const e of model.graph.edges)(byCls[e.cls]||byCls.street).push(e);
   const N=model.graph.nodes;
   // merge each class into continuous chains, then draw ALL casings (bottom) before ANY
   // fills (top) — per-segment casing-then-fill was overdrawing each fill at the next joint,
   // which produced the "loose segments" look; continuous strokes read as solid roads
   const chainSets={};
-  for(const cls of ['primary','street','lane','quay'])chainSets[cls]=roadChains(byCls[cls],N);
-  for(const cls of ['lane','quay','street','primary'])
+  for(const cls of ['primary','street','lane','quay','ringroad'])chainSets[cls]=roadChains(byCls[cls],N);
+  for(const cls of ['lane','quay','street','ringroad','primary'])
     for(const ch of chainSets[cls])
       el('path',{d:pl(ch.pts),class:'roadcase','stroke-width':(ch.w+1.6)},L.roads);
-  for(const cls of ['lane','quay','street','primary'])
+  for(const cls of ['lane','quay','street','ringroad','primary'])
     for(const ch of chainSets[cls]){
-      const fill=el('path',{d:pl(ch.pts),class:'roadfill'+(cls==='lane'?' lane':cls==='quay'?' quay':''),'stroke-width':ch.w},L.roads);
-      const label=cls==='primary'?'Primary road':cls==='quay'?'Quay':(cls==='lane'?'Back lane':'Street');
+      const fill=el('path',{d:pl(ch.pts),class:'roadfill'+(cls==='lane'?' lane':cls==='quay'?' quay':cls==='ringroad'?' ringroad':''),'stroke-width':ch.w},L.roads);
+      const label=cls==='primary'?'Primary road':cls==='quay'?'Quay':(cls==='lane'?'Back lane':cls==='ringroad'?'Ring road':'Street');
       reg(fill,label,label,{width:ch.w.toFixed(1)+' m',length:ch.len.toFixed(0)+' m'},ch.prov);}
   // bridges: draw a deck wherever a primary road crosses the river channel (one on a
   // river-crossing town; several where the river runs through the town)
@@ -2009,13 +3022,16 @@ function render(){
     }}
 
   // buildings
+  const BLD_TITLE={main:'House (main range)',wing:'Rear wing','rear range':'Rear range',
+    warehouse:'Warehouse','street range':'Courtyard house (street range)',
+    pavilion:'Circular pavilion','modular apartment':'Modular apartment',machiya:'Machiya (rowhouse)'};
   for(const b of model.buildings){
-    const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')},L.buildings);
-    el('path',{d:pl(b.ridge),class:'ridge'},L.buildings);
-    reg(e,'Building',(b.kind==='main'?'House (main range)':b.kind==='wing'?'Rear wing':b.kind==='rear range'?'Rear range':'Outbuilding'),
+    const e=el('path',{d:pd(b.poly),class:'bld'+(b.age>4?' aged':'')+(b.ruined?' ruined':'')+(b.kind==='pavilion'?' pavilion':'')},L.buildings);
+    el('path',{d:pl(b.ridge),class:'ridge'+(b.ruined?' ruined':'')},L.buildings);
+    reg(e,'Building',(b.ruined?'Ruined ':'')+(BLD_TITLE[b.kind]||'Outbuilding'),
       {district:DISTRICT_INFO[b.district]?DISTRICT_INFO[b.district][0]:b.district,
        footprint:Math.abs(polyAreaApp(b.poly)).toFixed(0)+' m²',
-       courtyard:b.courtyard?'yes (M-BLD-3)':'no'},b.prov);}
+       courtyard:b.courtyard?'yes (M-BLD-3)':'no'},b.prov+(b.ruined?' Abandoned and uninhabited since the collapse (M-PA-1), though the structure still stands.':''));}
   for(const ch of model.churches||[]){
     const wc=(ch.faith==='temple'||ch.faith==='shrine')?'temple':ch.faith==='mosque'?'mosque':'church';
     for(const op of ch.open||[])el('path',{d:pd(op),class:wc==='mosque'?'sahn':'podium'},L.buildings);
@@ -2032,7 +3048,14 @@ function render(){
     reg(cv,'Civic hall',model.civic.name,{},model.civic.prov);
     if(model.civic.apse)el('path',{d:pd(model.civic.apse),class:'townhall'},L.buildings);
     for(const co of model.civic.columns||[])el('circle',{cx:co.x,cy:co.y,r:0.85,class:'templecol'},L.buildings);
-    if(model.civic.belfry)el('circle',{cx:model.civic.belfry.x,cy:model.civic.belfry.y,r:2.2,class:'belfry'},L.buildings);}
+    if(model.civic.belfry)el('circle',{cx:model.civic.belfry.x,cy:model.civic.belfry.y,r:2.2,class:'belfry'},L.buildings);
+    if(model.civic.dome)el('circle',{cx:model.civic.center.x,cy:model.civic.center.y,r:3.4,class:'civicdome'},L.buildings);}
+
+  // signature games/spectacle building(s) (docs/03 M-GAMES register)
+  for(const gm of model.games||[]){
+    const ge=el('path',{d:pd(gm.poly),class:'games'},L.buildings);
+    reg(ge,'Games building',gm.name,{},gm.prov);
+    if(gm.inner)el('path',{d:pd(gm.inner),class:'games'},L.buildings);}
 
   // details: trees, wells, cross
   for(const d of model.details){
@@ -2062,8 +3085,10 @@ function render(){
     el('text',{x:mk.center.x,y:mk.center.y-12,class:'lbl','text-anchor':'middle'},L.labels).textContent=mk.name;
   if(model.civic)
     el('text',{x:model.civic.center.x,y:model.civic.center.y-11,class:'lbl','text-anchor':'middle'},L.labels).textContent=model.civic.name;
+  for(const gm of model.games||[])
+    el('text',{x:gm.center.x,y:gm.center.y-12,class:'lbl','text-anchor':'middle'},L.labels).textContent=gm.name;
   for(const gt of model.wall.gates||[])
-    el('text',{x:gt.pt.x,y:gt.pt.y-10,class:'lbl','text-anchor':'middle'},L.labels).textContent=gt.water?'':'Gate';
+    el('text',{x:gt.pt.x,y:gt.pt.y-10,class:'lbl','text-anchor':'middle'},L.labels).textContent=gt.water?'':(gt.name||'Gate');
   // scale bar
   const sb=el('g',{},L.labels);
   el('path',{d:`M60 ${model.Hm-46} h200`,class:'scalebar'},sb);
@@ -2076,6 +3101,7 @@ function render(){
   fitView();
   renderMetrics();
   renderLegend();
+  renderLedger();
 }
 function polyAreaApp(p){let s=0;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length];s+=a.x*b.y-b.x*a.y;}return s/2;}
 function distPtSegApp(pt,a,b){const abx=b.x-a.x,aby=b.y-a.y;const l2=abx*abx+aby*aby;
@@ -2132,10 +3158,15 @@ function select(id){
 /* ---------- metrics panel ---------- */
 function renderMetrics(){
   const m=model.metrics,b=m.bands;
+  // the historical bands (docs/03) are calibrated to the accretive medieval pack; a planned
+  // grid tradition (Roman) is EXPECTED to fall outside them (that's the point of M-ROM-6's
+  // statistical signature, not a defect) — a profile-specific band set is future work
+  // (docs/07 §7), so bands are shown for reference only, never marked pass/fail, off-medieval
+  const bandsApply=model.culture==='medieval';
   const fmt=(v,d=2)=>typeof v==='number'?v.toFixed(d):v;
   const row=(name,val,band,disp)=>{
     let cls='',note='';
-    if(band){const ok=val>=band[0]&&val<=band[1];cls=ok?'pass':'fail';note=ok?'✓':'✗';}
+    if(band&&bandsApply){const ok=val>=band[0]&&val<=band[1];cls=ok?'pass':'fail';note=ok?'✓':'✗';}
     return `<tr><td>${name}</td><td class="v">${disp}</td><td class="v ${cls}">${note}${band?` [${band[0]}–${band[1]}]`:''}</td></tr>`;};
   document.getElementById('mBody').innerHTML='<table>'+
     row('street nodes / edges',0,null,m.nodes+' / '+m.edges)+
@@ -2148,7 +3179,23 @@ function renderMetrics(){
     row('blocks / median area',0,null,m.blocks+' / '+(m.medianBlockArea/1000).toFixed(1)+'k m²')+
     row('parcels',0,null,m.parcels)+
     row('median frontage (M-PAR-1)',m.medianFrontage,b.medianFrontage,m.medianFrontage.toFixed(1)+' m')+
-    '</table><div style="font-size:10.5px;color:#7d6c47;margin-top:4px">Bands from docs/03-mathematical-assumptions.md; ✓ means the grown fabric sits inside the historical range.</div>';}
+    '</table><div style="font-size:10.5px;color:#7d6c47;margin-top:4px">'+(bandsApply
+      ?'Bands from docs/03-mathematical-assumptions.md; ✓ means the grown fabric sits inside the historical range.'
+      :'Bands are calibrated to the medieval pack and shown for reference only — a planned grid tradition is expected to fall outside them (M-ROM-6); a profile-specific band set is future work (docs/07 §7).')
+    +'</div>';}
+
+/* ---------------- evidence ledger (docs/07 §6) ----------------
+ * Every register id actually load-bearing for THIS generated town, in one place — the same
+ * assumptions register (docs/03) formalized as in-app data instead of only a markdown file.
+ * Click any inspector item to see its own full justification/source/confidence in docs/03. */
+function renderLedger(){
+  const box=document.getElementById('ledger');
+  if(!box)return;
+  const ids=[...ledgerIds].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  box.innerHTML=`<div style="font-size:10.5px;color:#7d6c47;margin-bottom:5px">`+
+    `${ids.length} register entries (M-*) are load-bearing for this town — full source/confidence/justification in `+
+    `<code>docs/03-mathematical-assumptions.md</code>.</div>`+
+    `<div>${ids.map(id=>`<span class="ledgerchip">${id}</span>`).join('')}</div>`;}
 
 function renderLegend(){
   const lg=document.getElementById('legend');
@@ -2161,7 +3208,243 @@ function renderLegend(){
     <span><span class="chip" style="background:#4a3a22"></span>Wall</span>
     <span><span class="chip" style="background:#b9c7c3"></span>Water</span>
     <span><span class="chip" style="background:#9aa96e;border-radius:50%"></span>Tree</span>`;
+  if(model.details.some(d=>d.kind==='field'))
+    html+=`<span><span class="chip" style="background:#dcc985;border-color:#a4874a"></span>Field</span>`;
+  if(model.details.some(d=>d.kind==='pasture'))
+    html+=`<span><span class="chip" style="background:#c7d19a;border-color:#82945a"></span>Pasture</span>`;
+  if(model.details.some(d=>d.kind==='waterway'))
+    html+=`<span><span class="chip" style="background:#8fa39e"></span>Waterway</span>`;
+  if(model.buildings.some(b=>b.ruined))
+    html+=`<span><span class="chip" style="background:#9a9184;border-color:#4a453c"></span>Ruin</span>`;
   lg.innerHTML=html;}
+
+/* ---------- Generation Rules panel (docs/07 §3.4): profile CRUD, live preview, presets ---------- */
+const RULES_LS_KEY='um_rules_profiles_v1';
+const RULE_PARAM_SPECS=[
+  {grp:'street',key:'branchAngleJitter',label:'Branch angle jitter (σ rad)',min:0.15,max:0.70,step:0.01},
+  {grp:'street',key:'continuationJitter',label:'Continuation jitter (σ rad)',min:0.10,max:0.50,step:0.01},
+  {grp:'street',key:'explorationStart',label:'Exploration share (start)',min:0.15,max:0.90,step:0.01},
+  {grp:'street',key:'explorationDecay',label:'Exploration decay/epoch',min:0.00,max:0.15,step:0.005},
+  {grp:'street',key:'explorationMinimum',label:'Exploration minimum',min:0.02,max:0.35,step:0.01},
+  {grp:'street',key:'segmentLengthMedian',label:'Segment length median (m)',min:20,max:100,step:1},
+  {grp:'street',key:'segmentLengthVariance',label:'Segment length variance (σ)',min:0.15,max:1.10,step:0.01},
+  {grp:'street',key:'pierceChance',label:'Pierce chance',min:0.00,max:0.15,step:0.005},
+  {grp:'street',key:'junctionAngleLimit',label:'Junction angle limit (rad)',min:0.10,max:0.55,step:0.01},
+  {grp:'street',key:'marketGradientDecay',label:'Market gradient decay',min:60,max:400,step:5},
+  {grp:'street',key:'parallelStreetSpacing',label:'Parallel street spacing (m)',min:8,max:32,step:1},
+  {grp:'street',key:'deadEndBias',label:'Dead-end bias',min:0.00,max:0.40,step:0.01},
+  {grp:'street',key:'bridgeheadDistance',label:'Bridgehead distance (m)',min:60,max:320,step:5},
+  {grp:'street',key:'bridgeheadProbability',label:'Bridgehead probability',min:0.05,max:0.90,step:0.01},
+  {grp:'parcels',key:'frontageWidthVariance',label:'Frontage width variance (σ)',min:0.10,max:0.50,step:0.01},
+  {grp:'parcels',key:'plotDepthVariance',label:'Plot depth variance (σ)',min:0.10,max:0.60,step:0.01},
+  {grp:'parcels',key:'subdivisionCap',label:'Subdivision cap',min:1,max:4,step:1},
+  {grp:'settlement',key:'wallGenerationThreshold',label:'Wall-generation threshold (interior fill)',min:0.5,max:0.95,step:0.01},
+  {grp:'settlement',key:'wallGenerationMinAgeGap',label:'Min. years between circuits',min:40,max:250,step:5},
+  {grp:'settlement',key:'wallGenerationExtramuralShare',label:'Min. extramural share',min:0.05,max:0.40,step:0.01},
+  {grp:'settlement',key:'maxWallGenerations',label:'Max wall generations',min:1,max:5,step:1},
+  {grp:'settlement',key:'carryingCapacityWeight',label:'Carrying-capacity weight',min:0.0,max:1.0,step:0.05},
+];
+const RULE_PRESETS={
+  'Planned Grid':{street:{branchAngleJitter:0.15,continuationJitter:0.10,pierceChance:0.15,junctionAngleLimit:0.15,parallelStreetSpacing:14,explorationStart:0.20,explorationMinimum:0.05,segmentLengthVariance:0.25,deadEndBias:0},parcels:{frontageWidthVariance:0.12,plotDepthVariance:0.12,subdivisionCap:1},meta:{wildness:0.2,plotChaos:0.2}},
+  'Classical Town':{street:{branchAngleJitter:0.20,continuationJitter:0.16,pierceChance:0.10,junctionAngleLimit:0.24,parallelStreetSpacing:18,explorationStart:0.35,explorationMinimum:0.08,segmentLengthVariance:0.35,deadEndBias:0.02},parcels:{frontageWidthVariance:0.18,plotDepthVariance:0.20,subdivisionCap:2},meta:{wildness:0.55,plotChaos:0.5}},
+  'Organic Medieval':{street:{branchAngleJitter:0.32,continuationJitter:0.28,pierceChance:0.06,junctionAngleLimit:0.50,parallelStreetSpacing:22,explorationStart:0.60,deadEndBias:0.12},meta:{wildness:1.3,plotChaos:1.1}},
+  'Medina':{street:{branchAngleJitter:0.40,continuationJitter:0.35,pierceChance:0.0,junctionAngleLimit:0.52,parallelStreetSpacing:16,deadEndBias:0.40},parcels:{subdivisionCap:4,frontageWidthVariance:0.40},meta:{wildness:1.4,plotChaos:1.8}},
+  'Wild Frontier':{street:{explorationStart:0.85,explorationMinimum:0.30,branchAngleJitter:0.60,continuationJitter:0.45,segmentLengthVariance:0.90,bridgeheadDistance:280,bridgeheadProbability:0.60},meta:{wildness:1.9,plotChaos:1.0}},
+};
+let currentRules=UME.resolveRules();
+let activeRulesProfileName=null;
+function loadSavedRulesProfiles(){try{return JSON.parse(localStorage.getItem(RULES_LS_KEY)||'{}');}catch(e){return {};}}
+function saveSavedRulesProfiles(obj){try{localStorage.setItem(RULES_LS_KEY,JSON.stringify(obj));}catch(e){}}
+function populateRulesProfileSelect(selectValue){
+  const sel=document.getElementById('rulesProfile');
+  const saved=loadSavedRulesProfiles();
+  sel.innerHTML='';
+  const addOpt=(val,label)=>{const o=document.createElement('option');o.value=val;o.textContent=label;sel.appendChild(o);};
+  addOpt('__default__','Default');
+  for(const name of Object.keys(RULE_PRESETS))addOpt('__preset__'+name,name+' (preset)');
+  const savedNames=Object.keys(saved);
+  if(savedNames.length){
+    const sep=document.createElement('option');sep.disabled=true;sep.textContent='── saved ──';sel.appendChild(sep);
+    for(const name of savedNames)addOpt('__saved__'+name,name);}
+  if(selectValue)sel.value=selectValue;
+}
+function refreshRuleSliders(){
+  document.getElementById('rWildness').value=currentRules.meta.wildness;
+  document.getElementById('rWildnessVal').textContent=currentRules.meta.wildness.toFixed(2);
+  document.getElementById('rPlotChaos').value=currentRules.meta.plotChaos;
+  document.getElementById('rPlotChaosVal').textContent=currentRules.meta.plotChaos.toFixed(2);
+  for(const spec of RULE_PARAM_SPECS){
+    const el=document.getElementById('rp_'+spec.key);
+    if(el)el.value=currentRules[spec.grp][spec.key];
+    const sp=document.getElementById('rpv_'+spec.key);
+    if(sp)sp.textContent=(+currentRules[spec.grp][spec.key]).toFixed(spec.step<1?2:0);
+  }
+}
+const RULE_GRP_LABELS={street:'Tier 1–2 — street network',parcels:'Tier 3 — parcels',
+  settlement:'Tier 4 — settlement growth (experimental)'};
+function buildRulesDetailHTML(){
+  let html='';let lastGrp=null;
+  for(const spec of RULE_PARAM_SPECS){
+    if(spec.grp!==lastGrp){
+      html+=`<div class="rgrouphdr">${RULE_GRP_LABELS[spec.grp]||spec.grp}</div>`;
+      lastGrp=spec.grp;}
+    html+=`<div class="rrow"><label title="${spec.key}">${spec.label}</label>`+
+      `<input type="range" id="rp_${spec.key}" min="${spec.min}" max="${spec.max}" step="${spec.step}">`+
+      `<span class="rval" id="rpv_${spec.key}"></span></div>`;
+  }
+  return html;
+}
+let regenDebounceTimer=null;
+function debouncedRegen(){clearTimeout(regenDebounceTimer);regenDebounceTimer=setTimeout(regen,150);}
+function wireRuleSliders(){
+  for(const spec of RULE_PARAM_SPECS){
+    const el=document.getElementById('rp_'+spec.key);
+    el.addEventListener('input',()=>{
+      currentRules[spec.grp][spec.key]=parseFloat(el.value);
+      document.getElementById('rpv_'+spec.key).textContent=(+el.value).toFixed(spec.step<1?2:0);
+      debouncedRegen();
+    });
+  }
+  document.getElementById('rWildness').addEventListener('input',(e)=>{
+    const w=parseFloat(e.target.value);
+    UME.applyWildness(currentRules,w);
+    document.getElementById('rWildnessVal').textContent=w.toFixed(2);
+    refreshRuleSliders();debouncedRegen();
+  });
+  document.getElementById('rPlotChaos').addEventListener('input',(e)=>{
+    const c=parseFloat(e.target.value);
+    UME.applyPlotChaos(currentRules,c);
+    document.getElementById('rPlotChaosVal').textContent=c.toFixed(2);
+    refreshRuleSliders();debouncedRegen();
+  });
+}
+document.getElementById('rulesProfile').addEventListener('change',(e)=>{
+  const val=e.target.value;
+  if(val==='__default__'){currentRules=UME.resolveRules();activeRulesProfileName=null;}
+  else if(val.startsWith('__preset__')){
+    const name=val.slice('__preset__'.length);
+    currentRules=UME.resolveRules(RULE_PRESETS[name]);activeRulesProfileName=null;}
+  else if(val.startsWith('__saved__')){
+    const name=val.slice('__saved__'.length);
+    const saved=loadSavedRulesProfiles();
+    currentRules=UME.resolveRules(saved[name]);activeRulesProfileName=name;}
+  refreshRuleSliders();regen();
+});
+document.getElementById('rNew').addEventListener('click',()=>{
+  const name=prompt('New profile name:');
+  if(!name)return;
+  const saved=loadSavedRulesProfiles();
+  currentRules=UME.resolveRules();
+  saved[name]=UME.cloneRules(currentRules);
+  saveSavedRulesProfiles(saved);
+  activeRulesProfileName=name;
+  populateRulesProfileSelect('__saved__'+name);
+  refreshRuleSliders();regen();
+});
+document.getElementById('rDup').addEventListener('click',()=>{
+  const suggested=(activeRulesProfileName||'Profile')+' copy';
+  const name=prompt('Duplicate as:',suggested);
+  if(!name)return;
+  const saved=loadSavedRulesProfiles();
+  saved[name]=UME.cloneRules(currentRules);
+  saveSavedRulesProfiles(saved);
+  activeRulesProfileName=name;
+  populateRulesProfileSelect('__saved__'+name);
+});
+document.getElementById('rRename').addEventListener('click',()=>{
+  if(!activeRulesProfileName){alert('Only a saved profile can be renamed. Use New or Duplicate first.');return;}
+  const name=prompt('Rename to:',activeRulesProfileName);
+  if(!name||name===activeRulesProfileName)return;
+  const saved=loadSavedRulesProfiles();
+  saved[name]=saved[activeRulesProfileName];
+  delete saved[activeRulesProfileName];
+  saveSavedRulesProfiles(saved);
+  activeRulesProfileName=name;
+  populateRulesProfileSelect('__saved__'+name);
+});
+document.getElementById('rSave').addEventListener('click',()=>{
+  let name=activeRulesProfileName;
+  if(!name){name=prompt('Save as:');if(!name)return;activeRulesProfileName=name;}
+  const saved=loadSavedRulesProfiles();
+  saved[name]=UME.cloneRules(currentRules);
+  saveSavedRulesProfiles(saved);
+  populateRulesProfileSelect('__saved__'+name);
+});
+document.getElementById('rDelete').addEventListener('click',()=>{
+  if(!activeRulesProfileName){alert('Nothing to delete — this is not a saved profile.');return;}
+  if(!confirm('Delete profile "'+activeRulesProfileName+'"?'))return;
+  const saved=loadSavedRulesProfiles();
+  delete saved[activeRulesProfileName];
+  saveSavedRulesProfiles(saved);
+  activeRulesProfileName=null;
+  currentRules=UME.resolveRules();
+  populateRulesProfileSelect('__default__');
+  refreshRuleSliders();regen();
+});
+document.getElementById('rReset').addEventListener('click',()=>{
+  currentRules=UME.resolveRules();
+  refreshRuleSliders();regen();
+});
+document.getElementById('rExport').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify(currentRules,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=(activeRulesProfileName||'rules')+'.json';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+document.getElementById('rImport').addEventListener('click',()=>document.getElementById('rImportFile').click());
+document.getElementById('rImportFile').addEventListener('change',(e)=>{
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const parsed=JSON.parse(reader.result);
+      currentRules=UME.resolveRules(parsed);
+      activeRulesProfileName=null;
+      populateRulesProfileSelect('__default__');
+      refreshRuleSliders();regen();
+    }catch(err){alert('Invalid rules JSON: '+err.message);}
+  };
+  reader.readAsText(file);
+  e.target.value='';
+});
+function renderRulesCompare(){
+  const box=document.getElementById('rulesCompare');
+  if(!box||!model)return;
+  const seed=parseInt(document.getElementById('seed').value,10)||1;
+  const epochs=parseInt(document.getElementById('epochs').value,10)||8;
+  const pop=parseInt(document.getElementById('pop').value,10)||5000;
+  const walls=document.getElementById('walls').checked;
+  const fortified=document.getElementById('fortified').checked;
+  const terrainAware=document.getElementById('terrainAware').checked;
+  const ruined=document.getElementById('ruined').checked;
+  const wallGenerations=document.getElementById('wallGenerations').checked;
+  const settlementAge=parseInt(document.getElementById('settlementAge').value,10)||300;
+  const siteKind=document.getElementById('siteKind').value;
+  const culture=document.getElementById('culture').value;
+  const defModel=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,wallGenerations,settlementAge,site:siteKind,culture});
+  const avgParcelArea=(m)=>m.parcels.length?m.parcels.reduce((s,p)=>s+p.area,0)/m.parcels.length:0;
+  const streetDensity=(m)=>m.metrics.totalLen/(m.pop||1);
+  const rows=[
+    ['4-way share',model.metrics.deg4Share,defModel.metrics.deg4Share,v=>(100*v).toFixed(0)+'%'],
+    ['Dead-end share',model.metrics.deadEndShare,defModel.metrics.deadEndShare,v=>(100*v).toFixed(0)+'%'],
+    ['Avg block size',model.metrics.medianBlockArea,defModel.metrics.medianBlockArea,v=>(v/1000).toFixed(1)+'k m²'],
+    ['Parcel count',model.parcels.length,defModel.parcels.length,v=>v],
+    ['Street density',streetDensity(model),streetDensity(defModel),v=>v.toFixed(2)+' m/cap'],
+    ['Avg parcel size',avgParcelArea(model),avgParcelArea(defModel),v=>v.toFixed(0)+' m²'],
+  ];
+  box.innerHTML='<div class="rgrouphdr">Current vs Default profile</div><table>'+
+    rows.map(([name,cur,def,fmt])=>{
+      const diffPct=def?Math.abs(cur-def)/Math.max(Math.abs(def),1e-6):0;
+      const hi=diffPct>0.08?' hi':'';
+      return `<tr><td>${name}</td><td class="${hi.trim()}">${fmt(cur)}</td><td style="color:#9a8f6a">${fmt(def)}</td></tr>`;
+    }).join('')+'</table>';
+}
+document.getElementById('rulesDetail').innerHTML=buildRulesDetailHTML();
+populateRulesProfileSelect('__default__');
+wireRuleSliders();
+refreshRuleSliders();
 
 /* ---------- camera ---------- */
 let vb={x:0,y:0,w:1700,h:1250};
@@ -2193,27 +3476,48 @@ function regen(){
   const pop=parseInt(document.getElementById('pop').value,10)||5000;
   const walls=document.getElementById('walls').checked;
   const fortified=document.getElementById('fortified').checked;
+  const terrainAware=document.getElementById('terrainAware').checked;
+  const ruined=document.getElementById('ruined').checked;
+  const wallGenerations=document.getElementById('wallGenerations').checked;
+  const settlementAge=parseInt(document.getElementById('settlementAge').value,10)||300;
   const siteKind=document.getElementById('siteKind').value;
   const harbourDefence=document.getElementById('harbourDefence').value;
   const faith=document.getElementById('faith').value;
   const civicStyle=document.getElementById('civicStyle').value;
+  const culture=document.getElementById('culture').value;
   const t0=performance.now();
-  model=UME.generate(seed,{epochs,pop,walls,fortified,site:siteKind,harbourDefence,faith,civicStyle});
+  model=UME.generate(seed,{epochs,pop,walls,fortified,terrainAware,ruined,wallGenerations,settlementAge,site:siteKind,harbourDefence,faith,civicStyle,culture,rules:currentRules});
   const dt=performance.now()-t0;
   render();
   let note='';
-  if(model.fortRequested&&!model.fortified)
-    note=` — ⚠ star fort needs pop ≥ ${model.fortMin.toLocaleString()} (a strategic town, not a hamlet); built a curtain wall`;
-  else if(model.fortified)note=' — bastioned trace';
+  if(model.fortRequested&&!model.fortified){
+    if(!model.walls)note=' — ⚠ star fort requires the city wall option; built without one';
+    else if(model.popTarget<model.fortMin)
+      note=` — ⚠ star fort needs pop ≥ ${model.fortMin.toLocaleString()} (a strategic town, not a hamlet); built a curtain wall`;
+    else note=' — ⚠ this civilization\'s wall tradition has no bastioned trace (anachronism guard); built a curtain wall';
+  }else if(model.fortified)note=' — bastioned trace';
   document.getElementById('status').textContent=
     `generated in ${dt.toFixed(0)} ms — realized ~${model.pop.toLocaleString()} of target `+
     `${model.popTarget.toLocaleString()} inhabitants${note} — hash ${UME.hashModel(model).toString(16)}`;
   window.__UM_MODEL=model; // for headless drivers
+  renderRulesCompare();
 }
 document.getElementById('gen').addEventListener('click',regen);
 document.getElementById('rnd').addEventListener('click',()=>{
   document.getElementById('seed').value=Math.floor(Math.random()*1e6);regen();});
 document.getElementById('fit').addEventListener('click',fitView);
+// switching civilization resets worship/civic to that profile's defaults (still overridable
+// afterward); per the spec, the profile primarily changes architecture, not morphology —
+// except a profile whose planning fundamentally differs (grid vs organic, docs/07 §2)
+document.getElementById('culture').addEventListener('change',(e)=>{
+  const p=UME.CULTURE_PROFILES[e.target.value];
+  if(!p)return;
+  document.getElementById('faith').value=p.defaultFaith;
+  document.getElementById('civicStyle').value=p.defaultCivic;
+  // most profiles leave the walls checkbox as the user set it; a profile can specify an explicit
+  // default (Venus: unwalled by default, but still a real optional toggle, unlike noWalls profiles)
+  if(p.defaultWalls!==undefined)document.getElementById('walls').checked=p.defaultWalls;
+  regen();});
 setupCamera();
 regen();
 })();
