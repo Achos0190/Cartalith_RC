@@ -9,10 +9,88 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.92.html`.** One self-contained HTML file, three
+- **Current tool file: `Cartalith Gen1 v0.94.html`.** One self-contained HTML file, three
   script blocks (generator engine / civ-politics layer / asset library). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.91` are kept and never edited.
+  (v0.95 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.93` are kept and never edited.
+- **v0.94 — owner /goal: "go on with the 4th proposal [colorization loop restructuring], draw
+  rivers as ways as in the legacy cartalith app, and make route planning take sea-faring routes
+  into account... when a split or partial [route] by sea or river is possible it opts to only use
+  land based routes."** Three parts, plan confirmed with the owner beforehand (river-ways overlays
+  on top of the raster blend and becomes the new default-ON; routing fix scoped to the interactive
+  Route tool/journey planner, not the auto-network builder). (1) **Colorization-loop
+  restructuring, re-scoped narrower.** v0.93 deferred this outright; fresh research proved buffer
+  pooling is alias-safe (the RGBA output is never retained past its synchronous call anywhere) but
+  showed allocation is 2-3 orders of magnitude cheaper than the per-pixel compute loop it sits
+  inside, so pooling was evaluated and skipped as not worth it. Shipped instead: `sampleArr`
+  row-hoisting (`sampleArrRowPrep`/`sampleArrRow`, eliminates redundant per-pixel recomputation of
+  the row-only part of the bilinear sample, proven bit-identical, confirmed via the `--full`
+  35-config hash battery). Palette-function scratch-ification (the project's own next roadmap
+  item) was designed, then also deferred — it surfaced a genuine nested-call aliasing hazard
+  (`grassCol` calls `ramp3` twice before consuming either result) that needs a proper multi-slot
+  design, not a rushed single-buffer one. (2) **Rivers as ways.** The legacy `Cartalith_V1.915.html`
+  drew every travel network (river/road/rail/sea) as one shared stroked-polyline "way"; Gen1 instead
+  rendered rivers as a per-pixel raster blend, with true vector strokes existing only inside the
+  opt-in Strahler debug view. That existing spline pipeline (previously duplicated between the
+  main-canvas and LOD debug-overlay code) is now factored into one shared `drawRiverWays()` and
+  exposed as a new default-on **"Draw rivers as ways"** checkbox, overlaid on top of the existing
+  raster water blend on both the main canvas and Tiled LOD — a deliberate default-render change
+  (`loadZip` back-compat guard keeps old saves on the old look, same pattern as v0.80's ocean-
+  currents flip), verified via a targeted A/B (forcing `riverWays:false` reproduces v0.93's hash
+  exactly, proving nothing else changed). Also closes a pre-existing LOD gap where the default
+  Tiled-LOD Biome view never showed the river network's color at any zoom. (3) **Sea/river-aware
+  routing.** Root-caused `_civMixedCostGrid` (the one function deciding both the Route tool's path
+  and every journey): water cost (1.5) was tuned *above* flat land, backwards from the journey
+  planner's own ~2.5× sea-speed model; land cost ignored biome friction other cost grids already
+  use; real rivers carried zero cost information. Fixed by rebalancing water below land
+  (`_CIV_SEA_COST=0.6`), sharing the biome-penalty table, and adding real river costing
+  (`_CIV_RIVER_COST_BASE=0.85`, order-scaled, floor-only so a river never makes a cell worse).
+  Scoped to the interactive tool only, per owner decision — the auto-generated world road network
+  stays untouched, flagged as a possible follow-up. Verified via an independent Playwright A/B on
+  six coastal detour-prone point pairs: v0.93 committed 5-6% water (essentially all-land) on two of
+  them, v0.94 committed 35-50% water on the identical pairs — every pair showed equal-or-higher
+  water usage. Render battery: `field`/`temp`/`rain`/`flow` identical everywhere (no engine change
+  anywhere in this version); `rgba` differs at biome-mode configs by design (river-ways default).
+  Headless **923** unchanged throughout; smoke **159 → 165** (6 new assertions across all three
+  parts). Same-day, before v0.94: a **v0.93 hotfix** shipped first (live-testing report: lake edges
+  blocky again, LOD tiles seemingly uncached) — see the v0.93 hotfix entry below for the full
+  root-cause (a rapid continuous-zoom gesture let the progressive-overview stretch placeholder
+  compound staleness without bound) and fix (`_lodOverviewStretchStreak`, bounding consecutive
+  un-landed stretches instead of any single stretch's ratio, after a first ratio-cap attempt broke
+  the legitimate single-big-jump case).
+- **v0.93 — owner /goal: "make the proposed optimisations in a new version, keep a focus on
+  graphic fidelity (no pixelated views or blockyness when zooming in on terrain)."** A prior
+  session (on request) had produced a ranked list of 6 LOD-render/tile-pipeline optimization
+  proposals (the engine's `generate()` stages were excluded from consideration — the bit-identity
+  invariants make that path too risky to touch for speed alone). This version implements 3 of the
+  6, all opt-in on the LOD path — render battery **ALL IDENTICAL to v0.92**, headless **923**
+  unchanged, smoke **157/157** (+3 new assertions): (1) **progressive overview rebuild** — a zoom
+  step with a previous overview in hand now stretches it and returns in <30ms instead of blocking
+  on a full synchronous rebuild, with the real rebuild deferred to a background pass
+  (`_lodScheduleOverviewRebuild`) guarded by `_fieldGen`/render-key checks against a regenerate
+  landing mid-flight; (2) **GENPOOL extended to tile refinement** — a new task-parallel
+  `runTiles()` dispatch mode (vs. the existing row-split `run()`) lets `refineVisibleTiles()`
+  compute pool-eligible tiles across cores instead of one-by-one on the main thread (~3.1× faster,
+  bit-identical output); found and fixed a genuine cold-Worker JIT cliff (~20× penalty on a
+  fresh Worker's first call) with a `GENPOOL.warmup()` step at init; (3) **parallel atlas baking**
+  — `bakeVisibleTiles()`/`bakeAllTiles()` batch each pyramid level's tile compute through the same
+  pool before the still-sequential PNG-encode/write loop (~25% faster for a multi-level bake). A
+  4th proposal (`renderBiomeTileRGBA` colorization-loop restructuring) was scoped, then
+  deliberately **not shipped** — pooling its scratch/output buffers risks aliasing with cached
+  tile data (a correctness bug that would manifest as exactly the visual corruption the owner's
+  fidelity mandate exists to prevent) and per-pixel `sampleArr` hoisting risks floating-point
+  reordering the bit-identity invariant doesn't tolerate; left for a future version with a
+  narrower, independently-verifiable scope. A 5th, lower-risk proposal (lazy seasonal-field
+  allocation — `tempJul/tempJan/rainJul/rainJan` now allocate on `computeSeasons()`'s first real
+  call instead of unconditionally in `allocate()`, since seasons default off) shipped alongside the
+  three LOD ones. **Fidelity explicitly verified** per the owner's stated concern: fixed-seed
+  (424242) Playwright screenshots at overview / immediate-post-zoom (stretched placeholder) /
+  settled (pooled-refined) / LOD zoom-cap (~1km scale) all show smooth, continuously-textured
+  terrain, no blocky/quantized artifacts; a canvas pixel-diff confirmed refinement genuinely adds
+  detail (not a no-op) rather than just being fast. See CHANGELOG for full profiling numbers,
+  including two debugging arcs (a headless/SwiftShader canvas-GPU-contention red herring during
+  pool profiling, and a same-page-first-call measurement artifact during bake-pool profiling) that
+  turned out not to be real defects once isolated.
 - **v0.92 — owner /goal: "carry out the [save-export audit's] reported fixes, then analyze why
   the program is so slow when zooming in even when tiles are baked"**, followed same-day by a
   bug report on the resulting fix (render battery ALL IDENTICAL to v0.91, headless **923**
@@ -504,7 +582,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.92), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.94), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
@@ -528,6 +606,26 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **LOD/render performance optimizations — 4 of 6 originally-proposed shipped across v0.93/v0.94**
+  (progressive overview rebuild, pooled tile refine, pooled atlas bake, `sampleArr` row-hoisting —
+  see the v0.93/v0.94 entries and CHANGELOG for full detail). **Explicitly deferred, not
+  forgotten:** (a) palette-function scratch-ification (`snowCol`/`rockCol`/etc.) — designed in
+  v0.94, surfaced a genuine nested-call aliasing hazard (`grassCol` calls `ramp3` twice before
+  consuming either result — a shared single scratch buffer would silently corrupt colors); needs a
+  proper multi-slot scratch design, not a rushed single-buffer one. This is the project's own
+  next performance-audit-roadmap item, still open. (b) A 6th proposal from the original list was
+  never detailed in this thread — re-derive or ask the owner if further LOD/render perf work is
+  wanted. Neither is a known bug or regression.
+- **Rivers-as-ways (v0.94) — shipped as an overlay + new default, auto-network builder untouched.**
+  `drawRiverWays()` is reusable as-is if a future version wants it wired into more places (e.g. an
+  export/print map style). Not queued as follow-up unless requested.
+- **Sea/river-aware routing (v0.94) — scoped to the interactive Route tool/journey planner by
+  owner decision.** The auto-generated world road network (`_civHierarchicalNetwork`+
+  `_civMstRoutes`, used by auto-populate) is still architecturally two disjoint land-only/water-only
+  Dijkstra passes and cannot produce a single mixed route between arbitrary settlements — a real,
+  separate limitation from the one fixed this version, flagged in the v0.94 research but explicitly
+  out of scope. Candidate for a future version if the owner wants the auto-generated network to
+  also route mixed land+sea+river.
 - **Save/export architecture restructuring — SHIPPED in v0.92.** `docs/research/save-export-architecture-
   audit.md` (read-only audit, 2026-07-13) found the real bloat was `exportZip()` writing overlapping map
   imagery from three independent code paths for the same terrain, and a separate, lower-risk naming/IA

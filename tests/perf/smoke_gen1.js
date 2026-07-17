@@ -137,17 +137,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const near = s.rivers ? featuresNear(currentFeatures().rivers[0].mouth.x, currentFeatures().rivers[0].mouth.y, 6) : [];
     return { summary: s, hasRivers: s.rivers > 0, hasPeaks: s.peaks > 0, queryWorks: !s.rivers || near.length > 0 };
   });
-  R.lodView = await page.evaluate(() => new Promise(res => {
+  R.lodView = await page.evaluate(async () => {
     const lc = document.getElementById('lodChk'); lc.checked = true; lc.dispatchEvent(new Event('change'));
     _lodZoom = 4; renderNow();                       // overview render → caches an overview canvas
     const cachedAfterFirst = !!_lodOverviewPrev && !!_lodOverviewPrev.key;
     const t0 = performance.now(); renderNow();       // second draw at the same view: overview reuse path
     const secondMs = performance.now() - t0;
-    refineVisibleTiles(); renderNow();               // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
+    await refineVisibleTiles(); renderNow();         // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
     const tileCacheN = _lodTileCanvasCache.size;
     lc.checked = false; lc.dispatchEvent(new Event('change'));
-    res({ cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true });
-  }));
+    return { cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true };
+  });
   // ── v0.72: deep-zoom (z≥8) tributary + local-incision morphology on a live tile ──
   R.tribs = await page.evaluate(() => {
     const bc = document.getElementById('lodBurnChk'); if (bc) { bc.checked = true; bc.dispatchEvent(new Event('change')); }
@@ -1093,6 +1093,133 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { overviewRebuildMs, chunksBaked: n, overviewW, overviewH, GW, GH };
   });
 
+  // v0.93 optimization: a zoom step used to pay the full overview-rebuild cost (above) synchronously
+  // on every step, even when a perfectly good previous overview exists to approximate the new view
+  // from. Regression guard: with a `prev` overview in hand (unlike the invalidated-cache case above),
+  // a zoom step's renderNow() call must return near-instantly (stretch + defer, not a full rebuild),
+  // and the deferred rebuild must still land the CORRECT sharp result shortly after.
+  R.lodProgressiveOverview = await page.evaluate(async () => {
+    state.debug = 'off'; _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 1;
+    applyView(); renderNow();   // establishes a `prev` overview (first-ever build, synchronous by necessity)
+    const hadPrevBeforeZoom = !!_lodOverviewPrev;
+
+    _lodZoom = 5; applyView();
+    const t0 = performance.now();
+    renderNow();
+    const zoomStepMs = performance.now() - t0;
+    const scheduledRebuild = !!_lodOverviewRebuildPending;
+    const expectedZ = lodViewRect().z;
+
+    await new Promise(res => setTimeout(res, 300));   // let the deferred rebuild land
+    const finalZ = _lodOverviewPrev.z;
+    const stillPending = !!_lodOverviewRebuildPending;
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { hadPrevBeforeZoom, zoomStepMs, scheduledRebuild, expectedZ, finalZ, stillPending };
+  });
+
+  // v0.93 hotfix (owner report: "lakes are blocky/pixilated again" + "tiles don't seem to be cached"):
+  // a REAL continuous zoom gesture (many ticks with no pause between them -- a back-to-back synchronous
+  // loop with no await/setTimeout reproduces this deterministically, since nothing yields to the event
+  // loop for the deferred overview rebuild to run) used to let the stretch-placeholder staleness compound
+  // without limit, because every tick's _lodScheduleOverviewRebuild call superseded the previous tick's
+  // still-pending one before any of them could land -- confirmed visually (checkerboarded, heavily
+  // blocky overview after 8 ticks). A hard ratio cap on any single stretch was tried and rejected -- it
+  // also blocked the legitimate single-big-jump case (one wheel tick straight to a deep zoom) that opt #1
+  // exists to keep fast. The actual fix bounds CONSECUTIVE un-landed stretches instead
+  // (_lodOverviewStretchStreak / LOD_OV_STRETCH_STREAK_CAP): a lone big jump still takes the fast path
+  // (streak 0->1), but a burst is forced into a synchronous resync once the streak gets too long.
+  // Regression guard: after a rapid multi-tick zoom with no settle time, (a) the streak counter itself
+  // never exceeds the cap (proving the forced-resync branch actually fired during the burst, not just
+  // that the counter kept climbing unchecked), and (b) the overview actually got refreshed at least once
+  // mid-burst (its captured view differs from the very first zoom-in step, proving it isn't just stuck
+  // showing the original whole-map capture the entire time).
+  R.lodOverviewStretchCap = await page.evaluate(async () => {
+    state.debug = 'off'; _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 1;
+    applyView(); renderNow();   // establish an initial prev overview
+    const steps = [2, 3, 5, 8, 12, 16, 20, 24];
+    let firstStepSpan = null;
+    for (const z of steps) {
+      _lodZoom = z; applyView(); renderNow();   // no waits: back-to-back, like a fast continuous wheel-scroll
+      if (firstStepSpan == null) firstStepSpan = _lodOverviewPrev.x1 - _lodOverviewPrev.x0;
+    }
+    const streakAfterBurst = _lodOverviewStretchStreak;
+    const finalOverviewSpan = _lodOverviewPrev.x1 - _lodOverviewPrev.x0;
+    const refreshedMidBurst = Math.abs(finalOverviewSpan - firstStepSpan) > 1e-9;
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { streakAfterBurst, refreshedMidBurst };
+  });
+
+  // v0.93 optimization: refineVisibleTiles now dispatches pool-eligible batches to GENPOOL.runTiles
+  // (task-parallel across cores) instead of computing every tile sequentially on the main thread.
+  // Regression guard: the pool path must be measurably faster than the forced-sync path AND produce
+  // byte-identical tile data (same pyramidTile output, just computed off the main thread).
+  R.lodRefinePool = await page.evaluate(async () => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 6; applyView(); renderNow();
+    _atlasBaked.clear(); _atlasImg.clear();   // an earlier perf test baked z=0..2 to the atlas -- clear it so bakedCover() doesn't make `need` empty here (refineVisibleTiles has nothing to do if everything's already baked)
+    const v0 = lodViewRect();
+    const keyCount = visibleTileKeys(v0.z, v0.x0, v0.y0, v0.x1, v0.y1).length;
+
+    lodCacheClear();
+    const t0 = performance.now();
+    await refineVisibleTiles();
+    const withPoolMs = performance.now() - t0;
+    const poolUsable = GENPOOL.usable;
+
+    const v = lodViewRect();
+    const poolSamples = [];
+    for (const k of visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1)) {
+      const t = lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile));
+      if (t) poolSamples.push({ col: k.col, row: k.row, w: t.w, h: t.h, sample: Array.from(t.data.slice(0, 3)) });
+    }
+
+    lodCacheClear();
+    const origUsableForTiles = GENPOOL.usableForTiles;
+    GENPOOL.usableForTiles = () => false;   // force the sync fallback for a fair A/B on this same view
+    const t1 = performance.now();
+    await refineVisibleTiles();
+    const syncOnlyMs = performance.now() - t1;
+    GENPOOL.usableForTiles = origUsableForTiles;
+
+    let allMatch = poolSamples.length > 0;
+    for (const pr of poolSamples) {
+      const s = lodCacheGet(lodCacheKey(v.z, pr.col, pr.row, _lodTile));
+      if (!s || s.w !== pr.w || s.h !== pr.h) { allMatch = false; break; }
+      for (let i = 0; i < 3; i++) if (s.data[i] !== pr.sample[i]) { allMatch = false; break; }
+    }
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { keyCount, withPoolMs, syncOnlyMs, poolUsable, allMatch };
+  });
+
+  // v0.93 optimization: bakeAllTiles batches each pyramid level's pool-eligible tiles through
+  // GENPOOL.runTiles before the (unchanged, still-sequential) PNG-encode/IndexedDB write loop,
+  // instead of computing every tile on the main thread. Regression guard: a multi-level bake via
+  // the pool finishes faster than the forced-sync fallback AND bakes the identical chunk set.
+  R.bakeAllTilesPool = await page.evaluate(async () => {
+    _lodOn = true;
+    const allKeys = [];
+    for (let z = 0; z <= 2; z++) { const side = 1 << z; for (let row = 0; row < side; row++) for (let col = 0; col < side; col++) allKeys.push(atlasChunkKey(z, col, row, _lodTile)); }
+
+    _atlasBaked.clear(); _atlasImg.clear();
+    const origUsableForTiles = GENPOOL.usableForTiles;
+    GENPOOL.usableForTiles = () => false;   // forced-sync baseline runs first
+    const t0 = performance.now();
+    const nBakedSync = await bakeAllTiles(2, () => {});
+    const syncOnlyMs = performance.now() - t0;
+    GENPOOL.usableForTiles = origUsableForTiles;
+    const syncBaked = allKeys.every(k => _atlasBaked.has(k));
+
+    _atlasBaked.clear(); _atlasImg.clear();
+    const t1 = performance.now();
+    const nBaked = await bakeAllTiles(2, () => {});
+    const withPoolMs = performance.now() - t1;
+    const poolBaked = allKeys.every(k => _atlasBaked.has(k));
+
+    _lodOn = false;
+    return { syncOnlyMs, withPoolMs, nBakedSync, nBaked, syncBaked, poolBaked, poolUsable: GENPOOL.usable };
+  });
+
   // v0.92 follow-up fix (owner report: "graphic fidelity seems to have degraded also"): every OTHER
   // way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already scheduled a
   // refine so the sharp tile overlay replaces the coarse overview after a beat -- the `lodChk`
@@ -1117,6 +1244,79 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { cachedAfterCheck };
   });
   R.lodCheckboxAutoRefine.noNewErrors = errors.length === errorsBeforeCheckbox;
+
+  // v0.94 (owner request: "draw rivers as ways, as in the legacy cartalith app"): a new default-on
+  // vector overlay (state.viz.riverWays, drawRiverWays()) layers stroked river-network splines on top
+  // of the existing raster water blend, on both the main canvas and under Tiled LOD (closing a
+  // pre-existing gap where the default LOD Biome view never showed the river network's color at all).
+  // Regression guard: the checkbox reflects/drives state.viz.riverWays, and toggling it produces a
+  // real, visible pixel difference on BOTH the main canvas and a LOD view zoomed onto a real river.
+  R.riverWays = await page.evaluate(async () => {
+    state.debug = 'off'; state.mode = 'biome'; _lodOn = false; _lodZoom = 1; applyView();
+    const chk = document.getElementById('riverWaysChk');
+    const checkboxReflectsDefault = !!chk && chk.checked === true && state.viz.riverWays === true;
+
+    if (!_riverNet) _riverNet = buildRiverNetwork(field, flowField, GW, GH, state.seaLevel, { world: state.world, riverDensity: (state.viz.riverDensity) || 1 });
+    // find a river cell to center the LOD view on (order >= 2, away from the map edge)
+    let spotX = GW / 2, spotY = GH / 2, found = false;
+    for (let y = 4; y < GH - 4 && !found; y++) for (let x = 4; x < GW - 4 && !found; x++) {
+      if (_riverNet.order[y * GW + x] >= 2) { spotX = x; spotY = y; found = true; }
+    }
+
+    renderNow();
+    const mainOn = vctx.getImageData(0, 0, GW, GH).data.slice();
+    state.viz.riverWays = false; chk.checked = false; renderNow();
+    const mainOff = vctx.getImageData(0, 0, GW, GH).data.slice();
+    state.viz.riverWays = true; chk.checked = true; renderNow();
+
+    let mainDiffPx = 0;
+    for (let i = 0; i < mainOn.length; i += 4) {
+      if (Math.abs(mainOn[i] - mainOff[i]) + Math.abs(mainOn[i + 1] - mainOff[i + 1]) + Math.abs(mainOn[i + 2] - mainOff[i + 2]) > 6) mainDiffPx++;
+    }
+
+    _lodOn = true; _lodCx = spotX; _lodCy = spotY; _lodZoom = 16; applyView(); renderNow();
+    await refineVisibleTiles(); renderNow();
+    const cv = document.getElementById('view'), cctx = cv.getContext('2d');
+    const lodOn = cctx.getImageData(0, 0, cv.width, cv.height).data.slice();
+    state.viz.riverWays = false; renderNow();
+    const lodOff = cctx.getImageData(0, 0, cv.width, cv.height).data.slice();
+    state.viz.riverWays = true; renderNow();
+
+    let lodDiffPx = 0;
+    for (let i = 0; i < lodOn.length; i += 4) {
+      if (Math.abs(lodOn[i] - lodOff[i]) + Math.abs(lodOn[i + 1] - lodOff[i + 1]) + Math.abs(lodOn[i + 2] - lodOff[i + 2]) > 6) lodDiffPx++;
+    }
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx };
+  });
+
+  // v0.94 (owner report: "when using a very long route where a split or partial is possible by sea
+  // or river... it opts to only use land based routes"). Root cause: _civMixedCostGrid's water cost
+  // (1.5) was tuned ABOVE typical flat land (~1.0), backwards from the journey planner's own ~2.5x
+  // sea-speed model, land cost ignored biome friction, and real rivers carried no cost at all. Fixed
+  // by rebalancing water below land, adding real river costing, and sharing the biome-penalty model.
+  // Regression guard: on a fixed seed/resolution (reproducible geography), a coastal point pair whose
+  // land-only route requires a real detour around the coastline (found via an independent Playwright
+  // probe against v0.93 vs this build: v0.93 committed a ~5-6% water route here, essentially
+  // all-land; v0.94 committed 35-50% water on the SAME pairs) must show a materially higher water
+  // fraction than the old behavior — asserted against a fixed threshold safely between the two
+  // observed values, not a live A/B (the new cost constants are `const`, not toggleable at runtime).
+  R.routingSeaShortcut = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    await generate();
+    const pairs = [
+      { x1: 810, y1: 530, x2: 754, y2: 602 },   // v0.93 waterFrac 0.051 -> v0.94 0.349 (independently measured)
+      { x1: 798, y1: 494, x2: 758, y2: 606 },   // v0.93 waterFrac 0.061 -> v0.94 0.500
+    ];
+    const out = pairs.map(p => {
+      const mixed = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'mixed');
+      const land = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'land');
+      if (!mixed || !mixed.pts) return { ok: false };
+      return { ok: true, waterFrac: _civPathWaterFrac(mixed.pts), mixedKm: mixed.km, landKm: land ? land.km : null };
+    });
+    return { pairs: out };
+  });
 
   await browser.close();
 
@@ -1234,8 +1434,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now capped to a 512px target width)', R.lodOverviewPerf.overviewRebuildMs < 400);
   A('v0.92 follow-up fix: overview canvas is capped at 512px wide, not a flat GW/4 (was 256px at this 1024px world → blocky lakes)', R.lodOverviewPerf.overviewW === 512);
   A('v0.92 follow-up fix: overview canvas keeps GW/GH aspect ratio', Math.abs(R.lodOverviewPerf.overviewW / R.lodOverviewPerf.overviewH - R.lodOverviewPerf.GW / R.lodOverviewPerf.GH) < 0.01);
+  A('v0.93 optimization: a zoom step with a previous overview in hand returns near-instantly (stretch + defer, not a full rebuild)', R.lodProgressiveOverview.hadPrevBeforeZoom === true && R.lodProgressiveOverview.zoomStepMs < 30);
+  A('v0.93 optimization: the zoom step schedules a background rebuild instead of skipping it', R.lodProgressiveOverview.scheduledRebuild === true);
+  A('v0.93 optimization: the deferred rebuild lands the correct (not stale) zoom level shortly after', R.lodProgressiveOverview.finalZ === R.lodProgressiveOverview.expectedZ && R.lodProgressiveOverview.stillPending === false);
+  A('v0.93 hotfix: a rapid multi-tick zoom gesture bounds the consecutive-stretch streak (was unbounded — "lakes blocky again")', R.lodOverviewStretchCap.streakAfterBurst <= 4);
+  A('v0.93 hotfix: the overview actually resyncs at least once during a rapid multi-tick burst (not stuck on the original capture)', R.lodOverviewStretchCap.refreshedMidBurst === true);
+  A('v0.93 optimization: GENPOOL is usable in a real browser (Worker support present)', R.lodRefinePool.poolUsable === true);
+  A('v0.93 optimization: refineVisibleTiles via the pool is faster than the forced-sync fallback', R.lodRefinePool.withPoolMs < R.lodRefinePool.syncOnlyMs);
+  A('v0.93 optimization: pooled tile refinement produces the same data as the sync fallback', R.lodRefinePool.allMatch === true);
+  A('v0.93 optimization: GENPOOL is usable for the bakeAllTiles pool path', R.bakeAllTilesPool.poolUsable === true);
+  A('v0.93 optimization: bakeAllTiles via the pool bakes the same chunk set as the forced-sync fallback', R.bakeAllTilesPool.nBaked === R.bakeAllTilesPool.nBakedSync && R.bakeAllTilesPool.syncBaked && R.bakeAllTilesPool.poolBaked);
+  A('v0.93 optimization: bakeAllTiles via the pool is faster than the forced-sync fallback for a multi-level bake', R.bakeAllTilesPool.withPoolMs < R.bakeAllTilesPool.syncOnlyMs);
   A('v0.92 follow-up fix: checking "Tiled LOD view" alone (no pan/zoom) auto-refines the visible tile', R.lodCheckboxAutoRefine.cachedAfterCheck === true);
   A('v0.92 follow-up fix: unchecking the box before the deferred refine settles throws no errors', R.lodCheckboxAutoRefine.noNewErrors === true);
+  A('v0.94: "Draw rivers as ways" checkbox reflects the new default-on state', R.riverWays.checkboxReflectsDefault === true);
+  A('v0.94: a real river cell is found on the fixed-seed world (test precondition)', R.riverWays.foundRiverSpot === true);
+  A('v0.94: river ways toggle produces a real pixel difference on the main canvas', R.riverWays.mainDiffPx > 0);
+  A('v0.94: river ways toggle produces a real pixel difference under Tiled LOD (closes the old "LOD shows no river color" gap)', R.riverWays.lodDiffPx > 0);
+  A('v0.94 routing fix: both fixed-seed coastal detour pairs resolve to a valid mixed route', R.routingSeaShortcut.pairs.every(p => p.ok));
+  A('v0.94 routing fix: a coastal route with a land detour now uses a real sea shortcut (was ~5-6% water, now materially more)', R.routingSeaShortcut.pairs.every(p => p.waterFrac >= 0.2));
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);

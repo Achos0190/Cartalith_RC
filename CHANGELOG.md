@@ -12,6 +12,187 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.94 (2026-07-16)
+**Owner /goal: "go on with the 4th proposal [colorization loop restructuring], draw rivers as ways
+as in the legacy cartalith app, and make route planning take sea-faring routes into account — at
+the moment ... it opts to only use land based routes [even] when a split or partial [route] by sea
+or river is possible."** Three pieces of work, each independently verified.
+
+**Part 1 — colorization-loop restructuring, revisited with a narrower scope.** v0.93 deferred this
+proposal outright; this pass re-scoped it per the two independent risks identified then. Fresh
+research (full call-site trace) **proved** `renderBiomeTileRGBA`'s RGBA output is never retained
+past its synchronous call anywhere in the codebase (always `putImageData`/`.set()`-copied or
+pixel-read immediately), so pooling its scratch buffers is provably alias-safe — but the same
+research measured tile-buffer allocation at 2-3 orders of magnitude cheaper than the ~651ms
+per-pixel compute loop it sits inside, so pooling was **evaluated and skipped as not worth the
+risk for a sub-1% gain**. Two changes shipped instead: (a) `sampleArr` row-hoisting —
+`sampleArrRowPrep(fy)`/`sampleArrRow(a,fx,prep)` eliminate the row-only part of `sampleArr`'s
+bilinear math (clamp/y0/y1/ty/row-offsets) being recomputed on every one of the 3 unconditional
+per-pixel calls in `renderBiomeTileRGBA`'s hot loop — proven bit-identical (a pure function of `fy`
+alone, no reordering of the actual data-blend arithmetic) and confirmed via the `--full` 35-config
+hash battery, ALL IDENTICAL. (b) Palette-function scratch-ification (`snowCol`/`rockCol`/etc.,
+next on the project's own performance-audit roadmap) was **designed, then also deferred** — it
+surfaced a genuine nested-call aliasing hazard (`grassCol` calls `ramp3` twice before consuming
+either result; a single shared scratch buffer would silently corrupt the second call's color into
+the first), which needs a proper multi-slot design rather than a rushed single-buffer one. Engine
+bit-identical to v0.93 hotfix at defaults; headless **923** unchanged.
+
+**Part 2 — rivers drawn as ways, as in the legacy Cartalith editor.** `Cartalith_V1.915.html` drew
+every travel network (river/road/rail/sea) as one shared stroked-polyline "way" abstraction; Gen1
+instead renders rivers as a per-pixel raster blend (`surfaceColor` sampling `_riverNet.intensity`/
+`depth`), with true vector strokes existing only inside the opt-in Strahler debug view. That
+existing spline pipeline (`traceRiverPolylines`→`rdpSimplify`→`catmullRomSample`→`riverSinuosity`,
+previously duplicated verbatim between the main-canvas and LOD debug-overlay code) is now factored
+into one shared `drawRiverWays(riverNet, reproj)` — `reproj=null` on the main canvas, `{px,py,
+inView,zk}` under Tiled LOD — and exposed as a new **"Draw rivers as ways"** checkbox
+(`state.viz.riverWays`) next to the existing "Show rivers" toggle. **Per owner decision this pass:
+overlays on top of** the existing raster water blend (both render — not a replacement) and **is
+the new default (ON)** for fresh worlds, a deliberate default-render change (`loadZip` back-compat
+guard keeps pre-v0.94 saves on the old raster-only look, same pattern as v0.80's ocean-currents
+flip). Also closes a pre-existing gap as a side effect: the default Tiled-LOD Biome view never
+showed the river network's water color at any zoom (only a decorative bank-tint SDF) — the vector
+overlay reads correctly at any zoom regardless of that raster limitation. Rendering-only (no
+engine/field change) ⇒ headless **923** unchanged, `field`/`temp`/`rain`/`flow` hashes identical in
+every hash-battery config; `rgba` differs at every biome-mode config by design (confirmed via a
+targeted A/B forcing `riverWays:false` on v0.94, which reproduces v0.93's default hash exactly —
+proving nothing else in the render path changed). Smoke **159 → 163** (checkbox reflects the new
+default; toggling it produces a real pixel difference on both the main canvas and under Tiled LOD).
+
+**Part 3 — sea/river-aware route planning.** Root-caused via full code trace (not guessed):
+`_civMixedCostGrid` — the one function deciding both the interactive Route tool's path and every
+journey — had three real defects. (1) `_CIV_WATER_COST=1.5` was tuned *above* typical flat land
+(`buildTravelCost`'s ≈1.0 baseline); the v0.73 comment says so explicitly ("stays above flat-land
+... so land is still the default on comparable distance") — backwards relative to what the journey
+planner's own speed model already believes (a Cog is 2.5× a walker's base speed; `JP_SHIPS`/
+`JP_LAND_TRANSPORTS`). (2) Land cost here was plain slope-only `buildTravelCost`, ignoring the
+biome-friction table `_civEnhancedTravelCost` already uses for the auto-network builder — under-
+costing land on top of over-costing sea. (3) Real flowing rivers carried **no cost information at
+all** in this grid — a river crossed exactly like dry ground. Fixed by rebalancing water to
+`_CIV_SEA_COST=0.6` (now genuinely cheaper than flat land, matching the ~2-2.5× real speed
+advantage), sharing `_civEnhancedTravelCost`'s biome-penalty table for land cells, and adding
+`_CIV_RIVER_COST_BASE=0.85` (order-scaled, taken as a floor against local land cost so a river
+never makes a cell more expensive, only potentially cheaper) for cells with real discharge (same
+`flowThresh` convention used elsewhere). **Scoped to the interactive Route tool / journey planner
+only** (per owner decision) — the auto-generated world road network (`_civHierarchicalNetwork`/
+`_civMstRoutes`) stays two disjoint land-only/water-only passes, flagged as a possible follow-up,
+not touched this pass. Verified via an independent Playwright A/B (not guessed): on a fixed seed/
+resolution, six coastal point-pairs whose land-only route requires a real detour around the
+coastline were run through `_civDijkstraPath(...,'mixed')` on both v0.93 and this build — every
+pair showed equal-or-higher water usage on v0.94, two dramatically so (5–6% water on v0.93,
+committing an essentially all-land route, → 35–50% water on v0.94, a genuine partial sea shortcut,
+on the *identical* start/end points). Civ layer only (block 2), no engine/field change ⇒ headless
+unaffected by construction; two new smoke-suite regression assertions lock in the two most dramatic
+pairs against a fixed threshold. Smoke **163 → 165**.
+
+### v0.93 hotfix (2026-07-16)
+**Owner live-testing report: "On part of lakes, the edges are blocky/pixilated again. Also the
+generated LOD tiles don't seem to be cached."** Root-caused via a headless repro (not guessed):
+optimization #1's progressive overview (stretch + defer, above) has no problem with a single big
+zoom jump — that case is exactly what it's built for and stays fast — but a **real continuous zoom
+gesture** (many rapid ticks with no pause between them, unlike the single-jump-then-wait scenario
+the shipped verification exercised) lets every tick's `_lodScheduleOverviewRebuild` call supersede
+the previous tick's still-pending one before any of them land. `_lodOverviewPrev` then stays pinned
+at whatever view it was last successfully rebuilt at while each subsequent tick stretches it
+further — confirmed visually with an 8-tick, 15ms-spaced headless repro: the overview ended up
+stretched ~5x past its last real capture, a heavily blocky/checkerboarded frame exactly matching
+the report. (Tile refinement itself was never actually broken — `_lodCache` populates correctly the
+moment input pauses, verified separately; "tiles don't seem cached" was the same overview
+staleness making every frame during a fast gesture look unrefined.)
+- **First attempt (rejected before shipping)**: cap the stretch *ratio* of any single frame. This
+  broke the ALREADY-SHIPPED `R.lodProgressiveOverview` regression test — a single big jump (e.g.
+  whole-map to a deep zoom in one tick) legitimately needs a large one-time stretch, and capping
+  ratio blocked exactly the case opt #1 exists to keep fast, not just the runaway-burst case.
+- **Shipped fix**: bound *consecutive un-landed stretches* instead of stretch magnitude.
+  `_lodOverviewStretchStreak` counts stretch-only frames since the last overview actually finished
+  rebuilding (real rebuild, sync or the deferred async one, resets it to 0); once the streak hits
+  `LOD_OV_STRETCH_STREAK_CAP=4`, `drawLODView()` forces a synchronous resync (same ~100-130ms cost
+  the v0.92 512px cap already proved acceptable) instead of stretching further. A lone big jump
+  still takes the fast path (streak 0→1); only a genuine multi-tick burst gets throttled into
+  periodic resyncs. Two new smoke-suite regression guards (streak stays bounded after an 8-tick
+  synchronous burst; the overview genuinely resyncs at least once mid-burst, not stuck on the
+  original capture) alongside the pre-existing single-jump guard — all three green together.
+  `_lodOn`-gated only; render battery **ALL IDENTICAL to v0.92**, headless **923** unchanged, smoke
+  **157 → 159**.
+
+### v0.93 (2026-07-16)
+**Owner /goal: "make the proposed optimisations in a new version, keep a focus on graphic fidelity
+(no pixelated views or blockyness when zooming in on terrain)."** Three LOD-render/tile-pipeline
+performance optimizations, all additive/opt-in on the LOD path — no engine changes; render battery
+**ALL IDENTICAL to v0.92**; headless **923** unchanged; Playwright UI smoke **157/157** (+3 new
+regression assertions on top of v0.92's suite, mirroring the pattern each of the three optimizations
+below already established for its own opt-in fast path).
+
+**#1 — progressive (non-blocking) overview rebuild on zoom.** Every zoom step used to synchronously
+rebuild the LOD overview backdrop from scratch — even when a perfectly good previous overview already
+existed to approximate the new view from — reintroducing the ~940–1200ms stall v0.92 had just fixed
+for the *first* build. `drawLODView()` now branches three ways: an exact-viewport pan reuses the
+cached overview via a translate-blit (unchanged from v0.92); a **zoom/pan change against a matching
+render key** (`_lodRenderKey()` — content/style state, not viewport) stretches the cached overview
+canvas immediately (near-instant, <30ms) and schedules the real rebuild via a new
+`_lodScheduleOverviewRebuild()` on a deferred `setTimeout(...,0)`, re-checking `_fieldGen`/`GW`/`GH`
+before applying results so a regenerate or resize mid-flight can't land stale data; anything else
+(first build, or a style/content change — `_lodRenderKey()` differs) falls through to the original
+synchronous v0.92 rebuild. `_lodBuildTileRGBA()` extracted from `drawLODView()` so both the
+synchronous and deferred paths build the same tile-colorization closures from current state, fixing
+an early `dbg is not defined` regression caught via console-warning capture (a naive timing-only test
+missed it, since `drawLODView()` silently falls back to `_lodOn=false` on error).
+*Fidelity note: the stretched placeholder is a **soft-scaled preview of the same coarse overview**
+used since v0.92's 512px-cap fix — never a blocky/quantized frame — and the deferred rebuild lands the
+correct sharp result well under a second later.*
+
+**#2 — GENPOOL extended to tile refinement (`refineVisibleTiles`).** GENPOOL (the multicore Worker
+pool already used for `generate()`'s heavy row-split fills) gains a second, task-parallel dispatch
+mode: `runTiles(coarse,cW,cH,jobs)`/`_runTiles(...)`, round-robining independent
+`{z,col,row,tileSize,opts}` tile jobs one-per-worker (vs. the existing row-split `run()`, which splits
+one big job across workers). `refineVisibleTiles()` (now `async`) batches pool-eligible tiles through
+`GENPOOL.runTiles` instead of computing every visible tile sequentially on the main thread — measured
+**~3.1× faster** (243ms pool vs. 760ms sync-fallback for 4 tiles), bit-identical output, guarded by
+`_lodGen` so a regenerate mid-flight discards stale results. A **cold-Worker JIT penalty** was found
+during profiling (~20× slower on a fresh Worker's first call, interpreted vs. TurboFan-compiled) and
+fixed with a `GENPOOL.warmup()` step at `init()` that dispatches one throwaway job per worker before
+marking the pool `usable`, so production usage never pays it. (A red herring along the way: an
+apparent 10×+ slowdown under headless/SwiftShader traced to canvas-GPU readback contention delaying
+`onmessage` delivery on the main thread, not a pool defect — confirmed by an isolated no-canvas-
+activity test completing in ~315ms.) The three pre-existing call sites (`lodChk` checkbox, "Refine"
+button, `scheduleLodRefine`'s debounce) now `await` the async function; headless call sites are
+unaffected since `GENPOOL.usable` is permanently `false` there (no `Worker` global), so the function
+always takes its synchronous fallback body with no `await` reached.
+
+**#3 — parallel atlas baking (`bakeVisibleTiles`/`bakeAllTiles`).** Both now batch each pyramid
+level's not-yet-cached, pool-eligible tiles through `GENPOOL.runTiles` before the (unchanged,
+still-sequential) PNG-encode/IndexedDB-write loop, instead of computing every tile's terrain data on
+the main thread first. `bakeAllTiles`'s per-level batching preserves the exact `done`/`onP`/already-
+baked-skip progress-callback order via a two-pass structure (build a level array with `{skip:true}`
+placeholders in the original row-major order, batch-dispatch the `need` subset, then iterate again
+doing the encode/write + progress callback exactly as before). Measured **~25% faster** for a 3-level
+bake (21 tiles) once isolated from a same-page-first-call measurement artifact (an initial single-shot
+test showed the pool *slower* — traced to whichever path ran first in a fresh page paying extra
+per-shape JIT warm-up on the main thread's `tilePngBytes`/`atlasPut` call sites; a fair alternating
+sync/pool/sync/pool measurement showed a stable, repeatable ~12.0–12.2s pool vs. ~15.9–16.1s sync),
+correctness confirmed by identical baked-chunk sets both ways.
+
+**#5 — lazy seasonal field allocation.** `tempJulField`/`tempJanField`/`rainJulField`/`rainJanField`
+(4 × `GW×GH` Float32Arrays) used to be allocated unconditionally in `allocate()` even though seasons
+default off. Now `null` until `computeSeasons()`'s first real call, which allocates them on demand;
+every consumer already gated its reads behind `state.climate.seasons`/`_seasonK`/an explicit
+`computeSeasons()` call (invariant 4's null-check pattern), so this is a pure allocation-timing change
+— confirmed bit-identical (923 headless, hash battery ALL IDENTICAL).
+
+**Evaluated, not shipped:** a 4th proposal (restructuring `renderBiomeTileRGBA`'s per-pixel
+colorization loop — hoisting per-row-constant math, pooling scratch buffers) was scoped and then
+dropped: pooling the tile-render scratch/output buffers risks aliasing with cached tile data (a
+correctness bug that would manifest as exactly the visual corruption this version's fidelity mandate
+exists to prevent), and hoisting math out of `sampleArr`'s per-pixel calls risks floating-point
+reordering that the cross-version bit-identity invariant doesn't tolerate. Left for a future version
+with a narrower, independently-verifiable scope.
+
+**Fidelity verification** (owner's explicit requirement): fixed-seed (424242) Playwright screenshots
+at whole-map overview, immediately after a deep zoom step (stretched placeholder), after settling
+(pooled-refined tiles), and at the LOD zoom cap (~1km scale) — all show smooth, continuously-textured
+terrain with no blocky/quantized artifacts; a canvas pixel-diff between the immediate and settled
+frames confirms real (non-trivial, ~14% of pixels, subtle magnitude) detail improvement from
+refinement rather than a no-op.
+
 ### v0.92 (2026-07-13)
 **Owner /goal: "carry out the reported fixes [from the save-export architecture audit], then analyze
 why the program is so slow when zooming in even when tiles are baked."** Followed same-day by an owner
