@@ -9,11 +9,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.98.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v0.99.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v0.99 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.97` are kept and never edited.
+  (v1.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.98` are kept and never edited.
+- **v0.99 — owner: "Continue" (Stage 3 of the seamless refactor — coastal polish).** Two contained,
+  safe improvements to v0.98's real-water settlement layouts, both on the opt-in path so render
+  bit-identity to v0.98 holds. (1) **Smooth local coastline:** `_umWaterCtx` (civ adapter) now samples
+  the height field **bilinearly** per 22 m mask cell instead of the nearest grid cell — at a coarse
+  512px region ~70 mask cells collapsed onto one grid cell, so the whole ~1.7 km town box read as one
+  blocky, axis-aligned land/water value (the owner's "solid block instead of smooth borders according
+  to the heightmap"); the interpolated height crosses sea level smoothly across the box, so the town's
+  coastline follows the real heightmap with sub-grid-cell detail. Adapter-only ⇒ engine/UME suites
+  unaffected by construction. (2) **Coast orientation fix:** `townBank` (UME engine) hardcoded a `y−5`
+  "town is north of the shoreline" offset — only right for the synthetic west→east coast; a real
+  sea/lake can face any way, so it pushed the wall the wrong side on an E/W/S coast. Now offset toward
+  the actual land (market side), **guarded on `site.usesRealWater`** so the synthetic path (UME suite)
+  is byte-identical. Verified: engine **923/923**, UME **831/831** (guard holds), hash A/B vs v0.98
+  **ALL IDENTICAL** (default-off), smoke **177/177**. Browser-verified seed 54869 (512px): a
+  pure-coastal walled town (bay, ~5k) sits on the real headland behind a smooth curved coast (was a
+  blocky block); a river-through estuary town builds entirely on land with the map's water through it.
+  **Still flagged (next pass):** on a coastal town the enceinte is sized from the street-graph
+  built-mass hull (`builtMassHull`), which folds in arterial junctions and can enclose empty land
+  beyond the built fabric — the wall stretches inland along a road while the built mass sits in the
+  seaward corner. Pre-existing (v0.97 `primaryPaths`), NOT introduced here; constraining the wall to
+  the built fabric is a growth/hull redesign (blocks don't exist yet when `buildWall` runs inside
+  `grow()`). "River through town" still reads best at 1K/2K.
 - **v0.98 — owner (screenshots, seed 54869 512px): "sea, rivers, lake logic is all but correct" +
   "refactor ... to get a seamless whole ... same for rivers and lakes".** Stage 2 of the seamless
   region↔settlement refactor (Stage 1, v0.97, was roads): the town's WATER is now the map's water.
@@ -694,9 +716,9 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **Seamless region↔settlement refactor — Stage 1 (roads, v0.97) and Stage 2 (water, v0.98) SHIPPED;
-  Stage 3 (coastal polish + refinement) is what remains.** The coordinate trick below is the crux and
-  is now realised in `_umWaterCtx` + `buildSite`'s `opts.water` branch — keep it in mind for Stage 3:
+- **Seamless region↔settlement refactor — Stage 1 (roads, v0.97), Stage 2 (water, v0.98) and Stage 3's
+  coastline pass (v0.99) SHIPPED; the coastal WALL SIZING is the one substantive item left.** The
+  coordinate trick below is the crux and is realised in `_umWaterCtx` + `buildSite`'s `opts.water` branch:
   - **Stage 2 (water, v0.98) — DONE.** Instead of one river polyline, the adapter (`_umWaterCtx`) feeds
     `buildSite` a whole real-water package via `opts.water`: the nearest real river centerline
     (`traceRiverPolylines(_riverNet.order,_riverNet.recv,GW,GH,minOrder)` → nearest stem, clipped to a
@@ -711,14 +733,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
     no rotation. The draw transform is `grid = p + R(orient)·(local − market)·gridPerMeter`; with
     market=C and the water referenced as `C + R(0)·(realGrid − p)/gridPerMeter`, the `(C − market)` shift
     is zero, so water (and the roads, which already anchor at market) draw pixel-for-pixel on the map.
-  - **Stage 3 (coastal polish + refinement, v0.99):** the water LOGIC is correct as of v0.98; what's
-    left is AESTHETICS/refinement — (a) the market-nudge onto a peninsula can give a pointed coastal
-    wall and warehouse sprawl past it (constrain the wall/harbour to the real headland better); (b)
-    "river through the town" reads best at 1K/2K because a 512px box is ~one grid cell (consider a
-    finer local water raster, or a higher effective sample rate around the settlement); (c) optionally
-    a smoother mask→shoreline (`shoreFromMask` is a rough PCA-ordered chain). Verify per stage: engine
-    923, UME 831 (default-opts path unchanged), hash ALL-IDENTICAL (default-off), smoke, and fixed-seed
-    screenshots showing the town water continuous with the map water through the settlement.
+  - **Stage 3 coastline pass (v0.99) — DONE.** (a) `_umWaterCtx`'s local water mask samples `field`
+    **bilinearly** per 22 m cell (not nearest grid cell), so the town's coast is a smooth heightmap-
+    following curve rather than one blocky box at coarse resolution; (b) `townBank`'s water-following
+    offset now points toward the actual land (market side) for any coast facing, not the synthetic
+    `y−5` "north" (guarded on `site.usesRealWater` ⇒ UME suite byte-identical). `shoreFromMask` still a
+    rough PCA chain, but it feeds off the smoother mask now.
+  - **Coastal WALL SIZING (the item left, → v1.00):** on a coastal town the enceinte is sized from the
+    street-graph built-mass hull (`builtMassHull`), which folds in bare junctions on the arterial roads
+    entering the town, so the wall can enclose a wedge of empty land beyond the built fabric (built mass
+    in the seaward corner, wall stretching inland along a road). `buildWall` runs inside `grow()`, BEFORE
+    `buildBlocks`, so it has no block/parcel fabric to size against — the fix is to size the ring from
+    the actual built density (either defer/rebuild the wall after blocks exist, or weight `builtMassHull`
+    toward true intersections — degree ≥ 3 nodes — and away from degree-2 arterial pass-throughs). This
+    is a growth/hull change in the synthetic-tested engine, so guard it on `usesRealWater` (or prove
+    UME 831 byte-identical). Also still: "river through the town" reads best at 1K/2K (512px box ≈ one
+    grid cell). Verify per change: engine 923, UME 831, hash ALL-IDENTICAL (default-off), smoke,
+    fixed-seed screenshots.
 - **Urban morphology (v0.95) — the requested feature is fully shipped; several scope cuts are
   documented, not forgotten.** Faction→culture/tradition mapping (the PoC ships 2 culture
   profiles; every settlement currently generates as `'medieval'` — worth revisiting once/if

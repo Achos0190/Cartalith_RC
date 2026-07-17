@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.98**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v0.99**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.98.html` | **Current** unified tool (~20.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.97.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v0.99.html` | **Current** unified tool (~20.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.98.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
@@ -97,7 +97,14 @@ bridge/bank/quay/coastline all match the map, and it never builds in the sea; th
 (no `opts.water`, the headless UME suite) is untouched and bit-identical. `generate()` pins the market
 onto C (nudging off water if C is in the channel) so town water AND roads land on the map pixel-for-
 pixel. A town whose nearest river is genuinely a couple of cells off gets NO wrong synthetic river.
-(Flagged follow-up: coastal wall/harbour aesthetics; "river through town" reads best at 1K/2K.)
+**v0.99 (Stage 3 — coastal polish):** `_umWaterCtx`'s local water mask samples the height field
+**bilinearly** per 22 m cell (not nearest grid cell), so the town's coastline follows the real
+heightmap smoothly instead of reading as one blocky box at coarse resolutions; and `townBank`'s
+water-following bank is offset toward the actual land (market side) for any coast facing, not the
+synthetic `y−5` "town is north" (guarded on `site.usesRealWater`, so the UME suite stays byte-
+identical). Still flagged: on a coastal town the enceinte is sized from the street-graph built-mass
+hull, which folds in arterial junctions and can enclose empty land beyond the built fabric (a
+growth/hull redesign, next pass); "river through town" reads best at 1K/2K.
 Generation is deferred one-settlement-per-frame (`_umScheduleGenStep`) and cached (`_umModelFor`,
 keyed on every input that affects the layout — including a water signature) so a cache miss shows the
 pin, not a stall, until the model lands.

@@ -12,6 +12,43 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v0.99 (2026-07-17)
+**Owner: "Continue" (Stage 3 of the seamless refactor — coastal polish).** Two contained, safe
+improvements to the real-water settlement layouts shipped in v0.98, both on the opt-in
+(`state.viz.urbanLayouts`, default off) path so render bit-identity to v0.98 holds at defaults.
+
+- **Smooth local coastline (`_umWaterCtx`, civ adapter).** The town's local water mask classified
+  each 22 m cell by the NEAREST grid cell's height; at a coarse 512 px region ~70 mask cells collapse
+  onto one grid cell, so the whole ~1.7 km box read as a single blocky, axis-aligned land/water value
+  — the owner's "solid block instead of smooth borders according to where it is located on the
+  heightmap." v0.99 samples the height field **bilinearly** at each mask cell, so the sea/below-sea
+  threshold crosses the box smoothly and the local coastline follows the real heightmap gradient with
+  sub-grid-cell detail (a smooth curve, not a rectangle). Discrete labelled lakes
+  (`currentWaterBodies()===2`) aren't interpolable, so they keep the nearest-cell test. Adapter-only
+  (never touches the UME engine block) ⇒ the UME suite and default render are unaffected by construction.
+- **Coast orientation fix (`townBank`, UME engine).** The wall's water-following bank offset hardcoded
+  `y−5` — "the town is landward (north)" — which is only right for the synthetic west→east shoreline.
+  A REAL sea/lake can lie on any side, so on an E/W/S-facing coast the offset pushed the wall the wrong
+  way. Fixed to offset toward the actual land (the market side), exactly as the river branch does.
+  **Guarded on `site.usesRealWater`**, so the synthetic path (the headless UME suite) keeps the
+  byte-identical `y−5` offset.
+
+**Still rough (flagged, carried forward):** on a coastal town the enceinte is sized from the street
+graph's built-mass hull (`builtMassHull`), which folds in bare junctions along the arterial roads that
+enter the town — so the wall can enclose a wedge of empty land beyond the actual built fabric (the
+built mass sits in the seaward corner while the wall stretches inland along a road). This is a
+pre-existing property of sizing the wall from junctions rather than blocks (blocks don't exist yet when
+`buildWall` runs inside `grow()`), present since v0.97's `primaryPaths`; it is NOT introduced here.
+Constraining the wall to the built fabric is a growth/hull redesign, left as the next coastal pass.
+Also unchanged: "river through the town" still reads best at 1K/2K (a 512 px box is ~one grid cell).
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (synthetic-water
+path byte-identical — the `townBank` guard holds); `hash_gen1.js` A/B vs v0.98 **ALL IDENTICAL**
+(feature default-off); `smoke_gen1.js` **177/177**. Browser-verified on seed 54869 (512px): a
+pure-coastal walled town (bay, pop ~5k) now sits on the real headland behind a **smooth curved
+coastline** instead of a blocky block; a river-through estuary town builds entirely on land with the
+map's water running through it.
+
 ### v0.98 (2026-07-17)
 **Owner (screenshots, seed 54869): "sea, rivers, lake logic is all but correct" + "refactor them ...
 to get a seamless whole ... same for rivers and lakes."** Stage 2 of the seamless region↔settlement
