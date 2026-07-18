@@ -12,40 +12,14 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.07 (2026-07-19)
-**Sculpt editor integration, P0 (`docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`).** Ports the pure,
-DOM-free core of the standalone `fractal-geology/Fractal Geology Painter v0.1.html` PoC — a
-stamp-based, non-destructive terrain feature generator — into script block 1, as the foundation
-for promoting today's "Manual Terrain" accordion (Generate → World) into its own full-fledged
-"Sculpt" Generate sub-tab (P1+, not yet built). Purely additive and **completely dormant**:
-nothing in the shipped app calls any of it yet.
+### v1.07 (2026-07-18)
+**Owner: "implement the top 6 borrow list from the research."** First of six: `docs/research/azgaar-comparative-analysis.md` §4's #1 pick, culture-flavored naming, after Azgaar's FMG per-culture namesbases making "regions feel distinct at zero simulation cost." Cartalith's `_civSettleName` was a single global syllable/suffix generator — every faction's towns sounded the same.
 
-Adds 11 features (`SCULPT_FEATURES`: hills, mountains, plateau, canyon, valley, river, lake,
-basin, coastline, cliff, volcano — each with its own tuned noise profile and fractal edge
-character, `edgeChar`/`edgeFreqMul`, so a coastline reads ragged and a river reads clean at the
-same brush size), a dirty-rect compositor (`sculptApplyStamp`/`sculptStampBBox`, generalized to
-arbitrary grid dimensions rather than the PoC's fixed 512×512 canvas), stroke geometry
-(`sculptNearestOnStroke`), and three new parametrized fractal-noise wrappers
-(`sculptFbm`/`sculptRidged`/`sculptBillow`) built on this engine's own `vnoise()`/`hash()` — new
-functions, not reuses of the existing `fbm()`/`ridged()` (which hardcode 6 octaves/0.5
-persistence/2.0 lacunarity; every sculpt feature needs all three as independent sliders) — but
-sharing the same underlying noise primitive as tectonics/erosion. Reuses this engine's own
-`smoothstep()`/`lerp()`/`clamp01()` directly. Named as flat, prefixed top-level functions/consts
-(matching `CIV_FACTIONS`/`buildResourcePotentials`-style convention for script block 1), not the
-block-4 `UME` IIFE pattern (that isolation need doesn't apply within one script block, and a
-direct collision check against every PoC-side name came back clean).
+Added seven **naming cultures** (`CIV_CULTURES`): `common` (the original `_SYL`/`_SFX` pool, verbatim), `imperial` (Latinate — Aurelium, Novaica), `highland` (harsh consonant clusters — Kragdunhold), `desert` (guttural — Qirashabad), `riverlands` (soft, watery — Avenmereford), `sylvan` (elvish, apostrophed), `maritime` (Norse-flavored — Bjorvikholm). A new parallel array `civFactionCulture` assigns each faction a culture, deterministically defaulted per faction index (`_civDefaultCulture`) so the six built-in factions read distinctly with zero setup; a naming-culture `<select>` next to each faction pill (`_civBuildFactionPicker`) lets the owner reassign it. `_civSettleName(rng,faction)` now looks up the settlement's own faction's culture before drawing syllables — both auto-populate call sites (`_civIterativeAutoWorld`'s suitability seeding and its crossroads-promotion pass) pass `faction` through. The settlement editor (`_civPopulatePlaceEditor`) gains a 🎲 button next to the Name field that re-rolls a name from the settlement's own faction culture, mirroring FMG's "regenerate burg name." `civFactionCulture` round-trips through the same `state.civ` sync (`_civSyncToState`/`_civSyncFromState`) that already carries `civFactionNames`, with old-save/no-field compatibility (missing ⇒ rebuilt from the deterministic per-index default) and extend/trim in lockstep with `CIV_FACTIONS` growth/shrink.
 
-Resolved open item from the plan: `applyFeatureAlongCurve` (this file's existing plotline brush)
-has no equirectangular world-seam wraparound handling either — `sculptApplyStamp` matches that
-existing behavior rather than regressing or inventing a new contract.
+Settlement naming isn't part of the `hash_gen1.js` bit-identity battery (field/temp/rain/flow/render only) — free to change without touching cross-version neutrality; verified `ALL IDENTICAL` regardless.
 
-**Verification:** `tests/run.sh` **1013/1013** (923 pre-existing + 90 new: noise range/determinism,
-all 11 features' finiteness/`[0,1]`-bounds/mask-locality/bit-reproducibility/raise-lower-water
-semantics, stroke geometry, per-feature edge-character contrast, world-wrap parity).
-`tests/run_um.sh` **831/831** (block 4 untouched). `hash_gen1.js` A/B vs v1.06 **ALL IDENTICAL**
-(default/geoid/waves/ao/icons configs) — proves the addition is bit-exact-neutral, as expected for
-dormant code nothing calls. `smoke_gen1.js` **179/179**, unchanged. Next: P1 (the Generate
-sub-tab shell) and P2 (draft-layer UI wiring) per the plan.
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.06 **ALL IDENTICAL**; `smoke_gen1.js` **183/183** (+4: per-faction culture picker present, a culture-pinned faction's names adhere to that culture's suffix pool >90% of draws, the editor's 🎲 re-rolls from the settlement's own faction culture, `civFactionCulture` round-trips through sync). Playwright-probed end-to-end on a real generated+auto-populated world: six factions pinned to six distinct cultures produce visibly distinct settlement names (Imperial: Novarcica, Auraurium; Highland: Kragandward, Dagrhurnridge; Desert: Ashqirspan, Bahrharmarch).
 
 ### v1.06 (2026-07-18)
 **Owner: "maybe we should have the seed box back, and the random option there also."** The setup gate's

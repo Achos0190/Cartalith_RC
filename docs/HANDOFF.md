@@ -14,28 +14,25 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
   (v1.08 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.06` are kept and never edited.
-- **v1.07 — owner: integrate the `fractal-geology` PoC (stamp-based, non-destructive terrain
-  painter) into Cartalith as its own full-fledged "Sculpt" landscape editor, replacing the
-  "Manual Terrain" accordion in Generate → World. Plan doc:
-  `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` — two design decisions locked with the owner before any
-  build started: (1) new Generate sub-tab "Sculpt" (not a new top-level tab — preserves the tested
-  2-position phase-switch invariant); (2) session-scoped stamp stack that bakes into `field` on
-  Commit, **conditioned on Commit ending with a full `renderNow()`** so the visible map AND any
-  open affordance/resource debug view (Lith/Soil/Water/Resources/CarryCap/Settlement) show
-  post-commit data in the same render pass, not just "correct next time it's opened." **P0 shipped
-  this version:** ported the PoC's pure core (11-feature `SCULPT_FEATURES` registry, dirty-rect
-  compositor `sculptApplyStamp`/`sculptStampBBox`, stroke geometry `sculptNearestOnStroke`, new
-  parametrized noise wrappers `sculptFbm`/`sculptRidged`/`sculptBillow` built on this engine's own
-  `vnoise()`) into script block 1, right after `catmullRomSample`. **Completely dormant — nothing
-  calls any of it yet**, so this had to be (and is, confirmed via hash A/B) bit-identical-neutral.
-  **Next task: P1** — the empty `#genSculpt` Generate sub-tab shell (`data-gsub="sculpt"`), wired
-  into `_genSubTab` show/hide; still no painting functionality. Then P2 (draft-layer UI: feature
-  palette, presets, stamp-stack panel, live preview) and P3 (the Commit path — bake stack → field,
-  `computeFlow(true); refreshClimate(); renderNow()`, one `pushUndo()` — this is the acceptance
-  test for "resources feed on commit AND the layers render," verify via the Resources/Carry
-  Cap/Settlement debug views actually updating live). Verified: engine **1013/1013** (923 + 90 new
-  sculpt-engine assertions), UME **831/831** (block 4 untouched), hash vs v1.06 **ALL IDENTICAL**,
-  smoke **179/179**.
+- **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
+  analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
+  version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
+  naming — **DONE, v1.07**. (2) setup-gate world archetype presets. (3) GeoJSON/GIS export. (4)
+  province tier + religions layer. (5) submap/resample UX. (6) label placement + per-layer style
+  editors. Items 2–6 not yet started.
+- **v1.07 — owner: "implement the top 6 borrow list from the research" (#1 culture-flavored naming).**
+  `_civSettleName` was one global syllable/suffix generator for every faction. Added seven **naming
+  cultures** (`CIV_CULTURES`: common/imperial/highland/desert/riverlands/sylvan/maritime), a parallel
+  `civFactionCulture` array assigning each faction a culture (deterministic per-index default via
+  `_civDefaultCulture`, so the six built-in factions read distinctly with zero setup), a naming-culture
+  `<select>` next to each faction pill, `_civSettleName(rng,faction)` looking up the settlement's own
+  faction's culture, a 🎲 re-roll button in the settlement editor (mirrors FMG's "regenerate burg
+  name"), and `civFactionCulture` round-tripping through the same `state.civ` sync as `civFactionNames`
+  (old-save compatible — missing ⇒ rebuilt from the deterministic default). Settlement naming isn't
+  part of the hash battery, so free to change without touching cross-version neutrality. Verified:
+  engine **923/923**, UME **831/831**, hash vs v1.06 **ALL IDENTICAL**, smoke **183/183** (+4).
+  Playwright-probed: six factions pinned to six cultures produce visibly distinct names (Imperial:
+  Novarcica; Highland: Kragandward; Desert: Ashqirspan).
 - **v1.06 — owner: "maybe we should have the seed box back, and the random option there also."** The
   setup gate's generate form gains a World seed row: `#suSeedN` (prefilled with the boot-random seed on
   open) + `#suSeedRand` 🎲 (rolls a new value into the box; applied on Generate). `_suGenCommit` applies

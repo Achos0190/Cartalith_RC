@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cartalith Gen1 v1.06</title>
+<title>Cartalith Gen1 v1.07</title>
 <style>
   :root{
     --bg:#101218; --panel:#171a22; --panel2:#1f232e; --line:#2c313d;
@@ -392,7 +392,7 @@ details.cat-acc[open]>summary{color:var(--accent)}
 <header>
   <button id="panelToggle" class="panel-toggle" aria-label="Toggle controls">☰</button>
   <h1>Cartalith Gen1</h1>
-  <span class="ver" id="verTag">v1.06</span>
+  <span class="ver" id="verTag">v1.07</span>
   <span class="tag">terrain · climate · civilization · 2D/3D · cartalith gen1</span>
   <!-- v0.63 (§3): phase chip — appears once the world is finalized (Atlas/Explore phase) -->
   <span id="phaseChip" title="The simulation is frozen — you're editing the cartographic Atlas. Un-finalize at the top of Generate → World.">✓ Atlas — world finalized</span>
@@ -1164,7 +1164,7 @@ details.cat-acc[open]>summary{color:var(--accent)}
       <h2>Factions</h2>
       <div id="civFactionPicker" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px"></div>
       <div class="btnrow" style="margin-bottom:6px"><button id="civAddFactionBtn">+ Add faction</button><button id="civRemoveFactionBtn">− Remove last</button></div>
-      <div class="hint" style="margin-bottom:6px;font-size:.75rem">Double-click a faction to rename it. <b>Add faction</b> appends a new polity with a distinct colour; <b>Remove last</b> drops the most recently added one (settlements/territory using it revert to Unclaimed).</div>
+      <div class="hint" style="margin-bottom:6px;font-size:.75rem">Double-click a faction to rename it; the small dropdown sets its <b>naming culture</b> — which namesbase newly-generated settlements for that polity draw from, so each people's towns read distinctly. <b>Add faction</b> appends a new polity with a distinct colour; <b>Remove last</b> drops the most recently added one (settlements/territory using it revert to Unclaimed).</div>
       <div class="row"><label for="civTerRadius">Territory radius</label><input type="range" id="civTerRadius" min="1" max="20" value="5"><span class="val" id="civTerRadiusV">5</span></div>
     </div>
     </details><!-- end Peoples cat-acc -->
@@ -6959,359 +6959,6 @@ function catmullRomSample(pts, step){
   }
   return out;
 }
-
-/* ===================== Sculpt engine — pure core (P0) =====================
-   docs/SCULPT_EDITOR_INTEGRATION_PLAN.md. Stamp-based, non-destructive terrain
-   feature generator ported from fractal-geology/Fractal Geology Painter v0.1.html
-   (the standalone PoC's headless-tested 77-assertion corpus). P0 scope only:
-   pure, DOM-free primitives — noise wrappers, stroke geometry, the feature
-   registry, and the dirty-rect compositor. NOT wired to any UI yet (that's
-   P1+); nothing here is called from anywhere else in this script block.
-
-   Reuses this engine's OWN primitives rather than duplicating a second noise
-   system: sculptFbm/sculptRidged/sculptBillow are built on vnoise()/hash()
-   (the same value-noise base every other terrain feature already uses), not
-   the PoC's own from-scratch seeded-permutation-table Perlin — so painted
-   features share one noise family with tectonics/erosion. They ARE new
-   functions (not reuses of the existing fbm()/ridged()) because those
-   hardcode 6 octaves / 0.5 persistence / 2.0 lacunarity, whereas every
-   sculpt feature exposes octaves/persistence/lacunarity as its own sliders;
-   ridgedFbm() parametrizes only octave count. sculptFbm intentionally returns
-   ~[-1,1] and sculptRidged/sculptBillow ~[0,1] (NOT the same convention as
-   the engine's own fbm()/ridged()) because every ported feature formula
-   below was tuned against the PoC's own Perlin-fbm range — this is a
-   deliberate range choice, not an inconsistency. smoothstep(a,b,x)/lerp/
-   clamp01 below are this engine's OWN existing globals (lines ~5598/6272/
-   5597) — reused as-is, not redefined.
-
-   Known, deliberate non-goal for P0: no world-mode equirectangular seam
-   wraparound — verified applyFeatureAlongCurve (this file's existing
-   plotline brush, just above) doesn't handle it either, so this matches
-   existing behavior rather than regressing or silently inventing a new
-   contract; a future pass could add wraparound to both uniformly. */
-
-// ~[-1,1]: each octave's vnoise() [0,1] output is remapped before summing.
-function sculptFbm(x,y,oct,pers,lac,seed){
-  let amp=1,freq=1,sum=0,norm=0;
-  for(let o=0;o<oct;o++){ sum+=amp*(vnoise(x*freq,y*freq,seed+o*131)*2-1); norm+=amp; amp*=pers; freq*=lac; }
-  return norm?sum/norm:0;
-}
-// [0,1], sharp crests — same shaping as this file's own ridged(), parametrized.
-function sculptRidged(x,y,oct,pers,lac,seed){
-  let amp=1,freq=1,sum=0,norm=0;
-  for(let o=0;o<oct;o++){ let n=vnoise(x*freq,y*freq,seed+o*131); n=1-Math.abs(n*2-1); n*=n; sum+=amp*n; norm+=amp; amp*=pers; freq*=lac; }
-  return norm?sum/norm:0;
-}
-// [0,1], puffy.
-function sculptBillow(x,y,oct,pers,lac,seed){
-  let amp=1,freq=1,sum=0,norm=0;
-  for(let o=0;o<oct;o++){ sum+=amp*Math.abs(vnoise(x*freq,y*freq,seed+o*131)*2-1); norm+=amp; amp*=pers; freq*=lac; }
-  return norm?sum/norm:0;
-}
-
-/* Closest point on a polyline: unsigned dist, signed dist (side), arclength s
-   at the projection. Pure geometry, no engine dependency. Powers meander,
-   one-sided cliffs, and river channels — same primitive as the PoC's. */
-function sculptNearestOnStroke(px,py,pts){
-  if(pts.length===1){
-    const dx=px-pts[0].x, dy=py-pts[0].y;
-    return { dist:Math.hypot(dx,dy), sd:Math.hypot(dx,dy), s:0 };
-  }
-  let best=Infinity, sd=0, sArc=0, acc=0;
-  for(let i=0;i<pts.length-1;i++){
-    const ax=pts[i].x, ay=pts[i].y, bx=pts[i+1].x, by=pts[i+1].y;
-    const dx=bx-ax, dy=by-ay; const L2=dx*dx+dy*dy || 1e-9;
-    let tt=((px-ax)*dx+(py-ay)*dy)/L2; tt=tt<0?0:(tt>1?1:tt);
-    const cx=ax+tt*dx, cy=ay+tt*dy;
-    const ex=px-cx, ey=py-cy; const dist=Math.hypot(ex,ey);
-    if(dist<best){
-      best=dist;
-      const cross = dx*ey - dy*ex;            // >0 left, <0 right of the stroke
-      sd = (cross<0?-1:1)*dist;
-      const segLen=Math.sqrt(L2);
-      sArc = acc + tt*segLen;
-    }
-    acc += Math.sqrt(L2);
-  }
-  return { dist:best, sd, s:sArc };
-}
-
-/* Shared, mutable per-pixel feature context (no per-pixel allocation) —
-   analogous to the PoC's `ctx`, renamed `_sculptFctx` to stay unambiguous in
-   a file with 200+ unrelated canvas-context locals named `ctx`. Each
-   feature's apply() sets .mode ('add'|'set') + .val, and optionally
-   .waterOut — an ABSTRACT desired water-surface height, deliberately not
-   wired to riverMask/riverFloor or lakeMask here (that hookup is a P3/P5
-   commit-time concern per the integration plan §7, not this pure primitive's
-   job: this function doesn't know about this engine's specific water
-   machinery, it only reports "this cell wants to be water at height X"). */
-const _sculptFctx = {
-  seed:0, P:null, nb:1, R:60, radius:60, cx:0, cy:0,
-  px:0, py:0, d:0, sd:0, s:0, rC:0, h0:0, w:0, k:0,
-  mode:'add', val:0, waterOut:NaN,
-  fbm(scale){ const b=this.nb*scale, P=this.P; return sculptFbm(this.px*b,this.py*b,P.octaves,P.persistence,P.lacunarity,this.seed); },
-  ridged(scale){ const b=this.nb*scale, P=this.P; return sculptRidged(this.px*b,this.py*b,P.octaves,P.persistence,P.lacunarity,this.seed); },
-  billow(scale){ const b=this.nb*scale, P=this.P; return sculptBillow(this.px*b,this.py*b,P.octaves,P.persistence,P.lacunarity,this.seed); },
-  meander(amp){ const s=this.s; return amp*(0.7*Math.sin(s*0.04)+0.3*Math.sin(s*0.11+1.3)); }
-};
-
-/* Feature registry — controls: [key,label,min,max,step,default]. Ported
-   verbatim from the PoC (same tuned formulas, same edgeChar/edgeFreqMul
-   fractal-edge character per landform); only ss(t)→smoothstep(0,1,t) and
-   clamp(v,0,1)→clamp01(v) substituted to reuse this engine's own globals
-   instead of the PoC's locally-defined equivalents. P0 ports the PoC's
-   original 11; the plan's 13-entry consolidated palette (merging in Ridge/
-   Escarpment/Freehand from the existing plotline+direct-paint tools) is a
-   P2 UI-content decision, not a P0 concern. */
-const SCULPT_FEATURES = {
-  hills: {
-    label:'Hills', icon:'⛰️', radial:false, edgeChar:0.55, edgeFreqMul:0.9,
-    controls:[['amplitude','Amplitude',0.02,0.3,0.005,0.11],
-              ['rollingFrequency','Rolling freq',0.5,4,0.1,1.4],
-              ['softness','Softness',0,1,0.01,0.7]],
-    apply(c,P){
-      const coarse = c.fbm(P.rollingFrequency)*0.5+0.5;
-      const fine   = c.fbm(P.rollingFrequency*2.6)*0.5+0.5;
-      const roll   = lerp(fine, coarse, P.softness);
-      c.mode='add'; c.val = P.amplitude*roll;
-    }
-  },
-  mountains: {
-    label:'Mountains', icon:'🏔️', radial:false, edgeChar:1.4, edgeFreqMul:1.5,
-    controls:[['mtnHeight','Height',0.1,0.55,0.01,0.42],
-              ['peakSharpness','Peak sharpness',0.6,3,0.05,1.5],
-              ['ridgeFrequency','Ridge freq',0.6,5,0.1,1.6],
-              ['ruggedness','Ruggedness',0,1,0.01,0.55]],
-    apply(c,P){
-      const r = c.ridged(P.ridgeFrequency);
-      const peak = Math.pow(r, P.peakSharpness);
-      const rug  = (c.billow(P.ridgeFrequency*3.5)*0.5+0.5)*P.ruggedness*0.3;
-      c.mode='add'; c.val = (peak + rug*peak)*P.mtnHeight;
-    }
-  },
-  plateau: {
-    label:'Plateau', icon:'🟫', radial:false, edgeChar:1.15, edgeFreqMul:0.65,
-    controls:[['plateauHeight','Rise',0.03,0.45,0.005,0.26],
-              ['terraces','Terraces',1,8,1,4],
-              ['plateauFreq','Detail freq',0.4,3,0.1,1.1]],
-    apply(c,P){
-      let terr = c.fbm(P.plateauFreq)*0.5+0.5;
-      const steps=Math.max(1,P.terraces|0);
-      terr = Math.round(terr*steps)/steps;
-      const level = P.seaLevel + P.plateauHeight + (terr-0.5)*0.03;
-      c.mode='set'; c.val = Math.max(c.h0, level);
-    }
-  },
-  canyon: {
-    label:'Canyon', icon:'🪨', radial:false, edgeChar:0.95, edgeFreqMul:1.2,
-    controls:[['canyonDepth','Depth',0.03,0.35,0.005,0.18],
-              ['wallSteepness','Wall steepness',0,1,0.01,0.7],
-              ['meander','Meander',0,0.8,0.01,0.35]],
-    apply(c,P){
-      const lat = c.meander(P.meander*c.R);
-      const dd  = Math.abs(c.sd - lat);
-      const t   = clamp01(dd/c.R);
-      const floorFrac=0.22;
-      let wall = t<floorFrac ? 1 : 1 - smoothstep(floorFrac,1,t);
-      wall = Math.pow(wall, 1/(0.35 + P.wallSteepness*1.4));
-      const floorN = (c.fbm(3)*0.5+0.5)*0.03;
-      c.mode='add'; c.val = -(P.canyonDepth*wall) + floorN*wall;
-    }
-  },
-  valley: {
-    label:'Valley', icon:'🏞️', radial:false, edgeChar:0.65, edgeFreqMul:0.85,
-    controls:[['valleyDepth','Depth',0.03,0.3,0.005,0.14],
-              ['valleyWidth','Width frac',0.3,1,0.02,0.85],
-              ['meander','Meander',0,0.8,0.01,0.3]],
-    apply(c,P){
-      const lat = c.meander(P.meander*c.R);
-      const dd  = Math.abs(c.sd - lat);
-      const t   = clamp01(dd/(c.R*P.valleyWidth));
-      const uProfile = Math.cos(t*Math.PI*0.5);   // 1 center -> 0 rim, smooth
-      c.mode='add'; c.val = -(P.valleyDepth*uProfile*uProfile);
-    }
-  },
-  river: {
-    label:'River', icon:'🏞', radial:false, edgeChar:0.4, edgeFreqMul:0.8,
-    controls:[['riverWidth','Width (px)',2,26,1,7],
-              ['riverDepth','Depth',0.02,0.22,0.005,0.09],
-              ['riverMeander','Meander',0,0.6,0.01,0.28],
-              ['branchNoise','Branch noise',0,1,0.01,0.5]],
-    apply(c,P){
-      const lat = c.meander(P.riverMeander*c.R);
-      const dd  = Math.abs(c.sd - lat);
-      const R   = Math.max(c.R, P.riverWidth+2);
-      const hw  = P.riverWidth*(1 + 0.45*P.branchNoise*(c.fbm(0.7)));
-      const bankF = 1 - smoothstep(hw, R, dd);            // 1 near channel -> 0 at brush edge
-      let target = c.h0 - P.riverDepth*0.45*bankF;
-      if(dd < hw){
-        const chan = 1 - smoothstep(hw*0.5, hw, dd);
-        target -= P.riverDepth*0.55*chan;
-        const finalBank = c.h0 + c.k*((c.h0 - P.riverDepth*0.45*bankF) - c.h0);
-        c.waterOut = finalBank - P.riverDepth*0.12;        // abstract "wants water here" surface height
-      }
-      c.mode='set'; c.val = target;
-    }
-  },
-  lake: {
-    label:'Lake', icon:'💧', radial:true, edgeChar:1.25, edgeFreqMul:0.75,
-    controls:[['lakeDepth','Depth',0.03,0.3,0.005,0.13],
-              ['lakeShore','Shore',0.05,0.6,0.01,0.25]],
-    apply(c,P){
-      const r = clamp01(c.rC/c.radius);
-      const bowl = 1 - r*r;
-      const floor = c.h0 - P.lakeDepth*bowl;
-      const surf  = c.h0 - P.lakeDepth*P.lakeShore;
-      c.mode='set'; c.val = floor;
-      const finalH = c.h0 + c.k*(floor - c.h0);
-      if(finalH < surf) c.waterOut = surf;
-    }
-  },
-  basin: {
-    label:'Basin', icon:'🛖', radial:false, edgeChar:0.85, edgeFreqMul:0.9,
-    controls:[['basinDepth','Depth',0.02,0.25,0.005,0.1],
-              ['basinRough','Floor rough',0,1,0.01,0.4]],
-    apply(c,P){
-      const t = clamp01(c.d/c.R);
-      const bowl = Math.pow(1-t,1.6);
-      const floorN = (c.fbm(2.2))*0.04*P.basinRough;
-      c.mode='add'; c.val = -(P.basinDepth*bowl) + floorN*bowl;
-    }
-  },
-  coastline: {
-    label:'Coastline', icon:'🌊', radial:false, edgeChar:1.5, edgeFreqMul:0.55,
-    controls:[['coastAmount','Amount',0.1,1,0.01,0.85],
-              ['coastRagged','Raggedness',0.4,4,0.1,1.6]],
-    apply(c,P){
-      const rag = c.fbm(P.coastRagged)*0.06;
-      const target = P.seaLevel - 0.05 + rag;
-      c.mode='set'; c.val = lerp(c.h0, target, P.coastAmount);
-    }
-  },
-  cliff: {
-    label:'Cliff', icon:'⛰', radial:false, edgeChar:0.6, edgeFreqMul:0.45,
-    controls:[['cliffHeight','Rise',0.05,0.45,0.005,0.22],
-              ['cliffSteep','Steepness',0.2,1,0.01,0.75]],
-    apply(c,P){
-      const transW = Math.max(1,(1.02-P.cliffSteep)*c.R*0.5);
-      const step = smoothstep(-transW, transW, c.sd);      // 0 low side -> 1 high side
-      c.mode='add'; c.val = P.cliffHeight*(step-0.5);
-    }
-  },
-  volcano: {
-    label:'Volcano', icon:'🌋', radial:true, edgeChar:1.3, edgeFreqMul:1.1,
-    controls:[['volcHeight','Cone height',0.15,0.6,0.01,0.45],
-              ['craterDepth','Crater depth',0,0.9,0.01,0.5],
-              ['volcRadius','Radius (px)',30,200,2,110],
-              ['flankRough','Flank rough',0,1,0.01,0.6]],
-    apply(c,P){
-      const r = clamp01(c.rC/c.radius);
-      const rim=0.55;
-      let profile;
-      if(r>=rim) profile = 1 - smoothstep(rim,1,r);
-      else       profile = lerp(1-P.craterDepth, 1, smoothstep(0,rim,r));
-      const flank = c.ridged(3.5)*0.12*P.flankRough*smoothstep(0,1,r/rim);
-      c.mode='add'; c.val = P.volcHeight*profile + flank;
-    }
-  }
-};
-const SCULPT_FEATURE_KEYS = Object.keys(SCULPT_FEATURES);
-const SCULPT_GLOBAL_KEYS = ['brushSize','hardness','intensity','noiseScale','octaves',
-                     'persistence','lacunarity','edgeNoise','seaLevel','baseLevel'];
-// seaLevel/baseLevel here are standalone-testability defaults only — P2's UI wiring
-// seeds a new stamp's g.seaLevel from the live state.seaLevel, not from this table.
-const SCULPT_GLOBAL_DEF = { brushSize:60, hardness:0.5, intensity:1.0, noiseScale:5,
-                     octaves:5, persistence:0.5, lacunarity:2.0, edgeNoise:0.55,
-                     seaLevel:0.42, baseLevel:0.45 };
-// salt per feature so identical seeds still differ between feature types
-const SCULPT_SALT = {}; SCULPT_FEATURE_KEYS.forEach((k,i)=> SCULPT_SALT[k]=(i+1)*1013);
-
-// radius the stamp reaches (for bbox + radial coverage)
-function sculptStampRadius(st){
-  if(st.type==='volcano') return st.f.volcRadius;
-  return st.g.brushSize;
-}
-function sculptStampBBox(st, gw, gh){
-  const rad = sculptStampRadius(st);
-  const feat = SCULPT_FEATURES[st.type];
-  const feather = Math.max(2, rad*(1-st.g.hardness));
-  const edgeChar = feat.edgeChar==null ? 1 : feat.edgeChar;
-  const edgeAmp = (st.g.edgeNoise||0) * rad * 0.34 * edgeChar;   // fractal edge warp reach
-  const m = rad + feather + edgeAmp + 3;
-  let x0,y0,x1,y1;
-  if(feat.radial){
-    let cx=0,cy=0; for(const p of st.pts){ cx+=p.x; cy+=p.y; } cx/=st.pts.length; cy/=st.pts.length;
-    x0=cx-m; y0=cy-m; x1=cx+m; y1=cy+m; st._cx=cx; st._cy=cy;
-  } else {
-    x0=y0=Infinity; x1=y1=-Infinity;
-    for(const p of st.pts){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); }
-    x0-=m; y0-=m; x1+=m; y1+=m;
-  }
-  return { x0:Math.max(0,x0|0), y0:Math.max(0,y0|0), x1:Math.min(gw-1,Math.ceil(x1)), y1:Math.min(gh-1,Math.ceil(y1)) };
-}
-
-/* Composite one stamp in place into hArr/wArr (reads h0 from hArr, writes
-   back). gw/gh are the grid dimensions (generalized from the PoC's fixed
-   512x512 SIZE, since Cartalith's GW/GH vary by resolution/region-vs-world).
-   Pure: only reads/writes the two passed arrays within the stamp's own
-   bbox — the same dirty-rect locality the PoC's headless suite asserts. */
-function sculptApplyStamp(st, hArr, wArr, gw, gh){
-  if(st.hidden || !st.pts || st.pts.length===0) return;
-  const feat = SCULPT_FEATURES[st.type];
-  const P = Object.assign({}, st.g, st.f);
-  const R = st.g.brushSize;
-  const rad = sculptStampRadius(st);
-  const bb = sculptStampBBox(st, gw, gh);
-  const feather = feat.radial ? Math.max(2, rad*(1-P.hardness)) : Math.max(1.5, R*(1-P.hardness));
-  const cx = st._cx, cy = st._cy;
-  const seed = (st.seed ^ SCULPT_SALT[st.type]) >>> 0;
-  _sculptFctx.seed = seed;
-  _sculptFctx.P = P; _sculptFctx.nb = P.noiseScale/Math.max(8,gw); _sculptFctx.R = R; _sculptFctx.radius = rad; _sculptFctx.cx=cx; _sculptFctx.cy=cy;
-  // Fractal edge warp (per-feature edgeChar/edgeFreqMul): see the PoC's own
-  // README for the worked rationale per landform (coastlines ragged & low-
-  // frequency, mountain ridgelines tight & high-frequency, rivers/cliffs
-  // comparatively clean/fault-trace-like).
-  const edgeChar = feat.edgeChar==null ? 1 : feat.edgeChar;
-  const edgeFreqMul = feat.edgeFreqMul==null ? 1 : feat.edgeFreqMul;
-  const edgeAmp = P.edgeNoise * rad * 0.34 * edgeChar;
-  const warp = edgeAmp > 0.01;
-  const wf = (2.3 / Math.max(8, rad)) * edgeFreqMul;
-  const wf2 = wf * 3.4;   // finer companion octave: mottles the transition band itself
-  const pts = st.pts;
-  for(let py=bb.y0; py<=bb.y1; py++){
-    for(let px=bb.x0; px<=bb.x1; px++){
-      let qx=px, qy=py;
-      if(warp){
-        const wx = sculptFbm(px*wf, py*wf, P.octaves, P.persistence, P.lacunarity, seed);
-        const wy = sculptFbm((px+211.3)*wf, (py+57.7)*wf, P.octaves, P.persistence, P.lacunarity, seed);
-        qx = px + wx*edgeAmp; qy = py + wy*edgeAmp;
-      }
-      let cov, d=0, sd=0, s=0, rC=0;
-      if(feat.radial){
-        rC = Math.hypot(qx-cx, qy-cy);
-        cov = smoothstep(0,1,(rad - rC)/feather);
-      } else {
-        const g = sculptNearestOnStroke(qx,qy,pts);
-        d=g.dist; sd=g.sd; s=g.s;
-        cov = smoothstep(0,1,(R - d)/feather);
-      }
-      if(cov<=0) continue;
-      if(warp && cov<1){
-        const detail = sculptFbm(px*wf2+500.7, py*wf2-330.2, Math.max(2,P.octaves-1), P.persistence, P.lacunarity, seed);
-        cov = clamp01(cov + detail*0.17*P.edgeNoise*edgeChar);
-        if(cov<=0) continue;
-      }
-      const i = py*gw+px;
-      _sculptFctx.px=px; _sculptFctx.py=py; _sculptFctx.d=d; _sculptFctx.sd=sd; _sculptFctx.s=s; _sculptFctx.rC=rC;
-      _sculptFctx.h0=hArr[i]; _sculptFctx.w=cov; _sculptFctx.k=cov*P.intensity; _sculptFctx.waterOut=NaN;
-      feat.apply(_sculptFctx,P);
-      const nh = _sculptFctx.mode==='add' ? _sculptFctx.h0 + _sculptFctx.k*_sculptFctx.val
-                                          : _sculptFctx.h0 + _sculptFctx.k*(_sculptFctx.val - _sculptFctx.h0);
-      hArr[i] = clamp01(nh);
-      if(wArr && _sculptFctx.waterOut===_sculptFctx.waterOut && _sculptFctx.waterOut>wArr[i]) wArr[i]=_sculptFctx.waterOut;
-    }
-  }
-}
 /* v0.94 (owner request: "draw rivers as ways, as in the legacy cartalith app"): V1.915 drew every
    travel network — river/road/rail/sea — as one shared "way" abstraction: a stroked, Catmull-Rom-
    sampled polyline. Gen1's rivers instead render as a per-pixel raster blend (surfaceColor sampling
@@ -11627,11 +11274,70 @@ function _civFactionColor(i){
   else if(h<240){r=0;g=x;b=c;} else if(h<300){r=x;g=0;b=c;} else {r=c;g=0;b=x;}
   return [Math.round((r+m)*255),Math.round((g+m)*255),Math.round((b+m)*255)];
 }
+
+/* Fantasy name generator's syllable/suffix pools */
+const _SYL=['ar','bel','cor','dun','el','far','gol','hal','ith','kor',
+  'lan','mor','nor','os','par','quel','ral','sen','tor','ul',
+  'val','wyn','yr','zan','aer','bri','cas','dor','eth','fen',
+  'gal','hur','ire','kar','las','mel','nar','osh','pre','ris',
+  'syl','tur','vol','war','xan','yel','zel'];
+const _SFX=['','','','heim','ford','burg','ton','vale','moor',
+  'fell','wick','stead','holt','crest','mere','haven'];
+
+/* v1.07 (owner: "implement the top 6 borrow list" — #1 culture-flavored naming, after Azgaar's
+   FMG per-culture namesbases): seven distinct syllable/suffix pools so a faction's settlements
+   read as one people rather than the same single generator everywhere. 'common' is the original
+   _SYL/_SFX pool verbatim — a faction left on 'common' (or any pre-v1.07 save, which has no
+   civFactionCulture at all) names exactly as before. Settlement naming isn't part of the
+   hash_gen1.js bit-identity battery (that hashes field/temp/rain/flow/render only), so this is
+   free to change without touching cross-version neutrality. Declared here (immediately after
+   CIV_FACTIONS/_civFactionColor, well before civFactionNames/civFactionCulture below) because
+   those two are computed at module top-level via a .map() that calls _civDefaultCulture — a
+   const declared later in the same script block would still be in its temporal dead zone at
+   that point and throw. */
+const CIV_CULTURES=[
+  {key:'common',label:'Common',
+    syl:_SYL, sfx:_SFX},
+  {key:'imperial',label:'Imperial',
+    syl:['aur','cas','dom','flav','gal','imp','jun','luc','marc','nov',
+      'oct','pris','quin','reg','sev','tib','ulp','val','arc','cor'],
+    sfx:['ium','ora','ara','um','opolis','ica','iana','forum','portus','castra']},
+  {key:'highland',label:'Highland',
+    syl:['brak','dun','gorm','krag','thorn','bruk','garn','hask','krun','morg',
+      'stok','vrag','and','bald','crun','dagr','forn','grim','hurn','kar'],
+    sfx:['dun','crag','hold','fell','stone','peak','ridge','cairn','tor','ward']},
+  {key:'desert',label:'Desert',
+    syl:['ash','bahr','dahn','far','ghal','har','irs','kad','mir','nash',
+      'qir','rah','sah','taz','ush','wah','zaf','abed','yus','omar'],
+    sfx:['abad','sar','ir','oasis','dune','well','rest','march','gate','span']},
+  {key:'riverlands',label:'Riverlands',
+    syl:['aven','bryn','del','esh','flor','ila','lor','mira','ness','ova',
+      'rev','sila','tam','ula','ves','wela','isla','oren','anwe','ely'],
+    sfx:['ford','mere','brook','wick','vale','mill','reach','wash','bend','shallows']},
+  {key:'sylvan',label:'Sylvan',
+    syl:["a'el","el'a",'fae','ily','leth','mira','nym','ora','sil','thal',
+      'vel','wyn','ael','ith','lor','sae','tael','yl','enne','iel'],
+    sfx:['leaf','thorn','wood','glen','bough','dell','shade','bloom','hollow','rest']},
+  {key:'maritime',label:'Maritime',
+    syl:['bjor','fjor','hald','kell','lund','nord','skal','torv','vik','yorn',
+      'bren','fjal','holv','karsk','morn','sker','torg','ulve','vann','yist'],
+    sfx:['holm','ness','bay','port','haven','skerry','sound','strand','wick','fjord']}
+];
+function _civCultureByKey(key){
+  for(const c of CIV_CULTURES) if(c.key===key) return c;
+  return CIV_CULTURES[0];
+}
+/* Deterministic default so a faction has flavor the instant it exists, with no user setup:
+   fid 0 (Unclaimed) is always 'common'; the six built-in factions (and any appended beyond
+   them) cycle the six non-common cultures in CIV_CULTURES's declared order. */
+function _civDefaultCulture(fid){ return CIV_CULTURES[fid%CIV_CULTURES.length].key; }
+
 function _civAddFaction(){
   const i=CIV_FACTIONS.length;
   const name='Faction '+i;
   CIV_FACTIONS.push([name,_civFactionColor(i)]);
   civFactionNames.push(name);
+  civFactionCulture.push(_civDefaultCulture(i));
   _civBuildFactionPicker(); if(typeof _civBuildMapFilterUI==='function') _civBuildMapFilterUI();
 }
 function _civRemoveFaction(){
@@ -11642,7 +11348,7 @@ function _civRemoveFaction(){
   const terr=civTerritory;
   if(terr){ for(let i=0;i<terr.length;i++) if(terr[i]===idx) terr[i]=0; _civTerrGen++; }   /* v0.148 */
   if(_civActiveFaction===idx) _civActiveFaction=Math.max(1,idx-1);
-  CIV_FACTIONS.pop(); civFactionNames.pop();
+  CIV_FACTIONS.pop(); civFactionNames.pop(); civFactionCulture.pop();
   /* the removed index must not linger in the visibility filter — a stale hidden-faction index would
      otherwise persist referencing nothing once the faction itself is gone */
   { const fo=state.mapFilter.factionsOff, oi=fo.indexOf(idx); if(oi>=0) fo.splice(oi,1); }
@@ -11724,6 +11430,7 @@ let civYear      = 0;
 let civWays      = [];          // auto-generated road/sea network [{pts,km,sea,name}]
 let civJourneys  = [];          // user-planned routes [{pts,km,brks?,sea,name,groupSize,plan?}]
 let civFactionNames = CIV_FACTIONS.map(f=>f[0]);
+let civFactionCulture = CIV_FACTIONS.map((f,i)=>_civDefaultCulture(i));   /* v1.07: naming culture per faction, parallel to civFactionNames */
 let _civWaypoints = [];         // in-progress route waypoints [x,y]
 let _civWayWaypoints = [];      // in-progress manual way (infrastructure) waypoints [x,y]
 let _civActiveFaction = 1;
@@ -12564,7 +12271,7 @@ function _civPopulatePlaceEditor(host,p,rowRefs){
   const traitHtml=CIV_TRAITS.map(t=>`<span class="pill${p.traits.includes(t.key)?' on':''}" data-trait="${t.key}">${t.glyph} ${t.label}</span>`).join('');
   const facOpts=CIV_FACTIONS.map((f,i)=>`<option value="${i}"${p.faction===i?' selected':''}>${civFactionNames[i]||f[0]}</option>`).join('');
   host.innerHTML=`
-    <div class="row"><label for="_civPeName">Name</label><input id="_civPeName" type="text" style="flex:1" value="${(p.name||'').replace(/"/g,'&quot;')}"></div>
+    <div class="row"><label for="_civPeName">Name</label><input id="_civPeName" type="text" style="flex:1" value="${(p.name||'').replace(/"/g,'&quot;')}">${!isPOI?`<button id="_civPeNameRoll" type="button" title="Re-roll a name from this settlement's naming culture (Polity below)" style="flex:0 0 auto;padding:4px 8px">🎲</button>`:''}</div>
     <div class="row"><label for="_civPeCat">Category</label><select id="_civPeCat" style="flex:1">
       <option value="settlement"${!isPOI?' selected':''}>Settlement</option>
       <option value="poi"${isPOI?' selected':''}>Point of interest</option>
@@ -12584,6 +12291,15 @@ function _civPopulatePlaceEditor(host,p,rowRefs){
     ${!isPOI?`<button id="_civPeConnect" style="width:100%;margin-top:6px">🛤 Connect to road network</button>`:''}
     <button id="_civPeDelete" style="width:100%;margin-top:6px;border-color:var(--warn)">Delete place</button>`;
   document.getElementById('_civPeName').oninput=()=>{ p.name=document.getElementById('_civPeName').value; if(rowRefs&&rowRefs.nameSpan) rowRefs.nameSpan.textContent=p.name||'(unnamed)'; drawCivLayerAuto(); };
+  /* v1.07: manual re-roll draws from the settlement's OWN faction's namesbase (civFactionCulture),
+     so a rename always matches the polity it belongs to, not the global 'common' pool. */
+  const nameRollEl=document.getElementById('_civPeNameRoll'); if(nameRollEl) nameRollEl.onclick=()=>{
+    const rng=_civRng((Math.random()*4294967295)>>>0);
+    p.name=_civSettleName(rng,p.faction);
+    document.getElementById('_civPeName').value=p.name;
+    if(rowRefs&&rowRefs.nameSpan) rowRefs.nameSpan.textContent=p.name||'(unnamed)';
+    drawCivLayerAuto();
+  };
   document.getElementById('_civPeCat').onchange=()=>{
     const cat=document.getElementById('_civPeCat').value;
     if(cat==='poi'&&!CIV_POI_KEYS.has(p.kind)) p.kind=CIV_POI_TYPES[0].key;
@@ -14518,19 +14234,13 @@ function _civRng(seed){
 }
 
 /* Fantasy name generator */
-const _SYL=['ar','bel','cor','dun','el','far','gol','hal','ith','kor',
-  'lan','mor','nor','os','par','quel','ral','sen','tor','ul',
-  'val','wyn','yr','zan','aer','bri','cas','dor','eth','fen',
-  'gal','hur','ire','kar','las','mel','nar','osh','pre','ris',
-  'syl','tur','vol','war','xan','yel','zel'];
-const _SFX=['','','','heim','ford','burg','ton','vale','moor',
-  'fell','wick','stead','holt','crest','mere','haven'];
-
-function _civSettleName(rng){
+function _civSettleName(rng,faction){
+  const cul=_civCultureByKey((faction!=null&&civFactionCulture[faction])||'common');
+  const syl=cul.syl,sfx=cul.sfx;
   const n=2+((rng()*3)|0);
-  let s=''; for(let i=0;i<n;i++) s+=_SYL[(rng()*_SYL.length)|0];
-  const sfx=_SFX[(rng()*_SFX.length)|0];
-  return s[0].toUpperCase()+s.slice(1)+sfx;
+  let s=''; for(let i=0;i<n;i++) s+=syl[(rng()*syl.length)|0];
+  const suf=sfx[(rng()*sfx.length)|0];
+  return s[0].toUpperCase()+s.slice(1)+suf;
 }
 
 /* Snap a cell onto dry land: if (gx,gy) is below sea OR in a water body (ocean/lake —
@@ -16633,7 +16343,7 @@ function _civIterativeAutoWorld(passes){
     if(kind==='capital'||kind==='city') traits.push('trade_hub');
     const faction=contFaction[c.contId]||1;
     const basePop=kind==='capital'?15000:kind==='city'?6000:kind==='town'?1500:kind==='village'?400:120;
-    return {x:c.x,y:c.y,name:_civSettleName(rng),kind,klass:kind,category:'settlement',
+    return {x:c.x,y:c.y,name:_civSettleName(rng,faction),kind,klass:kind,category:'settlement',
             faction,pop:Math.round(basePop*(0.7+c.suit*0.8)*(0.8+rng()*0.4)),traits};
   });
 
@@ -16711,7 +16421,7 @@ function _civIterativeAutoWorld(passes){
          scales with route traffic through the junction (usageCount), unlike the
          suitability-seeded settlements whose pop comes from the land's carrying capacity. */
       const tradeK=1+0.18*Math.min(12,c.u);
-      places.push({x:gx,y:gy,name:_civSettleName(rng),kind,klass:kind,category:'settlement',
+      places.push({x:gx,y:gy,name:_civSettleName(rng,faction),kind,klass:kind,category:'settlement',
         faction,pop:Math.round(basePop*tradeK*(0.9+rng()*0.3)),tradePop:Math.round(basePop*tradeK),traits});
     }
     if(chosen.length){
@@ -17060,6 +16770,7 @@ function _civSyncToState(){
     journeys:civJourneys.map(j=>({pts:j.pts,km:j.km,brks:j.brks&&j.brks.length?j.brks:undefined,sea:!!j.sea,name:j.name||'',groupSize:j.groupSize||10,plan:j.plan?JSON.parse(JSON.stringify(j.plan)):null})),
     year:civYear,
     factionNames:[...civFactionNames],
+    factionCulture:[...civFactionCulture],
   };
 }
 function _civSyncFromState(){
@@ -17081,6 +16792,11 @@ function _civSyncFromState(){
   // (deterministic colours) to match, or trim it back down if it somehow has more.
   while(CIV_FACTIONS.length<civFactionNames.length) CIV_FACTIONS.push([civFactionNames[CIV_FACTIONS.length]||('Faction '+CIV_FACTIONS.length),_civFactionColor(CIV_FACTIONS.length)]);
   while(CIV_FACTIONS.length>Math.max(civFactionNames.length,2)) CIV_FACTIONS.pop();
+  /* v1.07: civFactionCulture is a save from a version that has it, or (older save / no field at
+     all) rebuilt from the deterministic per-index default — never left short/long of CIV_FACTIONS. */
+  civFactionCulture=(c.factionCulture&&c.factionCulture.length)?[...c.factionCulture]:CIV_FACTIONS.map((f,i)=>_civDefaultCulture(i));
+  while(civFactionCulture.length<CIV_FACTIONS.length) civFactionCulture.push(_civDefaultCulture(civFactionCulture.length));
+  while(civFactionCulture.length>CIV_FACTIONS.length) civFactionCulture.pop();
   _civBuildTimelineUI();
   _civBuildFactionPicker();
   _civBuildMapFilterUI();
@@ -17230,6 +16946,21 @@ function _civBuildFactionPicker(){
     btn.onclick=()=>{ _civActiveFaction=fid; _civBuildFactionPicker(); };
     if(!none) btn.ondblclick=e=>{ e.stopPropagation(); _civRenameFaction(fid, name); };
     wrap.appendChild(btn);
+    /* v1.07: naming culture picker — shapes _civSettleName's syllable/suffix pool for this
+       faction's settlements (borrow-list #1, after FMG's per-culture namesbases). Unclaimed (fid 0)
+       has no settlements of its own, so it's skipped. */
+    if(!none){
+      const sel=document.createElement('select');
+      sel.title='Naming culture — which namesbase this faction\'s settlements draw from';
+      sel.style.cssText='font-size:.68rem;padding:1px 2px;border-radius:6px;border:1px solid var(--faint);background:var(--panel2);color:var(--dim);max-width:76px';
+      CIV_CULTURES.forEach(c=>{
+        const o=document.createElement('option'); o.value=c.key; o.textContent=c.label;
+        if((civFactionCulture[fid]||'common')===c.key) o.selected=true;
+        sel.appendChild(o);
+      });
+      sel.onchange=()=>{ civFactionCulture[fid]=sel.value; };
+      wrap.appendChild(sel);
+    }
     el.appendChild(wrap);
   });
 }
