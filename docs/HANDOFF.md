@@ -9,17 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.07.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.08.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.08 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.06` are kept and never edited.
+  (v1.09 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.07` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
   version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
-  naming — **DONE, v1.07**. (2) setup-gate world archetype presets. (3) GeoJSON/GIS export. (4)
-  province tier + religions layer. (5) submap/resample UX. (6) label placement + per-layer style
-  editors. Items 2–6 not yet started.
+  naming — **DONE, v1.07**. (2) setup-gate world archetype presets — **DONE, v1.08**. (3) GeoJSON/GIS
+  export. (4) province tier + religions layer. (5) submap/resample UX. (6) label placement + per-layer
+  style editors. Items 3–6 not yet started.
+- **v1.08 — owner: "implement the top 6 borrow list from the research" (#2 setup-gate world archetype
+  presets).** Cartalith already had the underlying system — `ARCHETYPES` (earth/supercontinent/
+  archipelago/volcanic/rift) + `state.world_structure`'s continentality-field steering, exposed in the
+  sidebar's Generate → World → World Structure panel — but only reachable AFTER a world existed, behind
+  an "Enable continental steering" checkbox. Added a **World shape** preset row to the setup gate
+  (`#suArchSeg`): Classic (default — `world_structure` disabled, bit-identical) plus Earth-like/
+  Pangaea/Archipelago/Volcanic Isles/Rift Valleys, reusing the same `ARCHETYPES` data. Picking a preset
+  calls the existing `deriveFromWorldStructure()` (invariant 5) before the upcoming commit; Classic
+  restores true defaults exactly (not just `enabled=false`) so bouncing between presets and landing
+  back on Classic reproduces the untouched default world. Verified: engine **923/923**, UME **831/831**,
+  hash vs v1.07 **ALL IDENTICAL** (hash harness bypasses the gate entirely — structurally unaffected),
+  smoke **186/186** (+3). Playwright-probed: untouched-default and explicit-Classic-click produce an
+  identical field hash; Pangaea/Archipelago each differ materially from Classic and each other.
 - **v1.07 — owner: "implement the top 6 borrow list from the research" (#1 culture-flavored naming).**
   `_civSettleName` was one global syllable/suffix generator for every faction. Added seven **naming
   cultures** (`CIV_CULTURES`: common/imperial/highland/desert/riverlands/sylvan/maritime), a parallel

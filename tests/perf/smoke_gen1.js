@@ -141,6 +141,30 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { present: true, pickerSelects, adherenceRate: hits / N, rollBtnExists: !!rollBtn, rerolled, restored, savedArrLen: savedArr.length };
   });
 
+  // ── v1.08 (borrow-list #2, after Azgaar's FMG heightmap templates): setup-gate world-shape
+  // presets. Reuses the existing ARCHETYPES/state.world_structure continentality system (already
+  // exposed post-generate in Generate → World → World Structure) but surfaces it as one-click
+  // buttons on the setup gate, before the first generate. Runs against the suite's already-
+  // committed shared world (reopening the gate via _setupOpen('generate') without re-committing),
+  // and restores world_structure/tect exactly afterward so later assertions see an untouched world.
+  R.archetypePresets = await page.evaluate(() => {
+    if (typeof ARCHETYPES === 'undefined' || typeof _suApplyArchetype !== 'function') return { present: false };
+    const wsSnap = JSON.parse(JSON.stringify(state.world_structure));
+    const tectSnap = { plates: state.tect.plates, vel: state.tect.vel, tectonicGraph: state.tect.tectonicGraph, foldIntensity: state.tect.foldIntensity, trenchDepth: state.tect.trenchDepth };
+    _setupOpen('generate');
+    const archSeg = document.getElementById('suArchSeg');
+    const buttonCount = archSeg ? archSeg.children.length : 0;
+    const classicOnByDefault = !!archSeg && archSeg.querySelector('[data-arc="classic"]').classList.contains('on');
+    archSeg.querySelector('[data-arc="supercontinent"]').click();
+    const afterPangaea = { enabled: state.world_structure.enabled, archetype: state.world_structure.archetype, continentality: state.world_structure.continentality, tectonicGraph: state.tect.tectonicGraph, buttonOn: archSeg.querySelector('[data-arc="supercontinent"]').classList.contains('on') };
+    archSeg.querySelector('[data-arc="classic"]').click();
+    const afterClassic = { enabled: state.world_structure.enabled, plates: state.tect.plates, tectonicGraph: state.tect.tectonicGraph, buttonOn: archSeg.querySelector('[data-arc="classic"]').classList.contains('on') };
+    _setupOpen('hide');
+    Object.assign(state.world_structure, wsSnap);
+    Object.assign(state.tect, tectSnap);
+    return { present: true, buttonCount, classicOnByDefault, afterPangaea, afterClassic };
+  });
+
   // ── v0.70: bug-fix batch ──
   // (a) sea level moves the coastline in the base biome view (was cached by _civBakeKey without seaLevel)
   R.seaMovesCoast = await page.evaluate(() => {
@@ -1695,6 +1719,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.07: a faction pinned to a distinctive culture names its settlements from that culture\'s own suffix pool', R.cultureNaming.adherenceRate > 0.9);
   A('v1.07: the settlement editor\'s 🎲 re-rolls a name from the settlement\'s own faction culture', R.cultureNaming.rollBtnExists && R.cultureNaming.rerolled);
   A('v1.07: civFactionCulture round-trips through the same state.civ sync as faction names', R.cultureNaming.savedArrLen > 0 && R.cultureNaming.restored);
+  // ── v1.08: setup-gate world archetype presets (borrow-list #2) ──
+  A('v1.08: setup gate has a World-shape preset row (Classic + 5 archetypes), Classic selected by default', R.archetypePresets.present && R.archetypePresets.buttonCount === 6 && R.archetypePresets.classicOnByDefault);
+  A('v1.08: picking Pangaea enables world_structure with the supercontinent bundle and derives orogeny before commit', R.archetypePresets.afterPangaea.enabled === true && R.archetypePresets.afterPangaea.archetype === 'supercontinent' && R.archetypePresets.afterPangaea.continentality === 0.6 && R.archetypePresets.afterPangaea.tectonicGraph === true && R.archetypePresets.afterPangaea.buttonOn);
+  A('v1.08: picking Classic after an archetype restores true defaults (14 plates, tectonicGraph off)', R.archetypePresets.afterClassic.enabled === false && R.archetypePresets.afterClassic.plates === 14 && R.archetypePresets.afterClassic.tectonicGraph === false && R.archetypePresets.afterClassic.buttonOn);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
