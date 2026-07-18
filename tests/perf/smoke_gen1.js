@@ -212,6 +212,81 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     }).catch(e => { document.createElement = realCreateElement; state.places = placesSnap; civWays = waysSnap; civTerritory = terrSnap; _civTerrGen = terrGenSnap + 1; return { present: true, ok: false, error: e.message }; });
   });
 
+  // ── v1.10 (borrow-list #4, after FMG provinces — "a mid-tier region between faction and
+  // settlement" — plus a scoped-down optional religions layer): auto-subdivides a faction's
+  // territory into one province per city-tier+ settlement (falling back to a single province
+  // seeded by the biggest settlement when there's no city+), renders a per-province tint
+  // (opt-in), and gives each faction a simple categorical state religion (not a spatial spread
+  // simulation — the research doc itself flags that half as optional). Builds two synthetic
+  // faction territories (one with 2 city-tier seeds, one with only a village) so both the
+  // subdivided and single-province-fallback paths are exercised, and checks GeoJSON province
+  // export tiles the parent territory with no gaps/overlaps (combined province area == territory
+  // area). Snapshots/restores places/ways/territory/province/religion so later assertions see
+  // the suite's original shared world untouched.
+  R.provinces = await page.evaluate(() => {
+    if (typeof _civGenerateProvinces !== 'function' || typeof CIV_RELIGIONS === 'undefined') return { present: false };
+    const placesSnap = state.places, waysSnap = civWays, terrSnap = civTerritory, terrGenSnap = _civTerrGen;
+    const provSnap = civProvince, provListSnap = CIV_PROVINCES, provGenSnap = _civProvGen, religionSnap = civFactionReligion.slice();
+    const stampDisc = (cx, cy, R2, fid) => { for (let dy = -R2; dy <= R2; dy++) for (let dx = -R2; dx <= R2; dx++) { if (dx * dx + dy * dy > R2 * R2) continue; const x = cx + dx, y = cy + dy; if (x < 0 || x >= GW || y < 0 || y >= GH) continue; civTerritory[y * GW + x] = fid; } };
+    civTerritory = new Uint8Array(GW * GH);
+    stampDisc((GW * 0.3) | 0, (GH * 0.5) | 0, 30, 1);
+    stampDisc((GW * 0.75) | 0, (GH * 0.5) | 0, 15, 2);
+    _civTerrGen++;
+    state.places = []; civWays = [];
+    const mk = (x, y, kind, faction, name) => ({ x, y, kind, klass: kind, category: 'settlement', faction, name, pop: 1000, traits: [] });
+    state.places.push(mk((GW * 0.3 - 15) | 0, (GH * 0.5) | 0, 'city', 1, 'Alpha'));
+    state.places.push(mk((GW * 0.3 + 15) | 0, (GH * 0.5 - 15) | 0, 'city', 1, 'Beta'));
+    state.places.push(mk((GW * 0.75) | 0, (GH * 0.5) | 0, 'village', 2, 'Delta'));
+    _civGenerateProvinces();
+    const prov1 = CIV_PROVINCES.filter(p => p.faction === 1), prov2 = CIV_PROVINCES.filter(p => p.faction === 2);
+    let crossFactionLeak = false;
+    for (let i = 0; i < civProvince.length; i++) { const pv = civProvince[i]; if (!pv) continue; const prov = CIV_PROVINCES.find(p => p.id === pv); if (prov.faction !== civTerritory[i]) { crossFactionLeak = true; break; } }
+    // rendering diff BEFORE the religion sync-restore below (which deliberately clears the
+    // non-persisted province cache, same as loading a project)
+    state.viz.provinces = false; renderNow();
+    const before = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+    state.viz.provinces = true; drawCivLayerAuto(); renderNow();
+    const after = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data;
+    let diffPx = 0; for (let i = 0; i < before.length; i += 4) if (before[i] !== after[i] || before[i + 1] !== after[i + 1] || before[i + 2] !== after[i + 2]) diffPx++;
+    // GeoJSON province export tiles the parent territory (combined area == territory area)
+    let captured = null;
+    const realCreateElement = document.createElement.bind(document);
+    document.createElement = (tag) => { const el = realCreateElement(tag); if (tag === 'a') { el.click = () => { captured = { href: el.href }; }; } return el; };
+    return exportGeoJSON().then(async () => {
+      document.createElement = realCreateElement;
+      const resp = await fetch(captured.href);
+      const fc = JSON.parse(await resp.text());
+      const provFeats = fc.features.filter(f => f.properties.layer === 'province');
+      const ringArea = (ring) => { let s = 0; for (let i = 0; i < ring.length - 1; i++) s += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]; return Math.abs(s / 2); };
+      let provAreaKm2 = 0; for (const f of provFeats) for (const poly of f.geometry.coordinates) { provAreaKm2 += ringArea(poly[0]); for (let h = 1; h < poly.length; h++) provAreaKm2 -= ringArea(poly[h]); }
+      let paintedCells = 0; for (let i = 0; i < civTerritory.length; i++) if (civTerritory[i]) paintedCells++;
+      const cellKm = state.mapWidthKm / GW, territoryAreaKm2 = paintedCells * cellKm * cellKm;
+      // religion: picker DOM presence + persistence round-trip
+      civFactionReligion[1] = 'sun_cult'; civFactionReligion[2] = 'sea_lords';
+      _civBuildFactionPicker();
+      const religionSelects = document.querySelectorAll('#civFactionPicker select[title="State religion"]').length;
+      _civSyncToState();
+      const savedReligionLen = state.civ.factionReligion.length;
+      civFactionReligion[1] = 'none';
+      _civSyncFromState();
+      const religionRestored = civFactionReligion[1] === 'sun_cult' && civFactionReligion[2] === 'sea_lords';
+      state.places = placesSnap; civWays = waysSnap; civTerritory = terrSnap; _civTerrGen = terrGenSnap + 1;
+      civProvince = provSnap; CIV_PROVINCES = provListSnap; _civProvGen = provGenSnap + 1; civFactionReligion = religionSnap;
+      _civBuildFactionPicker();
+      return {
+        present: true, ok: true, prov1Count: prov1.length, prov2Count: prov2.length, prov2Name: prov2[0] && prov2[0].name,
+        crossFactionLeak, diffPx, provFeatCount: provFeats.length, provGeomTypes: [...new Set(provFeats.map(f => f.geometry.type))],
+        areaRatio: provAreaKm2 / territoryAreaKm2, religionSelects, savedReligionLen, religionRestored
+      };
+    }).catch(e => {
+      document.createElement = realCreateElement;
+      state.places = placesSnap; civWays = waysSnap; civTerritory = terrSnap; _civTerrGen = terrGenSnap + 1;
+      civProvince = provSnap; CIV_PROVINCES = provListSnap; _civProvGen = provGenSnap + 1; civFactionReligion = religionSnap;
+      _civBuildFactionPicker();
+      return { present: true, ok: false, error: e.message };
+    });
+  });
+
   // ── v0.70: bug-fix batch ──
   // (a) sea level moves the coastline in the base biome view (was cached by _civBakeKey without seaLevel)
   R.seaMovesCoast = await page.evaluate(() => {
@@ -1773,6 +1848,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // ── v1.09: GeoJSON/GIS export (borrow-list #3) ──
   A('v1.09: exportGeoJSON downloads a valid FeatureCollection with settlements, ways and rivers', R.geoExport.present && R.geoExport.ok && R.geoExport.isFC && R.geoExport.hasNote && R.geoExport.hasSettlements && R.geoExport.hasWays && R.geoExport.hasRivers && /\.geojson$/.test(R.geoExport.download));
   A('v1.09: territory outline is a MultiPolygon whose shoelace area matches the painted cell area', R.geoExport.territoryGeomType === 'MultiPolygon' && Math.abs(R.geoExport.areaRatio - 1) < 0.001);
+  // ── v1.10: province tier + optional religions layer (borrow-list #4) ──
+  A('v1.10: one province per city-tier+ settlement, falling back to a single province with no city+', R.provinces.present && R.provinces.prov1Count === 2 && R.provinces.prov2Count === 1 && R.provinces.prov2Name === 'Delta Province');
+  A('v1.10: a province never crosses its own faction\'s territory boundary', R.provinces.crossFactionLeak === false);
+  A('v1.10: enabling the provinces tint produces a real pixel difference on the civ canvas', R.provinces.diffPx > 0);
+  A('v1.10: exported province MultiPolygons exactly tile the parent territory (combined area == territory area)', R.provinces.provFeatCount === 3 && R.provinces.provGeomTypes.length === 1 && R.provinces.provGeomTypes[0] === 'MultiPolygon' && Math.abs(R.provinces.areaRatio - 1) < 0.001);
+  A('v1.10: every non-Unclaimed faction gets a state-religion picker, and civFactionReligion round-trips through sync', R.provinces.religionSelects >= 6 && R.provinces.savedReligionLen > 0 && R.provinces.religionRestored);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
