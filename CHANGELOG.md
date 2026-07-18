@@ -12,6 +12,26 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.06 (2026-07-18)
+**Owner: "maybe we should have the seed box back, and the random option there also."** The setup gate's
+generate form gains a **World seed** row: a Seed number input (`#suSeedN`, prefilled with the current
+boot-random seed when the step opens) + a **🎲 Random** button that rolls a new value into the box
+(applied on Generate). `_suGenCommit` applies the typed seed to `state.tect.seed` before generating
+(blank = roll a fresh random one, the pre-v1.06 behaviour); the sidebar `#seedN` stays in sync via the
+existing `syncUI()`. The same seed + size + extent now reproduces the same world from the very first
+generate — previously the seed was only reachable in the sidebar AFTER a world existed, so the initial
+world was always irreproducible.
+
+Playwright-verified end-to-end: the same typed seed across two fresh boots produces an **identical
+field hash**; the dice rolls a different seed → different world; the sidebar seed matches. Side effect:
+`smoke_gen1.js` now seeds its boot world (31337) through this input, which also de-flakes the suite's
+previously random-world assertions.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B
+vs v1.05 **ALL IDENTICAL** (the harness bypasses the gate; at defaults the gate applies the same
+boot-random seed as before); `smoke_gen1.js` **179/179** (+1: seed box exists, 🎲 rolls, typed seed
+drives `state.tect.seed`).
+
 ### v1.05 (2026-07-18)
 **Owner: "the blocky water" — #96, "square lakes when LOD zooming" (deferred since v0.96, now fixed).**
 Above-sea lakes were classified per coarse grid cell (`currentWaterBodies()===2`) and both sub-cell

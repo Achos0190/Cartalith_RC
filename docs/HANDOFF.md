@@ -9,11 +9,20 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.05.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.06.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.06 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.04` are kept and never edited.
+  (v1.07 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.05` are kept and never edited.
+- **v1.06 — owner: "maybe we should have the seed box back, and the random option there also."** The
+  setup gate's generate form gains a World seed row: `#suSeedN` (prefilled with the boot-random seed on
+  open) + `#suSeedRand` 🎲 (rolls a new value into the box; applied on Generate). `_suGenCommit` applies
+  the typed seed to `state.tect.seed` (blank = fresh random, the old behaviour); sidebar `#seedN` syncs
+  via `syncUI()`. Same seed + size + extent now reproduces the same world from the first generate.
+  Playwright: same typed seed across two fresh boots → identical field hash; dice → different world;
+  sidebar in sync. Smoke now seeds its boot world (31337) through this input (de-flakes the random-world
+  assertions). Verified: engine **923/923**, UME **831/831**, hash vs v1.05 **ALL IDENTICAL**, smoke
+  **179/179** (+1).
 - **v1.05 — owner: "the blocky water" (#96, square lakes at LOD zoom — deferred since v0.96, FIXED).**
   Above-sea lakes are classified per coarse cell and were stamped by a NEAREST-cell test per pixel in
   the two sub-cell renderers (`renderBiomeTileRGBA`, `bakePixel`) → axis-aligned blue squares when the

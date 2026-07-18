@@ -64,15 +64,28 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { pill: pill.textContent, widthIsMiles: Math.abs(+w.value - 40000 / 1.609344) < 2 };
   });
   await page.evaluate(() => document.querySelector('#suUnitSeg [data-unit="km"]').click());   // back to km for the rest
+  // v1.06 (owner: "the seed box back, and the random option"): the setup gate carries a seed input +
+  // 🎲 button; typing a seed there must drive state.tect.seed on commit (asserted after the commit
+  // below, which types 31337), and the dice must roll a new value into the box.
+  R.setupSeed = await page.evaluate(() => {
+    const sEl = document.getElementById('suSeedN'), dice = document.getElementById('suSeedRand');
+    if (!sEl || !dice) return { present: false };
+    sEl.value = '777'; dice.click();
+    const diceChanged = String(sEl.value) !== '777' && String(sEl.value).trim() !== '';
+    return { present: true, diceChanged };
+  });
   // 1d. commit a default world (reset width→800 first so the committed world matches the rest of the suite)
   await page.evaluate(() => {
     const w = document.getElementById('suWidth'); w.value = 800; w.dispatchEvent(new Event('input'));
     document.querySelector('#suResSeg [data-w="512"]').click();   // small = fast commit
+    const sEl = document.getElementById('suSeedN'); if (sEl) sEl.value = '31337';   // v1.06: typed seed must land in state.tect.seed
     document.getElementById('suGenCommit').click();
   });
   await page.waitForFunction(() => getComputedStyle(document.getElementById('onboard')).display === 'none', null, { timeout: 60000 });
   await page.waitForFunction(() => { for (let i = 0; i < field.length; i += 997) { if (field[i] !== 0) return true; } return false; }, null, { timeout: 60000 });   // world committed
   R.committed = true;
+  R.setupSeedApplied = await page.evaluate(() => (typeof state !== 'undefined' && state.tect) ? state.tect.seed === 31337 : false);
+  if (R.setupSeed && R.setupSeed.present === false) R.setupSeedApplied = 'vacuous';   // pre-v1.06 target file
   R.gateHidden = await page.evaluate(() => getComputedStyle(document.getElementById('onboard')).display === 'none');
   R.sidebarUnlocked = await page.evaluate(() => !document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents !== 'none');   // v0.68: sidebar live after commit
   // 1e. import-calibration step exists and auto-infers on commit (drive it directly; a real file picker
@@ -1642,6 +1655,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.97: a connected walled settlement feeds dense resampled road paths into the generator', R.umBuildAround.ok === true && R.umBuildAround.usesPaths === true && R.umBuildAround.dense === true);
   A('v0.97: the town built around real roads still forms a wall and full-extent primaries (not stubs)', R.umBuildAround.ok !== true || (R.umBuildAround.wallRing === true && R.umBuildAround.maxPrim > 400));
   A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
+  A('v1.06: setup-gate seed box exists, 🎲 rolls a new value, and the typed seed drives state.tect.seed', R.setupSeedApplied === 'vacuous' || (R.setupSeed.present && R.setupSeed.diceChanged && R.setupSeedApplied === true));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
