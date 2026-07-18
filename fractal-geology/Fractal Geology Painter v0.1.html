@@ -138,6 +138,7 @@
       <div class="row"><label>Octaves</label><input type="range" id="g_octaves" min="1" max="8" step="1"><span class="val" id="g_octaves_v"></span></div>
       <div class="row"><label>Persistence</label><input type="range" id="g_persistence" min="0.2" max="0.9" step="0.01"><span class="val" id="g_persistence_v"></span></div>
       <div class="row"><label>Lacunarity</label><input type="range" id="g_lacunarity" min="1.4" max="3.2" step="0.05"><span class="val" id="g_lacunarity_v"></span></div>
+      <div class="row"><label>Edge noise</label><input type="range" id="g_edgeNoise" min="0" max="1" step="0.01"><span class="val" id="g_edgeNoise_v"></span></div>
       <div class="seedrow" style="margin-top:8px">
         <input type="number" id="seedInput" step="1">
         <button class="btn" id="randSeed" title="Randomize seed">🎲</button>
@@ -466,9 +467,10 @@ const App = (() => {
   };
   const FEATURE_KEYS = Object.keys(FEATURES);
   const GLOBAL_KEYS = ['brushSize','hardness','intensity','noiseScale','octaves',
-                       'persistence','lacunarity','seaLevel','baseLevel'];
+                       'persistence','lacunarity','edgeNoise','seaLevel','baseLevel'];
   const GLOBAL_DEF = { brushSize:60, hardness:0.5, intensity:1.0, noiseScale:5,
-                       octaves:5, persistence:0.5, lacunarity:2.0, seaLevel:0.30, baseLevel:0.45 };
+                       octaves:5, persistence:0.5, lacunarity:2.0, edgeNoise:0.55,
+                       seaLevel:0.30, baseLevel:0.45 };
   // salt per feature so identical seeds still differ between feature types
   const SALT = {}; FEATURE_KEYS.forEach((k,i)=> SALT[k]=(i+1)*1013);
 
@@ -492,7 +494,8 @@ const App = (() => {
     const rad = stampRadius(st);
     const feat = FEATURES[st.type];
     const feather = Math.max(2, rad*(1-st.g.hardness));
-    const m = rad + feather + 3;
+    const edgeAmp = (st.g.edgeNoise||0) * rad * 0.34;   // fractal edge warp reach
+    const m = rad + feather + edgeAmp + 3;
     let x0,y0,x1,y1;
     if(feat.radial){
       let cx=0,cy=0; for(const p of st.pts){ cx+=p.x; cy+=p.y; } cx/=st.pts.length; cy/=st.pts.length;
@@ -515,17 +518,30 @@ const App = (() => {
     const bb = stampBBox(st);
     const feather = feat.radial ? Math.max(2, rad*(1-P.hardness)) : Math.max(1.5, R*(1-P.hardness));
     const cx = st._cx, cy = st._cy;
-    ctx.nz = makeNoise((st.seed ^ SALT[st.type])>>>0);
+    const nz = makeNoise((st.seed ^ SALT[st.type])>>>0);
+    ctx.nz = nz;
     ctx.P = P; ctx.nb = P.noiseScale/SIZE; ctx.R = R; ctx.radius = rad; ctx.cx=cx; ctx.cy=cy;
+    // Fractal edge warp: perturb the coordinates used for the coverage mask so
+    // the feature footprint is ragged/organic, not a smooth rounded brush blob.
+    // Feature *interior* noise still samples the true px,py (ctx.px/py below).
+    const edgeAmp = P.edgeNoise * rad * 0.34;
+    const warp = edgeAmp > 0.01;
+    const wf = 2.3 / Math.max(8, rad);                  // ~4-5 lobes across the diameter + octaves
     const pts = st.pts;
     for(let py=bb.y0; py<=bb.y1; py++){
       for(let px=bb.x0; px<=bb.x1; px++){
+        let qx=px, qy=py;
+        if(warp){
+          const wx = nz.fbm(px*wf, py*wf, P.octaves, P.persistence, P.lacunarity);
+          const wy = nz.fbm((px+211.3)*wf, (py+57.7)*wf, P.octaves, P.persistence, P.lacunarity);
+          qx = px + wx*edgeAmp; qy = py + wy*edgeAmp;
+        }
         let cov, d=0, sd=0, s=0, rC=0;
         if(feat.radial){
-          rC = Math.hypot(px-cx, py-cy);
+          rC = Math.hypot(qx-cx, qy-cy);
           cov = ss((rad - rC)/feather);
         } else {
-          const g = nearestOnStroke(px,py,pts);
+          const g = nearestOnStroke(qx,qy,pts);
           d=g.dist; sd=g.sd; s=g.s;
           cov = ss((R - d)/feather);
         }

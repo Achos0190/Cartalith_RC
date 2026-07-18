@@ -98,6 +98,12 @@ Painting sweeps the brush along the stroke; a pixel's **coverage** feathers with
 `add` (displacement) or `set` (target), always weighted by coverage × intensity — so edges ramp to
 the surrounding terrain and **no feature produces a cliff unless the Cliff tool is used**.
 
+The mask footprint itself is **domain-warped by fractal noise** (the `Edge noise` slider) before
+coverage is computed, so feature boundaries are ragged and organic — irregular mesa rims, wobbly
+crater/lake shorelines, broken hill margins — rather than a smooth rounded brush blob. The
+feature's *interior* fractal detail still samples the true coordinates, so only the boundary is
+perturbed. Set `Edge noise` to 0 for perfectly smooth feathered edges.
+
 ### Performance / dirty rectangles
 
 Generation only touches each stamp's bounding box, never the whole map. While you drag, only the
