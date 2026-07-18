@@ -12,6 +12,23 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.04 (2026-07-18)
+**Owner: "harbour length + needle" (continuing the v1.03 screenshot batch).** Root cause of the extreme
+wall "needles next to lines of water" found and fixed: `buildWall`'s one-bank branch walks `townBank`
+between the two landArc→bank projection points, and on REAL water `site.river`/the shoreline is the real
+polyline spanning the WHOLE ~2.4 km town box — a noisy land classification could project the endpoints
+far apart along the bank, so the water-following wall ran kilometres along the river/shore (measured:
+a 2,210 m water wall on the flood scenario). The v1.03 hull cap can't catch this (the needle is the
+BANK walk, not the hull), and the same structure reads as the "weirdly long harbour" since it hugs the
+waterline. Fix: if the bank walk is disproportionate to the town (arc length > max(1.6 × landArc, 500 m)),
+the classification was degenerate — drop the water-following wall and fall back to the plain smooth
+curtain around the (v1.03 aspect-capped) hull. Guarded on `usesRealWater` ⇒ the synthetic UME suite is
+byte-identical. Flood probe: max water-wall 2,210 m → 0 (degenerate walks culled; proportionate ones
+kept), median ring aspect 1.1.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B
+vs v1.03 **ALL IDENTICAL**; `smoke_gen1.js` **178/178**.
+
 ### v1.03 (2026-07-18)
 **Owner (9 screenshots, v1.01): "harbours not placed correctly, layouts off; a place said to be in water
 but zoom reveals an island; weirdly long harbours next to lines of water; square lakes when LOD zooming."**

@@ -9,11 +9,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.03.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.04.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.04 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.02` are kept and never edited.
+  (v1.05 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.03` are kept and never edited.
 - **v1.03 — owner (9 screenshots): island town wrongly "in open water", elongated port walls, square
   lakes at LOD.** (1) **Island rescue** (`_umWaterCtx`): the v1.00 mostly-water bail keyed on the whole
   box's water fraction (>0.72), suppressing island/coast towns; now measures the water fraction in a
