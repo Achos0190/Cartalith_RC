@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.06.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.07.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.07 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.05` are kept and never edited.
+  (v1.08 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.06` are kept and never edited.
+- **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
+  analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
+  version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
+  naming — **DONE, v1.07**. (2) setup-gate world archetype presets. (3) GeoJSON/GIS export. (4)
+  province tier + religions layer. (5) submap/resample UX. (6) label placement + per-layer style
+  editors. Items 2–6 not yet started.
+- **v1.07 — owner: "implement the top 6 borrow list from the research" (#1 culture-flavored naming).**
+  `_civSettleName` was one global syllable/suffix generator for every faction. Added seven **naming
+  cultures** (`CIV_CULTURES`: common/imperial/highland/desert/riverlands/sylvan/maritime), a parallel
+  `civFactionCulture` array assigning each faction a culture (deterministic per-index default via
+  `_civDefaultCulture`, so the six built-in factions read distinctly with zero setup), a naming-culture
+  `<select>` next to each faction pill, `_civSettleName(rng,faction)` looking up the settlement's own
+  faction's culture, a 🎲 re-roll button in the settlement editor (mirrors FMG's "regenerate burg
+  name"), and `civFactionCulture` round-tripping through the same `state.civ` sync as `civFactionNames`
+  (old-save compatible — missing ⇒ rebuilt from the deterministic default). Settlement naming isn't
+  part of the hash battery, so free to change without touching cross-version neutrality. Verified:
+  engine **923/923**, UME **831/831**, hash vs v1.06 **ALL IDENTICAL**, smoke **183/183** (+4).
+  Playwright-probed: six factions pinned to six cultures produce visibly distinct names (Imperial:
+  Novarcica; Highland: Kragandward; Desert: Ashqirspan).
 - **v1.06 — owner: "maybe we should have the seed box back, and the random option there also."** The
   setup gate's generate form gains a World seed row: `#suSeedN` (prefilled with the boot-random seed on
   open) + `#suSeedRand` 🎲 (rolls a new value into the box; applied on Generate). `_suGenCommit` applies

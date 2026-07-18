@@ -107,6 +107,40 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     noMapwLegend: !document.getElementById('calLegend')
   }));
 
+  // ── v1.07 (borrow-list #1, after Azgaar's FMG per-culture namesbases): culture-flavored
+  // settlement naming — a per-faction naming-culture picker, _civSettleName drawing from that
+  // culture's own syllable/suffix pool, a manual re-roll button in the settlement editor, and
+  // civFactionCulture round-tripping through the same state.civ sync used for faction names.
+  R.cultureNaming = await page.evaluate(() => {
+    if (typeof CIV_CULTURES === 'undefined' || typeof civFactionCulture === 'undefined') return { present: false };
+    const pickerSelects = document.querySelectorAll('#civFactionPicker select').length;
+    // give faction 1 an unmistakable culture and sample many generated names for its own suffixes
+    const savedCulture1 = civFactionCulture[1];
+    civFactionCulture[1] = 'imperial';
+    const rng = _civRng(999);
+    const sfx = CIV_CULTURES.find(c => c.key === 'imperial').sfx.filter(s => s);
+    let hits = 0; const N = 200;
+    for (let i = 0; i < N; i++) { const nm = _civSettleName(rng, 1); if (sfx.some(s => nm.endsWith(s))) hits++; }
+    // manual re-roll button in the settlement editor draws from the settlement's own faction culture
+    const savedPlaces = state.places, savedSel = _civSelectedPlace;
+    const p = { x: 10, y: 10, name: 'PreRoll', kind: 'town', klass: 'town', category: 'settlement', faction: 1, pop: 500, traits: [] };
+    state.places = [p]; _civSelectedPlace = p; _civRenderPlaceEditor();
+    const rollBtn = document.getElementById('_civPeNameRoll');
+    const before = p.name;
+    if (rollBtn) rollBtn.click();
+    const rerolled = !!rollBtn && p.name !== before && p.name.length > 0;
+    // civFactionCulture persists through the same state.civ sync civFactionNames already uses
+    civFactionCulture[2] = 'desert';
+    _civSyncToState();
+    const savedArr = state.civ.factionCulture.slice();
+    civFactionCulture[2] = 'common';   // corrupt in-memory value on purpose
+    _civSyncFromState();
+    const restored = civFactionCulture[2] === 'desert';
+    civFactionCulture[1] = savedCulture1;
+    state.places = savedPlaces; _civSelectedPlace = savedSel; _civRenderPlaceEditor();
+    return { present: true, pickerSelects, adherenceRate: hits / N, rollBtnExists: !!rollBtn, rerolled, restored, savedArrLen: savedArr.length };
+  });
+
   // ── v0.70: bug-fix batch ──
   // (a) sea level moves the coastline in the base biome view (was cached by _civBakeKey without seaLevel)
   R.seaMovesCoast = await page.evaluate(() => {
@@ -1656,6 +1690,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.97: the town built around real roads still forms a wall and full-extent primaries (not stubs)', R.umBuildAround.ok !== true || (R.umBuildAround.wallRing === true && R.umBuildAround.maxPrim > 400));
   A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
   A('v1.06: setup-gate seed box exists, 🎲 rolls a new value, and the typed seed drives state.tect.seed', R.setupSeedApplied === 'vacuous' || (R.setupSeed.present && R.setupSeed.diceChanged && R.setupSeedApplied === true));
+  // ── v1.07: culture-flavored naming (borrow-list #1) ──
+  A('v1.07: every non-Unclaimed faction gets a naming-culture picker in the faction pill row', R.cultureNaming.present && R.cultureNaming.pickerSelects >= 6);
+  A('v1.07: a faction pinned to a distinctive culture names its settlements from that culture\'s own suffix pool', R.cultureNaming.adherenceRate > 0.9);
+  A('v1.07: the settlement editor\'s 🎲 re-rolls a name from the settlement\'s own faction culture', R.cultureNaming.rollBtnExists && R.cultureNaming.rerolled);
+  A('v1.07: civFactionCulture round-trips through the same state.civ sync as faction names', R.cultureNaming.savedArrLen > 0 && R.cultureNaming.restored);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

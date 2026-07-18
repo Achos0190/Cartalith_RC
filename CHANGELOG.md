@@ -12,6 +12,15 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.07 (2026-07-18)
+**Owner: "implement the top 6 borrow list from the research."** First of six: `docs/research/azgaar-comparative-analysis.md` §4's #1 pick, culture-flavored naming, after Azgaar's FMG per-culture namesbases making "regions feel distinct at zero simulation cost." Cartalith's `_civSettleName` was a single global syllable/suffix generator — every faction's towns sounded the same.
+
+Added seven **naming cultures** (`CIV_CULTURES`): `common` (the original `_SYL`/`_SFX` pool, verbatim), `imperial` (Latinate — Aurelium, Novaica), `highland` (harsh consonant clusters — Kragdunhold), `desert` (guttural — Qirashabad), `riverlands` (soft, watery — Avenmereford), `sylvan` (elvish, apostrophed), `maritime` (Norse-flavored — Bjorvikholm). A new parallel array `civFactionCulture` assigns each faction a culture, deterministically defaulted per faction index (`_civDefaultCulture`) so the six built-in factions read distinctly with zero setup; a naming-culture `<select>` next to each faction pill (`_civBuildFactionPicker`) lets the owner reassign it. `_civSettleName(rng,faction)` now looks up the settlement's own faction's culture before drawing syllables — both auto-populate call sites (`_civIterativeAutoWorld`'s suitability seeding and its crossroads-promotion pass) pass `faction` through. The settlement editor (`_civPopulatePlaceEditor`) gains a 🎲 button next to the Name field that re-rolls a name from the settlement's own faction culture, mirroring FMG's "regenerate burg name." `civFactionCulture` round-trips through the same `state.civ` sync (`_civSyncToState`/`_civSyncFromState`) that already carries `civFactionNames`, with old-save/no-field compatibility (missing ⇒ rebuilt from the deterministic per-index default) and extend/trim in lockstep with `CIV_FACTIONS` growth/shrink.
+
+Settlement naming isn't part of the `hash_gen1.js` bit-identity battery (field/temp/rain/flow/render only) — free to change without touching cross-version neutrality; verified `ALL IDENTICAL` regardless.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.06 **ALL IDENTICAL**; `smoke_gen1.js` **183/183** (+4: per-faction culture picker present, a culture-pinned faction's names adhere to that culture's suffix pool >90% of draws, the editor's 🎲 re-rolls from the settlement's own faction culture, `civFactionCulture` round-trips through sync). Playwright-probed end-to-end on a real generated+auto-populated world: six factions pinned to six distinct cultures produce visibly distinct settlement names (Imperial: Novarcica, Auraurium; Highland: Kragandward, Dagrhurnridge; Desert: Ashqirspan, Bahrharmarch).
+
 ### v1.06 (2026-07-18)
 **Owner: "maybe we should have the seed box back, and the random option there also."** The setup gate's
 generate form gains a **World seed** row: a Seed number input (`#suSeedN`, prefilled with the current
