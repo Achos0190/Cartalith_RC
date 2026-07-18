@@ -12,6 +12,24 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.02 (2026-07-18)
+**Owner: "sometimes ways don't connect — they stop just short of a location."** The land network
+(`_civHierarchicalNetwork`) consolidates shared corridors by claiming routing-grid cells busiest-first,
+so an edge whose near-settlement cells were already claimed by a THROUGH road starts its visible run a
+routing-cell or two out — at a downsampled cell CENTRE offset from the pin — and the road visibly stops
+short of the settlement. The v0.92 substitution only fixed the run that reached the edge's OWN endpoint
+cell; this adds a post-pass that pulls any way endpoint still landing near its edge's settlement
+(`aIdx`/`bIdx`) exactly onto the pin. The threshold scales with the downsample (offset = routing cells ×
+1/sc) and with the claimed-corridor depth, bounded to ~45% of the ~`GW/30` inter-settlement spacing so
+it can never reach a neighbouring place, and it only ever snaps to the way's own two settlements — so a
+terminal near its settlement is always the right target and interior junction runs (far from any pin)
+never match. Sea routes already anchored their endpoints exactly (`_civMstRoutes`), so they were fine.
+
+**Verification:** engine `tests/run.sh` **923/923** (block 1 untouched); `tests/run_um.sh` **831/831**
+(block 4 untouched); `hash_gen1.js` A/B vs v1.01 **ALL IDENTICAL** (way endpoints aren't part of the
+render buffers); `smoke_gen1.js` **178/178** (+1: every land way reaches its own settlement exactly,
+0 "stops just short" endpoints). Probe across 8 seeds: **20 → 0** stop-short endpoints.
+
 ### v1.01 (2026-07-18)
 **Owner: "settlements should not be in water — research the fix and implement; also continue the
 outstanding points [coastal wall over-enclosure, full-display canvas]."** Three items.

@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.01.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.02.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.02 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.00` are kept and never edited.
+  (v1.03 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.01` are kept and never edited.
+- **v1.02 — owner: "sometimes ways don't connect — they stop just short of a location."** The land
+  network (`_civHierarchicalNetwork`) consolidates shared corridors by claiming routing-grid cells
+  busiest-first; an edge whose near-settlement cells were already claimed by a THROUGH road starts its
+  visible run a routing-cell out, at a downsampled cell CENTRE offset from the pin, so the road stops
+  short. v0.92's substitution only fixed the run reaching the edge's OWN endpoint cell; v1.02 adds a
+  post-pass pulling any way endpoint landing near its `aIdx`/`bIdx` settlement exactly onto the pin
+  (threshold scales with 1/sc AND claimed-corridor depth, bounded to ~45% of `GW/30` spacing so it can't
+  reach a neighbour; only snaps to the way's own two settlements). Sea routes already anchored endpoints
+  exactly. Verified: engine **923/923**, UME **831/831** (blocks 1 & 4 untouched), hash vs v1.01 **ALL
+  IDENTICAL**, smoke **178/178** (+1 guard). Probe 8 seeds: **20 → 0** stop-short endpoints.
+- **NEXT (v1.03) — owner bug report (9 screenshots, v1.01):** (1) **island town wrongly suppressed** —
+  a settlement on a small island shows "No town layout — sits in open water" because the v1.00
+  `mostlyWater` bail keys on the BOX water fraction (>72%), but the settlement IS on land; since v1.01
+  snaps settlements onto land, the bail should test land NEAR the settlement, not the box, so
+  islands/peninsulas/coasts build a (small) town. (2) **elongated wall slivers + long harbours** — port/
+  coastal towns get a hugely stretched thin wall and warehouse/quay fabric strung far along the
+  shoreline/river (`shoreFromMask` shoreline as `site.river` + harbour district + `builtMassHull`
+  following the whole shore); constrain to a compact shore blob. (3) **square lakes at LOD zoom** —
+  pre-existing #96 (coarse grid magnified past resolution at the tile renderer); still deferred.
 - **v1.01 — owner: "settlements should not be in water — research and implement; also continue the
   outstanding points."** Three items. (1) **Settlements never stand in water** — research showed every
   placement path already refuses water (`_civSnapLand` checks sea + lakes, `_civDropPlace` refuses wet

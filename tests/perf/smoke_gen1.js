@@ -513,6 +513,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   };
   await page.evaluate(() => { state.places.push({x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}); });
 
+  // v1.02 (owner: "sometimes ways don't connect — they stop just short of a location"): the land
+  // network's corridor consolidation could start a road a routing-cell out at a downsampled cell
+  // centre, offset from the pin. Regression guard: every visible land way endpoint that belongs to a
+  // settlement (its aIdx/bIdx) lands EXACTLY on the pin — 0 "stops just short" endpoints, > 0 exact.
+  R.waysReachSettlements = await page.evaluate(() => {
+    state.places = [];
+    _civAutoWorld();
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    if (settles.length < 3) return { vacuous: true, short: 0, exact: 0 };
+    let short = 0, exact = 0;
+    for (const w of civWays) {
+      if (w.sea || w.hidden || !w.pts || w.pts.length < 2 || w.aIdx == null || w.bIdx == null) continue;
+      const A = settles[w.aIdx], B = settles[w.bIdx];
+      for (const end of [w.pts[0], w.pts[w.pts.length - 1]]) {
+        const ex = Array.isArray(end) ? end[0] : end.x, ey = Array.isArray(end) ? end[1] : end.y;
+        let md2 = Infinity; for (const P of [A, B]) { if (!P) continue; const dd = (ex - P.x) * (ex - P.x) + (ey - P.y) * (ey - P.y); if (dd < md2) md2 = dd; }
+        if (md2 <= 0.04) exact++; else if (md2 <= 25) short++;   // <=0.2 cell exact; 0.2–5 cells "short"
+      }
+    }
+    return { vacuous: false, short, exact };
+  });
+  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}]; });
+
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
   // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
@@ -1618,6 +1641,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // ── v0.97: town built around the real roads ──
   A('v0.97: a connected walled settlement feeds dense resampled road paths into the generator', R.umBuildAround.ok === true && R.umBuildAround.usesPaths === true && R.umBuildAround.dense === true);
   A('v0.97: the town built around real roads still forms a wall and full-extent primaries (not stubs)', R.umBuildAround.ok !== true || (R.umBuildAround.wallRing === true && R.umBuildAround.maxPrim > 400));
+  A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
