@@ -12,6 +12,49 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.01 (2026-07-18)
+**Owner: "settlements should not be in water — research the fix and implement; also continue the
+outstanding points [coastal wall over-enclosure, full-display canvas]."** Three items.
+
+- **Settlements never stand in water — root cause fixed (`_civSnapPlacesToLand`).** Research finding:
+  every PLACEMENT path already refuses water (`_civSnapLand` checks sea + `currentWaterBodies()` lakes;
+  `_civDropPlace` refuses wet cells; the crossroads-promotion pass snaps to land), but nothing ever
+  RE-VALIDATED existing pins when the terrain changed underneath them — erosion, a sea-level
+  recalibration, the Water brush, or an imported save could leave a settlement standing in the new
+  water (the owner's "renders inside a lake" screenshot). New reconcile pass: any settlement now on
+  water (sea OR lake) snaps to the nearest dry cell, dragging its connected way endpoints along (the
+  v0.92 "endpoint equals the settlement coordinate" invariant that road-locking depends on). Runs once
+  per terrain generation — keyed on `_fieldGen` + sea level, the same staleness pattern as the UM model
+  cache — from the civ draw path, plus a safety net at the end of auto-populate. POIs are deliberately
+  exempt (a lighthouse/shipwreck on water is legitimate). Probe-verified: 40 settlements placed, 0 wet;
+  raising the sea floods 17; one redraw later 0 wet and the sampled way endpoint followed its settlement.
+- **Coastal wall no longer stretches along the approach roads (`builtMassHull`).** The injected
+  real-road primaries (v0.97, ~55 m resample) carry many bare degree-2 vertices that are polyline
+  geometry, not built town — counting them as "built mass" inflated the enceinte over empty land. On the
+  injected-paths graph (new `g._fromPaths` tag set by `buildPrimariesFromPaths`), a vertex whose live
+  edges are ALL primary must be a real junction (degree ≥3) to count; a vertex where any town street/lane
+  attaches still counts. The synthetic path never sets the tag ⇒ UME suite byte-identical. Browser-
+  verified: the wall now hugs the built fabric (was a kite of empty land).
+- **Fill mode — the map always uses the full display area (owner: portrait phone letterboxed the map
+  with "big unused areas above and below").** The minimum zoom is now the COVER scale instead of the
+  letterbox FIT: the map fills the viewport and you pan to reach the cropped part (standard map-app
+  behaviour). One clamp inside `applyView()` catches every input path (wheel/pinch zoom, drag/two-finger
+  pan, move-to, reset — they all funnel through it); `zoomAt`'s floor is the cover scale so pinch-out
+  stops at "filled"; pan is clamped so no background band can be exposed; re-clamped on window
+  resize/rotation; `_lodFitCanvas` letterbox-fit becomes letterbox-COVER for Tiled-LOD mode. Input
+  mapping is untouched by construction — `evtToGrid` & friends are transform-invariant via
+  `getBoundingClientRect`, and LOD input reads the full element box even when the wrap clips it.
+  (Subtlety worth recording: the clamp must measure the stack rect against the LAST-APPLIED transform
+  (`_viewApplied`), not the pending `viewT` values — using the pending pan made the bounds drift with
+  the very pan being clamped, so it never bound.) Playwright-verified on a portrait 720×1420 viewport:
+  initial view covers (scale floor 4.09), 12× zoom-out holds coverage, a ±4000 px pan clamps back to
+  zero gap, a centre-click maps to an in-bounds grid cell, LOD mode covers, no page errors.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (`_fromPaths` guard
+holds — synthetic path byte-identical); `hash_gen1.js` A/B vs v1.00 **ALL IDENTICAL** (CSS-transform-only
+view changes never touch the render buffers; settlement snap is a no-op at defaults with no places);
+`smoke_gen1.js` **177/177**. Manual browser pass still owed for real-device touch feel (pinch/rotate).
+
 ### v1.00 (2026-07-18)
 **Owner: "a harbor sits at a coastline or actual river with the city right next to it on land; no roads
 passing over water that come from it"; "when tapping a city in explore mode I want a popup with the city

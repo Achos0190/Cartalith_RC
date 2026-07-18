@@ -9,11 +9,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.00.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.01.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.01 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.99` are kept and never edited.
+  (v1.02 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.00` are kept and never edited.
+- **v1.01 — owner: "settlements should not be in water — research and implement; also continue the
+  outstanding points."** Three items. (1) **Settlements never stand in water** — research showed every
+  placement path already refuses water (`_civSnapLand` checks sea + lakes, `_civDropPlace` refuses wet
+  cells, crossroads promotion snaps); the actual root cause was that NOTHING re-validated pins when the
+  terrain changed underneath them (erosion / sea-level recalibration / Water brush / imported save = the
+  owner's "renders inside a lake"). New `_civSnapPlacesToLand()` reconcile: settlements on water snap to
+  the nearest dry cell, dragging connected way endpoints along (v0.92 endpoint invariant); runs once per
+  `_fieldGen`+sea-level change from the civ draw path + after auto-populate; POIs exempt (a shipwreck on
+  water is legitimate). Probe: 40 placed / 0 wet → sea raised, 17 flooded → one redraw, 0 wet, way
+  endpoint followed. (2) **Coastal wall no longer stretches along approach roads**: `builtMassHull`
+  discounts bare degree-2 vertices of injected real-road primaries (`g._fromPaths` tag from
+  `buildPrimariesFromPaths`; a vertex counts if it's a ≥3-way junction or any town street attaches);
+  synthetic path never sets the tag ⇒ UME 831 byte-identical. Browser-verified: wall hugs the built
+  fabric now. (3) **Fill mode — map always uses the full display**: minimum zoom is now the COVER scale
+  (not letterbox fit) with pan clamped so no background band can show; one clamp in `applyView()`
+  catches all input paths; `zoomAt` floor = cover; re-clamp on resize; `_lodFitCanvas` letterbox-COVERS.
+  Input mapping untouched (evtToGrid is rect-based). Gotcha recorded in CHANGELOG: the clamp must
+  measure against the LAST-APPLIED transform (`_viewApplied`), not pending `viewT`, or the bounds drift
+  with the pan being clamped. Playwright portrait 720×1420: initial covered (floor 4.09), zoom-out
+  holds, ±4000 px pan clamps to zero gap, centre-click in bounds, LOD covers, no errors. Verified:
+  engine **923/923**, UME **831/831**, hash A/B vs v1.00 **ALL IDENTICAL**, smoke **177/177**. Manual
+  browser pass still owed: real-device touch feel (pinch/rotate) for fill mode.
 - **v1.00 — owner: "harbor at a coastline/river with the city on land, no roads over water from it";
   "tapping a city in explore → a popup with the city layout, a zoom in"; "[a settlement] renders inside
   a lake."** Four settlement-layout fixes + one explore feature, all opt-in / popup so render bit-

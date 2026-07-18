@@ -942,21 +942,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { total: keys.length, bad };
   });
 
-  // v0.87: entering LOD/atlas mode fills the viewport (letterboxed) instead of shrinking the canvas to its
-  // intrinsic GW×GH size; exiting restores the intrinsic size (owner report: "viewport restricts to the
-  // initial World px size instead of full screen").
+  // v0.87: entering LOD/atlas mode fills the viewport instead of shrinking the canvas to its intrinsic
+  // GW×GH size (owner report: "viewport restricts to the initial World px size instead of full screen").
+  // v1.01 (fill mode): BOTH modes now letterbox-COVER the wrap — the map always uses the full display
+  // area — so the contract is "the canvas covers the wrap's area in LOD mode, and exiting LOD clears
+  // the inline size and returns to the (cover-clamped) CSS-transform path at a comparable on-screen
+  // size", not "exit returns to a small intrinsic rect".
   R.lodViewport = await page.evaluate(() => {
     const view = document.getElementById('view'), wrap = document.querySelector('.canvas-wrap');
     const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
     const wrapA = area(wrap);
-    const intrinsicA = area(view);                                  // non-LOD, scale 1 ⇒ small
+    const beforeA = area(view);                                     // non-LOD (cover-clamped since v1.01)
     const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
     _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
-    const lodA = area(view);                                        // should fill most of the wrap
-    const filled = lodA > intrinsicA * 2 && lodA > wrapA * 0.5;     // clearly enlarged, majority of viewport
+    const lodA = area(view);                                        // letterbox-cover ⇒ at least the wrap
+    const filled = lodA >= wrapA * 0.95;                            // covers the viewport (crop allowed)
     _lodOn = false; if (lc) lc.checked = false; applyView(); renderNow();
-    const restoredA = area(view);                                   // back to intrinsic (inline size cleared)
-    return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
+    const restoredA = area(view);                                   // back to the CSS-transform (cover) path
+    const restored = restoredA > wrapA * 0.5 && Math.abs(restoredA - beforeA) < Math.max(beforeA, 1) * 0.35;
+    return { filled, restored, hadInlineCleared: view.style.width === '' };
   });
 
   // v0.88 (owner report: "highest zoom stops at 20km, I'd like to drop down to 5km"): the LOD zoom cap now
