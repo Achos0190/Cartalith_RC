@@ -165,6 +165,53 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { present: true, buttonCount, classicOnByDefault, afterPangaea, afterClassic };
   });
 
+  // ── v1.09 (borrow-list #3, after Azgaar's FMG GeoJSON/JSON export): settlements, ways, rivers
+  // and faction territory outlines as one GeoJSON FeatureCollection. Snapshots places/ways/
+  // territory, builds a fresh populated+territory-painted world for the export, captures the
+  // download via a temporary createElement('a') monkeypatch, then restores everything so later
+  // assertions see the suite's original shared world untouched.
+  R.geoExport = await page.evaluate(() => {
+    if (typeof exportGeoJSON !== 'function') return { present: false };
+    const placesSnap = state.places, waysSnap = civWays, terrSnap = civTerritory, terrGenSnap = _civTerrGen;
+    state.places = []; civWays = [];
+    _civAutoWorld();
+    civTerritory = new Uint8Array(GW * GH);
+    const cx = (GW / 2) | 0, cy = (GH / 2) | 0, R2 = 10;
+    let paintedCount = 0;
+    for (let dy = -R2; dy <= R2; dy++) for (let dx = -R2; dx <= R2; dx++) {
+      if (dx * dx + dy * dy > R2 * R2) continue;
+      const x = cx + dx, y = cy + dy; if (x < 0 || x >= GW || y < 0 || y >= GH) continue;
+      civTerritory[y * GW + x] = 1; paintedCount++;
+    }
+    _civTerrGen++;
+    let captured = null;
+    const realCreateElement = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      const el = realCreateElement(tag);
+      if (tag === 'a') { el.click = () => { captured = { href: el.href, download: el.download }; }; }
+      return el;
+    };
+    return exportGeoJSON().then(async () => {
+      document.createElement = realCreateElement;
+      const restore = () => { state.places = placesSnap; civWays = waysSnap; civTerritory = terrSnap; _civTerrGen = terrGenSnap + 1; };
+      if (!captured) { restore(); return { present: true, ok: false }; }
+      const resp = await fetch(captured.href);
+      const fc = JSON.parse(await resp.text());
+      restore();
+      const byLayer = {};
+      for (const f of fc.features) (byLayer[f.properties.layer] = byLayer[f.properties.layer] || []).push(f);
+      const cellKm = state.mapWidthKm / GW, expectedAreaKm2 = paintedCount * cellKm * cellKm;
+      const ringArea = (ring) => { let s = 0; for (let i = 0; i < ring.length - 1; i++) s += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]; return Math.abs(s / 2); };
+      let territoryAreaKm2 = 0; const terrFeat = (byLayer.territory || [])[0];
+      if (terrFeat) for (const poly of terrFeat.geometry.coordinates) { territoryAreaKm2 += ringArea(poly[0]); for (let h = 1; h < poly.length; h++) territoryAreaKm2 -= ringArea(poly[h]); }
+      return {
+        present: true, ok: true, download: captured.download, isFC: fc.type === 'FeatureCollection', hasNote: !!(fc.properties && fc.properties.note),
+        hasSettlements: (byLayer.settlement || []).length > 0, hasWays: (byLayer.way || []).length > 0, hasRivers: (byLayer.river || []).length > 0,
+        territoryGeomType: terrFeat ? terrFeat.geometry.type : null, areaRatio: terrFeat ? territoryAreaKm2 / expectedAreaKm2 : null
+      };
+    }).catch(e => { document.createElement = realCreateElement; state.places = placesSnap; civWays = waysSnap; civTerritory = terrSnap; _civTerrGen = terrGenSnap + 1; return { present: true, ok: false, error: e.message }; });
+  });
+
   // ── v0.70: bug-fix batch ──
   // (a) sea level moves the coastline in the base biome view (was cached by _civBakeKey without seaLevel)
   R.seaMovesCoast = await page.evaluate(() => {
@@ -1723,6 +1770,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.08: setup gate has a World-shape preset row (Classic + 5 archetypes), Classic selected by default', R.archetypePresets.present && R.archetypePresets.buttonCount === 6 && R.archetypePresets.classicOnByDefault);
   A('v1.08: picking Pangaea enables world_structure with the supercontinent bundle and derives orogeny before commit', R.archetypePresets.afterPangaea.enabled === true && R.archetypePresets.afterPangaea.archetype === 'supercontinent' && R.archetypePresets.afterPangaea.continentality === 0.6 && R.archetypePresets.afterPangaea.tectonicGraph === true && R.archetypePresets.afterPangaea.buttonOn);
   A('v1.08: picking Classic after an archetype restores true defaults (14 plates, tectonicGraph off)', R.archetypePresets.afterClassic.enabled === false && R.archetypePresets.afterClassic.plates === 14 && R.archetypePresets.afterClassic.tectonicGraph === false && R.archetypePresets.afterClassic.buttonOn);
+  // ── v1.09: GeoJSON/GIS export (borrow-list #3) ──
+  A('v1.09: exportGeoJSON downloads a valid FeatureCollection with settlements, ways and rivers', R.geoExport.present && R.geoExport.ok && R.geoExport.isFC && R.geoExport.hasNote && R.geoExport.hasSettlements && R.geoExport.hasWays && R.geoExport.hasRivers && /\.geojson$/.test(R.geoExport.download));
+  A('v1.09: territory outline is a MultiPolygon whose shoelace area matches the painted cell area', R.geoExport.territoryGeomType === 'MultiPolygon' && Math.abs(R.geoExport.areaRatio - 1) < 0.001);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
