@@ -12,6 +12,39 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.05 (2026-07-18)
+**Owner: "the blocky water" — #96, "square lakes when LOD zooming" (deferred since v0.96, now fixed).**
+Above-sea lakes were classified per coarse grid cell (`currentWaterBodies()===2`) and both sub-cell
+renderers — `renderBiomeTileRGBA` (LOD tiles/overview) and `bakePixel` (exports) — stamped whole cells
+via a NEAREST-cell test per pixel, so a lake magnified past the grid resolution read as axis-aligned
+blue squares with razor-straight right-angle edges.
+
+- **`buildWaterBodies` optionally exports its pooled fill level** (`opts.fillOut` — the priority-flood
+  `filled` raster, i.e. the lake's water-surface height per cell). Optional out-param; the return
+  contract and every existing caller are untouched. `currentWaterBodies()` captures it into a new
+  module cache `_lakeFill` with the same lifetime as `_waterBody`.
+- **Sub-cell lake test in both samplers**: deep inside the lake (all 4 surrounding coarse cells lake)
+  a pixel is water outright; on the boundary band a pixel is water where the tile's own (amplified)
+  terrain lies BELOW the pooled lake surface — the tile is flooded to the pool level, so the shore is
+  the curve where the visible terrain rises out of the water — AND inside a bilinear lake-membership
+  band (`fq>0.35`), which cuts a smooth marching-squares-style curve where the shelf is too flat for
+  the terrain test to shape (without it, flat shelves degenerated to straight window-limit edges).
+  Water-brush/flat lakes (nothing pooled: `fill−bed ≤ lakeDepth`) keep their painted cell shape via a
+  nearest-cell fallback, as does any path where `_lakeFill` is absent.
+- **The BASE per-cell map loop is untouched** — at 1 cell = 1 pixel there is nothing to subsample, and
+  this keeps the default render bit-identical (hash battery ALL IDENTICAL, no cross-version-neutrality
+  exception needed; only LOD tiles/overview and bakes change, which is the point).
+
+**Probe note (affects reproducibility of every earlier browser probe):** the setup gate has NO seed
+input — `state.tect.seed` is the real seed and boots randomized, so all earlier "seed 54869" Playwright
+probes were actually random worlds. The lake probe now sets `state.tect.seed` directly; the A/B above is
+a true same-world comparison (identical 710-cell lake in both versions, view on its eastern shore:
+v1.04 = hard right-angle squares → v1.05 = smooth terrain-following shoreline).
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B
+vs v1.04 **ALL IDENTICAL** (base loop untouched); `smoke_gen1.js` **178/178**. Same-world screenshot
+pair confirms the fix at a 6 km LOD span.
+
 ### v1.04 (2026-07-18)
 **Owner: "harbour length + needle" (continuing the v1.03 screenshot batch).** Root cause of the extreme
 wall "needles next to lines of water" found and fixed: `buildWall`'s one-bank branch walks `townBank`

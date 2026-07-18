@@ -9,11 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.04.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.05.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.05 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.03` are kept and never edited.
+  (v1.06 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.04` are kept and never edited.
+- **v1.05 — owner: "the blocky water" (#96, square lakes at LOD zoom — deferred since v0.96, FIXED).**
+  Above-sea lakes are classified per coarse cell and were stamped by a NEAREST-cell test per pixel in
+  the two sub-cell renderers (`renderBiomeTileRGBA`, `bakePixel`) → axis-aligned blue squares when the
+  LOD zoom magnified past grid resolution. Fix: `buildWaterBodies` optionally exports its priority-flood
+  pooled fill level (`opts.fillOut` → module cache `_lakeFill`, same lifetime as `_waterBody`); the
+  samplers now flood the tile's own amplified terrain to the pool surface (interior all-lake cells
+  water outright; boundary water where terrain < pool level AND inside a bilinear membership band
+  `fq>0.35` that cuts smooth curves where the shelf is too flat for the terrain test to shape).
+  Water-brush/flat lakes keep their painted cell shape. BASE per-cell loop untouched ⇒ default render
+  bit-identical (hash ALL IDENTICAL). Same-world A/B (state.tect.seed=54869, 710-cell lake, eastern
+  shore, 6 km LOD span): hard right-angle squares → smooth terrain-following shoreline. **Probe
+  gotcha for future sessions: the setup gate has NO seed input — set `state.tect.seed` directly before
+  generating, or every probe run is a different random world** (all pre-v1.05 probe runs were).
+  Verified: engine **923/923**, UME **831/831**, hash vs v1.04 **ALL IDENTICAL**, smoke **178/178**.
+- **v1.04 — owner: "harbour length + needle".** Root cause of the extreme wall needles: `buildWall`'s
+  one-bank branch walks `townBank` between the landArc→bank projections, and on REAL water the bank is
+  the real polyline spanning the whole box — degenerate classifications walked kilometres along the
+  water (measured 2,210 m). Fix: if the bank walk exceeds max(1.6 × landArc, 500 m), fall back to the
+  smooth curtain around the (v1.03-capped) hull; guarded on `usesRealWater` (UME byte-identical).
+  Flood probe: max water-wall 2,210 m → 0, median ring aspect 1.1. Verified: engine **923/923**, UME
+  **831/831**, hash vs v1.03 **ALL IDENTICAL**, smoke **178/178**.
 - **v1.03 — owner (9 screenshots): island town wrongly "in open water", elongated port walls, square
   lakes at LOD.** (1) **Island rescue** (`_umWaterCtx`): the v1.00 mostly-water bail keyed on the whole
   box's water fraction (>0.72), suppressing island/coast towns; now measures the water fraction in a
