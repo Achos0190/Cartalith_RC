@@ -100,9 +100,17 @@ the surrounding terrain and **no feature produces a cliff unless the Cliff tool 
 
 The mask footprint itself is **domain-warped by fractal noise** (the `Edge noise` slider) before
 coverage is computed, so feature boundaries are ragged and organic — irregular mesa rims, wobbly
-crater/lake shorelines, broken hill margins — rather than a smooth rounded brush blob. The
-feature's *interior* fractal detail still samples the true coordinates, so only the boundary is
-perturbed. Set `Edge noise` to 0 for perfectly smooth feathered edges.
+crater/lake shorelines, broken hill margins — rather than a smooth rounded brush blob. A second,
+finer noise octave also mottles the transition **band** itself (not just the outline), so the
+blend ramp reads as textured ground rather than a clean airbrushed fade. The feature's *interior*
+fractal detail still samples the true coordinates, so only the boundary/ramp is perturbed. Set
+`Edge noise` to 0 for perfectly smooth feathered edges.
+
+Each landform has its own **edge character** (`edgeChar`/`edgeFreqMul` in the `FEATURES`
+registry) so the warp isn't one-size-fits-all: coastlines and lake shorelines get large, ragged,
+low-frequency bays; mountain ridgelines get tight, high-frequency crenulation; rivers and glacial
+valleys stay comparatively clean (their shape already comes from the meander parameter); a cliff's
+trace wanders at low frequency like a real fault line rather than jittering.
 
 ### Performance / dirty rectangles
 

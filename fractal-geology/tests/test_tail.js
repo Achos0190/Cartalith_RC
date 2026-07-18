@@ -109,5 +109,35 @@ for(const type of FEATURE_KEYS){
   ok(nearestOnStroke(200,100,pts).s>90 && nearestOnStroke(200,100,pts).s<110, "arclength ~halfway along segment");
 }
 
+/* ---- 5. Per-feature edge character -------------------------------------- */
+{
+  // Raggedness proxy: for a straight horizontal stroke, walk columns along its
+  // middle span and find the boundary y where coverage starts (the local
+  // "radius" at that column: base.H[i] vs H[i], NOT a literal, since Float32
+  // storage of 0.45 never === the JS double 0.45). The stddev of that radius
+  // across columns is ~0 for a clean straight edge and grows with how ragged
+  // the warped boundary is — the same real signal driving the visual result.
+  function boundaryStd(type, extraG){
+    const g=Object.assign({brushSize:70}, extraG||{});
+    const base=blank();
+    const {H,W}=blank();
+    applyStamp(mkStamp(type,[{x:180,y:256},{x:332,y:256}],g), H, W);
+    const radii=[];
+    for(let x=210;x<=302;x+=2){
+      let boundaryY=-1;
+      for(let y=100;y<256;y++){ if(H[y*SIZE+x]!==base.H[y*SIZE+x]){ boundaryY=y; break; } }
+      if(boundaryY>=0) radii.push(256-boundaryY);
+    }
+    const mean=radii.reduce((a,b)=>a+b,0)/radii.length;
+    return Math.sqrt(radii.reduce((a,b)=>a+(b-mean)*(b-mean),0)/radii.length);
+  }
+  const sMtn = boundaryStd('mountains');
+  const sHill = boundaryStd('hills');
+  ok(sMtn > sHill, "mountains' higher edgeChar/edgeFreqMul reads more ragged than hills at equal brush size (boundary std "+sMtn.toFixed(2)+" vs "+sHill.toFixed(2)+")");
+
+  const sFlat = boundaryStd('mountains', {edgeNoise:0});
+  ok(sFlat===0, "edgeNoise:0 restores a perfectly straight boundary (std "+sFlat+")");
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail? 1 : 0);

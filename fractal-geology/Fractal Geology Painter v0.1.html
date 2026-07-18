@@ -304,7 +304,7 @@ const App = (() => {
   // controls: [key, label, min, max, step, default]
   const FEATURES = {
     hills: {
-      label:'Hills', icon:'⛰️', radial:false,
+      label:'Hills', icon:'⛰️', radial:false, edgeChar:0.55, edgeFreqMul:0.9,
       hint:'Smooth rolling FBM. Softness blends coarse and fine octaves.',
       controls:[['amplitude','Amplitude',0.02,0.3,0.005,0.11],
                 ['rollingFrequency','Rolling freq',0.5,4,0.1,1.4],
@@ -317,7 +317,7 @@ const App = (() => {
       }
     },
     mountains: {
-      label:'Mountains', icon:'🏔️', radial:false,
+      label:'Mountains', icon:'🏔️', radial:false, edgeChar:1.4, edgeFreqMul:1.5,
       hint:'Ridged multifractal. Peak sharpness powers the crests; ruggedness adds billow detail.',
       controls:[['mtnHeight','Height',0.1,0.55,0.01,0.42],
                 ['peakSharpness','Peak sharpness',0.6,3,0.05,1.5],
@@ -331,7 +331,7 @@ const App = (() => {
       }
     },
     plateau: {
-      label:'Plateau', icon:'🟫', radial:false,
+      label:'Plateau', icon:'🟫', radial:false, edgeChar:1.15, edgeFreqMul:0.65,
       hint:'Terraced FBM mesa. Sets a flat top; terraces quantize the surface.',
       controls:[['plateauHeight','Rise',0.03,0.45,0.005,0.26],
                 ['terraces','Terraces',1,8,1,4],
@@ -345,7 +345,7 @@ const App = (() => {
       }
     },
     canyon: {
-      label:'Canyon', icon:'🪨', radial:false,
+      label:'Canyon', icon:'🪨', radial:false, edgeChar:0.95, edgeFreqMul:1.2,
       hint:'Inverted ridged carve with steep walls. Meander offsets the centerline.',
       controls:[['canyonDepth','Depth',0.03,0.35,0.005,0.18],
                 ['wallSteepness','Wall steepness',0,1,0.01,0.7],
@@ -362,7 +362,7 @@ const App = (() => {
       }
     },
     valley: {
-      label:'Valley', icon:'🏞️', radial:false,
+      label:'Valley', icon:'🏞️', radial:false, edgeChar:0.65, edgeFreqMul:0.85,
       hint:'Broad U-shaped glacial trough. Gentler and wider than a canyon.',
       controls:[['valleyDepth','Depth',0.03,0.3,0.005,0.14],
                 ['valleyWidth','Width frac',0.3,1,0.02,0.85],
@@ -376,7 +376,7 @@ const App = (() => {
       }
     },
     river: {
-      label:'River', icon:'🏞', radial:false,
+      label:'River', icon:'🏞', radial:false, edgeChar:0.4, edgeFreqMul:0.8,
       hint:'Semi-automatic: carves a bed along your stroke, lowers banks, auto-fills water. Width varies with branch noise; meander wanders the channel.',
       controls:[['riverWidth','Width (px)',2,26,1,7],
                 ['riverDepth','Depth',0.02,0.22,0.005,0.09],
@@ -399,7 +399,7 @@ const App = (() => {
       }
     },
     lake: {
-      label:'Lake', icon:'💧', radial:true,
+      label:'Lake', icon:'💧', radial:true, edgeChar:1.25, edgeFreqMul:0.75,
       hint:'Radial basin (brush = radius). Lowers a bowl and fills it with water; shoreline feathers.',
       controls:[['lakeDepth','Depth',0.03,0.3,0.005,0.13],
                 ['lakeShore','Shore',0.05,0.6,0.01,0.25]],
@@ -414,7 +414,7 @@ const App = (() => {
       }
     },
     basin: {
-      label:'Basin', icon:'🛖', radial:false,
+      label:'Basin', icon:'🛖', radial:false, edgeChar:0.85, edgeFreqMul:0.9,
       hint:'Broad shallow depression with an FBM floor — endorheic sinks, playas.',
       controls:[['basinDepth','Depth',0.02,0.25,0.005,0.1],
                 ['basinRough','Floor rough',0,1,0.01,0.4]],
@@ -426,7 +426,7 @@ const App = (() => {
       }
     },
     coastline: {
-      label:'Coastline', icon:'🌊', radial:false,
+      label:'Coastline', icon:'🌊', radial:false, edgeChar:1.5, edgeFreqMul:0.55,
       hint:'Pulls terrain down toward sea level with a ragged fractal edge — carves bays and beaches.',
       controls:[['coastAmount','Amount',0.1,1,0.01,0.85],
                 ['coastRagged','Raggedness',0.4,4,0.1,1.6]],
@@ -437,7 +437,7 @@ const App = (() => {
       }
     },
     cliff: {
-      label:'Cliff', icon:'⛰', radial:false,
+      label:'Cliff', icon:'⛰', radial:false, edgeChar:0.6, edgeFreqMul:0.45,
       hint:'The ONE hard-edge tool: a one-sided escarpment. Steepness sets the transition width; the high side is the left of your stroke direction.',
       controls:[['cliffHeight','Rise',0.05,0.45,0.005,0.22],
                 ['cliffSteep','Steepness',0.2,1,0.01,0.75]],
@@ -448,7 +448,7 @@ const App = (() => {
       }
     },
     volcano: {
-      label:'Volcano', icon:'🌋', radial:true,
+      label:'Volcano', icon:'🌋', radial:true, edgeChar:1.3, edgeFreqMul:1.1,
       hint:'Radial cone + crater with ridged flanks. Crater depth carves the summit caldera.',
       controls:[['volcHeight','Cone height',0.15,0.6,0.01,0.45],
                 ['craterDepth','Crater depth',0,0.9,0.01,0.5],
@@ -494,7 +494,8 @@ const App = (() => {
     const rad = stampRadius(st);
     const feat = FEATURES[st.type];
     const feather = Math.max(2, rad*(1-st.g.hardness));
-    const edgeAmp = (st.g.edgeNoise||0) * rad * 0.34;   // fractal edge warp reach
+    const edgeChar = feat.edgeChar==null ? 1 : feat.edgeChar;
+    const edgeAmp = (st.g.edgeNoise||0) * rad * 0.34 * edgeChar;   // fractal edge warp reach
     const m = rad + feather + edgeAmp + 3;
     let x0,y0,x1,y1;
     if(feat.radial){
@@ -524,9 +525,15 @@ const App = (() => {
     // Fractal edge warp: perturb the coordinates used for the coverage mask so
     // the feature footprint is ragged/organic, not a smooth rounded brush blob.
     // Feature *interior* noise still samples the true px,py (ctx.px/py below).
-    const edgeAmp = P.edgeNoise * rad * 0.34;
+    // edgeChar/edgeFreqMul give each landform its own edge character (e.g. a
+    // coastline's bays are large and ragged; a river's banks stay tight; a
+    // cliff wanders like a fault trace rather than jittering).
+    const edgeChar = feat.edgeChar==null ? 1 : feat.edgeChar;
+    const edgeFreqMul = feat.edgeFreqMul==null ? 1 : feat.edgeFreqMul;
+    const edgeAmp = P.edgeNoise * rad * 0.34 * edgeChar;
     const warp = edgeAmp > 0.01;
-    const wf = 2.3 / Math.max(8, rad);                  // ~4-5 lobes across the diameter + octaves
+    const wf = (2.3 / Math.max(8, rad)) * edgeFreqMul;  // ~4-5 lobes across the diameter + octaves
+    const wf2 = wf * 3.4;                               // finer companion octave: mottles the ramp itself
     const pts = st.pts;
     for(let py=bb.y0; py<=bb.y1; py++){
       for(let px=bb.x0; px<=bb.x1; px++){
@@ -546,6 +553,13 @@ const App = (() => {
           cov = ss((R - d)/feather);
         }
         if(cov<=0) continue;
+        if(warp && cov<1){
+          // Mottle the transition band itself (not just the silhouette) so the
+          // blend ramp reads as textured ground, not a clean airbrushed fade.
+          const detail = nz.fbm(px*wf2+500.7, py*wf2-330.2, Math.max(2,P.octaves-1), P.persistence, P.lacunarity);
+          cov = clamp(cov + detail*0.17*P.edgeNoise*edgeChar, 0, 1);
+          if(cov<=0) continue;
+        }
         const i = py*SIZE+px;
         ctx.px=px; ctx.py=py; ctx.d=d; ctx.sd=sd; ctx.s=s; ctx.rC=rC;
         ctx.h0=H[i]; ctx.w=cov; ctx.k=cov*P.intensity; ctx.waterOut=NaN;
