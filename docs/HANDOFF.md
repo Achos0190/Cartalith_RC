@@ -9,17 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.08.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.09.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.09 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.07` are kept and never edited.
+  (v1.10 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.08` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
   version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
   naming — **DONE, v1.07**. (2) setup-gate world archetype presets — **DONE, v1.08**. (3) GeoJSON/GIS
-  export. (4) province tier + religions layer. (5) submap/resample UX. (6) label placement + per-layer
-  style editors. Items 3–6 not yet started.
+  export — **DONE, v1.09**. (4) province tier + religions layer. (5) submap/resample UX. (6) label
+  placement + per-layer style editors. Items 4–6 not yet started.
+- **v1.09 — owner: "implement the top 6 borrow list from the research" (#3 GeoJSON/GIS export).** New
+  **Export GeoJSON** button (File ▾, next to Export .zip): settlements/POIs, roads/sea-routes, rivers
+  (Strahler ≥2) and faction territory outlines as one `.geojson` FeatureCollection, each feature tagged
+  `layer` for filtering in a GIS tool. Coordinates are local planar km (east, north), NOT WGS84 lon/lat
+  — a fantasy world has no real georeference (same call Azgaar's FMG makes); documented in a top-level
+  `properties.note`. Territory outlines are the new algorithm: `_geoTraceMaskRings` walks a faction's
+  `civTerritory` cell mask into closed boundary rings via oriented cell-edge tracing, classifies
+  outer-shell-vs-hole by shoelace sign, nests holes into their smallest enclosing shell by point-in-
+  ring — an enclave/lake renders as an actual `MultiPolygon` hole, not a spurious extra polygon. Lives
+  in script block 1 (only ever called long after block 2 has run — same deferred cross-block pattern
+  `exportZip` already uses for the Asset Library). Verified: engine **923/923**, UME **831/831**, hash
+  vs v1.08 **ALL IDENTICAL**, smoke **188/188** (+2). Node-isolated ring-tracing unit tests (solid
+  square, donut-with-hole, two disjoint blobs, empty mask) all pass exact area/classification checks.
+  Playwright-probed on a real populated+territory-painted world: 225 features across all 4 layers,
+  territory area ratio to painted cells = 1.000.
 - **v1.08 — owner: "implement the top 6 borrow list from the research" (#2 setup-gate world archetype
   presets).** Cartalith already had the underlying system — `ARCHETYPES` (earth/supercontinent/
   archipelago/volcanic/rift) + `state.world_structure`'s continentality-field steering, exposed in the
