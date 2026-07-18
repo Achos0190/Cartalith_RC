@@ -64,15 +64,28 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { pill: pill.textContent, widthIsMiles: Math.abs(+w.value - 40000 / 1.609344) < 2 };
   });
   await page.evaluate(() => document.querySelector('#suUnitSeg [data-unit="km"]').click());   // back to km for the rest
+  // v1.06 (owner: "the seed box back, and the random option"): the setup gate carries a seed input +
+  // 🎲 button; typing a seed there must drive state.tect.seed on commit (asserted after the commit
+  // below, which types 31337), and the dice must roll a new value into the box.
+  R.setupSeed = await page.evaluate(() => {
+    const sEl = document.getElementById('suSeedN'), dice = document.getElementById('suSeedRand');
+    if (!sEl || !dice) return { present: false };
+    sEl.value = '777'; dice.click();
+    const diceChanged = String(sEl.value) !== '777' && String(sEl.value).trim() !== '';
+    return { present: true, diceChanged };
+  });
   // 1d. commit a default world (reset width→800 first so the committed world matches the rest of the suite)
   await page.evaluate(() => {
     const w = document.getElementById('suWidth'); w.value = 800; w.dispatchEvent(new Event('input'));
     document.querySelector('#suResSeg [data-w="512"]').click();   // small = fast commit
+    const sEl = document.getElementById('suSeedN'); if (sEl) sEl.value = '31337';   // v1.06: typed seed must land in state.tect.seed
     document.getElementById('suGenCommit').click();
   });
   await page.waitForFunction(() => getComputedStyle(document.getElementById('onboard')).display === 'none', null, { timeout: 60000 });
   await page.waitForFunction(() => { for (let i = 0; i < field.length; i += 997) { if (field[i] !== 0) return true; } return false; }, null, { timeout: 60000 });   // world committed
   R.committed = true;
+  R.setupSeedApplied = await page.evaluate(() => (typeof state !== 'undefined' && state.tect) ? state.tect.seed === 31337 : false);
+  if (R.setupSeed && R.setupSeed.present === false) R.setupSeedApplied = 'vacuous';   // pre-v1.06 target file
   R.gateHidden = await page.evaluate(() => getComputedStyle(document.getElementById('onboard')).display === 'none');
   R.sidebarUnlocked = await page.evaluate(() => !document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents !== 'none');   // v0.68: sidebar live after commit
   // 1e. import-calibration step exists and auto-infers on commit (drive it directly; a real file picker
@@ -513,6 +526,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   };
   await page.evaluate(() => { state.places.push({x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}); });
 
+  // v1.02 (owner: "sometimes ways don't connect — they stop just short of a location"): the land
+  // network's corridor consolidation could start a road a routing-cell out at a downsampled cell
+  // centre, offset from the pin. Regression guard: every visible land way endpoint that belongs to a
+  // settlement (its aIdx/bIdx) lands EXACTLY on the pin — 0 "stops just short" endpoints, > 0 exact.
+  R.waysReachSettlements = await page.evaluate(() => {
+    state.places = [];
+    _civAutoWorld();
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    if (settles.length < 3) return { vacuous: true, short: 0, exact: 0 };
+    let short = 0, exact = 0;
+    for (const w of civWays) {
+      if (w.sea || w.hidden || !w.pts || w.pts.length < 2 || w.aIdx == null || w.bIdx == null) continue;
+      const A = settles[w.aIdx], B = settles[w.bIdx];
+      for (const end of [w.pts[0], w.pts[w.pts.length - 1]]) {
+        const ex = Array.isArray(end) ? end[0] : end.x, ey = Array.isArray(end) ? end[1] : end.y;
+        let md2 = Infinity; for (const P of [A, B]) { if (!P) continue; const dd = (ex - P.x) * (ex - P.x) + (ey - P.y) * (ey - P.y); if (dd < md2) md2 = dd; }
+        if (md2 <= 0.04) exact++; else if (md2 <= 25) short++;   // <=0.2 cell exact; 0.2–5 cells "short"
+      }
+    }
+    return { vacuous: false, short, exact };
+  });
+  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}]; });
+
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
   // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
@@ -942,21 +978,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { total: keys.length, bad };
   });
 
-  // v0.87: entering LOD/atlas mode fills the viewport (letterboxed) instead of shrinking the canvas to its
-  // intrinsic GW×GH size; exiting restores the intrinsic size (owner report: "viewport restricts to the
-  // initial World px size instead of full screen").
+  // v0.87: entering LOD/atlas mode fills the viewport instead of shrinking the canvas to its intrinsic
+  // GW×GH size (owner report: "viewport restricts to the initial World px size instead of full screen").
+  // v1.01 (fill mode): BOTH modes now letterbox-COVER the wrap — the map always uses the full display
+  // area — so the contract is "the canvas covers the wrap's area in LOD mode, and exiting LOD clears
+  // the inline size and returns to the (cover-clamped) CSS-transform path at a comparable on-screen
+  // size", not "exit returns to a small intrinsic rect".
   R.lodViewport = await page.evaluate(() => {
     const view = document.getElementById('view'), wrap = document.querySelector('.canvas-wrap');
     const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
     const wrapA = area(wrap);
-    const intrinsicA = area(view);                                  // non-LOD, scale 1 ⇒ small
+    const beforeA = area(view);                                     // non-LOD (cover-clamped since v1.01)
     const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
     _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
-    const lodA = area(view);                                        // should fill most of the wrap
-    const filled = lodA > intrinsicA * 2 && lodA > wrapA * 0.5;     // clearly enlarged, majority of viewport
+    const lodA = area(view);                                        // letterbox-cover ⇒ at least the wrap
+    const filled = lodA >= wrapA * 0.95;                            // covers the viewport (crop allowed)
     _lodOn = false; if (lc) lc.checked = false; applyView(); renderNow();
-    const restoredA = area(view);                                   // back to intrinsic (inline size cleared)
-    return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
+    const restoredA = area(view);                                   // back to the CSS-transform (cover) path
+    const restored = restoredA > wrapA * 0.5 && Math.abs(restoredA - beforeA) < Math.max(beforeA, 1) * 0.35;
+    return { filled, restored, hadInlineCleared: view.style.width === '' };
   });
 
   // v0.88 (owner report: "highest zoom stops at 20km, I'd like to drop down to 5km"): the LOD zoom cap now
@@ -1318,6 +1358,113 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { pairs: out };
   });
 
+  // v0.95 (owner: refactor the urban-morphology PoC into Cartalith; at deep zoom a settlement's pin
+  // fades into its own generated street layout, main roads locked to the region network, gated by a
+  // map-wide opt-in toggle; settlement popup gains Age/Fortifications, inferred from population by
+  // default). Regression guard: default-off toggle + wiring, a real pixel difference between the
+  // toggle on/off states once the deep-zoom crossfade band + a generated model are both in effect (and
+  // the pin fades — _umRevealedSet gates on the model actually being ready, not just the zoom band),
+  // the popup's Age/Fortifications fields exist and editing either changes _umPlaceContext's cache key
+  // (so the layout regenerates), and generation is deterministic for identical inputs.
+  R.urbanMorph = await page.evaluate(async () => {
+    try { _civAutoWorld(); } catch (e) {}
+    // v1.00: a settlement sitting in open water (its town box is mostly water) legitimately renders
+    // NO layout — just its pin (_umModelFor bails). So this crossfade/reveal assertion must target a
+    // settlement that actually HAS a land town: pick the first whose model renders (via the synchronous
+    // _umModelForNow, which also warms the cache), falling back to the first settlement on older builds.
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    let settle = (typeof _umModelForNow === 'function') ? settles.find(p => _umModelForNow(p)) : null;
+    if (!settle) settle = settles[0];
+    if (!settle) return { ok: false, error: 'no settlement' };
+
+    const chk = document.getElementById('civUrbanLayoutsChk');
+    const defaultOff = (state.viz && state.viz.urbanLayouts) === false;
+    const checkboxReflectsDefault = !!chk && chk.checked === false;
+
+    const lc = document.getElementById('lodChk'); if (lc) { lc.checked = true; lc.dispatchEvent(new Event('change')); }
+    _lodCx = settle.x; _lodCy = settle.y; _lodZoom = Math.max(4, (state.mapWidthKm || 800) / 6);
+    state.viz.urbanLayouts = false; renderNow();
+    const civOff = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+
+    state.viz.urbanLayouts = true;
+    let model = null;
+    for (let i = 0; i < 50 && !model; i++) { renderNow(); model = _umModelFor(settle, false); if (!model) await new Promise(r => setTimeout(r, 20)); }
+    renderNow();
+    const civOn = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+    let diffPx = 0;
+    for (let i = 0; i < civOn.length; i += 4) {
+      if (Math.abs(civOn[i] - civOff[i]) + Math.abs(civOn[i + 1] - civOff[i + 1]) + Math.abs(civOn[i + 2] - civOff[i + 2]) + Math.abs(civOn[i + 3] - civOff[i + 3]) > 6) diffPx++;
+    }
+    const revealedWithModel = !!model && _umRevealedSet.has(settle);
+
+    _civSelectedPlace = settle; _civRenderPlaceEditor();
+    const ageEl = document.getElementById('_civPeAge'), wallsEl = document.getElementById('_civPeWalls');
+    const hasAgeEl = !!ageEl, hasWallsEl = !!wallsEl;
+    const key0 = _umCacheKey(_umPlaceContext(settle));
+    if (ageEl) { ageEl.value = '600'; ageEl.dispatchEvent(new Event('input')); }
+    const key1 = _umCacheKey(_umPlaceContext(settle));
+    const cacheInvalidatesOnAgeEdit = key0 !== key1;
+    if (ageEl) { ageEl.value = ''; ageEl.dispatchEvent(new Event('input')); }
+    const key2 = _umCacheKey(_umPlaceContext(settle));
+    const ageBackToAuto = key2 === key0;
+
+    const ctx = _umPlaceContext(settle);
+    const mA = UME.cityGen(ctx.seed, ctx), mB = UME.cityGen(ctx.seed, ctx);
+    const deterministic = UME.hashModel(mA) === UME.hashModel(mB);
+
+    _lodOn = false; _lodZoom = 1; state.viz.urbanLayouts = false; applyView(); renderNow();
+    return {
+      ok: true, defaultOff, checkboxReflectsDefault, diffPx, revealedWithModel,
+      hasAgeEl, hasWallsEl, cacheInvalidatesOnAgeEdit, ageBackToAuto, deterministic
+    };
+  });
+
+  // v0.96 regression guard for the coordinate-based _umRouteEnds fix (the town's main roads lock to the
+  // map's connected roads). Deterministic form: a road whose endpoint is snapped to the settlement must
+  // yield a route end, while a way that only PASSES NEAR the settlement (endpoint not at it) must NOT —
+  // the old aIdx/bIdx match couldn't tell those apart (several split runs of one edge share aIdx/bIdx,
+  // so it pulled bearings from way-interior junctions). Bearing-vs-bearing angle matching is left to the
+  // dedicated probes (chance-sensitive with many primaries; not a stable pass/fail in the smoke world).
+  R.umRoadEnds = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    await generate();
+    try { _civAutoWorld(); } catch (e) { return { ok: false, reason: 'autoworld: ' + e.message }; }
+    const eps = Math.max(1.0, GW / 250);
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    const cc = p => { let n = 0; for (const w of civWays) { if (w.sea || w.hidden || !w.pts || w.pts.length < 2) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - p.x, a.y - p.y) < eps || Math.hypot(b.x - p.x, b.y - p.y) < eps) n++; } return n; };
+    let best = null, bn = -1; for (const p of settles) { const c = cc(p); if (c > bn) { bn = c; best = p; } }
+    if (!best || bn < 1) return { ok: false, reason: 'no connected settlement' };
+    const re = _umRouteEnds(best, UME.SITE_WM, UME.SITE_HM, 0);
+    // a placeholder far from any settlement endpoint must get no route ends (proves it's not matching by
+    // proximity/aIdx alone) — find an empty spot
+    let farP = null; for (let gy = 5; gy < GH - 5 && !farP; gy += 7) for (let gx = 5; gx < GW - 5; gx += 7) { let near = false; for (const w of civWays) { if (!w.pts) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - gx, a.y - gy) < eps * 4 || Math.hypot(b.x - gx, b.y - gy) < eps * 4) { near = true; break; } } if (!near && field[gy * GW + gx] >= (state.seaLevel || 0.42)) { farP = { x: gx, y: gy }; break; } }
+    const reFar = farP ? _umRouteEnds(farP, UME.SITE_WM, UME.SITE_HM, 0) : null;
+    return { ok: true, conns: bn, connectedGetsEnds: !!re && re.length > 0, disconnectedGetsNone: !reFar };
+  });
+
+  // v0.97 regression guard: the town is built AROUND the real roads (primaryPaths) and still forms a
+  // proper structure — a wall for a walled settlement + primaries reaching a real extent. The first cut
+  // resampled the km-spaced civWay vertices too sparsely (2-3 pts), so injected primaries were 2-pt
+  // stubs (~250 m), the built mass landed entirely on the far river bank, and the wall never formed;
+  // the arc-length resample fixed it. Also checks the paths are dense (many points), not raw vertices.
+  R.umBuildAround = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+    await generate();
+    try { _civAutoWorld(); } catch (e) { return { ok: false, reason: 'autoworld: ' + e.message }; }
+    const eps = Math.max(1.0, GW / 250);
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind) && _umInferWalls(p));
+    const cc = p => { let n = 0; for (const w of civWays) { if (w.sea || w.hidden || !w.pts || w.pts.length < 2) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - p.x, a.y - p.y) < eps || Math.hypot(b.x - p.x, b.y - p.y) < eps) n++; } return n; };
+    let best = null, bn = -1; for (const p of settles) { const c = cc(p); if (c > bn) { bn = c; best = p; } }
+    if (!best || bn < 1) return { ok: false, reason: 'no connected walled settlement' };
+    const ctx = _umPlaceContext(best);
+    const usesPaths = !!ctx.primaryPaths && ctx.primaryPaths.length > 0;
+    const dense = usesPaths && ctx.primaryPaths.every(pa => pa.length >= 8);   // resampled, not raw km-spaced vertices
+    const m = UME.cityGen(ctx.seed, ctx);
+    const anc = m.anchors.market, N = m.graph.nodes; let maxPrim = 0;
+    for (const e of m.graph.edges) { if (e.cls !== 'primary') continue; for (const nid of [e.a, e.b]) { const nd = N[nid]; if (nd) maxPrim = Math.max(maxPrim, Math.hypot(nd.x - anc.x, nd.y - anc.y)); } }
+    return { ok: true, conns: bn, usesPaths, dense, wallRing: !!(m.wall && m.wall.ring), maxPrim: Math.round(maxPrim) };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1491,6 +1638,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.86: Assets header button toggles into the library ("← Map") and back to the canvas', R.assetsToggle.inAssets && R.assetsToggle.back);
   A('v0.86: every Layers-popover view has a visible, non-empty legend', R.allLegends.total > 25 && R.allLegends.bad === 0);
   A('v0.86: geological Resources layer is full-map (present below sea) and re-derives on a sea-level change', R.resources.fullMap && R.resources.reDerivedAfterSeaMove && R.resources.persistsUnderRaisedSea);
+
+  // ── v0.95: urban morphology (deep-zoom settlement layouts) ──
+  A('v0.95: settlement found on the auto-populated world (test precondition)', R.urbanMorph.ok === true);
+  A('v0.95: "Generate settlement layouts" toggle defaults off (state + checkbox)', R.urbanMorph.defaultOff === true && R.urbanMorph.checkboxReflectsDefault === true);
+  A('v0.95: enabling the toggle at deep zoom produces a real pixel difference on the civ canvas', R.urbanMorph.diffPx > 0);
+  A('v0.95: a settlement whose model is ready is marked revealed (pin fades complementary to the layout)', R.urbanMorph.revealedWithModel === true);
+  A('v0.95: settlement popup gains Age (years) and Fortifications fields', R.urbanMorph.hasAgeEl === true && R.urbanMorph.hasWallsEl === true);
+  A('v0.95: editing Age invalidates the cached layout (cache key changes)', R.urbanMorph.cacheInvalidatesOnAgeEdit === true);
+  A('v0.95: clearing Age back to blank restores the auto-inferred cache key', R.urbanMorph.ageBackToAuto === true);
+  A('v0.95: layout generation is deterministic for identical inputs (hashModel matches)', R.urbanMorph.deterministic === true);
+  // ── v0.96: urban-morphology fixes ──
+  A('v0.96: a connected settlement yields route ends from its real roads (road-lock precondition)', R.umRoadEnds.ok === true && R.umRoadEnds.connectedGetsEnds === true);
+  A('v0.96: a spot with no road endpoint at it yields no route ends (coordinate match, not aIdx/proximity)', R.umRoadEnds.ok !== true || R.umRoadEnds.disconnectedGetsNone === true);
+  // ── v0.97: town built around the real roads ──
+  A('v0.97: a connected walled settlement feeds dense resampled road paths into the generator', R.umBuildAround.ok === true && R.umBuildAround.usesPaths === true && R.umBuildAround.dense === true);
+  A('v0.97: the town built around real roads still forms a wall and full-extent primaries (not stubs)', R.umBuildAround.ok !== true || (R.umBuildAround.wallRing === true && R.umBuildAround.maxPrim > 400));
+  A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
+  A('v1.06: setup-gate seed box exists, 🎲 rolls a new value, and the typed seed drives state.tect.seed', R.setupSeedApplied === 'vacuous' || (R.setupSeed.present && R.setupSeed.diceChanged && R.setupSeedApplied === true));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
