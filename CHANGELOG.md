@@ -12,6 +12,35 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.03 (2026-07-18)
+**Owner (9 screenshots, v1.01): "harbours not placed correctly, layouts off; a place said to be in water
+but zoom reveals an island; weirdly long harbours next to lines of water; square lakes when LOD zooming."**
+Two targeted settlement-layout fixes (the third — square lakes at LOD — is the pre-existing tile-renderer
+resolution limit, still deferred).
+
+- **Island/coastal towns no longer wrongly suppressed** (`_umWaterCtx`). The v1.00 "mostly water" bail
+  keyed on the WHOLE ~1.7 km box's water fraction (>0.72), so a settlement on a small island read as
+  "in open water" and showed **no** town layout, even though it sits on land. Since v1.01 snaps every
+  settlement onto land, the right question is whether there's buildable land RIGHT AROUND the settlement,
+  not how much distant box is sea: the bail now measures the water fraction only in a ~260 m disc centred
+  on the settlement, and fires (bare pin) only if that disc is >90% water (a genuine mid-open-water pin).
+  An island/coast/estuary town has land under and beside it, so it builds a (small) town on that land.
+  Probe: rescued island settlements render a real town (137 buildings on the flooded-island test), no
+  false bails; the disc test spares true mid-water pins.
+- **Coastal/port enceinte no longer stretches into a thin sliver** (`builtMassHull`). On REAL water, if
+  the built-mass hull is pathologically elongated (a needle strung along the shore/river, e.g. the owner's
+  "weirdly long harbours next to lines of water"), it's now compressed along its long axis to a max ~2.4:1
+  aspect (anisotropic scale about the centroid). The common real-water wall is ~1.3:1 and passes through
+  untouched; only extreme cases engage. Guarded on `usesRealWater` ⇒ the synthetic UME suite is
+  byte-identical. Flood-scenario probe: worst wall aspect 2.5 → 2.2 (median 1.5 unchanged). NOTE: the
+  owner's most-extreme needles couldn't be reproduced on local seeds, so this is a general safeguard that
+  bounds any elongation (a hull of aspect 10 becomes ≤2.4) pending on-device confirmation; the long
+  HARBOUR-quay extent along the shore is a separate follow-up.
+
+**Verification:** engine `tests/run.sh` **923/923** (block 1 untouched); `tests/run_um.sh` **831/831**
+(both fixes guarded ⇒ synthetic path byte-identical); `hash_gen1.js` A/B vs v1.02 **ALL IDENTICAL**
+(opt-in layout path only); `smoke_gen1.js` **178/178**.
+
 ### v1.02 (2026-07-18)
 **Owner: "sometimes ways don't connect — they stop just short of a location."** The land network
 (`_civHierarchicalNetwork`) consolidates shared corridors by claiming routing-grid cells busiest-first,

@@ -9,11 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.02.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.03.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.03 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.01` are kept and never edited.
+  (v1.04 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.02` are kept and never edited.
+- **v1.03 — owner (9 screenshots): island town wrongly "in open water", elongated port walls, square
+  lakes at LOD.** (1) **Island rescue** (`_umWaterCtx`): the v1.00 mostly-water bail keyed on the whole
+  box's water fraction (>0.72), suppressing island/coast towns; now measures the water fraction in a
+  ~260 m disc around the settlement and bails only if that's >90% water (true mid-open-water). Islands
+  build a small town on the island land. (2) **Elongated-wall cap** (`builtMassHull`): on real water, a
+  pathologically elongated hull (needle along the shore/river) is compressed along its long axis to ≤2.4:1
+  (guarded on `usesRealWater`; common ~1.3:1 walls untouched). Verified: engine **923/923**, UME
+  **831/831**, hash vs v1.02 **ALL IDENTICAL**, smoke **178/178**. **Still flagged for v1.04+:** the
+  owner's MOST-EXTREME wall needles + the long HARBOUR-QUAY extent along the shore couldn't be reproduced
+  on local seeds — the aspect cap bounds any elongation but on-device confirmation is owed, and the
+  harbour-length is a separate constraint; **square lakes at LOD** remain the pre-existing tile-renderer
+  resolution limit (#96, deferred — needs procedural sub-cell coast detail in the tile pyramid).
 - **v1.02 — owner: "sometimes ways don't connect — they stop just short of a location."** The land
   network (`_civHierarchicalNetwork`) consolidates shared corridors by claiming routing-grid cells
   busiest-first; an edge whose near-settlement cells were already claimed by a THROUGH road starts its
