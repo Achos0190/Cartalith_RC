@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v0.99.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.00.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.98` are kept and never edited.
+  (v1.01 next). Older `v0.57`/`v0.6`/`v0.61`–`v0.99` are kept and never edited.
+- **v1.00 — owner: "harbor at a coastline/river with the city on land, no roads over water from it";
+  "tapping a city in explore → a popup with the city layout, a zoom in"; "[a settlement] renders inside
+  a lake."** Four settlement-layout fixes + one explore feature, all opt-in / popup so render bit-
+  identity to v0.99 holds. (1) **No town roads over open water:** `removeWaterCrossings` gains a real-
+  water pass culling primaries/streets that cross open water away from the one bridge (`site.bridgePt`);
+  `pruneLargest` drops orphaned far-bank fabric. Guarded on `usesRealWater` (UME suite byte-identical).
+  Side benefit: removes the far junctions that inflated the coastal wall, so it hugs the built mass
+  tighter. (2) **Town-on-land:** `generate()`'s market nudge searches the whole box (was 340 m) to land
+  the centre on real shore. (3) **No floating lake-town:** `_umWaterCtx.mostlyWater` (box >72% water) +
+  `_umModelFor` bail keep the bare pin for a settlement in open water. (4) **City-layout popup:** tapping
+  a settlement in explore shows a zoomed, fit-to-built-mass render of its town at the top of the editor
+  popup (`_umModelForNow` sync generate + `_umDrawLayoutPreview` + `_civOpenPlacePopup`); POIs/in-water
+  settlements show none. Smoke's v0.95 crossfade assertion now picks the first settlement whose model
+  actually renders (in-water ones legitimately render nothing). Verified: engine **923/923**, UME
+  **831/831** (guard holds), hash A/B vs v0.99 **ALL IDENTICAL** (default-off), smoke **177/177** (an
+  unrelated v0.73 routing-gravity assertion flakes on the unseeded smoke world — passes on re-run).
+  **Still flagged:** coastal wall can still over-enclose along an arterial (deeper hull change); the map
+  canvas does not yet fill a portrait/mobile display (letterboxes a landscape map — a core view/projection
+  change needing interactive mobile verification).
 - **v0.99 — owner: "Continue" (Stage 3 of the seamless refactor — coastal polish).** Two contained,
   safe improvements to v0.98's real-water settlement layouts, both on the opt-in path so render
   bit-identity to v0.98 holds. (1) **Smooth local coastline:** `_umWaterCtx` (civ adapter) now samples

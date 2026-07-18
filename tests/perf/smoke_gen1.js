@@ -1328,7 +1328,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // (so the layout regenerates), and generation is deterministic for identical inputs.
   R.urbanMorph = await page.evaluate(async () => {
     try { _civAutoWorld(); } catch (e) {}
-    const settle = state.places.find(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    // v1.00: a settlement sitting in open water (its town box is mostly water) legitimately renders
+    // NO layout — just its pin (_umModelFor bails). So this crossfade/reveal assertion must target a
+    // settlement that actually HAS a land town: pick the first whose model renders (via the synchronous
+    // _umModelForNow, which also warms the cache), falling back to the first settlement on older builds.
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    let settle = (typeof _umModelForNow === 'function') ? settles.find(p => _umModelForNow(p)) : null;
+    if (!settle) settle = settles[0];
     if (!settle) return { ok: false, error: 'no settlement' };
 
     const chk = document.getElementById('civUrbanLayoutsChk');

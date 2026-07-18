@@ -12,6 +12,51 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.00 (2026-07-18)
+**Owner: "a harbor sits at a coastline or actual river with the city right next to it on land; no roads
+passing over water that come from it"; "when tapping a city in explore mode I want a popup with the city
+layout — a zoom in that shows it closer"; "[a settlement] renders inside a lake."** Continues the
+seamless region↔settlement work with four settlement-layout fixes plus a new explore-mode feature. All
+of it is on the opt-in (`state.viz.urbanLayouts`, default off) / popup paths, so default render stays
+bit-identical to v0.99 (`hash_gen1.js` ALL IDENTICAL).
+
+- **No town roads over open water** (`removeWaterCrossings`, UME engine). The base pass exempted
+  `primary` edges as presumed bridges — only safe for the synthetic single-channel site. With REAL map
+  water, a primary can run out over the sea or make an extra unbridged river crossing. v1.00 adds a
+  real-water pass that culls any primary/street edge crossing open water away from the ONE designated
+  bridge (`site.bridgePt`); `pruneLargest` then drops fabric this orphans on the far bank (a town that
+  never bridged its water is one-sided on land, not floating). Quay stays exempt. Guarded on
+  `usesRealWater` ⇒ the synthetic path (headless UME suite) is byte-identical. This also removes the
+  far-bank/water junctions that inflated the coastal wall, so the enceinte hugs the built mass tighter.
+- **The town builds on land, not in the water** (`generate()` market nudge). The nudge that moves the
+  market off water when the box centre is wet now searches ring-by-ring across the WHOLE box (was capped
+  at 340 m), so a settlement on the edge of a large water body still lands its centre on the real shore.
+- **A settlement sitting in open water shows no floating town** (`_umWaterCtx` `mostlyWater` + `_umModelFor`
+  bail). If a settlement's town box is mostly water (a lake / mid-sea placement — no shore to build on),
+  `_umModelFor` keeps the bare pin instead of rendering a town in the water. Coastal/estuary towns (water
+  on one side, empirically well under half the box) are unaffected.
+- **Tap a settlement in explore → its city layout, zoomed in** (`_umModelForNow` + `_umDrawLayoutPreview`
+  + `_civOpenPlacePopup`). The settlement editor popup now leads with a fit-to-box render of the town's
+  own generated layout (walls/streets/blocks/buildings/water), fitted to the BUILT MASS so approach roads
+  run off the frame and the town fills the card. The model is fetched/generated synchronously on tap
+  (cached), independent of the map-wide toggle. POIs and in-water settlements show none.
+
+**Test:** the v0.95 deep-zoom crossfade smoke assertion picked the arbitrary FIRST settlement, which under
+v1.00 may legitimately be one that renders no layout (in-water); it now picks the first settlement whose
+model actually renders (via `_umModelForNow`), matching the new contract.
+
+**Still flagged (not blocking):** the coastal wall is tighter but still sized from the street-graph hull,
+so it can over-enclose along an arterial in some cases (a deeper growth/hull change). The map canvas does
+not yet fill a portrait/mobile display (it letterboxes a landscape map — a core view/projection change
+that needs interactive mobile verification; scoped separately).
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (synthetic-water path
+byte-identical); `hash_gen1.js` A/B vs v0.99 **ALL IDENTICAL** (feature default-off); `smoke_gen1.js`
+**177/177** with the robust settlement pick (an unrelated v0.73 routing-gravity assertion flakes on the
+unseeded smoke world, same class as the occasional engine "splat" flake — passes on re-run). Browser-
+verified on seed 54869 (512px): river/estuary/coastal towns build fully on land with no roads over water;
+the settlement popup shows a zoomed town-layout card.
+
 ### v0.99 (2026-07-17)
 **Owner: "Continue" (Stage 3 of the seamless refactor — coastal polish).** Two contained, safe
 improvements to the real-water settlement layouts shipped in v0.98, both on the opt-in

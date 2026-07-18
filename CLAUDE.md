@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v0.99**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.00**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v0.99.html` | **Current** unified tool (~20.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.98.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.00.html` | **Current** unified tool (~20.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v0.99.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
@@ -105,6 +105,14 @@ synthetic `y−5` "town is north" (guarded on `site.usesRealWater`, so the UME s
 identical). Still flagged: on a coastal town the enceinte is sized from the street-graph built-mass
 hull, which folds in arterial junctions and can enclose empty land beyond the built fabric (a
 growth/hull redesign, next pass); "river through town" reads best at 1K/2K.
+**v1.00 (settlement-layout polish + explore popup):** (a) `removeWaterCrossings` gains a real-water pass
+that culls town primaries/streets crossing open water away from the one bridge (`site.bridgePt`) — no
+road walks into the sea; guarded on `usesRealWater`, so the synthetic UME suite is byte-identical. (b)
+`generate()`'s market nudge searches the whole box (was 340 m) so a shore-edge settlement lands its
+centre on real land. (c) `_umWaterCtx` flags `mostlyWater` (box >72% water) and `_umModelFor` bails to
+the bare pin — a settlement in a lake/mid-sea shows no floating town. (d) Tapping a settlement in explore
+shows its town in the editor popup: `_umModelForNow` (synchronous cached generate) + `_umDrawLayoutPreview`
+(fit-to-BUILT-MASS, approach roads run off-frame) render a zoomed layout card in `_civOpenPlacePopup`.
 Generation is deferred one-settlement-per-frame (`_umScheduleGenStep`) and cached (`_umModelFor`,
 keyed on every input that affects the layout — including a water signature) so a cache miss shows the
 pin, not a stall, until the model lands.
