@@ -9,17 +9,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.09.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.10.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.10 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.08` are kept and never edited.
+  (v1.11 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.09` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
   version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
   naming — **DONE, v1.07**. (2) setup-gate world archetype presets — **DONE, v1.08**. (3) GeoJSON/GIS
-  export — **DONE, v1.09**. (4) province tier + religions layer. (5) submap/resample UX. (6) label
-  placement + per-layer style editors. Items 4–6 not yet started.
+  export — **DONE, v1.09**. (4) province tier + religions layer — **DONE, v1.10**. (5) submap/resample
+  UX. (6) label placement + per-layer style editors. Items 5–6 not yet started.
+- **v1.10 — owner: "implement the top 6 borrow list from the research" (#4 province tier + optional
+  religions layer).** New `civProvince` raster (parallel to `civTerritory`) subdivides each faction's
+  territory via `_civGenerateProvinces()` (on-demand button): one province per city-tier+ settlement
+  (rank ≥3), Voronoi-partitioned within that faction's own territory cells only (never crosses a
+  faction boundary — verified), falling back to a single province seeded by the biggest settlement
+  when there's no city+. Rendering (opt-in `state.viz.provinces`) folds a per-province lightness
+  jitter into the SAME per-pixel territory-blit pass, not a second draw. `civProvince`/`CIV_PROVINCES`
+  are deliberately not persisted (pure-derived, regenerate on demand). Religions scoped down to a
+  per-faction categorical "state religion" (`civFactionReligion`, `CIV_RELIGIONS` fixed 8-entry list)
+  rather than FMG's full spatial spread simulation — the research doc flags that half as optional;
+  mirrors the v1.07 culture picker exactly, same persistence pattern. GeoJSON export (v1.09) gains a
+  `province` layer sharing the territory tracer's boundary/hole-nesting code, and territory features
+  gain a `religion` property. Verified: engine **923/923**, UME **831/831**, hash vs v1.09 **ALL
+  IDENTICAL**, smoke **193/193** (+5). Playwright-probed on synthetic two-faction worlds: correct
+  province counts (2 city-seeded + 1 fallback), zero cross-faction leakage, exported province area
+  exactly tiles the parent territory (ratio 1.0000).
 - **v1.09 — owner: "implement the top 6 borrow list from the research" (#3 GeoJSON/GIS export).** New
   **Export GeoJSON** button (File ▾, next to Export .zip): settlements/POIs, roads/sea-routes, rivers
   (Strahler ≥2) and faction territory outlines as one `.geojson` FeatureCollection, each feature tagged
