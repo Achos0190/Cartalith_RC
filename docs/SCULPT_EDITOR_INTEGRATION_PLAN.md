@@ -17,8 +17,10 @@ block 1), while satisfying three hard requirements from the brief:
    While painting/tuning, nothing downstream recomputes; the expensive full-grid pipeline runs
    once, deliberately, when the user says so.
 
-This document is a plan, not a diff. Two decisions below need your sign-off before any of the
-phased work (P0+) starts — flagged inline and summarized at the end.
+This document is a plan, not a diff. Two decisions below needed sign-off before any of the
+phased work (P0+) starts — **both are now decided** (see "Design decision 1/2" below and the
+summary at the end): a 4th Generate sub-tab, and a session-scoped commit whose final step is a
+full re-render so the visible map/debug view never goes stale after committing.
 
 ## Current state (verified in `Cartalith Gen1 v1.06.html`, not assumed)
 
@@ -80,9 +82,9 @@ drawn at all — even though the underlying edit machinery (`editTileAt`, line 8
 rescales the *effect* radius correctly per tile resolution. That's a real, fixable gap, not a
 design choice.
 
-## Design decision 1 — where does the new editor live?
+## Design decision 1 — where does the new editor live? **DECIDED: a 4th Generate sub-tab.**
 
-**Recommendation: a 4th Generate sub-tab**, alongside World / Civilization / Cartography —
+Alongside World / Civilization / Cartography —
 `data-gsub="sculpt"`, label "Sculpt" (reviving the name the pre-merge standalone engine's own
 history used for this before two IA passes folded it into an accordion).
 
@@ -99,33 +101,52 @@ World/Civilization/Cartography, not a `<details>` accordion buried inside one of
 `_manualTerrainActive()` (line 6737, currently gated to `_genSubTab==='world'`) is replaced by an
 equivalent `_sculptEditorActive()` gated to `_genSubTab==='sculpt'`.
 
-## Design decision 2 — what does "commit" actually do to history?
+## Design decision 2 — what does "commit" actually do to history? **DECIDED: A, with a condition.**
 
-Two models are possible; I recommend the first:
+**A. Session-scoped stamp stack.** The stamp stack (per §3) is a cheap, fully non-destructive
+*staging area* for the current sculpting session — unlimited undo/redo, reorder, re-tune, hide,
+delete, all essentially free because it's JSON snapshots of a lightweight object list, not the
+heightmap. **Commit** bakes the whole stack into `field` in one pass, runs `computeFlow(true);
+refreshClimate()` once, pushes **one** snapshot onto the existing `pushUndo()`/`undoStack`, and
+clears the stamp stack. A single Ctrl+Z after commit reverts the whole batch cleanly (consistent
+with how every other field-mutating action in the engine — Generate, erosion passes, the plotline
+brush — already uses `pushUndo`). Once committed, a stamp is no longer independently editable;
+adjusting a committed mountain range means painting a new stamp on top of it, the same way a
+second erosion pass builds on the first rather than reopening it.
 
-**A. Session-scoped stamp stack (recommended).** The stamp stack (per §3) is a cheap, fully
-non-destructive *staging area* for the current sculpting session — unlimited undo/redo, reorder,
-re-tune, hide, delete, all essentially free because it's JSON snapshots of a lightweight object
-list, not the heightmap. **Commit** bakes the whole stack into `field` in one pass, runs
-`computeFlow(true); refreshClimate()` once, pushes **one** snapshot onto the existing
-`pushUndo()`/`undoStack`, and clears the stamp stack. A single Ctrl+Z after commit reverts the
-whole batch cleanly (consistent with how every other field-mutating action in the engine — Generate,
-erosion passes, the plotline brush — already uses `pushUndo`). Once committed, a stamp is no
-longer independently editable; adjusting a committed mountain range means painting a new stamp on
-top of it, the same way a second erosion pass builds on the first rather than reopening it.
+(Option B — fully persistent stamp history matching the PoC exactly, where `field` is always "base
++ full replay of every stamp ever placed" — was rejected: it doesn't scale to Cartalith's grid
+sizes, and `field` is *also* mutated by things that aren't stamps at all (tectonics, erosion,
+imported heightmaps), so "field is a pure function of the stamp stack" stops being true the moment
+any of those run.)
 
-**B. Fully persistent stamp history**, matching the PoC's own model exactly (stamps live for the
-whole project; the field is always "base + full replay of every stamp ever placed," rebuildable at
-any time). This is more faithful to the PoC's non-destructive ideal, but doesn't scale to
-Cartalith's grid sizes: replaying dozens of stamps over a full `GW×GH` world grid (versus the PoC's
-fixed 512×512 canvas) on every edit could cost real seconds, and — critically — `field` is *also*
-mutated by things that aren't stamps at all (tectonics, erosion ops, imported heightmaps), so "the
-field is always a pure function of the stamp stack" stops being true the moment any of those runs.
+**Condition (user-specified): commit must end with the underlying layers actually rendered, not
+just recomputed in the background.** Concretely, the commit sequence's last step is a full
+`renderNow()` (the same call the existing plotline Apply handler already makes after its own
+`computeFlow(true); refreshClimate()`, line 10162 — not new machinery, just making sure the new
+Commit path does it too). This guarantees:
+- The main terrain view redraws with the committed geometry/materials immediately — no stale
+  frame between "I clicked Commit" and "the map looks right."
+- **If the user is currently on one of the affordance/resource debug views** (Lith / Soil / Water
+  / Resources / Carry Cap / Settlement) **when they commit, that view redraws with post-commit
+  data as part of the same render** — because `renderNow()` is exactly what triggers each view's
+  lazy `current*()` builder (§ "Resource/affordance system"), and those builders now recompute
+  from the freshly-committed `field`/`rainField`/`tempField`/`flowField` since `computeFlow()`
+  already nulled their caches. No second action, no manual refresh, no toggling the view off and
+  back on to force a rebuild.
+- Views the user is *not* currently looking at stay lazily built (rebuilt whenever next opened),
+  per the engine's existing performance-conscious design (CHANGELOG frames these as deliberately
+  "debug-view + export only... built lazily," e.g. `docs/AFFORDANCE_FIELD_PLAN.md`'s whole
+  premise) — this condition is a correctness guarantee for whatever is currently rendered, not a
+  mandate to eagerly rebuild every possible layer regardless of visibility, which would waste
+  cycles for no visible benefit.
+- This becomes a named acceptance test in §10 (Verification), not just an implied side effect.
 
-**Recommendation: A.** It reuses the existing undo idiom instead of inventing project-lifetime
-stamp persistence, and matches the brief's "updating to layers only happens when committing the
-terrain" literally: draft work is free and reversible; committing is the one deliberate, coarser
-step, exactly like every other terrain-shaping stage in the engine already is.
+This reuses the existing undo idiom instead of inventing project-lifetime stamp persistence, and
+matches the brief's "updating to layers only happens when committing the terrain" literally: draft
+work is free, reversible, and invisible to every downstream system; committing is the one
+deliberate, coarser step — after which the user immediately *sees* the result, exactly like every
+other terrain-shaping stage in the engine already behaves.
 
 ## 3. Layer model
 
@@ -151,12 +172,16 @@ step, exactly like every other terrain-shaping stage in the engine already is.
 │  (this ALREADY nulls _lithField/_soilField/_waterField/_resourcePots│
 │   /_carryCapField/_settleSuitField — confirmed at lines 2646, 4031) │
 │  pushUndo() — ONE snapshot for the whole batch                      │
+│  renderNow() — the visible map AND any active affordance/resource   │
+│    debug view redraw with post-commit data, same call, same frame   │
 │  sculptStamps[] cleared; stampHistory cleared                       │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 The commit step is small precisely because it reuses existing, already-correct invalidation —
 the plan's job is making sure it *always* runs (once, on commit), not building new invalidation.
+The final `renderNow()` is not optional polish — it's the mechanism that satisfies "layers get
+rendered on commit," and it's the same call the existing plotline Apply handler already makes.
 
 ## 4. Feature registry — consolidating three overlapping lists into one
 
@@ -275,10 +300,11 @@ existing idioms — not the PoC's raw HTML/CSS, so it matches the rest of the ap
   touched. `_sculptEditorActive()` gates pointer handling exactly like `_manualTerrainActive()`
   does today.
 - **P3 — Commit path.** Bake stack → `field`; `computeFlow(true); refreshClimate()`; one
-  `pushUndo()`; clear draft. Verify via the existing Resources/Carry Cap/Settlement debug views
-  that painting a mountain range and committing actually moves copper/iron potential and
-  settlement suitability — this is the acceptance test for the whole "feeds resources on commit"
-  requirement.
+  `pushUndo()`; **`renderNow()`**; clear draft. Acceptance test: with a Resources/Carry Cap/
+  Settlement debug view already active, paint a mountain range and Commit — copper/iron potential
+  and settlement suitability must visibly update in that same view, same frame, no manual
+  refresh. This is the acceptance test for both "feeds resources on commit" and the "layers get
+  rendered on commit" condition together — they're one requirement, not two.
 - **P4 — Zoom/pointer polish.** Fix `renderBrushCursor`'s LOD bail; live km readout;
   `evtToGridLOD` audit.
 - **P5 — Water integration.** River→`riverMask`/`riverFloor`; Lake→enriched `lakeMask`/
@@ -298,21 +324,28 @@ existing idioms — not the PoC's raw HTML/CSS, so it matches the rest of the ap
   actually called once per commit, never mid-draft; affordance caches null after commit, non-null
   and unchanged during draft).
 - Browser (`tests/perf/smoke_gen1.js` additions): tab mechanics, paint → draft (verify `field`
-  unchanged) → commit (verify `field` changed + a debug-view resource field changed) → undo
-  (verify one Ctrl+Z fully reverts), LOD-mode cursor visibility, zoom-relative brush-circle size
-  at a few `viewT.scale`/LOD-zoom levels.
+  unchanged, and that an already-open Resources/Carry Cap/Settlement debug view does NOT change
+  during draft) → commit (verify `field` changed, `renderNow()` ran, and — with that debug view
+  still open from before the commit — its rendered pixels/legend values changed in the same pass)
+  → undo (verify one Ctrl+Z fully reverts both `field` and the debug view's rendered data) →
+  LOD-mode cursor visibility → zoom-relative brush-circle size at a few `viewT.scale`/LOD-zoom
+  levels.
 - Cross-version neutrality (CLAUDE.md's standing rule): with the new tab never opened / no stamps
   committed, `generate()` and rendering stay bit-identical to v1.06 at defaults — same FNV-hash
   discipline as every other opt-in feature in this codebase.
 
-## Summary of what needs your sign-off before P0 starts
+## Decisions (locked)
 
-1. **Tab placement** — new Generate sub-tab "Sculpt" (recommended) vs. a new top-level tab
-   (breaks the tested 2-position phase-switch invariant).
-2. **Commit model** — session-scoped stack that bakes into `field` and clears on commit
-   (recommended, reuses existing `pushUndo`) vs. a fully persistent, always-replayed stamp
-   history (truer to the PoC, doesn't scale to world-size grids).
-3. Whether to fully retire the plotline/direct-paint code paths in P6 or keep them dormant
-   behind a flag for one release as a safety net — recommendation is full retirement once P0's
-   dependency check comes back clean, but flagging this as a place you may want a more
-   conservative default.
+1. **Tab placement — DECIDED: new Generate sub-tab "Sculpt"** (4th branch alongside World /
+   Civilization / Cartography). Preserves the tested 2-position top-level phase-switch invariant.
+2. **Commit model — DECIDED: session-scoped stamp stack**, condition attached: commit's last step
+   is a full `renderNow()`, so the visible map and any currently-open affordance/resource debug
+   view show post-commit data in the same render pass — never merely "correct next time it's
+   opened." Folded into §3's layer-model diagram, P3's acceptance test, and §10's verification
+   plan above.
+3. **Still open, lower stakes, deferred to P6 itself:** whether to fully retire the
+   plotline/direct-paint code paths outright, or keep them dormant behind a flag for one release
+   as a safety net. Recommendation stays full retirement once P0's dependency check comes back
+   clean — revisit only if that check finds a surprise dependency.
+
+P0 (port the pure core, headless-test it in isolation, no UI wiring) is next.
