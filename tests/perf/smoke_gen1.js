@@ -64,15 +64,28 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { pill: pill.textContent, widthIsMiles: Math.abs(+w.value - 40000 / 1.609344) < 2 };
   });
   await page.evaluate(() => document.querySelector('#suUnitSeg [data-unit="km"]').click());   // back to km for the rest
+  // v1.06 (owner: "the seed box back, and the random option"): the setup gate carries a seed input +
+  // 🎲 button; typing a seed there must drive state.tect.seed on commit (asserted after the commit
+  // below, which types 31337), and the dice must roll a new value into the box.
+  R.setupSeed = await page.evaluate(() => {
+    const sEl = document.getElementById('suSeedN'), dice = document.getElementById('suSeedRand');
+    if (!sEl || !dice) return { present: false };
+    sEl.value = '777'; dice.click();
+    const diceChanged = String(sEl.value) !== '777' && String(sEl.value).trim() !== '';
+    return { present: true, diceChanged };
+  });
   // 1d. commit a default world (reset width→800 first so the committed world matches the rest of the suite)
   await page.evaluate(() => {
     const w = document.getElementById('suWidth'); w.value = 800; w.dispatchEvent(new Event('input'));
     document.querySelector('#suResSeg [data-w="512"]').click();   // small = fast commit
+    const sEl = document.getElementById('suSeedN'); if (sEl) sEl.value = '31337';   // v1.06: typed seed must land in state.tect.seed
     document.getElementById('suGenCommit').click();
   });
   await page.waitForFunction(() => getComputedStyle(document.getElementById('onboard')).display === 'none', null, { timeout: 60000 });
   await page.waitForFunction(() => { for (let i = 0; i < field.length; i += 997) { if (field[i] !== 0) return true; } return false; }, null, { timeout: 60000 });   // world committed
   R.committed = true;
+  R.setupSeedApplied = await page.evaluate(() => (typeof state !== 'undefined' && state.tect) ? state.tect.seed === 31337 : false);
+  if (R.setupSeed && R.setupSeed.present === false) R.setupSeedApplied = 'vacuous';   // pre-v1.06 target file
   R.gateHidden = await page.evaluate(() => getComputedStyle(document.getElementById('onboard')).display === 'none');
   R.sidebarUnlocked = await page.evaluate(() => !document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents !== 'none');   // v0.68: sidebar live after commit
   // 1e. import-calibration step exists and auto-infers on commit (drive it directly; a real file picker
@@ -137,17 +150,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const near = s.rivers ? featuresNear(currentFeatures().rivers[0].mouth.x, currentFeatures().rivers[0].mouth.y, 6) : [];
     return { summary: s, hasRivers: s.rivers > 0, hasPeaks: s.peaks > 0, queryWorks: !s.rivers || near.length > 0 };
   });
-  R.lodView = await page.evaluate(() => new Promise(res => {
+  R.lodView = await page.evaluate(async () => {
     const lc = document.getElementById('lodChk'); lc.checked = true; lc.dispatchEvent(new Event('change'));
     _lodZoom = 4; renderNow();                       // overview render → caches an overview canvas
     const cachedAfterFirst = !!_lodOverviewPrev && !!_lodOverviewPrev.key;
     const t0 = performance.now(); renderNow();       // second draw at the same view: overview reuse path
     const secondMs = performance.now() - t0;
-    refineVisibleTiles(); renderNow();               // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
+    await refineVisibleTiles(); renderNow();         // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
     const tileCacheN = _lodTileCanvasCache.size;
     lc.checked = false; lc.dispatchEvent(new Event('change'));
-    res({ cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true });
-  }));
+    return { cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true };
+  });
   // ── v0.72: deep-zoom (z≥8) tributary + local-incision morphology on a live tile ──
   R.tribs = await page.evaluate(() => {
     const bc = document.getElementById('lodBurnChk'); if (bc) { bc.checked = true; bc.dispatchEvent(new Event('change')); }
@@ -512,6 +525,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     journeysCleared: after.journeys === 0,
   };
   await page.evaluate(() => { state.places.push({x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}); });
+
+  // v1.02 (owner: "sometimes ways don't connect — they stop just short of a location"): the land
+  // network's corridor consolidation could start a road a routing-cell out at a downsampled cell
+  // centre, offset from the pin. Regression guard: every visible land way endpoint that belongs to a
+  // settlement (its aIdx/bIdx) lands EXACTLY on the pin — 0 "stops just short" endpoints, > 0 exact.
+  R.waysReachSettlements = await page.evaluate(() => {
+    state.places = [];
+    _civAutoWorld();
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    if (settles.length < 3) return { vacuous: true, short: 0, exact: 0 };
+    let short = 0, exact = 0;
+    for (const w of civWays) {
+      if (w.sea || w.hidden || !w.pts || w.pts.length < 2 || w.aIdx == null || w.bIdx == null) continue;
+      const A = settles[w.aIdx], B = settles[w.bIdx];
+      for (const end of [w.pts[0], w.pts[w.pts.length - 1]]) {
+        const ex = Array.isArray(end) ? end[0] : end.x, ey = Array.isArray(end) ? end[1] : end.y;
+        let md2 = Infinity; for (const P of [A, B]) { if (!P) continue; const dd = (ex - P.x) * (ex - P.x) + (ey - P.y) * (ey - P.y); if (dd < md2) md2 = dd; }
+        if (md2 <= 0.04) exact++; else if (md2 <= 25) short++;   // <=0.2 cell exact; 0.2–5 cells "short"
+      }
+    }
+    return { vacuous: false, short, exact };
+  });
+  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}]; });
 
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
@@ -942,21 +978,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { total: keys.length, bad };
   });
 
-  // v0.87: entering LOD/atlas mode fills the viewport (letterboxed) instead of shrinking the canvas to its
-  // intrinsic GW×GH size; exiting restores the intrinsic size (owner report: "viewport restricts to the
-  // initial World px size instead of full screen").
+  // v0.87: entering LOD/atlas mode fills the viewport instead of shrinking the canvas to its intrinsic
+  // GW×GH size (owner report: "viewport restricts to the initial World px size instead of full screen").
+  // v1.01 (fill mode): BOTH modes now letterbox-COVER the wrap — the map always uses the full display
+  // area — so the contract is "the canvas covers the wrap's area in LOD mode, and exiting LOD clears
+  // the inline size and returns to the (cover-clamped) CSS-transform path at a comparable on-screen
+  // size", not "exit returns to a small intrinsic rect".
   R.lodViewport = await page.evaluate(() => {
     const view = document.getElementById('view'), wrap = document.querySelector('.canvas-wrap');
     const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
     const wrapA = area(wrap);
-    const intrinsicA = area(view);                                  // non-LOD, scale 1 ⇒ small
+    const beforeA = area(view);                                     // non-LOD (cover-clamped since v1.01)
     const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
     _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; applyView(); renderNow();
-    const lodA = area(view);                                        // should fill most of the wrap
-    const filled = lodA > intrinsicA * 2 && lodA > wrapA * 0.5;     // clearly enlarged, majority of viewport
+    const lodA = area(view);                                        // letterbox-cover ⇒ at least the wrap
+    const filled = lodA >= wrapA * 0.95;                            // covers the viewport (crop allowed)
     _lodOn = false; if (lc) lc.checked = false; applyView(); renderNow();
-    const restoredA = area(view);                                   // back to intrinsic (inline size cleared)
-    return { filled, restored: Math.abs(restoredA - intrinsicA) < intrinsicA * 0.1, hadInlineCleared: view.style.width === '' };
+    const restoredA = area(view);                                   // back to the CSS-transform (cover) path
+    const restored = restoredA > wrapA * 0.5 && Math.abs(restoredA - beforeA) < Math.max(beforeA, 1) * 0.35;
+    return { filled, restored, hadInlineCleared: view.style.width === '' };
   });
 
   // v0.88 (owner report: "highest zoom stops at 20km, I'd like to drop down to 5km"): the LOD zoom cap now
@@ -1093,6 +1133,133 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { overviewRebuildMs, chunksBaked: n, overviewW, overviewH, GW, GH };
   });
 
+  // v0.93 optimization: a zoom step used to pay the full overview-rebuild cost (above) synchronously
+  // on every step, even when a perfectly good previous overview exists to approximate the new view
+  // from. Regression guard: with a `prev` overview in hand (unlike the invalidated-cache case above),
+  // a zoom step's renderNow() call must return near-instantly (stretch + defer, not a full rebuild),
+  // and the deferred rebuild must still land the CORRECT sharp result shortly after.
+  R.lodProgressiveOverview = await page.evaluate(async () => {
+    state.debug = 'off'; _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 1;
+    applyView(); renderNow();   // establishes a `prev` overview (first-ever build, synchronous by necessity)
+    const hadPrevBeforeZoom = !!_lodOverviewPrev;
+
+    _lodZoom = 5; applyView();
+    const t0 = performance.now();
+    renderNow();
+    const zoomStepMs = performance.now() - t0;
+    const scheduledRebuild = !!_lodOverviewRebuildPending;
+    const expectedZ = lodViewRect().z;
+
+    await new Promise(res => setTimeout(res, 300));   // let the deferred rebuild land
+    const finalZ = _lodOverviewPrev.z;
+    const stillPending = !!_lodOverviewRebuildPending;
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { hadPrevBeforeZoom, zoomStepMs, scheduledRebuild, expectedZ, finalZ, stillPending };
+  });
+
+  // v0.93 hotfix (owner report: "lakes are blocky/pixilated again" + "tiles don't seem to be cached"):
+  // a REAL continuous zoom gesture (many ticks with no pause between them -- a back-to-back synchronous
+  // loop with no await/setTimeout reproduces this deterministically, since nothing yields to the event
+  // loop for the deferred overview rebuild to run) used to let the stretch-placeholder staleness compound
+  // without limit, because every tick's _lodScheduleOverviewRebuild call superseded the previous tick's
+  // still-pending one before any of them could land -- confirmed visually (checkerboarded, heavily
+  // blocky overview after 8 ticks). A hard ratio cap on any single stretch was tried and rejected -- it
+  // also blocked the legitimate single-big-jump case (one wheel tick straight to a deep zoom) that opt #1
+  // exists to keep fast. The actual fix bounds CONSECUTIVE un-landed stretches instead
+  // (_lodOverviewStretchStreak / LOD_OV_STRETCH_STREAK_CAP): a lone big jump still takes the fast path
+  // (streak 0->1), but a burst is forced into a synchronous resync once the streak gets too long.
+  // Regression guard: after a rapid multi-tick zoom with no settle time, (a) the streak counter itself
+  // never exceeds the cap (proving the forced-resync branch actually fired during the burst, not just
+  // that the counter kept climbing unchecked), and (b) the overview actually got refreshed at least once
+  // mid-burst (its captured view differs from the very first zoom-in step, proving it isn't just stuck
+  // showing the original whole-map capture the entire time).
+  R.lodOverviewStretchCap = await page.evaluate(async () => {
+    state.debug = 'off'; _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 1;
+    applyView(); renderNow();   // establish an initial prev overview
+    const steps = [2, 3, 5, 8, 12, 16, 20, 24];
+    let firstStepSpan = null;
+    for (const z of steps) {
+      _lodZoom = z; applyView(); renderNow();   // no waits: back-to-back, like a fast continuous wheel-scroll
+      if (firstStepSpan == null) firstStepSpan = _lodOverviewPrev.x1 - _lodOverviewPrev.x0;
+    }
+    const streakAfterBurst = _lodOverviewStretchStreak;
+    const finalOverviewSpan = _lodOverviewPrev.x1 - _lodOverviewPrev.x0;
+    const refreshedMidBurst = Math.abs(finalOverviewSpan - firstStepSpan) > 1e-9;
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { streakAfterBurst, refreshedMidBurst };
+  });
+
+  // v0.93 optimization: refineVisibleTiles now dispatches pool-eligible batches to GENPOOL.runTiles
+  // (task-parallel across cores) instead of computing every tile sequentially on the main thread.
+  // Regression guard: the pool path must be measurably faster than the forced-sync path AND produce
+  // byte-identical tile data (same pyramidTile output, just computed off the main thread).
+  R.lodRefinePool = await page.evaluate(async () => {
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 6; applyView(); renderNow();
+    _atlasBaked.clear(); _atlasImg.clear();   // an earlier perf test baked z=0..2 to the atlas -- clear it so bakedCover() doesn't make `need` empty here (refineVisibleTiles has nothing to do if everything's already baked)
+    const v0 = lodViewRect();
+    const keyCount = visibleTileKeys(v0.z, v0.x0, v0.y0, v0.x1, v0.y1).length;
+
+    lodCacheClear();
+    const t0 = performance.now();
+    await refineVisibleTiles();
+    const withPoolMs = performance.now() - t0;
+    const poolUsable = GENPOOL.usable;
+
+    const v = lodViewRect();
+    const poolSamples = [];
+    for (const k of visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1)) {
+      const t = lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile));
+      if (t) poolSamples.push({ col: k.col, row: k.row, w: t.w, h: t.h, sample: Array.from(t.data.slice(0, 3)) });
+    }
+
+    lodCacheClear();
+    const origUsableForTiles = GENPOOL.usableForTiles;
+    GENPOOL.usableForTiles = () => false;   // force the sync fallback for a fair A/B on this same view
+    const t1 = performance.now();
+    await refineVisibleTiles();
+    const syncOnlyMs = performance.now() - t1;
+    GENPOOL.usableForTiles = origUsableForTiles;
+
+    let allMatch = poolSamples.length > 0;
+    for (const pr of poolSamples) {
+      const s = lodCacheGet(lodCacheKey(v.z, pr.col, pr.row, _lodTile));
+      if (!s || s.w !== pr.w || s.h !== pr.h) { allMatch = false; break; }
+      for (let i = 0; i < 3; i++) if (s.data[i] !== pr.sample[i]) { allMatch = false; break; }
+    }
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { keyCount, withPoolMs, syncOnlyMs, poolUsable, allMatch };
+  });
+
+  // v0.93 optimization: bakeAllTiles batches each pyramid level's pool-eligible tiles through
+  // GENPOOL.runTiles before the (unchanged, still-sequential) PNG-encode/IndexedDB write loop,
+  // instead of computing every tile on the main thread. Regression guard: a multi-level bake via
+  // the pool finishes faster than the forced-sync fallback AND bakes the identical chunk set.
+  R.bakeAllTilesPool = await page.evaluate(async () => {
+    _lodOn = true;
+    const allKeys = [];
+    for (let z = 0; z <= 2; z++) { const side = 1 << z; for (let row = 0; row < side; row++) for (let col = 0; col < side; col++) allKeys.push(atlasChunkKey(z, col, row, _lodTile)); }
+
+    _atlasBaked.clear(); _atlasImg.clear();
+    const origUsableForTiles = GENPOOL.usableForTiles;
+    GENPOOL.usableForTiles = () => false;   // forced-sync baseline runs first
+    const t0 = performance.now();
+    const nBakedSync = await bakeAllTiles(2, () => {});
+    const syncOnlyMs = performance.now() - t0;
+    GENPOOL.usableForTiles = origUsableForTiles;
+    const syncBaked = allKeys.every(k => _atlasBaked.has(k));
+
+    _atlasBaked.clear(); _atlasImg.clear();
+    const t1 = performance.now();
+    const nBaked = await bakeAllTiles(2, () => {});
+    const withPoolMs = performance.now() - t1;
+    const poolBaked = allKeys.every(k => _atlasBaked.has(k));
+
+    _lodOn = false;
+    return { syncOnlyMs, withPoolMs, nBakedSync, nBaked, syncBaked, poolBaked, poolUsable: GENPOOL.usable };
+  });
+
   // v0.92 follow-up fix (owner report: "graphic fidelity seems to have degraded also"): every OTHER
   // way into LOD (wheel-zoom, pan release, zoom buttons, auto-enter-on-zoom) already scheduled a
   // refine so the sharp tile overlay replaces the coarse overview after a beat -- the `lodChk`
@@ -1117,6 +1284,186 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { cachedAfterCheck };
   });
   R.lodCheckboxAutoRefine.noNewErrors = errors.length === errorsBeforeCheckbox;
+
+  // v0.94 (owner request: "draw rivers as ways, as in the legacy cartalith app"): a new default-on
+  // vector overlay (state.viz.riverWays, drawRiverWays()) layers stroked river-network splines on top
+  // of the existing raster water blend, on both the main canvas and under Tiled LOD (closing a
+  // pre-existing gap where the default LOD Biome view never showed the river network's color at all).
+  // Regression guard: the checkbox reflects/drives state.viz.riverWays, and toggling it produces a
+  // real, visible pixel difference on BOTH the main canvas and a LOD view zoomed onto a real river.
+  R.riverWays = await page.evaluate(async () => {
+    state.debug = 'off'; state.mode = 'biome'; _lodOn = false; _lodZoom = 1; applyView();
+    const chk = document.getElementById('riverWaysChk');
+    const checkboxReflectsDefault = !!chk && chk.checked === true && state.viz.riverWays === true;
+
+    if (!_riverNet) _riverNet = buildRiverNetwork(field, flowField, GW, GH, state.seaLevel, { world: state.world, riverDensity: (state.viz.riverDensity) || 1 });
+    // find a river cell to center the LOD view on (order >= 2, away from the map edge)
+    let spotX = GW / 2, spotY = GH / 2, found = false;
+    for (let y = 4; y < GH - 4 && !found; y++) for (let x = 4; x < GW - 4 && !found; x++) {
+      if (_riverNet.order[y * GW + x] >= 2) { spotX = x; spotY = y; found = true; }
+    }
+
+    renderNow();
+    const mainOn = vctx.getImageData(0, 0, GW, GH).data.slice();
+    state.viz.riverWays = false; chk.checked = false; renderNow();
+    const mainOff = vctx.getImageData(0, 0, GW, GH).data.slice();
+    state.viz.riverWays = true; chk.checked = true; renderNow();
+
+    let mainDiffPx = 0;
+    for (let i = 0; i < mainOn.length; i += 4) {
+      if (Math.abs(mainOn[i] - mainOff[i]) + Math.abs(mainOn[i + 1] - mainOff[i + 1]) + Math.abs(mainOn[i + 2] - mainOff[i + 2]) > 6) mainDiffPx++;
+    }
+
+    _lodOn = true; _lodCx = spotX; _lodCy = spotY; _lodZoom = 16; applyView(); renderNow();
+    await refineVisibleTiles(); renderNow();
+    const cv = document.getElementById('view'), cctx = cv.getContext('2d');
+    const lodOn = cctx.getImageData(0, 0, cv.width, cv.height).data.slice();
+    state.viz.riverWays = false; renderNow();
+    const lodOff = cctx.getImageData(0, 0, cv.width, cv.height).data.slice();
+    state.viz.riverWays = true; renderNow();
+
+    let lodDiffPx = 0;
+    for (let i = 0; i < lodOn.length; i += 4) {
+      if (Math.abs(lodOn[i] - lodOff[i]) + Math.abs(lodOn[i + 1] - lodOff[i + 1]) + Math.abs(lodOn[i + 2] - lodOff[i + 2]) > 6) lodDiffPx++;
+    }
+
+    _lodOn = false; _lodZoom = 1; applyView(); renderNow();
+    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx };
+  });
+
+  // v0.94 (owner report: "when using a very long route where a split or partial is possible by sea
+  // or river... it opts to only use land based routes"). Root cause: _civMixedCostGrid's water cost
+  // (1.5) was tuned ABOVE typical flat land (~1.0), backwards from the journey planner's own ~2.5x
+  // sea-speed model, land cost ignored biome friction, and real rivers carried no cost at all. Fixed
+  // by rebalancing water below land, adding real river costing, and sharing the biome-penalty model.
+  // Regression guard: on a fixed seed/resolution (reproducible geography), a coastal point pair whose
+  // land-only route requires a real detour around the coastline (found via an independent Playwright
+  // probe against v0.93 vs this build: v0.93 committed a ~5-6% water route here, essentially
+  // all-land; v0.94 committed 35-50% water on the SAME pairs) must show a materially higher water
+  // fraction than the old behavior — asserted against a fixed threshold safely between the two
+  // observed values, not a live A/B (the new cost constants are `const`, not toggleable at runtime).
+  R.routingSeaShortcut = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    await generate();
+    const pairs = [
+      { x1: 810, y1: 530, x2: 754, y2: 602 },   // v0.93 waterFrac 0.051 -> v0.94 0.349 (independently measured)
+      { x1: 798, y1: 494, x2: 758, y2: 606 },   // v0.93 waterFrac 0.061 -> v0.94 0.500
+    ];
+    const out = pairs.map(p => {
+      const mixed = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'mixed');
+      const land = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'land');
+      if (!mixed || !mixed.pts) return { ok: false };
+      return { ok: true, waterFrac: _civPathWaterFrac(mixed.pts), mixedKm: mixed.km, landKm: land ? land.km : null };
+    });
+    return { pairs: out };
+  });
+
+  // v0.95 (owner: refactor the urban-morphology PoC into Cartalith; at deep zoom a settlement's pin
+  // fades into its own generated street layout, main roads locked to the region network, gated by a
+  // map-wide opt-in toggle; settlement popup gains Age/Fortifications, inferred from population by
+  // default). Regression guard: default-off toggle + wiring, a real pixel difference between the
+  // toggle on/off states once the deep-zoom crossfade band + a generated model are both in effect (and
+  // the pin fades — _umRevealedSet gates on the model actually being ready, not just the zoom band),
+  // the popup's Age/Fortifications fields exist and editing either changes _umPlaceContext's cache key
+  // (so the layout regenerates), and generation is deterministic for identical inputs.
+  R.urbanMorph = await page.evaluate(async () => {
+    try { _civAutoWorld(); } catch (e) {}
+    // v1.00: a settlement sitting in open water (its town box is mostly water) legitimately renders
+    // NO layout — just its pin (_umModelFor bails). So this crossfade/reveal assertion must target a
+    // settlement that actually HAS a land town: pick the first whose model renders (via the synchronous
+    // _umModelForNow, which also warms the cache), falling back to the first settlement on older builds.
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    let settle = (typeof _umModelForNow === 'function') ? settles.find(p => _umModelForNow(p)) : null;
+    if (!settle) settle = settles[0];
+    if (!settle) return { ok: false, error: 'no settlement' };
+
+    const chk = document.getElementById('civUrbanLayoutsChk');
+    const defaultOff = (state.viz && state.viz.urbanLayouts) === false;
+    const checkboxReflectsDefault = !!chk && chk.checked === false;
+
+    const lc = document.getElementById('lodChk'); if (lc) { lc.checked = true; lc.dispatchEvent(new Event('change')); }
+    _lodCx = settle.x; _lodCy = settle.y; _lodZoom = Math.max(4, (state.mapWidthKm || 800) / 6);
+    state.viz.urbanLayouts = false; renderNow();
+    const civOff = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+
+    state.viz.urbanLayouts = true;
+    let model = null;
+    for (let i = 0; i < 50 && !model; i++) { renderNow(); model = _umModelFor(settle, false); if (!model) await new Promise(r => setTimeout(r, 20)); }
+    renderNow();
+    const civOn = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+    let diffPx = 0;
+    for (let i = 0; i < civOn.length; i += 4) {
+      if (Math.abs(civOn[i] - civOff[i]) + Math.abs(civOn[i + 1] - civOff[i + 1]) + Math.abs(civOn[i + 2] - civOff[i + 2]) + Math.abs(civOn[i + 3] - civOff[i + 3]) > 6) diffPx++;
+    }
+    const revealedWithModel = !!model && _umRevealedSet.has(settle);
+
+    _civSelectedPlace = settle; _civRenderPlaceEditor();
+    const ageEl = document.getElementById('_civPeAge'), wallsEl = document.getElementById('_civPeWalls');
+    const hasAgeEl = !!ageEl, hasWallsEl = !!wallsEl;
+    const key0 = _umCacheKey(_umPlaceContext(settle));
+    if (ageEl) { ageEl.value = '600'; ageEl.dispatchEvent(new Event('input')); }
+    const key1 = _umCacheKey(_umPlaceContext(settle));
+    const cacheInvalidatesOnAgeEdit = key0 !== key1;
+    if (ageEl) { ageEl.value = ''; ageEl.dispatchEvent(new Event('input')); }
+    const key2 = _umCacheKey(_umPlaceContext(settle));
+    const ageBackToAuto = key2 === key0;
+
+    const ctx = _umPlaceContext(settle);
+    const mA = UME.cityGen(ctx.seed, ctx), mB = UME.cityGen(ctx.seed, ctx);
+    const deterministic = UME.hashModel(mA) === UME.hashModel(mB);
+
+    _lodOn = false; _lodZoom = 1; state.viz.urbanLayouts = false; applyView(); renderNow();
+    return {
+      ok: true, defaultOff, checkboxReflectsDefault, diffPx, revealedWithModel,
+      hasAgeEl, hasWallsEl, cacheInvalidatesOnAgeEdit, ageBackToAuto, deterministic
+    };
+  });
+
+  // v0.96 regression guard for the coordinate-based _umRouteEnds fix (the town's main roads lock to the
+  // map's connected roads). Deterministic form: a road whose endpoint is snapped to the settlement must
+  // yield a route end, while a way that only PASSES NEAR the settlement (endpoint not at it) must NOT —
+  // the old aIdx/bIdx match couldn't tell those apart (several split runs of one edge share aIdx/bIdx,
+  // so it pulled bearings from way-interior junctions). Bearing-vs-bearing angle matching is left to the
+  // dedicated probes (chance-sensitive with many primaries; not a stable pass/fail in the smoke world).
+  R.umRoadEnds = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    await generate();
+    try { _civAutoWorld(); } catch (e) { return { ok: false, reason: 'autoworld: ' + e.message }; }
+    const eps = Math.max(1.0, GW / 250);
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+    const cc = p => { let n = 0; for (const w of civWays) { if (w.sea || w.hidden || !w.pts || w.pts.length < 2) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - p.x, a.y - p.y) < eps || Math.hypot(b.x - p.x, b.y - p.y) < eps) n++; } return n; };
+    let best = null, bn = -1; for (const p of settles) { const c = cc(p); if (c > bn) { bn = c; best = p; } }
+    if (!best || bn < 1) return { ok: false, reason: 'no connected settlement' };
+    const re = _umRouteEnds(best, UME.SITE_WM, UME.SITE_HM, 0);
+    // a placeholder far from any settlement endpoint must get no route ends (proves it's not matching by
+    // proximity/aIdx alone) — find an empty spot
+    let farP = null; for (let gy = 5; gy < GH - 5 && !farP; gy += 7) for (let gx = 5; gx < GW - 5; gx += 7) { let near = false; for (const w of civWays) { if (!w.pts) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - gx, a.y - gy) < eps * 4 || Math.hypot(b.x - gx, b.y - gy) < eps * 4) { near = true; break; } } if (!near && field[gy * GW + gx] >= (state.seaLevel || 0.42)) { farP = { x: gx, y: gy }; break; } }
+    const reFar = farP ? _umRouteEnds(farP, UME.SITE_WM, UME.SITE_HM, 0) : null;
+    return { ok: true, conns: bn, connectedGetsEnds: !!re && re.length > 0, disconnectedGetsNone: !reFar };
+  });
+
+  // v0.97 regression guard: the town is built AROUND the real roads (primaryPaths) and still forms a
+  // proper structure — a wall for a walled settlement + primaries reaching a real extent. The first cut
+  // resampled the km-spaced civWay vertices too sparsely (2-3 pts), so injected primaries were 2-pt
+  // stubs (~250 m), the built mass landed entirely on the far river bank, and the wall never formed;
+  // the arc-length resample fixed it. Also checks the paths are dense (many points), not raw vertices.
+  R.umBuildAround = await page.evaluate(async () => {
+    state.tect.seed = 424242; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+    await generate();
+    try { _civAutoWorld(); } catch (e) { return { ok: false, reason: 'autoworld: ' + e.message }; }
+    const eps = Math.max(1.0, GW / 250);
+    const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind) && _umInferWalls(p));
+    const cc = p => { let n = 0; for (const w of civWays) { if (w.sea || w.hidden || !w.pts || w.pts.length < 2) continue; const a = _umPt(w.pts[0]), b = _umPt(w.pts[w.pts.length - 1]); if (Math.hypot(a.x - p.x, a.y - p.y) < eps || Math.hypot(b.x - p.x, b.y - p.y) < eps) n++; } return n; };
+    let best = null, bn = -1; for (const p of settles) { const c = cc(p); if (c > bn) { bn = c; best = p; } }
+    if (!best || bn < 1) return { ok: false, reason: 'no connected walled settlement' };
+    const ctx = _umPlaceContext(best);
+    const usesPaths = !!ctx.primaryPaths && ctx.primaryPaths.length > 0;
+    const dense = usesPaths && ctx.primaryPaths.every(pa => pa.length >= 8);   // resampled, not raw km-spaced vertices
+    const m = UME.cityGen(ctx.seed, ctx);
+    const anc = m.anchors.market, N = m.graph.nodes; let maxPrim = 0;
+    for (const e of m.graph.edges) { if (e.cls !== 'primary') continue; for (const nid of [e.a, e.b]) { const nd = N[nid]; if (nd) maxPrim = Math.max(maxPrim, Math.hypot(nd.x - anc.x, nd.y - anc.y)); } }
+    return { ok: true, conns: bn, usesPaths, dense, wallRing: !!(m.wall && m.wall.ring), maxPrim: Math.round(maxPrim) };
+  });
 
   await browser.close();
 
@@ -1234,8 +1581,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.92 fix: LOD overview rebuild stays fast on a zoom step (was ~940-1200ms, now capped to a 512px target width)', R.lodOverviewPerf.overviewRebuildMs < 400);
   A('v0.92 follow-up fix: overview canvas is capped at 512px wide, not a flat GW/4 (was 256px at this 1024px world → blocky lakes)', R.lodOverviewPerf.overviewW === 512);
   A('v0.92 follow-up fix: overview canvas keeps GW/GH aspect ratio', Math.abs(R.lodOverviewPerf.overviewW / R.lodOverviewPerf.overviewH - R.lodOverviewPerf.GW / R.lodOverviewPerf.GH) < 0.01);
+  A('v0.93 optimization: a zoom step with a previous overview in hand returns near-instantly (stretch + defer, not a full rebuild)', R.lodProgressiveOverview.hadPrevBeforeZoom === true && R.lodProgressiveOverview.zoomStepMs < 30);
+  A('v0.93 optimization: the zoom step schedules a background rebuild instead of skipping it', R.lodProgressiveOverview.scheduledRebuild === true);
+  A('v0.93 optimization: the deferred rebuild lands the correct (not stale) zoom level shortly after', R.lodProgressiveOverview.finalZ === R.lodProgressiveOverview.expectedZ && R.lodProgressiveOverview.stillPending === false);
+  A('v0.93 hotfix: a rapid multi-tick zoom gesture bounds the consecutive-stretch streak (was unbounded — "lakes blocky again")', R.lodOverviewStretchCap.streakAfterBurst <= 4);
+  A('v0.93 hotfix: the overview actually resyncs at least once during a rapid multi-tick burst (not stuck on the original capture)', R.lodOverviewStretchCap.refreshedMidBurst === true);
+  A('v0.93 optimization: GENPOOL is usable in a real browser (Worker support present)', R.lodRefinePool.poolUsable === true);
+  A('v0.93 optimization: refineVisibleTiles via the pool is faster than the forced-sync fallback', R.lodRefinePool.withPoolMs < R.lodRefinePool.syncOnlyMs);
+  A('v0.93 optimization: pooled tile refinement produces the same data as the sync fallback', R.lodRefinePool.allMatch === true);
+  A('v0.93 optimization: GENPOOL is usable for the bakeAllTiles pool path', R.bakeAllTilesPool.poolUsable === true);
+  A('v0.93 optimization: bakeAllTiles via the pool bakes the same chunk set as the forced-sync fallback', R.bakeAllTilesPool.nBaked === R.bakeAllTilesPool.nBakedSync && R.bakeAllTilesPool.syncBaked && R.bakeAllTilesPool.poolBaked);
+  A('v0.93 optimization: bakeAllTiles via the pool is faster than the forced-sync fallback for a multi-level bake', R.bakeAllTilesPool.withPoolMs < R.bakeAllTilesPool.syncOnlyMs);
   A('v0.92 follow-up fix: checking "Tiled LOD view" alone (no pan/zoom) auto-refines the visible tile', R.lodCheckboxAutoRefine.cachedAfterCheck === true);
   A('v0.92 follow-up fix: unchecking the box before the deferred refine settles throws no errors', R.lodCheckboxAutoRefine.noNewErrors === true);
+  A('v0.94: "Draw rivers as ways" checkbox reflects the new default-on state', R.riverWays.checkboxReflectsDefault === true);
+  A('v0.94: a real river cell is found on the fixed-seed world (test precondition)', R.riverWays.foundRiverSpot === true);
+  A('v0.94: river ways toggle produces a real pixel difference on the main canvas', R.riverWays.mainDiffPx > 0);
+  A('v0.94: river ways toggle produces a real pixel difference under Tiled LOD (closes the old "LOD shows no river color" gap)', R.riverWays.lodDiffPx > 0);
+  A('v0.94 routing fix: both fixed-seed coastal detour pairs resolve to a valid mixed route', R.routingSeaShortcut.pairs.every(p => p.ok));
+  A('v0.94 routing fix: a coastal route with a land detour now uses a real sea shortcut (was ~5-6% water, now materially more)', R.routingSeaShortcut.pairs.every(p => p.waterFrac >= 0.2));
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
   A('Assets header button enters full-viewport Asset Library mode', R.assetsCanvasHidden === true && R.assetsLibraryShown === true);
   A('clicking Generate exits Assets mode', R.assetsExitedViaGenerate === true);
@@ -1274,6 +1638,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.86: Assets header button toggles into the library ("← Map") and back to the canvas', R.assetsToggle.inAssets && R.assetsToggle.back);
   A('v0.86: every Layers-popover view has a visible, non-empty legend', R.allLegends.total > 25 && R.allLegends.bad === 0);
   A('v0.86: geological Resources layer is full-map (present below sea) and re-derives on a sea-level change', R.resources.fullMap && R.resources.reDerivedAfterSeaMove && R.resources.persistsUnderRaisedSea);
+
+  // ── v0.95: urban morphology (deep-zoom settlement layouts) ──
+  A('v0.95: settlement found on the auto-populated world (test precondition)', R.urbanMorph.ok === true);
+  A('v0.95: "Generate settlement layouts" toggle defaults off (state + checkbox)', R.urbanMorph.defaultOff === true && R.urbanMorph.checkboxReflectsDefault === true);
+  A('v0.95: enabling the toggle at deep zoom produces a real pixel difference on the civ canvas', R.urbanMorph.diffPx > 0);
+  A('v0.95: a settlement whose model is ready is marked revealed (pin fades complementary to the layout)', R.urbanMorph.revealedWithModel === true);
+  A('v0.95: settlement popup gains Age (years) and Fortifications fields', R.urbanMorph.hasAgeEl === true && R.urbanMorph.hasWallsEl === true);
+  A('v0.95: editing Age invalidates the cached layout (cache key changes)', R.urbanMorph.cacheInvalidatesOnAgeEdit === true);
+  A('v0.95: clearing Age back to blank restores the auto-inferred cache key', R.urbanMorph.ageBackToAuto === true);
+  A('v0.95: layout generation is deterministic for identical inputs (hashModel matches)', R.urbanMorph.deterministic === true);
+  // ── v0.96: urban-morphology fixes ──
+  A('v0.96: a connected settlement yields route ends from its real roads (road-lock precondition)', R.umRoadEnds.ok === true && R.umRoadEnds.connectedGetsEnds === true);
+  A('v0.96: a spot with no road endpoint at it yields no route ends (coordinate match, not aIdx/proximity)', R.umRoadEnds.ok !== true || R.umRoadEnds.disconnectedGetsNone === true);
+  // ── v0.97: town built around the real roads ──
+  A('v0.97: a connected walled settlement feeds dense resampled road paths into the generator', R.umBuildAround.ok === true && R.umBuildAround.usesPaths === true && R.umBuildAround.dense === true);
+  A('v0.97: the town built around real roads still forms a wall and full-extent primaries (not stubs)', R.umBuildAround.ok !== true || (R.umBuildAround.wallRing === true && R.umBuildAround.maxPrim > 400));
+  A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
+  A('v1.06: setup-gate seed box exists, 🎲 rolls a new value, and the typed seed drives state.tect.seed', R.setupSeedApplied === 'vacuous' || (R.setupSeed.present && R.setupSeed.diceChanged && R.setupSeedApplied === true));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
