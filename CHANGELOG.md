@@ -12,6 +12,19 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.12 (2026-07-19)
+**Owner: "implement the top 6 borrow list from the research."** Sixth and last: `docs/research/azgaar-comparative-analysis.md` §4's #6 pick, label placement + per-layer style editors — "FMG's label engine and restyle-everything panels are the editor-maturity bar." Completes the borrow-list.
+
+**Label placement.** Settlement/POI name labels had exactly one candidate slot (fixed above the pin) since v0.148's occupancy-grid collision system shipped — a lower-priority label whose spot was already claimed was silently dropped, never offered anywhere else. `drawCivLayer`'s placement loop now tries **above → below → right → left** (in that priority order — "above" first reproduces the exact pre-v1.12 pixels whenever it's free, the overwhelming common case) before giving up, via new `lblTestBox`/`lblMarkBox` helpers (explicit `[x0,y0,x1,y1]` screen bounds, sharing the same occupancy grid as the existing point-based `lblTest`/`lblMark` the region-name-label system still uses unchanged). `_civDrawSettlementPin`/`_civDrawPoiPin` gain an `opts.labelPos` parameter (default `'above'`, so every pre-v1.12 call site not yet passing it draws identically) selecting which side of the pin the text renders on. Measured on a deliberately brutal test (five same-tier cities, long names, packed 8 grid units apart in a line — far tighter than any of their label widths): the pre-v1.12 system showed **1 of 5** labels; v1.12 shows **2 of 5** (the second rescued via `below`), with the rest correctly still dropped (the packing is tight enough that no side has room left) rather than overlapping.
+
+**Per-layer style editors.** Two new sliders (Settlements panel, "Layer style"): **Territory fill opacity** (`state.viz.territoryOpacity`, default `130/255` — the exact previously-hardcoded alpha) and **Way opacity** (`state.viz.wayOpacity`, default `1`) restyle those two layers independently of each other, alongside the existing settlement-icon/way-width scale sliders. Both fold into the SAME per-pixel render passes those layers already used (the territory raster-blit's cache key, the ways loop's existing per-condition `globalAlpha`) — no new draw passes, defaults reproduce prior pixels exactly.
+
+Neither change touches `field`/`temp`/`rain`/`flow`/the main terrain canvas (`vctx`) — all civ-layer (`civCtx`) rendering, so bit-identity holds by construction regardless of the specific pixel changes at non-default settings.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.11 **ALL IDENTICAL**; `smoke_gen1.js` **200/200** (+2: the packed-cities rescue case, both opacity sliders present and each producing a real pixel diff). Playwright-probed A/B against v1.11 on the identical packed-cities scenario: v1.11 shows 1/5 labels (`positions:[null]`), v1.12 shows 2/5 (`positions:['above','below']`) — the concrete, measured improvement.
+
+**All 6 items from the Azgaar comparative analysis borrow-list are now shipped** (v1.07–v1.12): culture-flavored naming, setup-gate archetype presets, GeoJSON/GIS export, province tier + religions, submap/resample UX, label placement + per-layer style editors.
+
 ### v1.11 (2026-07-19)
 **Owner: "implement the top 6 borrow list from the research."** Fifth of six: `docs/research/azgaar-comparative-analysis.md` §4's #5 pick, submap/resample UX — "framing the existing amplification/LOD machinery as an explicit 'carve this region into its own higher-resolution map' tool."
 

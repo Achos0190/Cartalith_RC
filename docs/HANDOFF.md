@@ -9,17 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.11.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.12.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.12 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.10` are kept and never edited.
+  (v1.13 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.11` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
-  analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
-  version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
-  naming — **DONE, v1.07**. (2) setup-gate world archetype presets — **DONE, v1.08**. (3) GeoJSON/GIS
-  export — **DONE, v1.09**. (4) province tier + religions layer — **DONE, v1.10**. (5) submap/resample
-  UX — **DONE, v1.11**. (6) label placement + per-layer style editors. Item 6 not yet started.
+  analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. **ALL 6 ITEMS
+  SHIPPED**, one version per item (per the "finish one thing before starting the next" rule):
+  (1) culture-flavored naming — v1.07. (2) setup-gate world archetype presets — v1.08. (3)
+  GeoJSON/GIS export — v1.09. (4) province tier + religions layer — v1.10. (5) submap/resample UX —
+  v1.11. (6) label placement + per-layer style editors — v1.12. The borrow-list arc is complete.
+- **v1.12 — owner: "implement the top 6 borrow list from the research" (#6, and last, label
+  placement + per-layer style editors).** Settlement/POI labels only ever tried one fixed spot
+  (above the pin); a collision there silently dropped the label. `drawCivLayer`'s placement loop now
+  tries above→below→right→left (new `lblTestBox`/`lblMarkBox`, sharing the same occupancy grid as
+  the point-based `lblTest`/`lblMark` the region-name-label system still uses unchanged);
+  `_civDrawSettlementPin`/`_civDrawPoiPin` gain `opts.labelPos` (default `'above'` — every pre-v1.12
+  call site draws identically). Measured: 5 same-tier cities packed tighter than their own label
+  width showed 1/5 labels pre-v1.12, **2/5** post (rescued via `below`). Two new per-layer style
+  sliders (Settlements panel): **Territory fill opacity** (default `130/255`, the exact prior
+  hardcoded alpha) and **Way opacity** (default `1`) — both fold into the existing per-pixel render
+  passes, no new draw calls. Verified: engine **923/923**, UME **831/831**, hash vs v1.11 **ALL
+  IDENTICAL**, smoke **200/200** (+2). Playwright A/B vs v1.11 on the identical packed-cities case
+  confirms the concrete before/after (`positions:[null]` → `positions:['above','below']`).
 - **v1.11 — owner: "implement the top 6 borrow list from the research" (#5 submap/resample UX).**
   Cartalith already had `amplifyRegion()` (seamless world-space heightmap upsampling), a region-select
   drag tool, and a tiled-.zip "Region export" pipeline — but it only produced FILES, never a live

@@ -1694,6 +1694,57 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     resolutionIsRequested: afterExtract.GW === 1024
   };
 
+  // ── v1.12 (borrow-list #6, after FMG's label engine + "restyle-everything panels" — "the
+  // editor-maturity bar"): multi-candidate label placement + per-layer style opacity sliders.
+  // This is now the LAST R-computation (after v1.11's world-replacing test above, which also
+  // doesn't restore) — builds its own small fresh world, so no snapshot/restore needed either.
+  // Five same-tier cities packed 8 grid units apart in a line (each city's own label is far wider
+  // than that spacing) is a deliberately brutal collision case: on the pre-v1.12 single-position
+  // system only the highest-priority label survives (shownCount 1); the multi-candidate fallback
+  // rescues at least one more via an alternate side.
+  await page.evaluate(async () => {
+    state.tect.seed = 55555; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+    await generate();
+  });
+  R.labelsAndStyle = await page.evaluate(() => {
+    const cx = (GW / 2) | 0, cy = (GH / 2) | 0;
+    state.places = [];
+    const names = ['Alphaburgshire', 'Betaburgshire', 'Gammaburgshire', 'Deltaburgshire', 'Epsilonburgshire'];
+    for (let i = 0; i < names.length; i++) state.places.push({ x: cx + (i - 2) * 8, y: cy, kind: 'city', klass: 'city', category: 'settlement', faction: 1, name: names[i], pop: 5000, traits: [] });
+    civTerritory = null; civWays = [];
+    const calls = [];
+    const orig = _civDrawSettlementPin;
+    _civDrawSettlementPin = function (ctx, px, py, place, selected, opts) { calls.push({ name: place.name, skipLabel: !!opts.skipLabel, labelPos: opts.labelPos }); return orig(ctx, px, py, place, selected, opts); };
+    drawCivLayerAuto();
+    _civDrawSettlementPin = orig;
+    const shown = calls.filter(c => !c.skipLabel);
+
+    civTerritory = new Uint8Array(GW * GH);
+    const R2 = 20;
+    for (let dy = -R2; dy <= R2; dy++) for (let dx = -R2; dx <= R2; dx++) { if (dx * dx + dy * dy > R2 * R2) continue; const x = cx + dx, y = cy + dy; if (x < 0 || x >= GW || y < 0 || y >= GH) continue; civTerritory[y * GW + x] = 1; }
+    _civTerrGen++;
+    state.viz.territoryOpacity = 130 / 255; drawCivLayerAuto(); renderNow();
+    const tLow = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+    state.viz.territoryOpacity = 1.0; drawCivLayerAuto(); renderNow();
+    const tHigh = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data;
+    let territoryDiffPx = 0; for (let i = 0; i < tLow.length; i += 4) if (tLow[i + 3] !== tHigh[i + 3]) territoryDiffPx++;
+    state.viz.territoryOpacity = 130 / 255;
+
+    civWays = [{ pts: [[cx - 30, cy + 30], [cx + 30, cy + 30]], km: 10, type: 'road', sea: false }];
+    state.viz.wayOpacity = 1.0; drawCivLayerAuto(); renderNow();
+    const wLow = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data.slice();
+    state.viz.wayOpacity = 0.2; drawCivLayerAuto(); renderNow();
+    const wHigh = civCtx.getImageData(0, 0, civCanvas.width, civCanvas.height).data;
+    let wayDiffPx = 0; for (let i = 0; i < wLow.length; i += 4) if (Math.abs(wLow[i] - wHigh[i]) > 2 || Math.abs(wLow[i + 1] - wHigh[i + 1]) > 2 || Math.abs(wLow[i + 2] - wHigh[i + 2]) > 2) wayDiffPx++;
+    state.viz.wayOpacity = 1.0;
+
+    return {
+      shownCount: shown.length, positions: [...new Set(shown.map(c => c.labelPos))],
+      territoryDiffPx, wayDiffPx,
+      territoryOpacitySliderExists: !!document.getElementById('territoryOpacityR'), wayOpacitySliderExists: !!document.getElementById('wayOpacityR')
+    };
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1909,6 +1960,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.11: the amplified field is real elevation data, not renormalized (finite, still within [0,1])', R.submap.afterExtract.allFinite === true && R.submap.afterExtract.fieldRangeOk === true);
   A('v1.11: civilization data (settlements/territory/provinces) is cleared on extraction', R.submap.afterExtract.placesCount === 0 && R.submap.afterExtract.territoryNull === true && R.submap.afterExtract.provinceNull === true);
   A('v1.11: committing the calibrate step infers a valid tectonic substrate on the new world (finite field, real plates)', R.submap.afterInfer.allFinite === true && R.submap.afterInfer.plateCount > 0);
+  // ── v1.12: label placement + per-layer style editors (borrow-list #6) ──
+  A('v1.12: a settlement label that would collide at its usual spot gets rescued via an alternate side instead of silently dropping (pre-v1.12 this exact packed layout showed only 1 of 5)', R.labelsAndStyle.shownCount >= 2 && R.labelsAndStyle.positions.length >= 2 && R.labelsAndStyle.positions.includes('above'));
+  A('v1.12: territory-opacity and way-opacity sliders exist and each produces a real pixel difference on the civ canvas', R.labelsAndStyle.territoryOpacitySliderExists && R.labelsAndStyle.wayOpacitySliderExists && R.labelsAndStyle.territoryDiffPx > 0 && R.labelsAndStyle.wayDiffPx > 0);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
