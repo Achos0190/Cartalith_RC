@@ -249,17 +249,44 @@ elsewhere in the engine.
 
 ## 7. Water — extend existing mechanisms, don't add a parallel one
 
-- **River stamps**, on commit: call the existing `enforceChannelDescent` + lock cells into
-  `riverMask`/`riverFloor` — literally the same call the plotline river feature already makes
-  (line 10158). No new field.
-- **Lake stamps**, on commit: extend `depositWater`'s `lakeMask` deposit with the PoC's radial
-  bowl-carving (actually lower `field` in a falloff bowl, not just flood-to-level) and fractal
-  shoreline warp, then mark the settled cells in `lakeMask` with `forceLake` so `buildWaterBodies`
-  classifies them correctly regardless of connectivity. Reuses the existing invalidation
-  (`_waterBody=null` etc., already correctly wired at every `lakeMask`-writing site).
+**Hard requirement (owner, 2026-07-19): river and lake water render with the same treatment as
+sea water, with one exception — standing water in a lake or river is not required to sit at
+`state.seaLevel`, exactly like real hydrology.** This turned out to already be the engine's design
+principle since v0.103, not something to newly build — the job here is wiring painted stamps into
+the existing correct system, not inventing elevation-aware water rendering:
+
+- **Lakes already render above sea level, and already reuse the sea's own color function.**
+  `buildWaterBodies` (line 4636) classifies every cell `0`=land / `1`=ocean / `2`=lake, and does so
+  three ways: (a) below-sea depressions not connected to the largest (ocean) component → inland-sea
+  lake; (b) **a priority-flood fill auto-detects natural above-sea depression lakes** — any pooled,
+  well-watered depression (`depth>lakeDepth && rain[i]>=lakeRain`) becomes class 2 with zero user
+  input, a real hydrological simulation already running today; (c) `opts.forceLake` (fed by
+  `lakeMask`, the existing "Water" brush's deposit) always overrides to class 2, for a user-placed
+  lake regardless of what the natural test would say. The renderer (`renderNow`, line 6499) checks
+  this **before** the normal sea/land split: `if(_lakeWB[i]===2 && vw>=state.seaLevel){ …
+  lakeColor(x,y,i) … }` — and `lakeColor()` (line 6253) **literally calls `seaColorCore()`** (the
+  same function `seaColor()` itself calls), just at a fixed shallow depth and shifted slightly
+  brighter/greener — i.e. "the same treatment as the sea," by construction, not by convention. A
+  lake that dips below `state.seaLevel` doesn't need this branch at all — it already passes the
+  ordinary `isWater()` test and renders via `seaColor()` directly.
+  **Lake stamps, on commit:** carve the radial bowl (fractal shoreline warp per §6) into `field`,
+  then deposit the affected cells into `lakeMask` (the same array `depositWater()`, line 6656,
+  already writes) so `buildWaterBodies`'s `forceLake` path always classifies them as lake — whether
+  the bowl's floor ends up above or below `state.seaLevel`. No new field; reuses the existing
+  invalidation already correctly wired at every `lakeMask`-writing site.
+- **Rivers already render at any elevation, by construction — a mountain stream costs nothing
+  extra.** The river overlay (`surfaceColor`, line ~6151) blends `waterShade(bed, depth, sed, Kd)`
+  (line 6286, a Beer–Lambert bed-transmission model — the same physically-motivated "semi-
+  transparent water over a surface" family as the sea/lake shaders, just modeling depth-visibility
+  instead of a fixed palette) over the land color wherever `_riverNet.intensity[i]>0` — purely a
+  function of the traced drainage network, never of absolute height versus `state.seaLevel`. **River
+  stamps, on commit:** call the existing `enforceChannelDescent` + lock carved cells into
+  `riverMask`/`riverFloor` — literally the same call the plotline river feature already makes (line
+  10158) — then let `computeFlow(true)` retrace `_riverNet` through them, same as today. No new
+  field, no elevation handling to add: the network overlay already doesn't care.
 - **Basin/Coastline/Canyon/Valley** don't need a water flag at all — they're pure elevation
   shaping; whether a cell ends up underwater falls out of `isWater(v) = v<state.seaLevel` (line
-  6342) same as any other terrain.
+  6342) or the natural above-sea lake detection above, same as any other terrain.
 
 ## 8. UI / menu content (the "full and rich" ask)
 
@@ -286,12 +313,40 @@ existing idioms — not the PoC's raw HTML/CSS, so it matches the rest of the ap
 
 ## 9. Phased implementation
 
-- **P0 — Port the pure core, prove it in isolation.** Move the PoC's noise/geometry/feature-
-  registry/compositor into script block 1 as self-contained, namespaced functions (no collisions
-  with `applyFeatureAlongCurve`/`brushHeight`). Headless-test against Cartalith's own
-  `tests/run.sh` harness *before* any UI wiring, porting the PoC's 77-assertion corpus
-  (`fractal-geology/tests/test_tail.js`) retargeted at `state.seaLevel`/engine noise. Resolve the
-  world-wrap open item (§6) here. No user-visible change yet.
+- **P0 — SHIPPED, `Cartalith Gen1 v1.07.html`.** Per CLAUDE.md's "new version = new file, never
+  edit old versions in place" rule, this landed as a new version, not an in-place edit of v1.06.
+  Ported into script block 1 (right after `catmullRomSample`, before
+  `drawRiverWays` — the file's existing "pure curve/geometry primitives" neighborhood): 11 features
+  (`SCULPT_FEATURES`), the dirty-rect compositor (`sculptApplyStamp`/`sculptStampBBox`), stroke
+  geometry (`sculptNearestOnStroke`), and three new parametrized noise wrappers
+  (`sculptFbm`/`sculptRidged`/`sculptBillow`). Two decisions made *during* porting, worth recording:
+  - **Naming: flat, prefixed top-level functions/consts** (`SCULPT_FEATURES`, `sculptApplyStamp`,
+    …), matching this codebase's actual convention for registry-style globals in script block 1
+    (`CIV_FACTIONS`, `BIOME_KEYS`, `buildResourcePotentials`) — **not** the block-4 IIFE-namespace
+    pattern (`UME`), which exists specifically for block 4's cross-block isolation, a concern that
+    doesn't apply here (a direct collision check against all PoC-side names came back clean).
+  - **Noise: new parametrized wrappers on `vnoise()`, not a reuse of the existing `fbm()`/
+    `ridged()`.** The plan originally said "reuse the engine's own primitives" — turned out to be
+    half right: `fbm()`/`ridged()` hardcode 6 octaves/0.5 persistence/2.0 lacunarity (only
+    `ridgedFbm()` parametrizes octave count), but every sculpt feature needs all three as
+    independent sliders. `sculptFbm`/`sculptRidged`/`sculptBillow` are built on the engine's own
+    `vnoise()`/`hash()` (so painted terrain still shares its base noise primitive with tectonics/
+    erosion) but are new functions, and deliberately keep the PoC's own range convention
+    (`sculptFbm` ~[-1,1], not `fbm()`'s [0,1]) because every ported feature formula was tuned
+    against that range — changing it would silently alter results already visually verified in the
+    PoC. `smoothstep(a,b,x)`/`lerp`/`clamp01` (this file's own existing globals) ARE reused as-is.
+  - **World-wrap open item — resolved.** Read `applyFeatureAlongCurve` in full: it has no
+    equirectangular seam-wrap handling at all (plain 2D Euclidean bboxes/distances, no `state.world`
+    branch). `sculptApplyStamp` matches that — parity, not a regression. A future pass could add
+    wraparound to both uniformly; out of scope here.
+  - Verified: `tests/run.sh` — **1013 passed, 0 failed** (923 pre-existing + 90 new, covering noise
+    range/determinism, all 11 features' finiteness/`[0,1]`-bounds/mask-locality/bit-reproducibility/
+    raise-lower-water semantics, geometry, per-feature edge character, and the world-wrap parity
+    check above). `tests/run_um.sh` **831/831** (block 4 untouched). `node tests/perf/hash_gen1.js
+    "Cartalith Gen1 v1.06.html" "Cartalith Gen1 v1.07.html"` — **ALL IDENTICAL** across the
+    default/geoid/waves/ao/icons config matrix, proving cross-version neutrality (nothing wired to
+    any UI yet, so this had to be a no-op — confirmed, not assumed). `smoke_gen1.js` **179/179**,
+    unchanged.
 - **P1 — Tab shell.** `#genSculpt` + `data-gsub="sculpt"`, wired into `_genSubTab` show/hide, empty
   panel. Confirm `tests/perf/smoke_gen1.js`'s 2-tab-bar assertion is untouched and its `subTabs`
   array assertion is additive. No functionality yet.
