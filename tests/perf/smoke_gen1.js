@@ -1507,8 +1507,27 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       if (Math.abs(lodOn[i] - lodOff[i]) + Math.abs(lodOn[i + 1] - lodOff[i + 1]) + Math.abs(lodOn[i + 2] - lodOff[i + 2]) > 6) lodDiffPx++;
     }
 
+    // v1.14 (owner report: "a multitude of rivers... in close proximity, as if two different engines
+    // are trying to achieve the very same thing... poor unnatural looking"): confirmed root cause —
+    // surfaceColor's own per-pixel raster network blend and drawRiverWays' vector spline both traced
+    // the SAME _riverNet and both rendered whenever riverWays was on (the v0.94 comment literally said
+    // "both render"), and the vector path's Catmull-Rom smoothing + sinuosity jitter visibly diverges
+    // from the raster's raw cell-centerline blend, reading as a second, parallel river. Fix: surfaceColor
+    // now skips its raster blend whenever the vector overlay is about to draw the same network right
+    // after it (state.viz.riverWays on) — direct regression guard: calling surfaceColor at an identical
+    // river cell with riverWays on vs off must still differ (on ⇒ raw/no blend, off ⇒ blended), proving
+    // the skip branch is live and doesn't quietly get short-circuited back to "always blend".
+    let dedupDiffer = null;
+    if (found) {
+      const di = spotY * GW + spotX, vw = field[di];
+      state.viz.riverWays = true; const onC = surfaceColor(spotX, spotY, di, vw);
+      state.viz.riverWays = false; const offC = surfaceColor(spotX, spotY, di, vw);
+      state.viz.riverWays = true;
+      dedupDiffer = (Math.abs(onC[0] - offC[0]) + Math.abs(onC[1] - offC[1]) + Math.abs(onC[2] - offC[2])) > 3;
+    }
+
     _lodOn = false; _lodZoom = 1; applyView(); renderNow();
-    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx };
+    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx, dedupDiffer };
   });
 
   // v0.94 (owner report: "when using a very long route where a split or partial is possible by sea
@@ -1948,6 +1967,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.94: a real river cell is found on the fixed-seed world (test precondition)', R.riverWays.foundRiverSpot === true);
   A('v0.94: river ways toggle produces a real pixel difference on the main canvas', R.riverWays.mainDiffPx > 0);
   A('v0.94: river ways toggle produces a real pixel difference under Tiled LOD (closes the old "LOD shows no river color" gap)', R.riverWays.lodDiffPx > 0);
+  A('v1.14: surfaceColor skips its own raster river blend when the vector overlay (riverWays) is on — no more double-rendering the same network (the "two engines... in close proximity" report)', R.riverWays.dedupDiffer === true);
   A('v0.94 routing fix: both fixed-seed coastal detour pairs resolve to a valid mixed route', R.routingSeaShortcut.pairs.every(p => p.ok));
   A('v0.94 routing fix: a coastal route with a land detour now uses a real sea shortcut (was ~5-6% water, now materially more)', R.routingSeaShortcut.pairs.every(p => p.waterFrac >= 0.2));
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);

@@ -12,6 +12,46 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.14 (2026-07-19)
+**Owner: "there seems a multitude of rivers drawn everytime and in close proximity, almost as if two
+different engines are trying to achieve the very same thing (and in a rather poor unnatural looking
+way at that)."** Confirmed and root-caused: the report was literal — two separate river renderers
+were both drawing the same network on top of each other.
+
+**Root cause.** `surfaceColor()`'s per-pixel raster blend (Strahler/Rosgen width + Beer–Lambert depth,
+sampling `_riverNet.intensity`/`depth` directly off the cell grid) and `drawRiverWays()`'s vector
+overlay (Catmull-Rom-sampled, sinuosity-jittered spline strokes over the same `_riverNet`) have BOTH
+rendered on the main (non-LOD) Biome view since v0.94 — the v0.94 comment literally said "on top of
+the existing raster water blend, both render." The vector path's smoothing and its perpendicular
+sinuosity jitter (added for visual appeal) deliberately wanders off the raster's exact cell-centerline,
+so at anything but dead-center of a wide trunk the two visibly diverge into what reads as a second,
+parallel river running alongside the first — worst on terrain with many closely-spaced channels,
+exactly the "close proximity... unnatural" complaint. (Under Tiled LOD this pair never existed — the
+LOD tile renderer never replicated the fine raster blend in the first place, per its own v0.94 comment
+— so this was specifically a main-canvas/non-LOD-zoom artifact.)
+
+**Fix.** `surfaceColor()`'s raster network blend now skips itself whenever `state.viz.riverWays` is on,
+matching the precedent the Strahler debug view already established (vector-only, no raster blend
+underneath). `riverWays` off keeps the exact pre-v1.14 raster-only render (byte-identical at that
+setting — the gate simply guards the existing branch, doesn't touch its body). `riverWays` on (the
+default since v0.94) is now vector-only — one river renderer, not two.
+
+**What this does NOT fix (flagged, not built):** a separate, deeper pattern — closely-spaced, near-
+parallel single-order channels on certain uniformly-sloped terrain (visually a fine hatch/comb texture)
+— showed up in BOTH the raster-only and vector-only renders during investigation, so it isn't a
+render-duplication artifact; it's the underlying drainage network itself being dense there (a
+flow-routing/channel-threshold question, `docs/research/natural-rivers.md` territory, not a rendering
+fix). `state.viz.minRiverOrder` already exists to thin it per-map; a root-cause fix (if wanted) would
+be a separate, engine-level pass.
+
+**Verification:** engine `tests/run.sh` **923/923** (`field`/`temp`/`rain`/`flow` hashes identical to
+v1.13 — this change is `vctx`-only, no engine data touched); `tests/run_um.sh` **831/831**; `hash_gen1.js`
+vs v1.13 shows the INTENDED rgba differences at default settings (riverWays defaults true, so this is a
+default-rendering bug fix, not a neutral opt-in change — same category as v1.01/v1.04/etc.); `smoke_gen1.js`
+**204/204** (+1: `surfaceColor` at an identical river cell now differs between `riverWays` on/off, proving
+the skip-branch is live). Playwright-probed A/B screenshots on an inland trunk-river reach confirm the
+fine secondary raster hachure that used to show through/around the bold vector strokes is gone.
+
 ### v1.13 (2026-07-19)
 **Owner: "3 fixes: the current label system doesn't provide visual results anymore. And the zoom — I should also be able to zoom out to a point that the full width of the map stays in the viewer, currently the furthest zoom-out uses the map height as max view, forcing a user to drag left and right to see everything. When zooming, the clickable information on the map seems to keep its coord to the original zoom level, it doesn't adapt."** Three post-borrow-list bug fixes, all civ/UI layer — engine block 1 untouched.
 

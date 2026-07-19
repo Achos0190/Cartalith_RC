@@ -9,17 +9,35 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.13.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.14.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.14 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.12` are kept and never edited.
+  (v1.15 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.13` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. **ALL 6 ITEMS
   SHIPPED**, one version per item (per the "finish one thing before starting the next" rule):
   (1) culture-flavored naming — v1.07. (2) setup-gate world archetype presets — v1.08. (3)
   GeoJSON/GIS export — v1.09. (4) province tier + religions layer — v1.10. (5) submap/resample UX —
   v1.11. (6) label placement + per-layer style editors — v1.12. The borrow-list arc is complete.
+- **v1.14 — owner: "a multitude of rivers... in close proximity, as if two different engines are
+  trying to achieve the very same thing... poor unnatural looking."** Confirmed literal: two river
+  renderers really were both drawing the same network on top of each other on the main (non-LOD)
+  Biome view — `surfaceColor()`'s per-pixel raster blend (Strahler/Rosgen width + Beer–Lambert
+  depth off `_riverNet.intensity`/`depth`) AND `drawRiverWays()`'s Catmull-Rom+sinuosity vector
+  spline over the SAME `_riverNet` (the v0.94 comment literally said "both render"). The vector
+  path's smoothing/jitter wanders off the raster's exact cell-centerline, so away from dead-centre
+  the two diverge into what reads as a second, parallel river — worst on terrain with many close
+  channels. Fix: `surfaceColor`'s raster blend now skips itself whenever `state.viz.riverWays` is
+  on (matching the Strahler debug view's existing vector-only precedent); off keeps the exact
+  pre-v1.14 raster-only render. **Flagged, not fixed:** a separate, deeper "closely-spaced parallel
+  channels" hatch pattern showed up in BOTH raster-only and vector-only renders during
+  investigation on certain uniformly-sloped terrain — that's the underlying drainage network's own
+  density (a flow-routing/channel-threshold question), not a render-duplication artifact; would
+  need a separate engine-level pass if pursued (`state.viz.minRiverOrder` already thins it
+  per-map). Verified: engine **923/923** (field/temp/rain/flow hashes identical to v1.13 — vctx-only
+  change), UME **831/831**, hash vs v1.13 shows the intended default-rendering rgba diff (not
+  neutral — this is a default-behavior bug fix), smoke **204/204** (+1).
 - **v1.13 — owner: "3 fixes: labels give no visual results; let me zoom out until the full map
   WIDTH stays in view (furthest zoom-out currently uses map height, forcing L/R drag); clicked
   info keeps its coord at the original zoom, doesn't adapt."** Three civ/UI bug fixes, engine
