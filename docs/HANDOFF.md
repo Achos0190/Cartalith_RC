@@ -9,17 +9,39 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.12.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.13.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.13 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.11` are kept and never edited.
+  (v1.14 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.12` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. **ALL 6 ITEMS
   SHIPPED**, one version per item (per the "finish one thing before starting the next" rule):
   (1) culture-flavored naming — v1.07. (2) setup-gate world archetype presets — v1.08. (3)
   GeoJSON/GIS export — v1.09. (4) province tier + religions layer — v1.10. (5) submap/resample UX —
   v1.11. (6) label placement + per-layer style editors — v1.12. The borrow-list arc is complete.
+- **v1.13 — owner: "3 fixes: labels give no visual results; let me zoom out until the full map
+  WIDTH stays in view (furthest zoom-out currently uses map height, forcing L/R drag); clicked
+  info keeps its coord at the original zoom, doesn't adapt."** Three civ/UI bug fixes, engine
+  untouched. **(1) Region/area name labels stopped drawing:** the shared occupancy grid (v0.148)
+  let a settlement auto-label claim the region label's cell — worsened by v1.12's extra label
+  boxes — so §4's `if(!lblTest(...)) continue;` skipped it (owner: 0 of 2 drew). Fix: a pre-pass
+  reserves each region label's box BEFORE the settlement loop (settlement labels now yield to
+  user-authored names), and §4 draws region labels **unconditionally** (no collision skip → the
+  selected label can't erase itself either). **(2) Zoom-out floored at COVER, not FIT:** the fill
+  floor was `_viewCoverScale()` (max ratio — fills, but the other axis overflows). New
+  `_viewFitScale()` (min ratio — whole map visible, letterbox on the overflow axis) is the new
+  `zoomAt`/`_viewClampFill` floor; a fitting axis is **centred**. The default/reset view still
+  FILLS (cover) via new `_viewFill()` (routed through reset button, post-generate/import, resize,
+  load), so only deliberate zoom-out below cover reveals the full map. **(3) Clicked info kept the
+  un-zoomed coord under LOD:** the left-click civ-tool `pointerdown` (and territory-paint
+  `pointermove`) used plain `evtToGrid`, which assumes the world fills the canvas — wrong under the
+  auto-entered tiled-LOD viewer (~260 cells off at deep zoom). Switched to LOD-aware `evtToGridLOD`
+  (same inverse the v0.91 info/wildlife + v0.95 right-click paths use; off-LOD it falls through to
+  `evtToGrid`). Verified: engine **923/923**, UME **831/831**, hash vs v1.12 **ALL IDENTICAL**,
+  smoke **203/203** (+3: region label draws through a packed grid; zoom-out floor fits map W+H
+  where cover overflowed; deep-LOD click reaches `_civInfoAt` on the right cell). Screenshots
+  confirm labels at the filled default and both map edges visible at max zoom-out.
 - **v1.12 — owner: "implement the top 6 borrow list from the research" (#6, and last, label
   placement + per-layer style editors).** Settlement/POI labels only ever tried one fixed spot
   (above the pin); a collision there silently dropped the label. `drawCivLayer`'s placement loop now

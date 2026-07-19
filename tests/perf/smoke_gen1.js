@@ -1745,6 +1745,76 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     };
   });
 
+  // ── v1.13: three owner-reported fixes — (1) region/area name labels stopped drawing, (2) zoom-out
+  //    floored at COVER (map height fills, width overflows → forced L/R drag), (3) clickable info under
+  //    deep zoom kept the un-zoomed coordinate mapping. Reuses the seed-55555 512px world from v1.12.
+  R.v113 = await page.evaluate(async () => {
+    const out = {};
+    const cx = (GW / 2) | 0, cy = (GH / 2) | 0;
+
+    // (1) Region labels are user cartography — they must ALWAYS draw, never be suppressed by an
+    //     auto-placed settlement label crowding the shared occupancy grid. Reproduce the v1.12
+    //     regression (settlement boxes packed on top of a region label → 0 region draws), then confirm
+    //     v1.13 reserves the region label's box first so it still renders.
+    state.places = [];
+    const names = ['Alphaburgshire', 'Betaburgshire', 'Gammaburgshire', 'Deltaburgshire', 'Epsilonburgshire'];
+    for (let i = 0; i < names.length; i++) state.places.push({ x: cx + (i - 2) * 6, y: cy, kind: 'city', klass: 'city', category: 'settlement', faction: 1, name: names[i], pop: 5000, traits: [] });
+    state.labels = [{ x: cx, y: cy, name: 'REACHWOLD', size: 22, color: '#f0e4c8', font: 'Georgia, serif', angle: 0, arc: 0 }];
+    civTerritory = null; civWays = []; _civSelectedLabel = null;
+    let regionDraws = 0;
+    const origArc = drawArcLabel;
+    drawArcLabel = function (ctx, text) { if (text === 'REACHWOLD') regionDraws++; return origArc.apply(this, arguments); };
+    drawCivLayerAuto();
+    drawArcLabel = origArc;
+    out.regionLabelDraws = regionDraws;
+
+    // (2) Zoom-out FLOOR is now the FIT scale (whole map visible) rather than COVER. Establish the
+    //     filled default, then zoom out hard and confirm the WHOLE map — width AND height — fits the
+    //     viewport (letterbox on the overflow axis), instead of one axis overflowing (the reported drag).
+    const measure = () => {
+      const wrap = document.querySelector('.canvas-wrap'); const cs = getComputedStyle(wrap);
+      const availW = wrap.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+      const availH = wrap.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+      const r = canvasStack.getBoundingClientRect();   // reflects the applied transform (scaled visual size)
+      return { availW, availH, scaledW: r.width, scaledH: r.height };
+    };
+    _lodOn = false;
+    _viewFill();                                  // the filled cover default
+    out.coverScale = +_viewCoverScale().toFixed(4);
+    out.fitScale = +_viewFitScale().toFixed(4);
+    out.fitAtOrBelowCover = out.fitScale <= out.coverScale + 1e-4;
+    const mCover = measure();                      // at cover, at least one axis overflows when aspects differ
+    out.overflowsAtCover = mCover.scaledW > mCover.availW + 1.5 || mCover.scaledH > mCover.availH + 1.5;
+    const [vcx, vcy] = viewCenter();
+    for (let i = 0; i < 40; i++) zoomAt(vcx, vcy, 0.5);   // zoom out to the floor
+    out.scaleAtFloor = +viewT.scale.toFixed(4);
+    const mFloor = measure();
+    out.widthFitsAtFloor = mFloor.scaledW <= mFloor.availW + 1.5;
+    out.heightFitsAtFloor = mFloor.scaledH <= mFloor.availH + 1.5;
+    _viewFill();                                   // restore the default filled view
+
+    // (3) Under deep LOD zoom the LEFT-click tool handler must map through evtToGridLOD (LOD-aware),
+    //     not the un-zoomed evtToGrid. Arm the Info tool, centre LOD on a settlement, dispatch a REAL
+    //     pointerdown at its predicted on-screen pixel, and confirm _civInfoAt receives that
+    //     settlement's grid cell — while the old plain mapping would have landed far away.
+    _civAutoWorld();
+    const p = state.places.find(pl => pl.kind === 'capital' || pl.kind === 'city') || state.places[0];
+    _activeTab = 'explore'; _civTool = 'info';
+    _lodOn = true; const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodCx = p.x; _lodCy = p.y; _lodZoom = 8; applyView(); renderNow();
+    let infoGx = null, infoGy = null;
+    const origInfo = _civInfoAt;
+    _civInfoAt = function (gx, gy) { infoGx = gx; infoGy = gy; /* skip DOM work */ };
+    const [sx, sy] = _civPlaceScreenPos(p.x, p.y);       // LOD-aware forward projection of the pin
+    view.dispatchEvent(new MouseEvent('pointerdown', { clientX: sx, clientY: sy, button: 0, bubbles: true }));
+    _civInfoAt = origInfo;
+    out.lodClickHandlerErr = (infoGx == null) ? 999 : +Math.hypot(infoGx - p.x, infoGy - p.y).toFixed(2);
+    const plain = evtToGrid({ clientX: sx, clientY: sy });   // what the pre-v1.13 handler would have used
+    out.plainMappingErr = +Math.hypot(plain[0] - p.x, plain[1] - p.y).toFixed(2);
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; _activeTab = 'generate'; _civTool = 'inspect'; applyView(); renderNow();
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1963,6 +2033,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // ── v1.12: label placement + per-layer style editors (borrow-list #6) ──
   A('v1.12: a settlement label that would collide at its usual spot gets rescued via an alternate side instead of silently dropping (pre-v1.12 this exact packed layout showed only 1 of 5)', R.labelsAndStyle.shownCount >= 2 && R.labelsAndStyle.positions.length >= 2 && R.labelsAndStyle.positions.includes('above'));
   A('v1.12: territory-opacity and way-opacity sliders exist and each produces a real pixel difference on the civ canvas', R.labelsAndStyle.territoryOpacitySliderExists && R.labelsAndStyle.wayOpacitySliderExists && R.labelsAndStyle.territoryDiffPx > 0 && R.labelsAndStyle.wayDiffPx > 0);
+  // ── v1.13: label regression + zoom-out-to-fit + LOD click mapping (three owner fixes) ──
+  A('v1.13 #1: a region/area name label still draws even when settlement auto-labels crowd its cell (pre-v1.13 the occupancy grid could suppress it entirely)', R.v113.regionLabelDraws >= 1);
+  A('v1.13 #2: zoom-out floors at the FIT scale so the whole map — width AND height — fits the viewport (was cover: one axis overflowed, forcing L/R drag)', R.v113.fitAtOrBelowCover === true && R.v113.overflowsAtCover === true && R.v113.widthFitsAtFloor === true && R.v113.heightFitsAtFloor === true);
+  A('v1.13 #3: under deep LOD zoom a left-click reaches _civInfoAt with the correct settlement cell (LOD-aware evtToGridLOD); the old un-zoomed mapping would have been far off', R.v113.lodClickHandlerErr < 3 && R.v113.plainMappingErr > 10);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
