@@ -727,23 +727,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     }
     return { vacuous: false, short, exact };
   });
-  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}]; });
+  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',category:'settlement',faction:0,pop:100,traits:[]}]; });
 
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
   // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
   // labels/icons are unchanged (still the sidebar-pinned inspector).
-  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  // v1.16: the sidebar settlement list was replaced by the virtualized Settlements-page table
+  // (#stSpacer) — switch to that sub-page so the table is populated before checking it.
+  await page.evaluate(() => {
+    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.querySelector('#civSubBar [data-civsub="settlements"]').click();
+    _civSelectedPlace = state.places[0]; _civRenderPlaceEditor();
+  });
   await page.waitForTimeout(100);
   R.editorInPopup = await page.$eval('#placeEditPopup', el => !!el.querySelector('#_civPeName') && el.style.display === 'block');
   R.editorNotInInspector = await page.$eval('#inspectorBody', el => !el.querySelector('#_civPeName'));
   R.popupOnScreen = await page.evaluate(() => { const r = document.getElementById('placeEditPopup').getBoundingClientRect(); return r.x >= 0 && r.x < window.innerWidth && r.y >= 0 && r.y < window.innerHeight; });
-  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('civSettlementList').querySelector('#_civPeName') === null);
+  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('stSpacer').querySelector('#_civPeName') === null);
   await page.fill('#_civPeName', 'Renamed');
   await page.dispatchEvent('#_civPeName', 'input');
   await page.waitForTimeout(100);
   R.liveModelUpdate = await page.evaluate(() => state.places[0].name === 'Renamed');
-  R.liveRowPatch = await page.evaluate(() => document.getElementById('civSettlementList').textContent.includes('Renamed'));
+  R.liveRowPatch = await page.evaluate(() => document.getElementById('stSpacer').textContent.includes('Renamed'));
   await page.evaluate(() => {
     state.labels.push({x:5,y:5,name:'ALabel'});
     _civSelectLabel(state.labels[0]);
@@ -1027,10 +1033,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const sec = document.getElementById('explTimelineSection');
     const controlsInExplore = !!(sec && sec.querySelector('#civTlYear') && sec.querySelector('#civTlAddYearBtn')
       && sec.querySelector('#civTimelinePanel') && sec.querySelector('#civSimulateBtn') && sec.querySelector('#explTimelineSlider'));
-    const polity = [...document.querySelectorAll('#genCiv details.cat-acc')].find(d => {
-      const s = d.querySelector('summary'); return s && s.textContent.trim() === 'Polity';
-    });
-    const controlsNotInPolity = !!polity && !polity.querySelector('#civTlYear') && !polity.querySelector('#civSimulateBtn');
+    // v1.16: Civilization → Polity was folded into Generation → Territories by the sub-page redesign
+    // (#civSubGeneration); the invariant this guards — timeline/simulate controls never duplicated
+    // inside Civilization — still holds, so check the whole #genCiv subtree rather than a section
+    // literally named "Polity".
+    const controlsNotInPolity = !document.querySelector('#genCiv #civTlYear') && !document.querySelector('#genCiv #civSimulateBtn');
 
     civTimeline.length = 0; civYear = 0;
     civAddYear(10);

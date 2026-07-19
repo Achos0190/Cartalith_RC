@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.15**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.16**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.15.html` | **Current** unified tool (~21.9k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.14.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.16.html` | **Current** unified tool (~22.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.15.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -45,16 +45,20 @@ init, not `setTimeout(...,0)`).
 1. **Generator engine + app shell** (~9.5k lines). The full `elevation_foundation` lineage:
    procedural heightmap/tectonics/climate/erosion pipeline, renderer, LOD/atlas, exports, UI
    wiring, and (v1.15) the **Sculpt editor** — see below. Everything `tests/run.sh` exercises.
-2. **Civ/politics layer** (~4.2k lines): factions (`CIV_FACTIONS`, deterministic golden-angle
+2. **Civ/politics layer** (~6.9k lines): factions (`CIV_FACTIONS`, deterministic golden-angle
    colours for appended factions, a per-faction naming culture from `CIV_CULTURES` driving
-   `_civSettleName`'s syllable/suffix pool — v1.07's `civFactionCulture` parallel array — and a
-   per-faction state religion from `CIV_RELIGIONS` — v1.10's `civFactionReligion` parallel array),
-   settlements/ways/icons/territory drape, ported from the Cartalith editor. v1.10 also adds
-   `civProvince` (a `civTerritory`-parallel raster subdividing each faction's territory into
-   settlement-seeded provinces via `_civGenerateProvinces()`, on-demand/not persisted). Also hosts
-   the v0.95 urban-morphology adapter (`_umPlaceContext`,
-   `_umModelFor`'s cache/queue, `_umDrawLayout`'s deep-zoom crossfade renderer) that bridges a
-   settlement to script block 4's engine — see "Urban morphology" below.
+   `_civSettleName`'s syllable/suffix pool — v1.07's `civFactionCulture` parallel array, a
+   per-faction state religion from `CIV_RELIGIONS` — v1.10's `civFactionReligion` parallel array —
+   and a per-faction government type from `CIV_GOVERNMENTS` — v1.16's `civFactionGovernment`
+   parallel array, same convention), settlements/ways/icons/territory drape, ported from the
+   Cartalith editor. v1.10 also adds `civProvince` (a `civTerritory`-parallel raster subdividing
+   each faction's territory into settlement-seeded provinces via `_civGenerateProvinces()`,
+   on-demand/not persisted). v1.16 adds the Civilization-menu data/UI layer — see "Civilization
+   menu redesign" below — including `_civFactionAggregates()`, the cached per-faction stats pass
+   every Factions/Settlements/Economy/Statistics sub-page reads from. Also hosts the v0.95
+   urban-morphology adapter (`_umPlaceContext`, `_umModelFor`'s cache/queue, `_umDrawLayout`'s
+   deep-zoom crossfade renderer) that bridges a settlement to script block 4's engine — see
+   "Urban morphology" below.
 3. **Asset Library** (~1.2k lines, IIFE): the native asset-management page (AssetDB,
    collections, importers incl. sprite-sheet slicer, validator, pack export). Migrated from the
    old standalone compiler; assets travel with the project ZIP via `_alExportEntries`/
@@ -148,6 +152,73 @@ Noise: `sculptFbm`/`sculptRidged`/`sculptBillow`, new parametrized wrappers on t
 `vnoise()`/`hash()` — deliberately not the engine's hardcoded 6-octave `fbm()`/`ridged()` (every
 sculpt feature needs octaves/persistence/lacunarity as independent sliders) and not the PoC's own
 classic-Perlin `makeNoise()`.
+
+### Civilization menu redesign (v1.16)
+
+A UI/data-architecture refactor of `#genCiv` — not a simulation rewrite. Replaced the flat
+Peoples/Settlements/Polity/Infrastructure `<details>`-accordion stack with an inner sub-tab bar
+(`#civSubBar`, same click-handler pattern as `#genSubBar`): **Generation → Factions →
+Settlements → Economy → Statistics** (`_civSubTab`, `_civRefreshActiveSubPage()` — renders only
+the currently-active sub-page, zero cost while any other is open). `civPoiTypeRow`/the manual
+way-drawing controls live above the bar, always visible regardless of active sub-page (they
+belong to the top-level tool palette's Place-POI/Draw-way tools, not one sub-page).
+
+**Data layer** — `_civFactionAggregates()`: one cached `O(GW·GH + nPlaces)` pass (gated on
+`[_civAggGen,_civTerrGen,_fieldGen,faction count]`, modeled on `_civRegionalPopulation()`'s
+existing single-pass shape) producing, per faction: population (Σ settlement pop — distinct from
+`_civRegionalPopulation`'s density-integral ceiling, kept separate as `foodProductionCapacity`),
+territory km², food surplus, trade/tax income, capital (derived from `kind`/`pop`, no override
+field), a 5-way power breakdown (military/economic/political/cultural/religious + a derived
+overall — explicitly labeled heuristic, never presented as simulated), imports/exports/strategic
+resources (territory-mean `currentResourcePotentials()` vs. world mean), and per-sector
+production (`sectorOutput`, `CIV_PRIMARY_SPECIALISATION` bucketing `CIV_SPECIALISATIONS` into
+Agriculture/Livestock/Fishing/Forestry/Mining, everything else → `craft`, labeled
+"(approximate)" — the one field with no direct backing signal). **Never re-runs
+`_civNetworkMetrics`' Brandes betweenness** — faction economic/political numbers consume the
+*persisted* `economicImportance`/`tradeVolume` from the last Auto-Populate/Generate-Roads run
+(stale until the next one — an accepted tradeoff). Seven `_civPlace*` settlement-level functions
+(Prosperity/Food-surplus/Defensibility/Connected-roads/Connected-rivers/Resource-context) are
+thin on-demand wrappers around pre-existing primitives (`_umInferWalls`, `_umSiteKindFromTerrain`,
+`buildSettlementSuitability`'s defensibility term, `currentResourcePotentials()`,
+`_civCatchmentDensityMean`) — no new full-grid pass, called only for rendered rows/inspectors.
+
+**Generation page**: pure relocation of Auto-Populate/`civAutoPolityBtn` (relabeled "Recalculate
+Territories")/`civAutoRoutesBtn` (relabeled "Generate Roads") — same ids/handlers, zero logic
+change; provinces/scale+opacity sliders/way list under an "Advanced" disclosure.
+
+**Factions page**: the original compact pill picker (`civFactionPicker`) stays — it still drives
+`_civActiveFaction`, the Territory-paint/Drop-settlement map tools' "paint/drop as" selection, a
+deliberately separate concern from *browsing* a faction. Below it, a richer faction list; clicking
+a row opens `_civPopulateFactionEditor` inline (editable Name/Government/Culture/Religion +
+read-only aggregate fields + a "Diplomatic relations — not yet implemented" placeholder) with a
+lazy-loaded settlement sublist (`<details>` `toggle`, gated on `builtGen===_civAggGen` — an
+unchanged re-expand is a DOM node-identity no-op). `_civPopulateEntityInspector(host,kind,entity,
+rowRefs)` is a thin dispatcher to the settlement- or faction- populate function (not a merge —
+their editable fields differ too much for that to reduce duplication rather than relocate it).
+
+**Settlements page**: a virtual-scrolling table (`ST_ROW_H=28`, a fixed recycled row pool sized
+to the viewport + overscan, positioned via `transform:translateY` — never sized to settlement
+count) with search + faction/type/econ-role/pop-range filters and 7 sort keys, over a new
+transient `state.civTableFilter` (kept separate from `state.mapFilter` — different shape/intent).
+`_stRebuildFiltered()` (the O(n log n)-plus-bounded-per-row-cost pass) runs only on an explicit
+filter/sort/search change (debounced); `_stUpdateVisible()` never recomputes, only repositions/
+repatches the pool on scroll. Row click reuses the `_civSelectedPlace`/`_civMoveViewTo`/
+`_civOpenPlacePopup` precedent, feeding `_civSelectedRowRefs={nameSpan}` so a Name keystroke live-
+patches the visible row (mirrors the old sidebar list's own convention — `_civRenderPlaceEditor()`
+rebuilds the active sub-page *before* opening the inspector so this ref is fresh). POIs stay
+reachable via a toggle reusing the untouched `_civRenderPoiList`.
+
+**Settlement Inspector** (`_civPopulatePlaceEditor`, still the existing map-anchored popup via
+`_civOpenPlacePopup()`) gained a read-only "Derived" block (Prosperity/Food surplus/Defensibility/
+Connected roads/Connected rivers/Nearby strategic resources) + a Focus-camera button
+(`_civMoveViewTo`). Existing editable fields/handlers untouched.
+
+**Economy/Statistics pages** render exclusively from `_civFactionAggregates()` plus trivial extra
+tallies (way km/count, settlement-tier counts via the existing `kind` vocabulary, mean
+Prosperity) — no separate computation path.
+
+`_civRenderSettlementList()`/`#civSettlementList`/`#civSettlementCount` (superseded by the
+virtualized table) were deleted outright, not left as dead-but-harmless code.
 
 ### Engine (block 1) essentials
 
