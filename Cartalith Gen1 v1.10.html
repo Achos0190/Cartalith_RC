@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cartalith Gen1 v1.07</title>
+<title>Cartalith Gen1 v1.10</title>
 <style>
   :root{
     --bg:#101218; --panel:#171a22; --panel2:#1f232e; --line:#2c313d;
@@ -392,7 +392,7 @@ details.cat-acc[open]>summary{color:var(--accent)}
 <header>
   <button id="panelToggle" class="panel-toggle" aria-label="Toggle controls">☰</button>
   <h1>Cartalith Gen1</h1>
-  <span class="ver" id="verTag">v1.07</span>
+  <span class="ver" id="verTag">v1.10</span>
   <span class="tag">terrain · climate · civilization · 2D/3D · cartalith gen1</span>
   <!-- v0.63 (§3): phase chip — appears once the world is finalized (Atlas/Explore phase) -->
   <span id="phaseChip" title="The simulation is frozen — you're editing the cartographic Atlas. Un-finalize at the top of Generate → World.">✓ Atlas — world finalized</span>
@@ -442,6 +442,10 @@ details.cat-acc[open]>summary{color:var(--accent)}
         <div class="btnrow" style="margin-top:8px"><button class="accent" id="exportBtn">Export .zip</button></div>
         <div class="row" id="bakeProgRow" style="display:none"><label>Baking</label><progress id="bakeProg" max="100" value="0"></progress><span class="val" id="bakeProgV">0%</span></div>
         <div class="hint">One .zip with everything the world has become: raw 32-bit heightmap + temperature + rainfall, the baked LOD atlas, the asset library, and all parameters — plus a rendered map image, unless a <b>finalized</b> world's Atlas already covers the whole map at every baked level (then the atlas alone carries the imagery, and the redundant flat bake is skipped). Restore it whole with <b>File → Load project .zip</b>. For tiled / 16K output of a hand-picked region use <b>Region export</b> in Generate → World.</div>
+        <!-- v1.09 (borrow-list #3, after Azgaar's FMG GeoJSON/JSON export): settlements/POIs, roads &
+             sea-routes, rivers and faction territory as one GeoJSON FeatureCollection, for GIS tools. -->
+        <div class="btnrow" style="margin-top:8px"><button id="exportGeoBtn">Export GeoJSON</button></div>
+        <div class="hint">Settlements/POIs, roads &amp; sea-routes, rivers (Strahler order ≥2), faction territory (with its state religion) and — once generated below — provinces, as one <code>.geojson</code> file — filter by each feature's <code>layer</code> property. Coordinates are local planar kilometres (east, north) from the map's own scale, <b>not</b> real-world WGS84 longitude/latitude — a fantasy world has no true georeference. Any GIS tool that accepts an unspecified/local coordinate system (e.g. QGIS "Add Vector Layer" with the CRS left as detected) reads it as a flat projected dataset at the map's scale.</div>
       </div>
     </div>
   </div>
@@ -561,6 +565,23 @@ details.cat-acc[open]>summary{color:var(--accent)}
             <button data-world="1">Whole world</button>
           </div>
           <label class="chk su"><input type="checkbox" id="suCenter"> Center landmasses (whole-world seam)</label>
+
+          <!-- v1.08 (borrow-list #2, after Azgaar's FMG heightmap templates — one-click parameter
+               bundles on the new-world screen): steers the SAME `ARCHETYPES`/`state.world_structure`
+               continentality system the sidebar's Generate → World → World Structure panel already
+               exposes post-generate — this just picks a bundle up-front, before the first generate,
+               instead of leaving it buried in an Advanced panel the owner has to already know exists.
+               Classic (default, selected) leaves world_structure disabled — bit-identical to pre-v1.08. -->
+          <div class="su-label">World shape</div>
+          <div class="seg su" id="suArchSeg">
+            <button data-arc="classic" class="on">Classic</button>
+            <button data-arc="earth">Earth-like</button>
+            <button data-arc="supercontinent">Pangaea</button>
+            <button data-arc="archipelago">Archipelago</button>
+            <button data-arc="volcanic">Volcanic Isles</button>
+            <button data-arc="rift">Rift Valleys</button>
+          </div>
+          <div class="su-note">Classic uses independent random plates (today's default). The other presets steer plate placement toward a target landmass shape before the first generate — fine-tune further afterward in Generate → World → World Structure.</div>
 
           <!-- v1.06 (owner: "we should have the seed box back, and the random option there also"):
                the world seed is settable BEFORE the first generate — the same world is reproducible
@@ -1166,6 +1187,12 @@ details.cat-acc[open]>summary{color:var(--accent)}
       <div class="btnrow" style="margin-bottom:6px"><button id="civAddFactionBtn">+ Add faction</button><button id="civRemoveFactionBtn">− Remove last</button></div>
       <div class="hint" style="margin-bottom:6px;font-size:.75rem">Double-click a faction to rename it; the small dropdown sets its <b>naming culture</b> — which namesbase newly-generated settlements for that polity draw from, so each people's towns read distinctly. <b>Add faction</b> appends a new polity with a distinct colour; <b>Remove last</b> drops the most recently added one (settlements/territory using it revert to Unclaimed).</div>
       <div class="row"><label for="civTerRadius">Territory radius</label><input type="range" id="civTerRadius" min="1" max="20" value="5"><span class="val" id="civTerRadiusV">5</span></div>
+      <!-- v1.10 (borrow-list #4, after FMG provinces — "a mid-tier region between faction and
+           settlement"): auto-subdivides each faction's territory into provinces, one per city+
+           settlement. Regenerate-on-demand rather than automatic on every territory edit. -->
+      <label class="chk"><input type="checkbox" id="civProvincesChk"> Show provinces (subtle per-province tint within each faction's territory)</label>
+      <div class="btnrow" style="margin-top:4px"><button id="civGenProvincesBtn">Generate provinces</button></div>
+      <div class="hint" style="font-size:.75rem">One province per city-tier+ settlement in each faction (a faction with only towns/villages gets one province, seeded by its biggest settlement). Re-run after adding settlements or repainting territory.</div>
     </div>
     </details><!-- end Peoples cat-acc -->
 
@@ -1671,7 +1698,7 @@ details.cat-acc[open]>summary{color:var(--accent)}
  *   Pillar 3 — optical water shading: Beer–Lambert depth transport + flow-map UV, after Premože & Ashikhmin
  *     (Stanford, "Rendering Natural Waters").
  * ===================================================================================================== */
-const VERSION='1.07';
+const VERSION='1.10';
 const view = document.getElementById('view');
 const vctx = view.getContext('2d');
 /* v0.6: 2D/3D view-dimension state — declared early (before any renderNow) so the renderNow refresh
@@ -1750,7 +1777,7 @@ const state = {
   mapIcons: [],   /* {x,y,fam:'poi'|'custom',slot,set,variant,scale} user-placed Cartography icons — persistent, like labels; never cleared by generate() */
   cartoPaint: {biome:[],splat:[],terrain:[]},   /* sparse [i,v,i,v,...] pairs — synced from paintBiome/paintSplat/paintTerrain module globals on export, decoded back on import (mirrors state.civ.territory) */
   mapFilter: {showTerritory:true, factionsOff:[], settlementTypesOff:[], showRoads:true, wayTypesOff:[], timelineExistOnly:false, timelineGhost:false, timelineHighlight:false},   /* Explore-tab map-view filters — a persistent user preference, NOT reset by generate() (unlike civTerritory/civWays) */
-  viz:{ parchment:0, icons:false, waves:false, waveDist:1, zoomDetail:1, scaleBar:true, splat:0.7, sharpBiomes:true, showLakes:true, multiSun:false, ao:0, crest:0, rockSlope:0, texture:0, minorStreams:0, ridgedRelief:0, svf:0, shadows:0, curveShade:0, geology:0, wetness:0, season:0, contourM:0, sdfCoast:0, sdfRivers:0, sdfBiomes:0, contours:0, ink:0, hachure:0, watercolor:0, cel:0, crosshatch:0, stipple:0, sepia:0, risograph:0, pointillism:0, waterAnim:false, riverDensity:1, minRiverOrder:1, civIconScale:1, civWayScale:1, riverWays:true, urbanLayouts:false },   /* B1/B3/B4 layers + splat + river overlay + lakes + R1 AO + R2 crests/slope-rock + R3 texture/minor channels + R4 ridged relief + v0.096 SDF coast/river/biome + v0.108 Painter NPR contours/ink/hachure/watercolor + v0.129 cel/crosshatch/stipple + v0.131 sepia/risograph/pointillism (all default 0 = off; blueprint removed v0.141); civIconScale/civWayScale: user-adjustable civ-layer settlement/label and way line-width multipliers (both default 1) */
+  viz:{ parchment:0, icons:false, waves:false, waveDist:1, zoomDetail:1, scaleBar:true, splat:0.7, sharpBiomes:true, showLakes:true, multiSun:false, ao:0, crest:0, rockSlope:0, texture:0, minorStreams:0, ridgedRelief:0, svf:0, shadows:0, curveShade:0, geology:0, wetness:0, season:0, contourM:0, sdfCoast:0, sdfRivers:0, sdfBiomes:0, contours:0, ink:0, hachure:0, watercolor:0, cel:0, crosshatch:0, stipple:0, sepia:0, risograph:0, pointillism:0, waterAnim:false, riverDensity:1, minRiverOrder:1, civIconScale:1, civWayScale:1, riverWays:true, urbanLayouts:false, provinces:false },   /* B1/B3/B4 layers + splat + river overlay + lakes + R1 AO + R2 crests/slope-rock + R3 texture/minor channels + R4 ridged relief + v0.096 SDF coast/river/biome + v0.108 Painter NPR contours/ink/hachure/watercolor + v0.129 cel/crosshatch/stipple + v0.131 sepia/risograph/pointillism (all default 0 = off; blueprint removed v0.141); civIconScale/civWayScale: user-adjustable civ-layer settlement/label and way line-width multipliers (both default 1) */
   climate:{ latN:55, latS:5, equatorTemp:30, poleTemp:-25, lapseRate:6.5, rainK:1.0, rainDep:0.35, oceanHum:1.0, windDir:0, windMode:'auto', pressK:0.6, zonalK:0.5, bulkEvap:true, seasons:false, maxRainMm:3000, currents:true, currentK:1.0, albedo:0, evap:0.12, ocean:1.0, wIters:70 }   /* v0.80: ocean currents ON by default (cheap, integrated into the weather sim before buildWind — warm/cold coastal climate; loadZip keeps pre-v0.80 saves at their stored value). albedo/seasons stay opt-in (albedo forces the CPU temp path; seasons is the heaviest pass + changes annual→seasonal field meaning). */
 };
 
@@ -9685,9 +9712,152 @@ async function exportZip(){
   }catch(e){ alert('Export failed: '+e.message); }
   finally{ btn.disabled=false; hideBusy(); if(row)row.style.display='none'; }
 }
+
+/* ===================== v1.09: GeoJSON / GIS export (borrow-list #3, after Azgaar's FMG JSON/
+   GeoJSON export "opens the same downstream-pipeline door") =====================
+   Coordinates are LOCAL PLANAR map coordinates in kilometres (east, north) — NOT real-world
+   WGS84 longitude/latitude. RFC 7946 assumes WGS84, but a procedurally generated fantasy world
+   has no true georeference (the same pragmatic call Azgaar's FMG makes for its own export); any
+   GIS tool that accepts an unspecified/local coordinate system (e.g. QGIS "Add Vector Layer"
+   with the CRS left as detected/none) reads these as a flat projected dataset at the map's own
+   scale. North is UP (Y increases northward), flipping the grid's row-major Y-down convention
+   so the export displays right-side-up in a standard viewer. Lives here (script block 1) rather
+   than beside the civ-layer functions it reads (state.places/civWays/civTerritory/CIV_FACTIONS,
+   all script block 2) because it's only ever CALLED from a menu click — long after block 2 has
+   run — exactly the deferred cross-block reference exportZip already uses for
+   `window._alExportEntries` above. */
+function _geoCellKm(){ return state.mapWidthKm/GW; }
+function _geoXY(gx,gy){ const k=_geoCellKm(); return [+(gx*k).toFixed(3), +((GH-gy)*k).toFixed(3)]; }
+
+/* Raster→vector boundary tracing for a binary cell mask: walks oriented cell-edges (each mask
+   cell contributes the sides that border a non-mask cell) into closed rings. A ring's shoelace
+   sign distinguishes an outer shell (positive) from a hole (negative) — the standard property of
+   boundary-edge tracing regardless of the grid's Y-down convention. Doesn't attempt marching-
+   squares' sub-cell interpolation (territory is a per-cell raster already, so a "staircase"
+   outline is the honest shape) and doesn't disambiguate the rare checkerboard pinch-point (two
+   diagonal cells in the mask, the other two not) — an acceptable simplification for a nice-to-
+   have GIS export of blob-shaped territory, not a core rendering path. */
+function _geoTraceMaskRings(inMask,minX,minY,maxX,maxY){
+  const next=new Map();
+  const addEdge=(ax,ay,bx,by)=>{ next.set(ax+','+ay,[bx,by]); };
+  for(let y=minY;y<maxY;y++) for(let x=minX;x<maxX;x++){
+    if(!inMask(x,y)) continue;
+    if(!inMask(x,y-1)) addEdge(x,y,x+1,y);
+    if(!inMask(x+1,y)) addEdge(x+1,y,x+1,y+1);
+    if(!inMask(x,y+1)) addEdge(x+1,y+1,x,y+1);
+    if(!inMask(x-1,y)) addEdge(x,y+1,x,y);
+  }
+  const rings=[], visited=new Set(), guard=next.size+5;
+  for(const startKey of next.keys()){
+    if(visited.has(startKey)) continue;
+    const ring=[]; let curKey=startKey, steps=0;
+    while(true){
+      if(visited.has(curKey)) break;
+      visited.add(curKey);
+      ring.push(curKey.split(',').map(Number));
+      const nxt=next.get(curKey); if(!nxt) break;
+      const nk=nxt[0]+','+nxt[1];
+      if(nk===startKey){ ring.push(nxt); break; }
+      curKey=nk;
+      if(++steps>guard) break;   // safety valve — should never trigger for a well-formed mask boundary
+    }
+    if(ring.length>=4) rings.push(ring);
+  }
+  return rings;
+}
+function _geoRingArea(ring){ let s=0; for(let i=0;i<ring.length-1;i++){ const[x1,y1]=ring[i],[x2,y2]=ring[i+1]; s+=x1*y2-x2*y1; } return s/2; }
+function _geoPointInRing(px,py,ring){
+  let inside=false;
+  for(let i=0,j=ring.length-2;i<ring.length-1;j=i++){
+    const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+    if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+/* Shared mask→MultiPolygon-coordinates helper (holes nested into their containing shell by
+   point-in-ring + smallest-enclosing-area) — used by both territory and (v1.10) province export,
+   so the two id-raster layers share one boundary-tracing/hole-nesting implementation. */
+function _geoMaskOutlineCoords(maskFn){
+  const rings=_geoTraceMaskRings(maskFn,0,0,GW,GH);
+  if(!rings.length) return null;
+  const shells=[],holes=[];
+  for(const r of rings){ const a=_geoRingArea(r); (a>0?shells:holes).push({ring:r,area:Math.abs(a)}); }
+  if(!shells.length) return null;
+  const polys=shells.map(s=>({outer:s.ring,holeRings:[]}));
+  for(const h of holes){
+    const[hx,hy]=h.ring[0]; let best=-1,bestArea=Infinity;
+    for(let i=0;i<shells.length;i++) if(_geoPointInRing(hx,hy,shells[i].ring)&&shells[i].area<bestArea){ best=i; bestArea=shells[i].area; }
+    if(best>=0) polys[best].holeRings.push(h.ring);
+  }
+  const toGeo=ring=>ring.map(([x,y])=>_geoXY(x,y));
+  return polys.map(p=>[toGeo(p.outer),...p.holeRings.map(toGeo)]);
+}
+/* One faction's territory as a MultiPolygon feature. */
+function _geoTerritoryFeature(fid){
+  const terr=civTerritory;
+  const coordinates=_geoMaskOutlineCoords((x,y)=>x>=0&&x<GW&&y>=0&&y<GH&&terr[y*GW+x]===fid);
+  if(!coordinates) return null;
+  const name=(typeof civFactionNames!=='undefined'&&civFactionNames[fid])||(CIV_FACTIONS[fid]&&CIV_FACTIONS[fid][0])||('Faction '+fid);
+  const religion=(typeof civFactionReligion!=='undefined'&&civFactionReligion[fid])||'none';
+  return { type:'Feature', geometry:{type:'MultiPolygon',coordinates}, properties:{layer:'territory',faction:fid,factionName:name,religion} };
+}
+/* v1.10: one province as a MultiPolygon feature (borrow-list #4 — a mid-tier region between
+   faction and settlement). Traces civProvince the same way _geoTerritoryFeature traces
+   civTerritory — a province never crosses its faction's own territory boundary by construction
+   (_civGenerateProvinces only assigns a cell to a same-faction seed), so no extra clipping needed. */
+function _geoProvinceFeature(prov){
+  const pr=civProvince;
+  const coordinates=_geoMaskOutlineCoords((x,y)=>x>=0&&x<GW&&y>=0&&y<GH&&pr[y*GW+x]===prov.id);
+  if(!coordinates) return null;
+  const factionName=(typeof civFactionNames!=='undefined'&&civFactionNames[prov.faction])||(CIV_FACTIONS[prov.faction]&&CIV_FACTIONS[prov.faction][0])||('Faction '+prov.faction);
+  return { type:'Feature', geometry:{type:'MultiPolygon',coordinates}, properties:{layer:'province',name:prov.name,faction:prov.faction,factionName} };
+}
+async function exportGeoJSON(){
+  const btn=document.getElementById('exportGeoBtn'); if(btn) btn.disabled=true;
+  try{
+    const feats=[];
+    if(state.places&&state.places.length){
+      const poiKeys=(typeof CIV_POI_KEYS!=='undefined')?CIV_POI_KEYS:null;
+      for(const p of state.places){
+        const isPoi=!!(poiKeys&&poiKeys.has(p.kind));
+        feats.push({ type:'Feature', geometry:{type:'Point',coordinates:_geoXY(p.x,p.y)},
+          properties: isPoi
+            ? {layer:'poi',name:p.name||'',kind:p.kind}
+            : {layer:'settlement',name:p.name||'',kind:p.kind,pop:p.pop|0,faction:p.faction||0,
+               factionName:(typeof civFactionNames!=='undefined'&&civFactionNames[p.faction])||(typeof CIV_FACTIONS!=='undefined'&&CIV_FACTIONS[p.faction]&&CIV_FACTIONS[p.faction][0])||'Unclaimed',
+               traits:(p.traits||[]).slice()} });
+      }
+    }
+    if(typeof civWays!=='undefined') for(const w of civWays){
+      if(!w.pts||w.pts.length<2) continue;
+      feats.push({ type:'Feature', geometry:{type:'LineString',coordinates:w.pts.map(pt=>_geoXY(pt[0],pt[1]))},
+        properties:{layer:'way',type:w.type||'road',name:w.name||'',km:+((w.km||0).toFixed(2)),sea:!!w.sea} });
+    }
+    { if(!_riverNet) _riverNet=buildRiverNetwork(field,flowField,GW,GH,state.seaLevel,{world:state.world,riverDensity:(state.viz&&state.viz.riverDensity)||1});
+      const polys=traceRiverPolylines(_riverNet.order,_riverNet.recv,GW,GH,2);
+      for(const poly of polys){
+        let maxOrder=0; for(const p of poly){ const idx=(p.y|0)*GW+(p.x|0); if(_riverNet.order[idx]>maxOrder) maxOrder=_riverNet.order[idx]; }
+        feats.push({ type:'Feature', geometry:{type:'LineString',coordinates:poly.map(p=>_geoXY(p.x,p.y))}, properties:{layer:'river',strahlerOrder:maxOrder} });
+      } }
+    if(typeof civTerritory!=='undefined'&&civTerritory&&typeof CIV_FACTIONS!=='undefined'){
+      for(let fid=1;fid<CIV_FACTIONS.length;fid++){ const f=_geoTerritoryFeature(fid); if(f) feats.push(f); }
+    }
+    if(typeof civProvince!=='undefined'&&civProvince&&civProvince.length===GW*GH&&CIV_PROVINCES.length){
+      for(const prov of CIV_PROVINCES){ const f=_geoProvinceFeature(prov); if(f) feats.push(f); }
+    }
+    const fc={ type:'FeatureCollection',
+      properties:{ generator:'Cartalith Gen1', version:VERSION, seed:state.tect.seed, mapWidthKm:state.mapWidthKm,
+        note:"Coordinates are local planar kilometres (east, north) from the map's own scale, not real-world WGS84 longitude/latitude." },
+      features:feats };
+    const blob=new Blob([JSON.stringify(fc)],{type:'application/geo+json'});
+    const url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=`world_${state.tect.seed}.geojson`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),5000);
+  }catch(e){ alert('GeoJSON export failed: '+e.message); }
+  finally{ if(btn) btn.disabled=false; }
+}
+
 async function loadZip(file){ showBusy('loading…');
   try{ const z=unzipStore(await file.arrayBuffer()); if(!z['params.json']) throw new Error('not an Elevation Foundation save');
-    const pk=JSON.parse(new TextDecoder().decode(z['params.json'])); GW=pk.GW; GH=pk.GH; Object.assign(state,pk.state); state.climate=Object.assign({windDir:0,evap:0.12,ocean:1.0,wIters:70,oceanHum:1.0},state.climate); if(state.climate.windMode==null)state.climate.windMode='manual'; if(state.climate.pressK==null)state.climate.pressK=0; if(state.climate.zonalK==null)state.climate.zonalK=1.0; if(state.climate.bulkEvap==null)state.climate.bulkEvap=false; if(state.climate.seasons==null)state.climate.seasons=false; if(state.climate.maxRainMm==null)state.climate.maxRainMm=3000; if(state.climate.currents==null)state.climate.currents=false; if(state.climate.currentK==null)state.climate.currentK=1.0; if(state.climate.albedo==null)state.climate.albedo=0; state.stream=Object.assign({uplift:0.0,deposit:0.3,climateK:0.5,cycles:5},state.stream); state.velo=Object.assign({iters:60,strength:0.5,meander:0.6},state.velo||{}); if(state.lodMaxLevel==null)state.lodMaxLevel=8; if(typeof state.finalized!=='boolean')state.finalized=false; if(typeof state.lodAuto!=='boolean')state.lodAuto=true; if(!Array.isArray(state.places))state.places=[]; if(state.roads===undefined)state.roads=null; if(!Array.isArray(state.labels))state.labels=[]; if(!Array.isArray(state.mapIcons))state.mapIcons=[]; if(!state.cartoPaint)state.cartoPaint={biome:[],splat:[],terrain:[]}; state.mapFilter=Object.assign({showTerritory:true,factionsOff:[],settlementTypesOff:[],showRoads:true,wayTypesOff:[],timelineExistOnly:false,timelineGhost:false,timelineHighlight:false},state.mapFilter||{}); state.view3d=Object.assign({exag:0.5,detail:1,lightAz:315,flatSea:true},state.view3d||{}); if(typeof state.showRivers!=='boolean')state.showRivers=true; if(typeof state.carveRivers!=='boolean')state.carveRivers=true; state.glacial=Object.assign({kg:0.15,mg:0.4,snowline:0.65,uFactor:0.6,passes:8},state.glacial||{}); state.coastal=Object.assign({waveStr:0.5,estuaryDepth:0.08,marshBand:0.03,passes:4},state.coastal||{}); state.planet=Object.assign({g:1.0,rotationHours:24,axialTiltDeg:23.4,radiusRel:1.0},state.planet||{}); state.planet.geoid=Object.assign({enabled:false,amp:0.015},state.planet.geoid||{}); state.planet.tides=Object.assign({enabled:false,k2:1.0,moons:[{massRel:1.0,distRel:1.0,phase:0}]},state.planet.tides||{}); state.world_structure=Object.assign({enabled:false,archetype:'earth',continentality:0.30,fragmentation:0.50,tectonicEnergy:0.60,oceanDepth:0.60,hotspotDensity:0.20},state.world_structure||{}); if(typeof state.world!=='boolean')state.world=false; if(state.debugOpacity==null)state.debugOpacity=1; state.viz=Object.assign({parchment:0,icons:false,waves:false,waveDist:1,zoomDetail:1,scaleBar:true,splat:0.7,sharpBiomes:true,showLakes:true,multiSun:false,ao:0,crest:0,rockSlope:0,texture:0,minorStreams:0,ridgedRelief:0,svf:0,shadows:0,curveShade:0,geology:0,wetness:0,season:0,contourM:0,sdfCoast:0,sdfRivers:0,sdfBiomes:0,contours:0,ink:0,hachure:0,watercolor:0,cel:0,crosshatch:0,stipple:0,sepia:0,risograph:0,pointillism:0,waterAnim:false,riverDensity:1,minRiverOrder:1,civIconScale:1,civWayScale:1,urbanLayouts:false},state.viz||{}); delete state.viz.smoothRivers; delete state.viz.blueprint; if(state.viz.riverWays==null)state.viz.riverWays=false;   /* v0.94: new default is ON for fresh worlds (see the top-level state literal) — a pre-v0.94 save keeps its old (no river-way lines) look */ if(state.tect.tectonicGraph==null)state.tect.tectonicGraph=false; if(state.tect.foldIntensity==null)state.tect.foldIntensity=1.0; if(state.tect.trenchDepth==null)state.tect.trenchDepth=1.0; if(state.tect.faultBlock==null)state.tect.faultBlock=0.6; if(state.tect.dynamicLithology==null)state.tect.dynamicLithology=false; state.resW=GW; allocate(); refreshGeoid(); refreshTides();
+    const pk=JSON.parse(new TextDecoder().decode(z['params.json'])); GW=pk.GW; GH=pk.GH; Object.assign(state,pk.state); state.climate=Object.assign({windDir:0,evap:0.12,ocean:1.0,wIters:70,oceanHum:1.0},state.climate); if(state.climate.windMode==null)state.climate.windMode='manual'; if(state.climate.pressK==null)state.climate.pressK=0; if(state.climate.zonalK==null)state.climate.zonalK=1.0; if(state.climate.bulkEvap==null)state.climate.bulkEvap=false; if(state.climate.seasons==null)state.climate.seasons=false; if(state.climate.maxRainMm==null)state.climate.maxRainMm=3000; if(state.climate.currents==null)state.climate.currents=false; if(state.climate.currentK==null)state.climate.currentK=1.0; if(state.climate.albedo==null)state.climate.albedo=0; state.stream=Object.assign({uplift:0.0,deposit:0.3,climateK:0.5,cycles:5},state.stream); state.velo=Object.assign({iters:60,strength:0.5,meander:0.6},state.velo||{}); if(state.lodMaxLevel==null)state.lodMaxLevel=8; if(typeof state.finalized!=='boolean')state.finalized=false; if(typeof state.lodAuto!=='boolean')state.lodAuto=true; if(!Array.isArray(state.places))state.places=[]; if(state.roads===undefined)state.roads=null; if(!Array.isArray(state.labels))state.labels=[]; if(!Array.isArray(state.mapIcons))state.mapIcons=[]; if(!state.cartoPaint)state.cartoPaint={biome:[],splat:[],terrain:[]}; state.mapFilter=Object.assign({showTerritory:true,factionsOff:[],settlementTypesOff:[],showRoads:true,wayTypesOff:[],timelineExistOnly:false,timelineGhost:false,timelineHighlight:false},state.mapFilter||{}); state.view3d=Object.assign({exag:0.5,detail:1,lightAz:315,flatSea:true},state.view3d||{}); if(typeof state.showRivers!=='boolean')state.showRivers=true; if(typeof state.carveRivers!=='boolean')state.carveRivers=true; state.glacial=Object.assign({kg:0.15,mg:0.4,snowline:0.65,uFactor:0.6,passes:8},state.glacial||{}); state.coastal=Object.assign({waveStr:0.5,estuaryDepth:0.08,marshBand:0.03,passes:4},state.coastal||{}); state.planet=Object.assign({g:1.0,rotationHours:24,axialTiltDeg:23.4,radiusRel:1.0},state.planet||{}); state.planet.geoid=Object.assign({enabled:false,amp:0.015},state.planet.geoid||{}); state.planet.tides=Object.assign({enabled:false,k2:1.0,moons:[{massRel:1.0,distRel:1.0,phase:0}]},state.planet.tides||{}); state.world_structure=Object.assign({enabled:false,archetype:'earth',continentality:0.30,fragmentation:0.50,tectonicEnergy:0.60,oceanDepth:0.60,hotspotDensity:0.20},state.world_structure||{}); if(typeof state.world!=='boolean')state.world=false; if(state.debugOpacity==null)state.debugOpacity=1; state.viz=Object.assign({parchment:0,icons:false,waves:false,waveDist:1,zoomDetail:1,scaleBar:true,splat:0.7,sharpBiomes:true,showLakes:true,multiSun:false,ao:0,crest:0,rockSlope:0,texture:0,minorStreams:0,ridgedRelief:0,svf:0,shadows:0,curveShade:0,geology:0,wetness:0,season:0,contourM:0,sdfCoast:0,sdfRivers:0,sdfBiomes:0,contours:0,ink:0,hachure:0,watercolor:0,cel:0,crosshatch:0,stipple:0,sepia:0,risograph:0,pointillism:0,waterAnim:false,riverDensity:1,minRiverOrder:1,civIconScale:1,civWayScale:1,urbanLayouts:false,provinces:false},state.viz||{}); delete state.viz.smoothRivers; delete state.viz.blueprint; if(state.viz.riverWays==null)state.viz.riverWays=false;   /* v0.94: new default is ON for fresh worlds (see the top-level state literal) — a pre-v0.94 save keeps its old (no river-way lines) look */ if(state.tect.tectonicGraph==null)state.tect.tectonicGraph=false; if(state.tect.foldIntensity==null)state.tect.foldIntensity=1.0; if(state.tect.trenchDepth==null)state.tect.trenchDepth=1.0; if(state.tect.faultBlock==null)state.tect.faultBlock=0.6; if(state.tect.dynamicLithology==null)state.tect.dynamicLithology=false; state.resW=GW; allocate(); refreshGeoid(); refreshTides();
     if(z['heightmap.f32']){ const fa=new Float32Array(z['heightmap.f32'].buffer); field.set(fa.subarray(0,Math.min(fa.length,GW*GH))); }
     else if(z['heightmap_rg16.bin']){ const fa=unpackHeight16(z['heightmap_rg16.bin'],GW*GH); field.set(fa.subarray(0,Math.min(fa.length,GW*GH))); }   /* portable 16-bit fallback */
     if(z['temperature.f32']){ const fa=new Float32Array(z['temperature.f32'].buffer); tempField.set(fa.subarray(0,Math.min(fa.length,GW*GH))); } else computeTemperature();
@@ -9734,6 +9904,7 @@ function syncUI(){ suspendRender=true;
   { const el=document.getElementById('showRivers'); if(el) el.checked=state.showRivers!==false; }
   { const el=document.getElementById('riverWaysChk'); if(el) el.checked=!!(state.viz&&state.viz.riverWays); }
   { const el=document.getElementById('civUrbanLayoutsChk'); if(el) el.checked=!!(state.viz&&state.viz.urbanLayouts); }
+  { const el=document.getElementById('civProvincesChk'); if(el) el.checked=!!(state.viz&&state.viz.provinces); }
   { const el=document.getElementById('carveRiversChk'); if(el) el.checked=state.carveRivers!==false; }
   { const el=document.getElementById('sharpBiomes'); if(el) el.checked=!state.viz||state.viz.sharpBiomes!==false; }
   { const el=document.getElementById('showLakes'); if(el) el.checked=!state.viz||state.viz.showLakes!==false; }
@@ -10591,7 +10762,9 @@ function _setupOpen(mode){ if(!_obEl) return;
   _obEl.style.display='flex';
   if(document&&document.body) document.body.classList.add('setup-gated');   /* v0.68: lock the sidebar while gated — no world to act on yet */
   if(mode==='generate'){ _suShowStep('obStepGenerate'); _suGenSync();
-    const sEl=document.getElementById('suSeedN'); if(sEl&&String(sEl.value).trim()==='') sEl.value=state.tect.seed; }   /* v1.06: prefill the seed box with the current (boot-random) seed */
+    const sEl=document.getElementById('suSeedN'); if(sEl&&String(sEl.value).trim()==='') sEl.value=state.tect.seed;   /* v1.06: prefill the seed box with the current (boot-random) seed */
+    { const archSeg=document.getElementById('suArchSeg'); if(archSeg){ const cur=state.world_structure.enabled?state.world_structure.archetype:'classic';
+      [...archSeg.children].forEach(c=>c.classList.toggle('on',c.dataset.arc===cur)); } } }   /* v1.08: reflect current world_structure state if the gate is reopened */
   else if(mode==='calibrate'){ _suShowStep('obStepCalibrate'); _suCalSync(); }
   else _suShowStep('obStepIntro');
 }
@@ -10635,6 +10808,24 @@ function _suGenCommit(){
   withBusy('generating…', async ()=>{ const r=generate(); if(r&&r.then) await r; if(doCenter && typeof centerLandmasses==='function') centerLandmasses();
     if(typeof applyView==='function') applyView();   /* v1.01 fill mode: cover the viewport as soon as the world reveals */ });
 }
+/* v1.08: apply a setup-gate "World shape" preset. Mirrors the sidebar archetypeSeg/wsEnabled handlers
+   (deriveFromWorldStructure() must be called from a UI handler, never inside generate() — invariant 5)
+   but runs pre-generate, so there's no world yet to redraw — just sets the state the upcoming
+   _suGenCommit → generate() will read. 'classic' restores true defaults (not just enabled=false) so
+   bouncing between presets and landing back on Classic reproduces the exact pre-v1.08 default world. */
+function _suApplyArchetype(arc){
+  if(arc==='classic'){
+    state.world_structure.enabled=false; state.world_structure.archetype='earth';
+    Object.assign(state.world_structure, ARCHETYPES.earth);
+    state.tect.plates=14; state.tect.vel=1.0; state.tect.tectonicGraph=false;
+    state.tect.foldIntensity=1.0; state.tect.trenchDepth=1.0; state.volc.count=20;
+  } else if(ARCHETYPES[arc]){
+    state.world_structure.archetype=arc;
+    Object.assign(state.world_structure,ARCHETYPES[arc]);
+    state.world_structure.enabled=true;
+    deriveFromWorldStructure();
+  }
+}
 function _suCalCommit(){
   state.mapWidthKm=Math.max(1,_suWork.width); state.peakM=Math.max(1,Math.round(_suWork.peak));
   syncUI(); if(typeof updateScaleBar==='function') updateScaleBar();
@@ -10646,6 +10837,11 @@ function _suCalCommit(){
 if(_obEl){
   document.querySelectorAll('#suResSeg button').forEach(b=>b.addEventListener('click',()=>{ document.querySelectorAll('#suResSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }));
   document.querySelectorAll('#suExtentSeg button').forEach(b=>b.addEventListener('click',()=>{ document.querySelectorAll('#suExtentSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }));
+  { const archSeg=document.getElementById('suArchSeg'); if(archSeg) archSeg.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    [...archSeg.children].forEach(c=>c.classList.toggle('on',c===b));
+    _suApplyArchetype(b.dataset.arc);
+  }); }
   document.querySelectorAll('#suUnitSeg button, #suUnitSeg2 button').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.unit===_units) return; _setUnits(b.dataset.unit); _suRender(); }));
   ['suWidth','suWidth2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',_suOnWidthInput); });
   ['suPeak','suPeak2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',_suOnPeakInput); });
@@ -10811,6 +11007,7 @@ document.addEventListener('keyup',e=>{ if(e.code==='Space') spaceDown=false; });
   sel.addEventListener('pointerdown',ensure); sel.addEventListener('focus',ensure);
   tiles.addEventListener('change',()=>{ probed=true; refreshRes(); });
   document.getElementById('exportBtn').onclick=exportZip;
+  { const gb=document.getElementById('exportGeoBtn'); if(gb) gb.onclick=exportGeoJSON; }
   document.getElementById('loadZipBtn').onclick=()=>document.getElementById('zipFile').click();
   document.getElementById('zipFile').addEventListener('change',e=>{ if(e.target.files[0]) loadZip(e.target.files[0]); e.target.value=''; });
 })();
@@ -11338,6 +11535,7 @@ function _civAddFaction(){
   CIV_FACTIONS.push([name,_civFactionColor(i)]);
   civFactionNames.push(name);
   civFactionCulture.push(_civDefaultCulture(i));
+  civFactionReligion.push('none');
   _civBuildFactionPicker(); if(typeof _civBuildMapFilterUI==='function') _civBuildMapFilterUI();
 }
 function _civRemoveFaction(){
@@ -11348,7 +11546,7 @@ function _civRemoveFaction(){
   const terr=civTerritory;
   if(terr){ for(let i=0;i<terr.length;i++) if(terr[i]===idx) terr[i]=0; _civTerrGen++; }   /* v0.148 */
   if(_civActiveFaction===idx) _civActiveFaction=Math.max(1,idx-1);
-  CIV_FACTIONS.pop(); civFactionNames.pop(); civFactionCulture.pop();
+  CIV_FACTIONS.pop(); civFactionNames.pop(); civFactionCulture.pop(); civFactionReligion.pop();
   /* the removed index must not linger in the visibility filter — a stale hidden-faction index would
      otherwise persist referencing nothing once the faction itself is gone */
   { const fo=state.mapFilter.factionsOff, oi=fo.indexOf(idx); if(oi>=0) fo.splice(oi,1); }
@@ -11431,6 +11629,33 @@ let civWays      = [];          // auto-generated road/sea network [{pts,km,sea,
 let civJourneys  = [];          // user-planned routes [{pts,km,brks?,sea,name,groupSize,plan?}]
 let civFactionNames = CIV_FACTIONS.map(f=>f[0]);
 let civFactionCulture = CIV_FACTIONS.map((f,i)=>_civDefaultCulture(i));   /* v1.07: naming culture per faction, parallel to civFactionNames */
+
+/* v1.10 (borrow-list #4, after FMG provinces — "a mid-tier region between faction and settlement"):
+   civProvince subdivides civTerritory's per-cell faction ids one level finer, seeded by that
+   faction's own city-tier+ settlements (a settlement-seeded Voronoi partition restricted to cells
+   already owned by the seed's faction — never crosses a territory boundary). Regenerated on demand
+   (_civGenerateProvinces, a UI button) rather than on every territory edit. */
+let civProvince = null;          // Uint16Array(GW*GH) — province index per cell (0 = none)
+let _civProvGen = 0;             // bumped by _civGenerateProvinces — keys the cached province raster in drawCivLayer
+let CIV_PROVINCES = [];          // [{id, faction, name, capitalTid}]
+
+/* v1.10 (borrow-list #4, "religions are a similar spread-model layer if wanted"): scoped down to a
+   per-FACTION categorical "state religion" attribute — FMG's religions are a substantially larger
+   system (General/Organized/Cult tiers, each with its own spatial spread simulation from a holy
+   site) than one item in a 6-item list warrants, and the research doc itself flags this half as
+   optional. Mirrors the v1.07 naming-culture picker exactly: a small fixed list + a per-faction
+   parallel array + a picker, persisted the same way. */
+const CIV_RELIGIONS=[
+  {key:'none',label:'None / secular'},
+  {key:'sun_cult',label:'Sun Cult'},
+  {key:'earth_mother',label:'Earth Mother'},
+  {key:'sea_lords',label:'Sea Lords'},
+  {key:'sky_pantheon',label:'Sky Pantheon'},
+  {key:'ancestor_rites',label:'Ancestor Rites'},
+  {key:'flame_creed',label:'Flame Creed'},
+  {key:'old_gods',label:'Old Gods'}
+];
+let civFactionReligion = CIV_FACTIONS.map(()=>'none');
 let _civWaypoints = [];         // in-progress route waypoints [x,y]
 let _civWayWaypoints = [];      // in-progress manual way (infrastructure) waypoints [x,y]
 let _civActiveFaction = 1;
@@ -11488,6 +11713,43 @@ function _civSyncCanvas(){
 function getCivTerritory(){
   if(!civTerritory||civTerritory.length!==GW*GH){ civTerritory=new Uint8Array(GW*GH); _civTerrGen++; }
   return civTerritory;
+}
+
+/* v1.10: auto-subdivide every faction's territory into provinces, one per city-tier+ (rank>=3:
+   city/capital/metropolis/university/industrial) settlement belonging to that faction — a
+   settlement-seeded Voronoi partition restricted to cells the seed's OWN faction already owns
+   (nearest-seed-of-the-same-faction wins; never crosses a territory boundary). A faction with no
+   city+ settlement falls back to its single highest-population settlement, so any faction that
+   owns territory gets at least one named province. Pure over the current civTerritory/state.places
+   snapshot — safe to call from a UI button (on-demand, not on every territory paint stroke). */
+function _civGenerateProvinces(){
+  if(!civTerritory||civTerritory.length!==GW*GH){ civProvince=null; CIV_PROVINCES=[]; _civProvGen++; return; }
+  const seedsByFaction=new Map();
+  state.places.forEach(p=>{
+    if(!p.faction||!CIV_SETTLE_KEYS.has(p.kind)) return;
+    const cls=CIV_SETTLEMENT_CLASSES.find(c=>c.key===p.kind), rank=cls?cls.rank:0;
+    const arr=seedsByFaction.get(p.faction)||[]; arr.push({p,rank}); seedsByFaction.set(p.faction,arr);
+  });
+  CIV_PROVINCES=[]; const seedList=[];
+  for(const [fid,arr] of seedsByFaction){
+    let seeds=arr.filter(s=>s.rank>=3);
+    if(!seeds.length) seeds=[arr.reduce((a,b)=>(b.p.pop||0)>(a.p.pop||0)?b:a)];
+    for(const s of seeds){
+      const provIdx=CIV_PROVINCES.length+1;   // 1-indexed — 0 means "no province" in civProvince
+      CIV_PROVINCES.push({id:provIdx,faction:fid,name:(s.p.name||'Province')+' Province',capitalTid:_civAssignTid(s.p)});
+      seedList.push({x:s.p.x,y:s.p.y,prov:provIdx,fid});
+    }
+  }
+  civProvince=new Uint16Array(GW*GH);
+  if(seedList.length){
+    for(let y=0;y<GH;y++) for(let x=0;x<GW;x++){
+      const i=y*GW+x, fid=civTerritory[i]; if(!fid) continue;
+      let best=0,bd=Infinity;
+      for(const s of seedList){ if(s.fid!==fid) continue; const dx=s.x-x,dy=s.y-y,d=dx*dx+dy*dy; if(d<bd){ bd=d; best=s.prov; } }
+      civProvince[i]=best;
+    }
+  }
+  _civProvGen++;
 }
 
 /* ---- drawing helpers ---- */
@@ -11789,7 +12051,11 @@ function drawCivLayer(viewRect,opts){
        visibility filter — the cache key MUST include factionsOff, or toggling a faction filter after
        the scratch canvas was already cached would silently keep showing stale unfiltered pixels. */
     const factionsOff=state.mapFilter.factionsOff||[];
-    const _tk=_civTerrGen+'|'+_fieldGen+'|'+sea+'|'+GW+'x'+GH+'|'+CIV_FACTIONS.map(f=>f[1]).join(';')+'|'+factionsOff.join(',');
+    /* v1.10: opt-in (default off, so the default territory render stays bit-identical) per-province
+       lightness jitter within a faction's own colour — a deterministic small offset from the
+       province id, cheap enough to fold into this same per-pixel pass rather than a second draw. */
+    const provOn=!!(state.viz&&state.viz.provinces)&&civProvince&&civProvince.length===GW*GH;
+    const _tk=_civTerrGen+'|'+_fieldGen+'|'+sea+'|'+GW+'x'+GH+'|'+CIV_FACTIONS.map(f=>f[1]).join(';')+'|'+factionsOff.join(',')+(provOn?('|p'+_civProvGen):'');
     if(_civTerrScratchKey!==_tk){
       const tctx=_civTerrScratch.getContext('2d');
       const img=tctx.createImageData(GW,GH);
@@ -11798,7 +12064,11 @@ function drawCivLayer(viewRect,opts){
         const f=terr[i]; if(!f) continue;
         if(factionsOff.includes(f)) continue;   // v0.149: per-faction map-filter visibility
         if(field[i]<sea) continue; // no territory on water
-        const col=CIV_FACTIONS[f]?.[1]||[128,128,128];
+        let col=CIV_FACTIONS[f]?.[1]||[128,128,128];
+        if(provOn){
+          const pv=civProvince[i];
+          if(pv){ const j=((pv*57)%41)-20; col=[Math.max(0,Math.min(255,col[0]+j)),Math.max(0,Math.min(255,col[1]+j)),Math.max(0,Math.min(255,col[2]+j))]; }
+        }
         const p=i*4; d[p]=col[0]; d[p+1]=col[1]; d[p+2]=col[2]; d[p+3]=130;
       }
       tctx.putImageData(img,0,0);
@@ -16771,6 +17041,7 @@ function _civSyncToState(){
     year:civYear,
     factionNames:[...civFactionNames],
     factionCulture:[...civFactionCulture],
+    factionReligion:[...civFactionReligion],
   };
 }
 function _civSyncFromState(){
@@ -16797,6 +17068,14 @@ function _civSyncFromState(){
   civFactionCulture=(c.factionCulture&&c.factionCulture.length)?[...c.factionCulture]:CIV_FACTIONS.map((f,i)=>_civDefaultCulture(i));
   while(civFactionCulture.length<CIV_FACTIONS.length) civFactionCulture.push(_civDefaultCulture(civFactionCulture.length));
   while(civFactionCulture.length>CIV_FACTIONS.length) civFactionCulture.pop();
+  /* v1.10: civFactionReligion — same old-save-compatible pattern as civFactionCulture above.
+     civProvince/CIV_PROVINCES are deliberately NOT persisted — they're pure-derived from
+     civTerritory+state.places (regenerate on demand via the "Generate provinces" button), so
+     saving them would just be redundant bytes that go stale the moment territory changes. */
+  civFactionReligion=(c.factionReligion&&c.factionReligion.length)?[...c.factionReligion]:CIV_FACTIONS.map(()=>'none');
+  while(civFactionReligion.length<CIV_FACTIONS.length) civFactionReligion.push('none');
+  while(civFactionReligion.length>CIV_FACTIONS.length) civFactionReligion.pop();
+  civProvince=null; CIV_PROVINCES=[]; _civProvGen++;
   _civBuildTimelineUI();
   _civBuildFactionPicker();
   _civBuildMapFilterUI();
@@ -16960,6 +17239,18 @@ function _civBuildFactionPicker(){
       });
       sel.onchange=()=>{ civFactionCulture[fid]=sel.value; };
       wrap.appendChild(sel);
+      /* v1.10: state-religion picker (borrow-list #4's optional half — a per-faction categorical
+         attribute, not a spatial spread simulation; see CIV_RELIGIONS' own comment for why). */
+      const rel=document.createElement('select');
+      rel.title='State religion';
+      rel.style.cssText='font-size:.68rem;padding:1px 2px;border-radius:6px;border:1px solid var(--faint);background:var(--panel2);color:var(--dim);max-width:76px';
+      CIV_RELIGIONS.forEach(r=>{
+        const o=document.createElement('option'); o.value=r.key; o.textContent=r.label;
+        if((civFactionReligion[fid]||'none')===r.key) o.selected=true;
+        rel.appendChild(o);
+      });
+      rel.onchange=()=>{ civFactionReligion[fid]=rel.value; };
+      wrap.appendChild(rel);
     }
     el.appendChild(wrap);
   });
@@ -17218,6 +17509,11 @@ function _civSetTool(tool){
   const terR=document.getElementById('civTerRadius');
   const terRV=document.getElementById('civTerRadiusV');
   if(terR){ terR.addEventListener('input',()=>{ _civTerRadius=+terR.value; if(terRV)terRV.textContent=terR.value; }); }
+
+  /* v1.10: provinces toggle + on-demand generation */
+  { const pc=document.getElementById('civProvincesChk'); if(pc){ pc.checked=!!(state.viz&&state.viz.provinces);
+      pc.addEventListener('change',()=>{ state.viz.provinces=pc.checked; drawCivLayerAuto(); }); }
+    const gb=document.getElementById('civGenProvincesBtn'); if(gb) gb.addEventListener('click',()=>{ _civGenerateProvinces(); drawCivLayerAuto(); }); }
 
   const addFacBtn=document.getElementById('civAddFactionBtn');
   if(addFacBtn) addFacBtn.onclick=()=>_civAddFaction();

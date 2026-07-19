@@ -9,33 +9,123 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.07.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.13.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.08 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.06` are kept and never edited.
-- **v1.07 — owner: integrate the `fractal-geology` PoC (stamp-based, non-destructive terrain
-  painter) into Cartalith as its own full-fledged "Sculpt" landscape editor, replacing the
-  "Manual Terrain" accordion in Generate → World. Plan doc:
-  `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` — two design decisions locked with the owner before any
-  build started: (1) new Generate sub-tab "Sculpt" (not a new top-level tab — preserves the tested
-  2-position phase-switch invariant); (2) session-scoped stamp stack that bakes into `field` on
-  Commit, **conditioned on Commit ending with a full `renderNow()`** so the visible map AND any
-  open affordance/resource debug view (Lith/Soil/Water/Resources/CarryCap/Settlement) show
-  post-commit data in the same render pass, not just "correct next time it's opened." **P0 shipped
-  this version:** ported the PoC's pure core (11-feature `SCULPT_FEATURES` registry, dirty-rect
-  compositor `sculptApplyStamp`/`sculptStampBBox`, stroke geometry `sculptNearestOnStroke`, new
-  parametrized noise wrappers `sculptFbm`/`sculptRidged`/`sculptBillow` built on this engine's own
-  `vnoise()`) into script block 1, right after `catmullRomSample`. **Completely dormant — nothing
-  calls any of it yet**, so this had to be (and is, confirmed via hash A/B) bit-identical-neutral.
-  **Next task: P1** — the empty `#genSculpt` Generate sub-tab shell (`data-gsub="sculpt"`), wired
-  into `_genSubTab` show/hide; still no painting functionality. Then P2 (draft-layer UI: feature
-  palette, presets, stamp-stack panel, live preview) and P3 (the Commit path — bake stack → field,
-  `computeFlow(true); refreshClimate(); renderNow()`, one `pushUndo()` — this is the acceptance
-  test for "resources feed on commit AND the layers render," verify via the Resources/Carry
-  Cap/Settlement debug views actually updating live). Verified: engine **1013/1013** (923 + 90 new
-  sculpt-engine assertions), UME **831/831** (block 4 untouched), hash vs v1.06 **ALL IDENTICAL**,
-  smoke **179/179**.
+  (v1.14 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.12` are kept and never edited.
+- **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
+  analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. **ALL 6 ITEMS
+  SHIPPED**, one version per item (per the "finish one thing before starting the next" rule):
+  (1) culture-flavored naming — v1.07. (2) setup-gate world archetype presets — v1.08. (3)
+  GeoJSON/GIS export — v1.09. (4) province tier + religions layer — v1.10. (5) submap/resample UX —
+  v1.11. (6) label placement + per-layer style editors — v1.12. The borrow-list arc is complete.
+- **v1.13 — owner: "3 fixes: labels give no visual results; let me zoom out until the full map
+  WIDTH stays in view (furthest zoom-out currently uses map height, forcing L/R drag); clicked
+  info keeps its coord at the original zoom, doesn't adapt."** Three civ/UI bug fixes, engine
+  untouched. **(1) Region/area name labels stopped drawing:** the shared occupancy grid (v0.148)
+  let a settlement auto-label claim the region label's cell — worsened by v1.12's extra label
+  boxes — so §4's `if(!lblTest(...)) continue;` skipped it (owner: 0 of 2 drew). Fix: a pre-pass
+  reserves each region label's box BEFORE the settlement loop (settlement labels now yield to
+  user-authored names), and §4 draws region labels **unconditionally** (no collision skip → the
+  selected label can't erase itself either). **(2) Zoom-out floored at COVER, not FIT:** the fill
+  floor was `_viewCoverScale()` (max ratio — fills, but the other axis overflows). New
+  `_viewFitScale()` (min ratio — whole map visible, letterbox on the overflow axis) is the new
+  `zoomAt`/`_viewClampFill` floor; a fitting axis is **centred**. The default/reset view still
+  FILLS (cover) via new `_viewFill()` (routed through reset button, post-generate/import, resize,
+  load), so only deliberate zoom-out below cover reveals the full map. **(3) Clicked info kept the
+  un-zoomed coord under LOD:** the left-click civ-tool `pointerdown` (and territory-paint
+  `pointermove`) used plain `evtToGrid`, which assumes the world fills the canvas — wrong under the
+  auto-entered tiled-LOD viewer (~260 cells off at deep zoom). Switched to LOD-aware `evtToGridLOD`
+  (same inverse the v0.91 info/wildlife + v0.95 right-click paths use; off-LOD it falls through to
+  `evtToGrid`). Verified: engine **923/923**, UME **831/831**, hash vs v1.12 **ALL IDENTICAL**,
+  smoke **203/203** (+3: region label draws through a packed grid; zoom-out floor fits map W+H
+  where cover overflowed; deep-LOD click reaches `_civInfoAt` on the right cell). Screenshots
+  confirm labels at the filled default and both map edges visible at max zoom-out.
+- **v1.12 — owner: "implement the top 6 borrow list from the research" (#6, and last, label
+  placement + per-layer style editors).** Settlement/POI labels only ever tried one fixed spot
+  (above the pin); a collision there silently dropped the label. `drawCivLayer`'s placement loop now
+  tries above→below→right→left (new `lblTestBox`/`lblMarkBox`, sharing the same occupancy grid as
+  the point-based `lblTest`/`lblMark` the region-name-label system still uses unchanged);
+  `_civDrawSettlementPin`/`_civDrawPoiPin` gain `opts.labelPos` (default `'above'` — every pre-v1.12
+  call site draws identically). Measured: 5 same-tier cities packed tighter than their own label
+  width showed 1/5 labels pre-v1.12, **2/5** post (rescued via `below`). Two new per-layer style
+  sliders (Settlements panel): **Territory fill opacity** (default `130/255`, the exact prior
+  hardcoded alpha) and **Way opacity** (default `1`) — both fold into the existing per-pixel render
+  passes, no new draw calls. Verified: engine **923/923**, UME **831/831**, hash vs v1.11 **ALL
+  IDENTICAL**, smoke **200/200** (+2). Playwright A/B vs v1.11 on the identical packed-cities case
+  confirms the concrete before/after (`positions:[null]` → `positions:['above','below']`).
+- **v1.11 — owner: "implement the top 6 borrow list from the research" (#5 submap/resample UX).**
+  Cartalith already had `amplifyRegion()` (seamless world-space heightmap upsampling), a region-select
+  drag tool, and a tiled-.zip "Region export" pipeline — but it only produced FILES, never a live
+  world. New **Extract as new world** button (same panel): reuses the same selection + `amplifyRegion`,
+  replaces the live world with the amplified region, hands off to the EXISTING Import-heightmap
+  calibrate→`inferTectonics()` pipeline (no new world-construction path). Deliberately skips
+  `normalize()` (unlike `loadImage`'s raw-pixel path) — the amplified data is already real elevation
+  in the parent's `[0,1]` space, and renormalizing would corrupt the sea-level/relative-height
+  continuity that's the whole point. New `mapWidthKm` = parent width × the selection's true fraction
+  (smaller region ⇒ higher-resolution close-up, not a rescale). Civ data (settlements/roads/territory/
+  provinces) is cleared on extraction (old-extent coordinates, honest reset) behind a `confirm()`.
+  Verified: engine **923/923**, UME **831/831**, hash vs v1.10 **ALL IDENTICAL**, smoke **198/198**
+  (+5). Playwright-probed: a quarter-map region (256×164 of 512×328) extracted at 1024px produced a
+  1024×656 world at exactly half the parent's km-width, fully valid after tectonic inference.
+- **v1.10 — owner: "implement the top 6 borrow list from the research" (#4 province tier + optional
+  religions layer).** New `civProvince` raster (parallel to `civTerritory`) subdivides each faction's
+  territory via `_civGenerateProvinces()` (on-demand button): one province per city-tier+ settlement
+  (rank ≥3), Voronoi-partitioned within that faction's own territory cells only (never crosses a
+  faction boundary — verified), falling back to a single province seeded by the biggest settlement
+  when there's no city+. Rendering (opt-in `state.viz.provinces`) folds a per-province lightness
+  jitter into the SAME per-pixel territory-blit pass, not a second draw. `civProvince`/`CIV_PROVINCES`
+  are deliberately not persisted (pure-derived, regenerate on demand). Religions scoped down to a
+  per-faction categorical "state religion" (`civFactionReligion`, `CIV_RELIGIONS` fixed 8-entry list)
+  rather than FMG's full spatial spread simulation — the research doc flags that half as optional;
+  mirrors the v1.07 culture picker exactly, same persistence pattern. GeoJSON export (v1.09) gains a
+  `province` layer sharing the territory tracer's boundary/hole-nesting code, and territory features
+  gain a `religion` property. Verified: engine **923/923**, UME **831/831**, hash vs v1.09 **ALL
+  IDENTICAL**, smoke **193/193** (+5). Playwright-probed on synthetic two-faction worlds: correct
+  province counts (2 city-seeded + 1 fallback), zero cross-faction leakage, exported province area
+  exactly tiles the parent territory (ratio 1.0000).
+- **v1.09 — owner: "implement the top 6 borrow list from the research" (#3 GeoJSON/GIS export).** New
+  **Export GeoJSON** button (File ▾, next to Export .zip): settlements/POIs, roads/sea-routes, rivers
+  (Strahler ≥2) and faction territory outlines as one `.geojson` FeatureCollection, each feature tagged
+  `layer` for filtering in a GIS tool. Coordinates are local planar km (east, north), NOT WGS84 lon/lat
+  — a fantasy world has no real georeference (same call Azgaar's FMG makes); documented in a top-level
+  `properties.note`. Territory outlines are the new algorithm: `_geoTraceMaskRings` walks a faction's
+  `civTerritory` cell mask into closed boundary rings via oriented cell-edge tracing, classifies
+  outer-shell-vs-hole by shoelace sign, nests holes into their smallest enclosing shell by point-in-
+  ring — an enclave/lake renders as an actual `MultiPolygon` hole, not a spurious extra polygon. Lives
+  in script block 1 (only ever called long after block 2 has run — same deferred cross-block pattern
+  `exportZip` already uses for the Asset Library). Verified: engine **923/923**, UME **831/831**, hash
+  vs v1.08 **ALL IDENTICAL**, smoke **188/188** (+2). Node-isolated ring-tracing unit tests (solid
+  square, donut-with-hole, two disjoint blobs, empty mask) all pass exact area/classification checks.
+  Playwright-probed on a real populated+territory-painted world: 225 features across all 4 layers,
+  territory area ratio to painted cells = 1.000.
+- **v1.08 — owner: "implement the top 6 borrow list from the research" (#2 setup-gate world archetype
+  presets).** Cartalith already had the underlying system — `ARCHETYPES` (earth/supercontinent/
+  archipelago/volcanic/rift) + `state.world_structure`'s continentality-field steering, exposed in the
+  sidebar's Generate → World → World Structure panel — but only reachable AFTER a world existed, behind
+  an "Enable continental steering" checkbox. Added a **World shape** preset row to the setup gate
+  (`#suArchSeg`): Classic (default — `world_structure` disabled, bit-identical) plus Earth-like/
+  Pangaea/Archipelago/Volcanic Isles/Rift Valleys, reusing the same `ARCHETYPES` data. Picking a preset
+  calls the existing `deriveFromWorldStructure()` (invariant 5) before the upcoming commit; Classic
+  restores true defaults exactly (not just `enabled=false`) so bouncing between presets and landing
+  back on Classic reproduces the untouched default world. Verified: engine **923/923**, UME **831/831**,
+  hash vs v1.07 **ALL IDENTICAL** (hash harness bypasses the gate entirely — structurally unaffected),
+  smoke **186/186** (+3). Playwright-probed: untouched-default and explicit-Classic-click produce an
+  identical field hash; Pangaea/Archipelago each differ materially from Classic and each other.
+- **v1.07 — owner: "implement the top 6 borrow list from the research" (#1 culture-flavored naming).**
+  `_civSettleName` was one global syllable/suffix generator for every faction. Added seven **naming
+  cultures** (`CIV_CULTURES`: common/imperial/highland/desert/riverlands/sylvan/maritime), a parallel
+  `civFactionCulture` array assigning each faction a culture (deterministic per-index default via
+  `_civDefaultCulture`, so the six built-in factions read distinctly with zero setup), a naming-culture
+  `<select>` next to each faction pill, `_civSettleName(rng,faction)` looking up the settlement's own
+  faction's culture, a 🎲 re-roll button in the settlement editor (mirrors FMG's "regenerate burg
+  name"), and `civFactionCulture` round-tripping through the same `state.civ` sync as `civFactionNames`
+  (old-save compatible — missing ⇒ rebuilt from the deterministic default). Settlement naming isn't
+  part of the hash battery, so free to change without touching cross-version neutrality. Verified:
+  engine **923/923**, UME **831/831**, hash vs v1.06 **ALL IDENTICAL**, smoke **183/183** (+4).
+  Playwright-probed: six factions pinned to six cultures produce visibly distinct names (Imperial:
+  Novarcica; Highland: Kragandward; Desert: Ashqirspan).
 - **v1.06 — owner: "maybe we should have the seed box back, and the random option there also."** The
   setup gate's generate form gains a World seed row: `#suSeedN` (prefilled with the boot-random seed on
   open) + `#suSeedRand` 🎲 (rolls a new value into the box; applied on Generate). `_suGenCommit` applies
