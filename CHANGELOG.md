@@ -12,6 +12,41 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.07 (2026-07-19)
+**Sculpt editor integration, P0 (`docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`).** Ports the pure,
+DOM-free core of the standalone `fractal-geology/Fractal Geology Painter v0.1.html` PoC — a
+stamp-based, non-destructive terrain feature generator — into script block 1, as the foundation
+for promoting today's "Manual Terrain" accordion (Generate → World) into its own full-fledged
+"Sculpt" Generate sub-tab (P1+, not yet built). Purely additive and **completely dormant**:
+nothing in the shipped app calls any of it yet.
+
+Adds 11 features (`SCULPT_FEATURES`: hills, mountains, plateau, canyon, valley, river, lake,
+basin, coastline, cliff, volcano — each with its own tuned noise profile and fractal edge
+character, `edgeChar`/`edgeFreqMul`, so a coastline reads ragged and a river reads clean at the
+same brush size), a dirty-rect compositor (`sculptApplyStamp`/`sculptStampBBox`, generalized to
+arbitrary grid dimensions rather than the PoC's fixed 512×512 canvas), stroke geometry
+(`sculptNearestOnStroke`), and three new parametrized fractal-noise wrappers
+(`sculptFbm`/`sculptRidged`/`sculptBillow`) built on this engine's own `vnoise()`/`hash()` — new
+functions, not reuses of the existing `fbm()`/`ridged()` (which hardcode 6 octaves/0.5
+persistence/2.0 lacunarity; every sculpt feature needs all three as independent sliders) — but
+sharing the same underlying noise primitive as tectonics/erosion. Reuses this engine's own
+`smoothstep()`/`lerp()`/`clamp01()` directly. Named as flat, prefixed top-level functions/consts
+(matching `CIV_FACTIONS`/`buildResourcePotentials`-style convention for script block 1), not the
+block-4 `UME` IIFE pattern (that isolation need doesn't apply within one script block, and a
+direct collision check against every PoC-side name came back clean).
+
+Resolved open item from the plan: `applyFeatureAlongCurve` (this file's existing plotline brush)
+has no equirectangular world-seam wraparound handling either — `sculptApplyStamp` matches that
+existing behavior rather than regressing or inventing a new contract.
+
+**Verification:** `tests/run.sh` **1013/1013** (923 pre-existing + 90 new: noise range/determinism,
+all 11 features' finiteness/`[0,1]`-bounds/mask-locality/bit-reproducibility/raise-lower-water
+semantics, stroke geometry, per-feature edge-character contrast, world-wrap parity).
+`tests/run_um.sh` **831/831** (block 4 untouched). `hash_gen1.js` A/B vs v1.06 **ALL IDENTICAL**
+(default/geoid/waves/ao/icons configs) — proves the addition is bit-exact-neutral, as expected for
+dormant code nothing calls. `smoke_gen1.js` **179/179**, unchanged. Next: P1 (the Generate
+sub-tab shell) and P2 (draft-layer UI wiring) per the plan.
+
 ### v1.06 (2026-07-18)
 **Owner: "maybe we should have the seed box back, and the random option there also."** The setup gate's
 generate form gains a **World seed** row: a Seed number input (`#suSeedN`, prefilled with the current
