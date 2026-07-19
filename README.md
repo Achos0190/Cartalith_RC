@@ -10,7 +10,7 @@ zero-dependency HTML file.
 
 ## Use it
 
-Open the newest **`Cartalith Gen1 v*.html`** (currently **`Cartalith Gen1 v1.11.html`**) in a
+Open the newest **`Cartalith Gen1 v*.html`** (currently **`Cartalith Gen1 v1.12.html`**) in a
 modern browser. It works straight from `file://`; a local HTTP server is optional (enables a few
 extras like multicore worker pools on some browsers) and nothing breaks without it.
 
@@ -23,8 +23,8 @@ v0.70): naive version sort compares the minor numerically, so a `v0.7` would sor
 
 | Path | What it is |
 |------|------------|
-| `Cartalith Gen1 v1.11.html` | **The tool.** Current version |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.10.html` | Previous versions (kept, frozen) |
+| `Cartalith Gen1 v1.12.html` | **The tool.** Current version |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.11.html` | Previous versions (kept, frozen) |
 | `Cartalith_V1.915.html` | The pre-merge map editor, kept as a reference implementation |
 | `urban-morphology/` | Standalone procedural city-layout PoC; its engine was ported into Gen1's 4th script block (v0.95) — kept as reference, never edited |
 | `assets/` | CC0 sample asset pack + its generator script |
