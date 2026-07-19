@@ -3,19 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.14**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.15**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.14.html` | **Current** unified tool (~20.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.13.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.15.html` | **Current** unified tool (~21.9k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.14.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
+| `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 923-assertion suite; `run_um.sh`, 831-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports, `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 984-assertion suite; `run_um.sh`, 831-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -27,7 +28,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (923 assertions green).
+  until it passes (984 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
 - GPU (WebGL) code, Web Worker glue, and canvas interaction cannot be tested headlessly — flag
@@ -41,9 +42,9 @@ execute in order; cross-block initialization must not assume a later block has r
 `#carIconGallery` comment in the file for the established pattern — a later block performs the
 init, not `setTimeout(...,0)`).
 
-1. **Generator engine + app shell** (~8.0k lines, `const VERSION='0.85'`). The full
-   `elevation_foundation` lineage: procedural heightmap/tectonics/climate/erosion pipeline,
-   renderer, LOD/atlas, exports, UI wiring. Everything `tests/run.sh` exercises.
+1. **Generator engine + app shell** (~9.5k lines). The full `elevation_foundation` lineage:
+   procedural heightmap/tectonics/climate/erosion pipeline, renderer, LOD/atlas, exports, UI
+   wiring, and (v1.15) the **Sculpt editor** — see below. Everything `tests/run.sh` exercises.
 2. **Civ/politics layer** (~4.2k lines): factions (`CIV_FACTIONS`, deterministic golden-angle
    colours for appended factions, a per-faction naming culture from `CIV_CULTURES` driving
    `_civSettleName`'s syllable/suffix pool — v1.07's `civFactionCulture` parallel array — and a
@@ -122,6 +123,32 @@ Generation is deferred one-settlement-per-frame (`_umScheduleGenStep`) and cache
 keyed on every input that affects the layout — including a water signature) so a cache miss shows the
 pin, not a stall, until the model lands.
 
+### Sculpt editor (v1.15)
+
+Replaces the old "Manual Terrain" accordion (plotline feature brush + direct paint) entirely, as
+a 4th Generate sub-tab (`data-gsub="sculpt"`, `#genSculpt`). Ported from `fractal-geology/Fractal
+Geology Painter v0.1.html` per `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`. **Stamp-based,
+non-destructive:** paint geological intent (a stroke or a tap) → a 13-entry feature registry
+(`SCULPT_FEATURES` — mountains/hills/ridge/plateau/cliff/canyon/valley/river/lake/basin/
+coastline/volcano/freehand, each with fractal-edge-warp character via `edgeChar`/`edgeFreqMul`)
+composites a coverage mask into a **session-scoped DRAFT stack** (`sculptStamps[]`, JSON-snapshot
+undo/redo) that never touches `field` — a live translucent outline overlay (`#polyOverlay` off-LOD,
+reprojected onto `vctx` under Tiled LOD) previews it. **Commit** (`sculptCommit()`) bakes the whole
+stack into `field` once, re-clamps any pre-existing locked river channel a non-river stamp may have
+raised (`enforceRiverChannels()` — the same precedent `carveRiverValleys()` follows), carves+locks
+new River stamps (`enforceChannelDescent`, converting the stamp's `{x,y}` points to the `[x,y]`
+pairs that function expects — the SAME conversion `carveRiverValleys()` does for
+`traceRiverPolylines`' output), deposits Lake stamps into `lakeMask` (the same array the retired
+direct-paint Water tool used, so `buildWaterBodies`'s `forceLake` path classifies them), then one
+`computeFlow(true); refreshClimate();`, one `pushUndo()`, and one `renderNow()` — so the visible
+map and any open debug/resource view redraw with post-commit data in the same frame. Brush size is
+stored in **grid cells**, not screen pixels, so it reads the same real-world km radius at any zoom
+(`evtToGridLOD` for pointer capture, matching the LOD-aware convention the rest of the file uses).
+Noise: `sculptFbm`/`sculptRidged`/`sculptBillow`, new parametrized wrappers on this engine's own
+`vnoise()`/`hash()` — deliberately not the engine's hardcoded 6-octave `fbm()`/`ridged()` (every
+sculpt feature needs octaves/persistence/lacunarity as independent sliders) and not the PoC's own
+classic-Perlin `makeNoise()`.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -180,7 +207,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 923-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 984-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 831-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)

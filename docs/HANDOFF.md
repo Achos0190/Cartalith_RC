@@ -9,11 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.14.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.15.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.15 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.13` are kept and never edited.
+  (v1.16 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.14` are kept and never edited.
+- **v1.15 — owner: "integrate this sculpting tool and replace the one that's already in
+  cartalith v1.14... follow the planning doc... goal is to complete this work completely."**
+  Full port of `fractal-geology/Fractal Geology Painter v0.1.html`'s stamp-based,
+  non-destructive terrain sculptor per `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`, **replacing
+  the old "Manual Terrain" accordion entirely** (plotline feature brush + direct paint, both
+  fully retired — HTML and JS). New 4th Generate sub-tab "Sculpt": paint intent with a
+  13-feature registry (mountains/hills/ridge/plateau/cliff/canyon/valley/river/lake/basin/
+  coastline/volcano/freehand, each with its own fractal edge-warp character) into a
+  session-scoped DRAFT stamp stack (own undo/redo, never touches `field`, previewed as a
+  translucent overlay) → **Commit** bakes the whole stack once, re-clamps any pre-existing
+  locked river channel a non-river stamp raised (`enforceRiverChannels()`), carves+locks new
+  River stamps, deposits Lake stamps into `lakeMask` (same mechanism the retired Water tool
+  used), then one flow/climate recompute + one undo snapshot + one render. Brush size lives in
+  grid cells (real-world/zoom-independent), pointer capture is LOD-aware throughout. **Two real
+  bugs caught by the new test coverage and fixed:** the river-commit hook was passing `{x,y}`
+  stamp points to a helper that expects `[x,y]` arrays (silently carving at grid cell (0,0)
+  every time — a total river-tool failure that would have shipped unnoticed); and commit never
+  re-protected a pre-existing locked river channel from being raised by an unrelated stamp.
+  Verified: engine **984/984**, UME **831/831** (untouched), hash vs v1.14 **ALL IDENTICAL**
+  (no stamps committed by default), smoke **211/211** (+8). See the CHANGELOG v1.15 entry for
+  full detail on what old code was retired vs. kept.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. **ALL 6 ITEMS
   SHIPPED**, one version per item (per the "finish one thing before starting the next" rule):
@@ -948,6 +969,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Sculpt editor (v1.15) — fully shipped, all 8 phases of `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`
+  §9 complete (P0 noise/geometry/registry through P7 docs/tests), including the P3 acceptance test
+  (painting + committing with a Resources/Carry-Cap/Settlement debug view already open updates that
+  view in the same frame — reverified directly for v1.15, since `computeFlow(true)` inside
+  `sculptCommit()` invalidates `_resourcePots`/`_carryCapField`/`_settleSuitField` exactly like any
+  other terrain edit). Nothing from the plan was deliberately deferred; the plan's own §4 registry
+  table, §6 edge-character table, and §7 water table are the reference for any future per-feature
+  tuning. World-wrap (equirectangular seam) handling was out of scope for the PoC-ported features
+  from the start (`applyFeatureAlongCurve`, the retired plotline's own primitive, never had it
+  either — parity, not a regression) — a future pass could add it to `sculptApplyStamp` uniformly
+  if a `state.world`-mode sculpt session needs it.
 - **Seamless region↔settlement refactor — Stage 1 (roads, v0.97), Stage 2 (water, v0.98) and Stage 3's
   coastline pass (v0.99) SHIPPED; the coastal WALL SIZING is the one substantive item left.** The
   coordinate trick below is the crux and is realised in `_umWaterCtx` + `buildSite`'s `opts.water` branch:

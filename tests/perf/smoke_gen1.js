@@ -1834,6 +1834,72 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  R.sculpt = await page.evaluate(async () => {
+    const out = {};
+    // (1) tab mechanics: the 4th Generate sub-tab shows its panel, hides World, and arms the editor
+    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    out.panelShown = getComputedStyle(document.getElementById('genSculpt')).display !== 'none';
+    out.worldHidden = getComputedStyle(document.getElementById('genWorld')).display === 'none';
+    out.featureButtons = document.querySelectorAll('#sculptFeatureSeg button').length;
+    out.presetButtons = document.querySelectorAll('#sculptPresetSeg button').length;
+    out.editorActive = _sculptEditorActive();
+
+    // (2) paint → draft: neither `field` nor the rendered pixels change until commit (non-destructive)
+    state.debug = 'off'; renderNow();
+    const beforeField = field.slice(), beforePixels = img.data.slice();
+    _sculptType = 'mountains'; _sculptSel = -1;
+    const cx = GW / 2, cy = GH / 2;
+    _sculptCapturing = true; _sculptPts = [{ x: cx - 30, y: cy }, { x: cx, y: cy }, { x: cx + 30, y: cy }];
+    sculptFinishStroke();
+    out.draftLeavesFieldUntouched = field.every((v, i) => v === beforeField[i]);
+    out.draftLeavesRenderUntouched = img.data.every((v, i) => v === beforePixels[i]);
+    out.stampCountAfterPaint = sculptStamps.length;
+
+    // (3) commit: bakes the stack (field changes), a real renderNow ran (pixels change in the same
+    //     pass — the currently-open view, here the default Biome map, updates immediately)
+    const undoBefore = undoStack.length;
+    sculptCommit();
+    out.commitChangesField = !field.every((v, i) => v === beforeField[i]);
+    out.commitChangesRender = !img.data.every((v, i) => v === beforePixels[i]);
+    out.commitClearsStamps = sculptStamps.length === 0;
+    out.commitPushedUndo = undoStack.length === undoBefore + 1;
+
+    // (4) Ctrl+Z (field-level undo, since the draft above was already committed) reverts the bake
+    const committedField = field.slice();
+    undoLast();
+    out.undoRevertsField = field.every((v, i) => v === beforeField[i]);
+    out.undoDifferedFromCommitted = !field.every((v, i) => v === committedField[i]);
+
+    // (5) LOD cursor/overlay: painting under Tiled LOD draws the stamp-footprint overlay without
+    //     throwing (drawLODView's own tail calls this every frame while a stamp/stroke is live)
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
+    _sculptType = 'hills'; _sculptSel = -1;
+    _sculptCapturing = true; _sculptPts = [{ x: GW / 2 - 10, y: GH / 2 }, { x: GW / 2 + 10, y: GH / 2 }];
+    sculptFinishStroke();
+    let overlayThrew = false;
+    try { sculptDrawLODOverlay(lodViewRect()); } catch (e) { overlayThrew = true; }
+    out.lodOverlayDrawsWithoutError = !overlayThrew;
+    sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];   // discard the LOD-mode draft directly (no confirm() dialog)
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+
+    // (6) zoom-relative brush size: brushSize is stored in GRID CELLS, so its real-world (km)
+    //     footprint is a pure function of state.mapWidthKm/GW — independent of view zoom — and the
+    //     UI readout reflects that live as the slider (or the map's real-world width) changes.
+    const brushEl = document.getElementById('sBrush'), kmEl = document.getElementById('sBrushKm');
+    brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));
+    const kmAt32 = kmEl.textContent;
+    out.kmReadoutAt32 = /≈ [\d.]+ km radius/.test(kmAt32);
+    const numAt32 = parseFloat(kmAt32.replace('≈', '').trim());
+    brushEl.value = 64; brushEl.dispatchEvent(new Event('input'));
+    const numAt64 = parseFloat(kmEl.textContent.replace('≈', '').trim());
+    out.kmReadoutDoublesWithBrushSize = Math.abs(numAt64 - 2 * numAt32) < 0.05;
+    brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));   // restore
+
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1890,7 +1956,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('un-finalize clears phase-explore', R.phaseOff === false);
   A('v0.74 finalize button is the first button in Generate → World, not behind a disclosure', R.finalizeTop.inFinalizeSec && R.finalizeTop.notInDetails && R.finalizeTop.isFirstButton && R.finalizeTop.depthInSec);
   A('Undo button lives in header', R.undoInHeader === true);
-  A('Generate sub-tab bar restored (world/civ/carto)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto']));
+  A('Generate sub-tab bar has world/civ/carto/sculpt (v1.15 adds the Sculpt editor)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','sculpt']));
   A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);
   A('faction picker lives in Generate → Civilization', R.factionPickerInGenCiv === true);
   A('Map style lives in Generate → Cartography', R.mapStyleInGenCarto === true);
@@ -2057,6 +2123,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.13 #1: a region/area name label still draws even when settlement auto-labels crowd its cell (pre-v1.13 the occupancy grid could suppress it entirely)', R.v113.regionLabelDraws >= 1);
   A('v1.13 #2: zoom-out floors at the FIT scale so the whole map — width AND height — fits the viewport (was cover: one axis overflowed, forcing L/R drag)', R.v113.fitAtOrBelowCover === true && R.v113.overflowsAtCover === true && R.v113.widthFitsAtFloor === true && R.v113.heightFitsAtFloor === true);
   A('v1.13 #3: under deep LOD zoom a left-click reaches _civInfoAt with the correct settlement cell (LOD-aware evtToGridLOD); the old un-zoomed mapping would have been far off', R.v113.lodClickHandlerErr < 3 && R.v113.plainMappingErr > 10);
+
+  // ── v1.15: Sculpt editor (stamp-based non-destructive terrain sculpting, replaces Manual Terrain) ──
+  A('v1.15 Sculpt tab: clicking the sub-tab shows the panel, hides World, and lists the 13-feature palette + 8 presets', R.sculpt.panelShown && R.sculpt.worldHidden && R.sculpt.featureButtons === 13 && R.sculpt.presetButtons === 8);
+  A('v1.15 Sculpt tab: _sculptEditorActive() is true while the tab is open on an un-finalized world', R.sculpt.editorActive === true);
+  A('v1.15 draft is non-destructive: painting a stroke touches neither `field` nor the rendered pixels until commit', R.sculpt.draftLeavesFieldUntouched && R.sculpt.draftLeavesRenderUntouched && R.sculpt.stampCountAfterPaint === 1);
+  A('v1.15 commit bakes the draft into `field`, runs a real renderNow (pixels update in the same pass), clears the stack, and pushes exactly one undo snapshot', R.sculpt.commitChangesField && R.sculpt.commitChangesRender && R.sculpt.commitClearsStamps && R.sculpt.commitPushedUndo);
+  A('v1.15 Ctrl+Z (field-level undo, post-commit) reverts the bake', R.sculpt.undoRevertsField && R.sculpt.undoDifferedFromCommitted);
+  A('v1.15 LOD-mode painting draws the stamp overlay (drawLODView tail) without throwing', R.sculpt.lodOverlayDrawsWithoutError === true);
+  A('v1.15 brush size is real-world/zoom-relative: the km-radius readout tracks brushSize (grid cells), doubling brushSize doubles the reported km', R.sculpt.kmReadoutAt32 && R.sculpt.kmReadoutDoublesWithBrushSize);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
