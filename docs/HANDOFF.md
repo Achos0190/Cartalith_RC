@@ -9,17 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.10.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.11.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.11 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.09` are kept and never edited.
+  (v1.12 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.10` are kept and never edited.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. In progress, one
   version per item (per the "finish one thing before starting the next" rule): (1) culture-flavored
   naming — **DONE, v1.07**. (2) setup-gate world archetype presets — **DONE, v1.08**. (3) GeoJSON/GIS
   export — **DONE, v1.09**. (4) province tier + religions layer — **DONE, v1.10**. (5) submap/resample
-  UX. (6) label placement + per-layer style editors. Items 5–6 not yet started.
+  UX — **DONE, v1.11**. (6) label placement + per-layer style editors. Item 6 not yet started.
+- **v1.11 — owner: "implement the top 6 borrow list from the research" (#5 submap/resample UX).**
+  Cartalith already had `amplifyRegion()` (seamless world-space heightmap upsampling), a region-select
+  drag tool, and a tiled-.zip "Region export" pipeline — but it only produced FILES, never a live
+  world. New **Extract as new world** button (same panel): reuses the same selection + `amplifyRegion`,
+  replaces the live world with the amplified region, hands off to the EXISTING Import-heightmap
+  calibrate→`inferTectonics()` pipeline (no new world-construction path). Deliberately skips
+  `normalize()` (unlike `loadImage`'s raw-pixel path) — the amplified data is already real elevation
+  in the parent's `[0,1]` space, and renormalizing would corrupt the sea-level/relative-height
+  continuity that's the whole point. New `mapWidthKm` = parent width × the selection's true fraction
+  (smaller region ⇒ higher-resolution close-up, not a rescale). Civ data (settlements/roads/territory/
+  provinces) is cleared on extraction (old-extent coordinates, honest reset) behind a `confirm()`.
+  Verified: engine **923/923**, UME **831/831**, hash vs v1.10 **ALL IDENTICAL**, smoke **198/198**
+  (+5). Playwright-probed: a quarter-map region (256×164 of 512×328) extracted at 1024px produced a
+  1024×656 world at exactly half the parent's km-width, fully valid after tectonic inference.
 - **v1.10 — owner: "implement the top 6 borrow list from the research" (#4 province tier + optional
   religions layer).** New `civProvince` raster (parallel to `civTerritory`) subdivides each faction's
   territory via `_civGenerateProvinces()` (on-demand button): one province per city-tier+ settlement
