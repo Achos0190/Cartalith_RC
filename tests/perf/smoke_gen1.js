@@ -1645,6 +1645,55 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { ok: true, conns: bn, usesPaths, dense, wallRing: !!(m.wall && m.wall.ring), maxPrim: Math.round(maxPrim) };
   });
 
+  // ── v1.11 (borrow-list #5, after the research's "framing the existing amplification/LOD
+  // machinery as an explicit 'carve this region into its own higher-resolution map' tool"):
+  // Extract as new world. Builds its own fresh world (this is the LAST R-computation in the
+  // suite — nothing downstream depends on the previous shared world, so no snapshot/restore is
+  // needed, same as R.umBuildAround just above). Selects a quarter-map region, clicks "Extract
+  // as new world" (auto-accepting its confirm() dialog), waits for the calibrate step it hands
+  // off to, checks the amplified field/scale/civ-clearing, then commits calibrate (inferTectonics)
+  // and checks the resulting world is a valid finite field.
+  await page.evaluate(async () => {
+    state.tect.seed = 777777; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+    await generate();
+  });
+  const submapBefore = await page.evaluate(() => {
+    _civAutoWorld();
+    civTerritory = new Uint8Array(GW * GH); civTerritory[5] = 1; _civTerrGen++;
+    regionSel = normRegion(Math.floor(GW * 0.25), Math.floor(GH * 0.25), Math.floor(GW * 0.75), Math.floor(GH * 0.75), GW, GH);
+    const nb = document.getElementById('regionNewWorldBtn'); if (nb) nb.disabled = false;
+    document.getElementById('refSize').value = '1024';
+    return { GW, GH, mapWidthKm: state.mapWidthKm, placesCount: state.places.length, regionW: regionSel.w, regionH: regionSel.h };
+  });
+  let confirmSeen = false;
+  const hSubmapConfirm = async d => { confirmSeen = true; await d.accept(); };
+  page.on('dialog', hSubmapConfirm);
+  await page.evaluate(() => document.getElementById('regionNewWorldBtn').click());
+  await page.waitForFunction(() => {
+    const el = document.getElementById('obStepCalibrate');
+    return el && el.classList.contains('on') && getComputedStyle(document.getElementById('onboard')).display !== 'none';
+  }, null, { timeout: 20000 });
+  page.off('dialog', hSubmapConfirm);
+  const afterExtract = await page.evaluate(() => ({
+    GW, GH, mapWidthKm: state.mapWidthKm, placesCount: state.places.length,
+    territoryNull: civTerritory === null, provinceNull: civProvince === null,
+    calWidthValue: +document.getElementById('suWidth2').value,
+    allFinite: (() => { for (let i = 0; i < field.length; i += 37) if (!Number.isFinite(field[i])) return false; return true; })(),
+    fieldRangeOk: (() => { let mn = Infinity, mx = -Infinity; for (let i = 0; i < field.length; i++) { if (field[i] < mn) mn = field[i]; if (field[i] > mx) mx = field[i]; } return mn >= 0 && mx <= 1; })()
+  }));
+  await page.evaluate(() => document.getElementById('suCalCommit').click());
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('onboard')).display === 'none', null, { timeout: 60000 });
+  await page.waitForTimeout(400);
+  const afterInfer = await page.evaluate(() => ({
+    plateCount: (typeof plates !== 'undefined' && plates) ? plates.length : -1,
+    allFinite: (() => { for (let i = 0; i < field.length; i += 37) if (!Number.isFinite(field[i])) return false; return true; })()
+  }));
+  R.submap = {
+    confirmSeen, before: submapBefore, afterExtract, afterInfer,
+    expectedMapWidthKm: submapBefore.mapWidthKm * submapBefore.regionW / submapBefore.GW,
+    resolutionIsRequested: afterExtract.GW === 1024
+  };
+
   await browser.close();
 
   // ---- assertions ----
@@ -1854,6 +1903,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.10: enabling the provinces tint produces a real pixel difference on the civ canvas', R.provinces.diffPx > 0);
   A('v1.10: exported province MultiPolygons exactly tile the parent territory (combined area == territory area)', R.provinces.provFeatCount === 3 && R.provinces.provGeomTypes.length === 1 && R.provinces.provGeomTypes[0] === 'MultiPolygon' && Math.abs(R.provinces.areaRatio - 1) < 0.001);
   A('v1.10: every non-Unclaimed faction gets a state-religion picker, and civFactionReligion round-trips through sync', R.provinces.religionSelects >= 6 && R.provinces.savedReligionLen > 0 && R.provinces.religionRestored);
+  // ── v1.11: submap/resample UX (borrow-list #5) ──
+  A('v1.11: "Extract as new world" shows a confirm() and hands off to the calibrate step at the requested resolution', R.submap.confirmSeen === true && R.submap.resolutionIsRequested === true);
+  A('v1.11: the extracted region preserves real-world scale (new mapWidthKm == parent width × region-fraction, both in the state and the prefilled calibrate field)', Math.abs(R.submap.afterExtract.mapWidthKm - R.submap.expectedMapWidthKm) < 0.01 && Math.abs(R.submap.afterExtract.calWidthValue - R.submap.expectedMapWidthKm) < 1);
+  A('v1.11: the amplified field is real elevation data, not renormalized (finite, still within [0,1])', R.submap.afterExtract.allFinite === true && R.submap.afterExtract.fieldRangeOk === true);
+  A('v1.11: civilization data (settlements/territory/provinces) is cleared on extraction', R.submap.afterExtract.placesCount === 0 && R.submap.afterExtract.territoryNull === true && R.submap.afterExtract.provinceNull === true);
+  A('v1.11: committing the calibrate step infers a valid tectonic substrate on the new world (finite field, real plates)', R.submap.afterInfer.allFinite === true && R.submap.afterInfer.plateCount > 0);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
