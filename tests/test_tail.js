@@ -469,10 +469,21 @@ check('render wrote opaque pixels', img.data.length === GW * GH * 4 && img.data[
     const ridge = Math.max(0, 1 - Math.abs(y - 32) / 18);          // E–W ridge along y=32
     fld[y * W + x] = (x >= 8 && x < 88) ? sea + 0.02 + 0.48 * ridge : 0.2;  // flanks → low land, edges → ocean
   }
+  // v1.20: 4 biome bands (was 2) so the new tree/scatter kinds are all reachable — tempForest,
+  // savanna, desert, tundra, per the frozen BIOME_KEYS index (5,10,9,2). A synthetic tempField
+  // splits the desert band into a warm half (→ cactus) and cold half (→ boulder), and a synthetic
+  // wetlandMask marks a small pocket inside the tempForest band (→ wetland trees, overriding the
+  // biome underneath) — both passed as OPTIONAL opts fields so placeMapIcons stays the "pure
+  // primitive, no globals" contract this test relies on (the live caller passes the real
+  // tempField/currentWetlandMask(); a plain opts object without them exercises the fallback path).
   const biome = new Uint8Array(n);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
-    biome[y * W + x] = (x < 48) ? 5 /* tempForest */ : 9 /* desert */;
-  const opts = { sea, seed: 7 };
+    biome[y * W + x] = (x < 24) ? 5 /* tempForest */ : (x < 48) ? 10 /* savanna */ : (x < 72) ? 9 /* desert */ : 2 /* tundra */;
+  const tempField = new Float32Array(n).fill(15);
+  for (let y = 0; y < H; y++) for (let x = 48; x < 72; x++) tempField[y * W + x] = x < 60 ? 20 : -5;   // warm / cold desert half
+  const wetlandMask = new Uint8Array(n);
+  for (let y = 28; y < 36; y++) for (let x = 10; x < 20; x++) wetlandMask[y * W + x] = 1;              // marsh pocket inside the tempForest band
+  const opts = { sea, seed: 7, tempField, wetlandMask };
   const icons = placeMapIcons(fld, biome, W, H, opts);
   check('icons: mountains found on the ridge (' + icons.mountains.length + ')', icons.mountains.length >= 3);
   check('icons: hills found on the flanks (' + icons.hills.length + ')', icons.hills.length >= 2);
@@ -488,15 +499,47 @@ check('render wrote opaque pixels', img.data.length === GW * GH * 4 && img.data[
     minD2 = Math.min(minD2, dx * dx + dy * dy);
   }
   check('icons: mountain spacing respected (min ' + Math.sqrt(minD2).toFixed(1) + ' ≥ ' + mSpace + ')', minD2 >= mSpace * mSpace);
-  check('icons: trees only on closed-canopy biome cells',
-    icons.trees.length > 5 && icons.trees.every(t => { const b = biome[t.y * W + t.x]; return b === 3 || b === 4 || b === 5 || b === 6 || b === 12; }));
-  check('icons: painter order is north→south', ['mountains', 'hills', 'trees'].every(k =>
+  const treeValid = t => {
+    const b = biome[t.y * W + t.x];
+    if (wetlandMask[t.y * W + t.x] === 1) return t.kind === 'wetland';
+    if (b === 3 || b === 4) return t.kind === 'conifer';
+    if (b === 5) return t.kind === 'broadleaf';
+    if (b === 6 || b === 12) return t.kind === 'rainforest';
+    if (b === 10 || b === 11) return t.kind === 'savanna';
+    return false;
+  };
+  check('icons: every tree kind matches its cell biome/wetland status (' + icons.trees.length + ' trees)',
+    icons.trees.length > 5 && icons.trees.every(treeValid));
+  check('icons: the wetland mask pocket produces wetland trees, overriding the tempForest biome underneath',
+    icons.trees.some(t => t.kind === 'wetland'));
+  check('icons: the savanna band produces savanna trees', icons.trees.some(t => t.kind === 'savanna'));
+  const scatterValid = sk => {
+    const b = biome[sk.y * W + sk.x];
+    if (b === 9) return sk.kind === (tempField[sk.y * W + sk.x] >= 10 ? 'cactus' : 'boulder');
+    if (b === 2) return sk.kind === 'boulder';
+    return false;
+  };
+  check('icons: every scatter kind matches its cell biome/temperature (' + icons.scatter.length + ' scattered)',
+    icons.scatter.length > 5 && icons.scatter.every(scatterValid));
+  check('icons: the warm half of the desert band gets cactus',
+    icons.scatter.some(sk => sk.kind === 'cactus' && biome[sk.y * W + sk.x] === 9));
+  check('icons: the cold half of the desert band gets boulder',
+    icons.scatter.some(sk => sk.kind === 'boulder' && biome[sk.y * W + sk.x] === 9));
+  check('icons: the tundra band gets boulder',
+    icons.scatter.some(sk => sk.kind === 'boulder' && biome[sk.y * W + sk.x] === 2));
+  check('icons: painter order is north→south', ['mountains', 'hills', 'trees', 'scatter'].every(k =>
     icons[k].every((p, i, a) => i === 0 || a[i - 1].y <= p.y)));
   const icons2 = placeMapIcons(fld, biome, W, H, opts);
   check('icons: placement deterministic', JSON.stringify(icons) === JSON.stringify(icons2));
+  const iconsNoOpt = placeMapIcons(fld, biome, W, H, { sea, seed: 7 });
+  check('icons: omitting tempField ⇒ desert always resolves to cactus (no cold-desert split)',
+    iconsNoOpt.scatter.filter(sk => biome[sk.y * W + sk.x] === 9).every(sk => sk.kind === 'cactus'));
+  check('icons: omitting wetlandMask ⇒ no wetland trees (falls through to the plain biome forest)',
+    iconsNoOpt.trees.every(t => t.kind !== 'wetland'));
   const flat = new Float32Array(n).fill(sea + 0.02);
   const none = placeMapIcons(flat, null, W, H, opts);
-  check('icons: flat lowland → no mountains or hills', none.mountains.length === 0 && none.hills.length === 0 && none.trees.length === 0);
+  check('icons: flat lowland → nothing placed',
+    none.mountains.length === 0 && none.hills.length === 0 && none.trees.length === 0 && none.scatter.length === 0);
 
   // parchment: defaults-off neutrality + visible effect, on the real map
   const before = Uint8ClampedArray.from(img.data);
@@ -815,9 +858,11 @@ fieldsFinite('generate(world)');
     const allStored = Object.values(z).every(v => v instanceof Uint8Array);
     check('sample_pack.zip is fully STORED (unzipStore reads every entry)', allStored && z['pack.json'] && z['pack.csv']);
     const sman = parsePackManifest(z);
-    check('sample pack manifest: 7 textures + 3/2/2/2 icons, CC0', Object.keys(sman.textures).length === 7 &&
-      sman.icons.mountain.length === 3 && sman.icons.hill.length === 2 && sman.icons.tree_conifer.length === 2 &&
-      sman.icons.tree_broadleaf.length === 2 && sman.license === 'CC0' && sman.warnings.length === 0);
+    check('sample pack manifest: 7 textures + 3/2×9 icons (10 slots), CC0, no warnings', Object.keys(sman.textures).length === 7 &&
+      sman.icons.mountain.length === 3 &&
+      ['hill', 'tree_conifer', 'tree_broadleaf', 'tree_rainforest', 'tree_savanna', 'tree_wetland', 'shrub', 'cactus', 'boulder']
+        .every(slot => sman.icons[slot] && sman.icons[slot].length === 2) &&
+      sman.license === 'CC0' && sman.warnings.length === 0);
     const pngOK = Object.keys(z).filter(n => n.endsWith('.png')).every(n => { const d = z[n]; return d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4E && d[3] === 0x47; });
     check('sample pack PNGs have valid signatures', pngOK);
   }
@@ -827,7 +872,8 @@ fieldsFinite('generate(world)');
   state.mode = 'biome'; state.debug = 'off'; state.viz.icons = false; renderNow();
   const baseNoPack = Uint8ClampedArray.from(img.data);
   assetPack = { name: 'syn', license: 'CC0', texAny: false, textures: {},
-    icons: { mountain: [{ w: 64, h: 64, bmp: {} }, { w: 64, h: 64, bmp: {} }], tree_conifer: [{ w: 32, h: 48, bmp: {} }] } };
+    icons: { mountain: [{ w: 64, h: 64, bmp: {} }, { w: 64, h: 64, bmp: {} }], tree_conifer: [{ w: 32, h: 48, bmp: {} }],
+      tree_savanna: [{ w: 40, h: 40, bmp: {} }], cactus: [{ w: 24, h: 40, bmp: {} }] } };   // v1.20: exercise the new slots' sprite-lookup path too
   renderNow();   // pack present but icons toggle off → every pack path inert
   let neutral = true; for (let i = 0; i < img.data.length; i++) if (img.data[i] !== baseNoPack[i]) { neutral = false; break; }
   check('asset pack loaded but icons off → render bit-identical', neutral);
@@ -3560,7 +3606,7 @@ if (typeof carveRiverValleys === 'function') {
   {
     const ab = require('fs').readFileSync('assets/sample_pack.zip');
     const z = await unzipAny(ab.buffer.slice(ab.byteOffset, ab.byteOffset + ab.byteLength));
-    check('unzipAny reads the STORED sample pack via central dir', !!z['pack.json'] && Object.keys(z).filter(n => n.endsWith('.png')).length === 16);
+    check('unzipAny reads the STORED sample pack via central dir', !!z['pack.json'] && Object.keys(z).filter(n => n.endsWith('.png')).length === 28);   // v1.20: 7 textures + 21 icons (10 icon slots × 2-3 variants), was 16 (7+9)
     if (typeof DecompressionStream !== 'undefined'){
       // hand-build a 1-entry DEFLATED zip (Node zlib) and confirm unzipAny inflates it
       const zlib = require('zlib');

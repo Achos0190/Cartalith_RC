@@ -12,6 +12,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.20 (2026-07-20)
+**Owner: "let's go up to 4/5 different possible tree types (and for other landscape types and
+features) that can be placed at relatively random."** Follow-up to a walkthrough of the Asset
+Library's coverage: the procedural map-icon system (`placeMapIcons`/`drawMapIcons`, opt-in via
+`state.viz.icons`, default `false`) only ever distinguished two tree styles (conifer vs.
+broadleaf) and placed nothing at all on grassland/steppe/desert/tundra. Scoped via
+`AskUserQuestion` to the broadest option: 5 biome-conditioned tree kinds, new shrub/cactus/boulder
+ground scatter for the biomes that got nothing before, mountain/hill procedural-fallback variety,
+and every new kind made **both** auto-scattered (same mechanism as before) **and** manually
+placeable via the Icon tool's "Feature icons" family — matching exactly how the original 4 already
+worked.
+
+**Biome → feature mapping** (frozen `BIOME_KEYS` index): `conifer`/`broadleaf` unchanged (boreal/
+montane-conifer, temperate forest); new `rainforest` (temperate rainforest + tropical jungle, same
+dense closed-canopy grid); new `savanna` (savanna + tropical dry, sparse — thinned via a per-cell
+hash-probability keep test, same `hash()` the grid jitter already uses); new `wetland` (a real
+terrain signal via `currentWetlandMask()`, not a climate bucket — checked FIRST, overriding
+whatever forest/grass biome sits underneath a marsh pocket); new ground-scatter `shrub` (grass/
+steppe/Mediterranean), `cactus` (warm desert), `boulder` (tundra, and cold desert — split by
+`tempField` at 10°C when available). `placeMapIcons` stays the "pure primitive, no globals"
+function the headless suite already relies on: the new `opts.tempField`/`opts.wetlandMask` fields
+are strictly **optional** (omitted ⇒ desert always reads warm/cactus, no wetland override), so the
+live caller passes the real `tempField`/`currentWetlandMask()` while a synthetic test can supply
+its own small arrays.
+
+**Mountains/hills** get variety in the **procedural fallback only** — pack art (`mountain`/`hill`
+slots) is deliberately left unchanged/unconditioned on climate, to avoid schema churn; only the
+zero-asset drawing gains a second look, using module globals `drawMapIcons` may read directly
+(same precedent as its existing `assetPack` read): a snow cap below ~2°C (`tempField` already has
+elevation lapse baked in, CLAUDE.md invariant 14 — no new computation) and a rockier hill outline
+when `rainField` reads arid.
+
+**Vocabulary growth** in the 3 lists that were already parallel: `PACK_ICON_SLOTS` (4→10),
+`CIV_FEATURE_ICON_TYPES` (4→10, one new Unicode glyph each), and the Asset Library's own
+`FAMILIES` reference table. `assets/make_sample_pack.py` gained 6 new procedural silhouette
+generators (same stdlib noise/raster style as the existing `conifer()`/`broadleaf()`/`hill()`) and
+`assets/sample_pack.zip` was regenerated (21 icon sprites across the 10 slots, up from 9).
+`docs/ASSET_PACK_FORMAT.md`'s icon-slot table grew to match, with a note on the temperature/
+wetland-driven refinement so pack authors understand why a desert cell might resolve to `cactus`
+or `boulder`.
+
+**Verification:** `tests/run.sh` **992/992** (+8: per-kind biome/wetland/temperature validity
+checks against a 4-band synthetic fixture — tempForest/savanna/desert/tundra — plus a synthetic
+wetland pocket and a hot/cold desert split, the `opts`-omitted fallback path, and the extended
+determinism/flat-lowland/painter-order checks); `tests/run_um.sh` **852/852 unchanged** (script
+block 4 untouched); `hash_gen1.js` vs v1.19 — **`default`/`geoid`/`waves`/`ao` ALL IDENTICAL**
+(the feature lives entirely behind `state.viz.icons`, default `false`); the battery's `icons`
+scenario (`state.viz.icons=true`) **intentionally diverges** for the first time — that is the
+feature working, not a regression, exactly analogous to how `parchment`'s own "on → pixels change,
+off → bit-identical" pair already distinguishes real effect from default neutrality.
+`smoke_gen1.js` **236/236** (+5: the Feature-icons gallery now lists 10 tiles; a new kind arms and
+places through the real UI exactly like the original 4; the placed icon draws without throwing;
+every new key has a glyph fallback; `PACK_ICON_SLOTS` count). Playwright-probed: the regenerated
+sample pack imports cleanly with zero warnings and all 10 icon slots decode; fixed-seed (12345,
+whole-world/1024px) screenshots with the icons toggle on show varied canopy shapes across a
+world with real biome diversity (confirmed via `buildBiomeRaster()` counts spanning all 12 land
+biome keys).
+
 ### v1.19 (2026-07-20)
 **Owner: "in generate - sculpt I have one small caveat. On mobile/android/ios when I need to drag
 the screen I'll paint at the same time. Can we put a small graphic joystick in the bottom right

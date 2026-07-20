@@ -9,11 +9,34 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.19.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.20.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.20 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.18` are kept and never edited.
+  (v1.21 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.19` are kept and never edited.
+- **v1.20 — owner: "let's go up to 4/5 different possible tree types (and for other landscape
+  types and features) that can be placed at relatively random."** Follow-up to a walkthrough of
+  the Asset Library's coverage: the opt-in procedural map-icon layer (`state.viz.icons`, default
+  `false`) only ever drew 2 tree styles (conifer/broadleaf) and nothing at all on grassland/
+  steppe/desert/tundra. Scoped via `AskUserQuestion` to the broadest option. Trees grew to 5 kinds
+  keyed off the frozen `BIOME_KEYS` biome index — conifer/broadleaf unchanged, + rainforest
+  (temperate rainforest/jungle), + savanna (sparse, thinned by a hash-probability keep test), +
+  wetland (a REAL terrain signal via `currentWetlandMask()`, checked first and overriding whatever
+  biome sits underneath a marsh pocket). New ground-scatter category: shrub (grass/steppe),
+  cactus (warm desert), boulder (tundra + cold desert, split by `tempField` at 10°C). `tempField`/
+  `wetlandMask` are OPTIONAL additions to `placeMapIcons`'s `opts` — the function stays the "pure
+  primitive, no globals" contract the headless suite already relies on. Mountains/hills gained
+  variety in the **procedural fallback only** (snow cap below ~2°C, rockier hill outline when
+  arid) — pack art for those two slots deliberately stays climate-unconditioned, a disclosed scope
+  cut to avoid schema churn. Every new kind is both auto-scattered AND manually placeable via the
+  Icon tool's "Feature icons" family (`PACK_ICON_SLOTS`/`CIV_FEATURE_ICON_TYPES` both 4→10). The
+  sample-pack generator (`assets/make_sample_pack.py`) gained 6 matching procedural silhouette
+  functions and `sample_pack.zip` was regenerated (21 icon sprites, up from 9). Verified: engine
+  **992/992** (+8), UME **852/852 unchanged**, hash vs v1.19 — `default`/`geoid`/`waves`/`ao`
+  **ALL IDENTICAL**, the `icons` scenario **intentionally diverges** for the first time (the
+  feature is opt-in, so this is the expected effect, not a regression), smoke **236/236** (+5),
+  the regenerated sample pack imports with zero warnings, fixed-seed whole-world screenshots
+  confirm rendering across real biome diversity.
 - **v1.19 — owner: "in generate - sculpt I have one small caveat. On mobile/android/ios when I
   need to drag the screen I'll paint at the same time. Can we put a small graphic joystick in the
   bottom right corner just as the cartalith v1.915 has."** A single-finger drag over the canvas is
@@ -1142,6 +1165,20 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   `_sculptEditorActive()`. Not scoped beyond the Sculpt editor — a future session could extend the
   same pattern to other touch/paint tools (e.g. Cartography's paint mode) if that friction is ever
   reported; not requested here, so left alone.
+- **Expanded natural-feature vocabulary (v1.20) — shipped.** Documented scope cuts, not forgotten:
+  (a) `mountain`/`hill` pack-art variant *selection* stays purely positional, not climate-aware —
+  only the zero-asset procedural fallback varies by temperature/aridity; a pack author who wants
+  a snow-mountain vs. bare-mountain distinction still can't target one directly, only supply more
+  variants that get distributed randomly. (b) The desert cactus/boulder split and the mountain
+  snow-cap both key off a single, un-tuned threshold (10°C, 2°C respectively) — reasonable
+  defaults, not validated against the climate sim's actual real-world calibration. (c) Not
+  extended to `structures.trait` badges or biome/terrain ground-texture art (both already parsed
+  by schema 2 but not drawn anywhere — a pre-existing gap, unrelated to this feature, still open).
+  (d) No new POI/settlement slots — this was scoped to trees/ground-scatter/mountain-hill variety
+  specifically, not a broader POI-vocabulary expansion (the user's uploaded reference sheet had
+  far more categories — ruins, standing stones, lighthouses, culture packs, etc. — than fit this
+  request; those remain reachable today only via the Asset Library's existing free-form `custom`
+  icon family + sprite-sheet slicer, manually placed one at a time, not auto-attached to anything).
 - **Settlement generation refactor (v1.17) — shipped (audit + S1–S7).** Documented scope cuts,
   not forgotten: (a) per-culture town morphology — `civFactionCulture` now reaches
   `opts.culture`, but UME still ships 2 profiles ('medieval'/'venus'), so every faction resolves

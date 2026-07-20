@@ -2092,6 +2092,57 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.20: expanded natural-feature vocabulary (owner: "let's go up to 4/5 different possible
+  // tree types (and for other landscape types and features) that can be placed at relatively
+  // random") — trees grew from 2 to 5 biome-conditioned kinds, plus new shrub/cactus/boulder
+  // ground scatter, all also manually placeable via the Icon tool's "Feature icons" family
+  // exactly like the original 4. The auto-scatter placement logic itself (placeMapIcons) is
+  // covered in depth by the headless engine suite (tests/test_tail.js); this block only proves
+  // the manual-placement side (gallery/arm/place/draw) works end-to-end in the real UI.
+  R.v120 = await page.evaluate(async () => {
+    const out = {};
+    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#genSubBar [data-gsub="carto"]').click();
+    await new Promise(r => setTimeout(r, 50));
+
+    // the gallery is populated at load time with the default 'feature' family (v1.20.html:19671)
+    const gal = document.getElementById('carIconGallery');
+    const famSel = document.getElementById('carIconFam');
+    famSel.value = 'feature'; famSel.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 50));
+    out.featureTileCount = gal.querySelectorAll('figure.caropt:not(.none)').length;
+
+    // arm one of the NEW kinds and place it — same {x,y,fam,slot,scale} shape the real
+    // click-to-place handler constructs (v1.20.html ~7911-7914), just without simulating exact
+    // canvas pointer coordinates
+    const before = state.mapIcons.length;
+    _carIconGalleryPick('feature', 'cactus');
+    out.armedCactus = !!_carIconArmed && _carIconArmed.fam === 'feature' && _carIconArmed.slot === 'cactus';
+    const gx = Math.floor(GW / 2), gy = Math.floor(GH / 2);
+    state.mapIcons.push({ x: gx, y: gy, fam: _carIconArmed.fam, slot: _carIconArmed.slot, scale: 1 });
+    renderNow();
+    out.placedCactus = state.mapIcons.length === before + 1 && state.mapIcons[state.mapIcons.length - 1].slot === 'cactus';
+
+    // it draws (pack sprite or the generic circle+glyph fallback) without throwing
+    let threw = false;
+    try { drawCivLayerAuto(); } catch (e) { threw = true; }
+    out.drawsWithoutThrow = !threw;
+
+    // every new feature-icon key has a real glyph fallback (no missing entries)
+    out.allNewKeysHaveGlyphs = ['tree_rainforest', 'tree_savanna', 'tree_wetland', 'shrub', 'cactus', 'boulder']
+      .every(k => CIV_FEATURE_ICON_TYPES.some(t => t.key === k && t.glyph));
+
+    // the sample pack's 10 icon slots exactly match the engine's PACK_ICON_SLOTS vocabulary
+    out.packIconSlotsCount = PACK_ICON_SLOTS.length;
+
+    // clean up: remove the placed test icon and disarm so it doesn't leak into later assertions
+    state.mapIcons.pop();
+    _carIconGalleryPick(null);
+    renderNow();
+
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2348,6 +2399,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.19: knob travel is clamped to MAX_OFFSET and recenters on release', R.v119.knobClampsOffset && R.v119.knobResetsToCenter);
   A('v1.19: under Tiled LOD, the same stick drives _lodCx/_lodCy instead of viewT', R.v119.lodPanDrivesLodCx);
   A('v1.19: cycling Sculpt/Generate tabs re-syncs joystick visibility without throwing', R.v119.noThrowOnTabCycle);
+  A('v1.20: the Icon tool\'s "Feature icons" gallery lists all 10 slots (was 4)', R.v120.featureTileCount === 10);
+  A('v1.20: a new kind (cactus) arms and places via the Icon tool exactly like the original 4', R.v120.armedCactus && R.v120.placedCactus);
+  A('v1.20: the manually-placed icon draws without throwing (pack sprite or generic glyph fallback)', R.v120.drawsWithoutThrow);
+  A('v1.20: every new feature-icon key has a real glyph fallback', R.v120.allNewKeysHaveGlyphs);
+  A('v1.20: PACK_ICON_SLOTS grew from 4 to 10', R.v120.packIconSlotsCount === 10);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

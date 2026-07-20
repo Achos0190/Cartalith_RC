@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.19**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.20**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.19.html` | **Current** unified tool (~23.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.18.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.20.html` | **Current** unified tool (~23.8k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.19.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -342,6 +342,50 @@ touch-only (`isMobile`), shown only while `_sculptEditorActive()`.
 - **Known scope cuts**: no zoom slider (deliberate — see Shell above); not extended to other
   touch/paint tools (e.g. Cartography's paint mode) — not requested, left for a future session if
   the same conflict is ever reported there.
+
+### Expanded natural-feature vocabulary (v1.20)
+
+Owner request: "let's go up to 4/5 different possible tree types (and for other landscape types
+and features) that can be placed at relatively random." Extends the existing opt-in procedural
+map-icon layer (`placeMapIcons`/`drawMapIcons`, `state.viz.icons` default `false`) rather than
+building a new system — that toggle previously drew only 2 tree styles and nothing on grassland/
+steppe/desert/tundra.
+
+- **Biome → feature mapping** (`placeMapIcons`, block 1): trees grew from 2 to 5 kinds keyed off
+  the frozen `BIOME_KEYS` index — `conifer`/`broadleaf` unchanged; new `rainforest` (temperate
+  rainforest + tropical jungle, same dense closed-canopy grid); new `savanna` (savanna + tropical
+  dry, sparse — thinned by a per-cell `hash()` keep-probability test); new `wetland` (a REAL
+  terrain signal via `currentWetlandMask()`, checked FIRST and overriding whatever biome sits
+  underneath a marsh pocket, not a climate bucket). New ground-scatter category (non-tree,
+  returned as `icons.scatter`, separate from `icons.trees`): `shrub` (grass/steppe/Mediterranean),
+  `cactus` (warm desert), `boulder` (tundra, and cold desert — split by `tempField` at 10°C).
+  `opts.tempField`/`opts.wetlandMask` are strictly OPTIONAL additions to `placeMapIcons`'s
+  existing `opts` object (omitted ⇒ desert always reads warm/cactus, no wetland override) — the
+  function stays the "pure primitive, no globals" contract `tests/test_tail.js`'s synthetic-ridge
+  unit test already relies on; the live call site passes the real `tempField`/
+  `currentWetlandMask()`.
+- **Mountains/hills**: variety in the procedural FALLBACK only (`drawMapIcons`, which may read
+  `tempField`/`rainField` module globals directly — it's only ever exercised against a real
+  `generate()`'d world, unlike `placeMapIcons`) — a snow cap below ~2°C (`tempField` already has
+  elevation lapse baked in, invariant 14 below — no new computation) and a rockier hill outline
+  when `rainField` reads arid. Pack art for `mountain`/`hill` deliberately stays
+  climate-unconditioned (still N positionally-picked variants, unchanged schema) — a disclosed
+  scope cut to avoid schema churn.
+- **Manual placement parity**: every new kind is also placeable one-at-a-time via the Icon tool's
+  "Feature icons" family, exactly like the original 4 — `PACK_ICON_SLOTS` and
+  `CIV_FEATURE_ICON_TYPES` both grew 4→10 in lockstep, plus the Asset Library's own `FAMILIES`
+  reference table (block 3).
+- **Sample pack**: `assets/make_sample_pack.py` gained 6 new procedural silhouette generators
+  (same stdlib noise/raster style as the existing `conifer()`/`broadleaf()`/`hill()` — no
+  real/downloaded art needed) and `assets/sample_pack.zip` was regenerated (21 icon sprites across
+  10 slots, up from 9).
+- **Known scope cuts**: `mountain`/`hill` pack-art selection isn't climate-aware, only the
+  fallback (see above); the hot/cold-desert and snow-cap thresholds are reasonable un-tuned
+  defaults; `structures.trait` badges and biome/terrain ground-texture art remain parsed-but-
+  undrawn (pre-existing gaps, unrelated to this feature); no new POI/settlement slots — a much
+  larger reference sheet the owner shared (ruins, standing stones, lighthouses, 16 culture packs,
+  etc.) remains reachable only via the Asset Library's existing free-form `custom` icon family +
+  sprite-sheet slicer, manually placed, not auto-attached to anything.
 
 ### Engine (block 1) essentials
 
