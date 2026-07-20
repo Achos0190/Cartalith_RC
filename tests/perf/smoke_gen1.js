@@ -2143,6 +2143,97 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.21: sprite-sheet slicer zoom/pan (owner: "I'd like zoom and pan buttons and an option
+  // for the viewer to zoom. That way it should be easier to work accurately with larger
+  // resolution sheets.") — SpriteSheetImporter lives inside the Asset Library's own IIFE (block 3)
+  // and is deliberately not exposed on window, so this block drives it purely through the DOM/real
+  // input, the same way an actual user would, rather than reaching into module internals. Pan-drag
+  // and click-to-select use real Playwright mouse events (not page.evaluate-dispatched synthetic
+  // PointerEvents) because canvas.setPointerCapture requires a genuinely browser-tracked pointer.
+  R.v121 = {};
+  {
+    const b64 = await page.evaluate(async () => {
+      const cv = document.createElement('canvas'); cv.width = 4096; cv.height = 2731;
+      const cx = cv.getContext('2d');
+      for (let i = 0; i < 20; i++) { cx.fillStyle = `hsl(${i * 17},60%,50%)`; cx.fillRect((i % 5) * 800, Math.floor(i / 5) * 700, 780, 680); }
+      const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+      const buf = await blob.arrayBuffer();
+      let binary = ''; const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    });
+    await page.evaluate(() => { if (!document.getElementById('assetsHeaderBtn').classList.contains('on')) document.getElementById('assetsHeaderBtn').click(); });
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.getElementById('alSlicerBtn').click());
+    await page.waitForTimeout(100);
+    await page.setInputFiles('#alSheetPicker', { name: 'v121_big_sheet.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') });
+    await page.waitForTimeout(200);
+
+    R.v121.scaffold = await page.evaluate(() => ({
+      zoomToolbarShown: getComputedStyle(document.getElementById('alSlZoom')).display !== 'none',
+      hasPanBtn: !!document.querySelector('#alSlMode [data-m="pan"]'),
+      cvW0: document.getElementById('alSlCv').width, pct0: document.getElementById('alSlZoomPct').textContent,
+    }));
+
+    R.v121.zoomButtons = await page.evaluate(() => {
+      const before = document.getElementById('alSlCv').width;
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      const afterIn = { w: document.getElementById('alSlCv').width, pct: document.getElementById('alSlZoomPct').textContent, scrollable: document.getElementById('alSlWrap').scrollWidth > document.getElementById('alSlWrap').clientWidth };
+      document.getElementById('alSlZoomFit').click();
+      const afterFit = { w: document.getElementById('alSlCv').width, pct: document.getElementById('alSlZoomPct').textContent, scrollLeft: document.getElementById('alSlWrap').scrollLeft };
+      return { before, afterIn, afterFit };
+    });
+
+    // real-mouse Pan-mode drag
+    await page.evaluate(() => {
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.querySelector('#alSlMode [data-m="pan"]').click();
+      document.getElementById('alSlWrap').scrollLeft = 200; document.getElementById('alSlWrap').scrollTop = 150;
+    });
+    await page.waitForTimeout(50);
+    let r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const panBefore = await page.evaluate(() => ({ l: document.getElementById('alSlWrap').scrollLeft, t: document.getElementById('alSlWrap').scrollTop }));
+    await page.mouse.move(r.x + 300, r.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(r.x + 240, r.y + 230, { steps: 5 });
+    const panCursor = await page.evaluate(() => document.getElementById('alSlCv').className);
+    await page.mouse.up();
+    const panAfter = await page.evaluate(() => ({ l: document.getElementById('alSlWrap').scrollLeft, t: document.getElementById('alSlWrap').scrollTop, cls: document.getElementById('alSlCv').className }));
+    R.v121.pan = { before: panBefore, duringCursor: panCursor, after: panAfter,
+      movedCorrectly: (panBefore.l - (r.x + 240 - (r.x + 300))) === panAfter.l && (panBefore.t - (r.y + 230 - (r.y + 300))) === panAfter.t };
+
+    // cell-select still hits the right cell at a non-fit zoom (the real regression risk — proves
+    // evToSrc needed no changes for the new camera)
+    await page.evaluate(() => {
+      document.querySelector('#alSlMode [data-m="select"]').click();
+      document.getElementById('alSlZoomFit').click();
+      document.getElementById('alSlCols').value = 4; document.getElementById('alSlCols').dispatchEvent(new Event('input'));
+      document.getElementById('alSlRows').value = 4; document.getElementById('alSlRows').dispatchEvent(new Event('input'));
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.getElementById('alSlWrap').scrollLeft = 0; document.getElementById('alSlWrap').scrollTop = 0;
+    });
+    await page.waitForTimeout(80);
+    r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const selBefore = await page.evaluate(() => document.getElementById('alSlCount').textContent);
+    await page.mouse.click(r.x + 40, r.y + 40);
+    const selAfter = await page.evaluate(() => document.getElementById('alSlCount').textContent);
+    R.v121.selectAtZoom = { selBefore, selAfter, pct: await page.evaluate(() => document.getElementById('alSlZoomPct').textContent) };
+
+    // wheel-zoom-to-cursor
+    await page.evaluate(() => document.getElementById('alSlZoomFit').click());
+    await page.waitForTimeout(50);
+    const pctBefore = await page.evaluate(() => document.getElementById('alSlZoomPct').textContent);
+    r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left + 150, y: b.top + 100 }; });
+    await page.mouse.move(r.x, r.y);
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(80);
+    R.v121.wheelZoom = { pctBefore, pctAfter: await page.evaluate(() => document.getElementById('alSlZoomPct').textContent) };
+
+    await page.evaluate(() => document.getElementById('alSlClose').click());
+    await page.evaluate(() => { const b = document.getElementById('assetsHeaderBtn'); if (b && b.classList.contains('on')) b.click(); });
+  }
+
   await browser.close();
 
   // ---- assertions ----
@@ -2404,6 +2495,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.20: the manually-placed icon draws without throwing (pack sprite or generic glyph fallback)', R.v120.drawsWithoutThrow);
   A('v1.20: every new feature-icon key has a real glyph fallback', R.v120.allNewKeysHaveGlyphs);
   A('v1.20: PACK_ICON_SLOTS grew from 4 to 10', R.v120.packIconSlotsCount === 10);
+  A('v1.21: the zoom toolbar and Pan mode button exist once a sheet is loaded', R.v121.scaffold.zoomToolbarShown && R.v121.scaffold.hasPanBtn);
+  A('v1.21: a sheet loads at a sane fit-to-view scale (not 100%, not 0)', R.v121.scaffold.cvW0 > 0 && R.v121.scaffold.pct0 !== '100%');
+  A('v1.21: Zoom In grows the canvas past the wrap (native scroll now applies)', R.v121.zoomButtons.afterIn.w > R.v121.zoomButtons.before && R.v121.zoomButtons.afterIn.scrollable);
+  A('v1.21: Fit restores the original scale and resets scroll to 0,0', R.v121.zoomButtons.afterFit.w === R.v121.zoomButtons.before && R.v121.zoomButtons.afterFit.scrollLeft === 0);
+  A('v1.21: dragging in Pan mode moves the wrap\'s scroll offset by the drag delta', R.v121.pan.duringCursor.includes('panning') && R.v121.pan.movedCorrectly);
+  A('v1.21: cell click-to-select still hits the right cell at a non-fit zoom (evToSrc needed no changes)', R.v121.selectAtZoom.selBefore === '0 selected' && R.v121.selectAtZoom.selAfter === '1 selected' && R.v121.selectAtZoom.pct !== '100%');
+  A('v1.21: wheel-zoom actually zooms in', parseInt(R.v121.wheelZoom.pctAfter) > parseInt(R.v121.wheelZoom.pctBefore));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

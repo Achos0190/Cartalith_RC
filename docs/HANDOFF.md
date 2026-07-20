@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.20.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.21.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.21 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.19` are kept and never edited.
+  (v1.22 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.20` are kept and never edited.
+- **v1.21 — owner: "I'd like zoom and pan buttons and an option for the viewer to zoom. That way
+  it should be easier to work accurately with larger resolution sheets."** Follow-up to a question
+  about the Asset Library's sprite-sheet slicer (`SpriteSheetImporter`, script block 3): the
+  slicer always scaled the *entire* sheet down to fit a fixed box, so a large/detailed sheet just
+  shrank with no way to work at higher precision. Key finding: the slicer's canvas already sits
+  inside `.al-slice-cv-wrap`, which is CSS `overflow:auto` — never triggered before because
+  `redraw()` deliberately capped the canvas to always fit. Lifting that cap on zoom makes the
+  canvas larger than its container and the **browser's own scrollbars/wheel-scroll/touch-scroll
+  pan it for free** — no custom camera system needed (unlike the main map's `viewT`/`zoomAt` or
+  the v1.18 City Viewer's `_cvCam`), and `evToSrc()` (every existing tool's pointer→source-
+  coordinate conversion) needed zero changes since `getBoundingClientRect()` already reflects
+  scroll position. New `−`/`+`/`Fit` zoom buttons + a live `%` readout + wheel-zoom-to-cursor
+  (same "keep the point under the cursor fixed" trick as the main map's `zoomAt()`, via scroll
+  offsets instead of a transform); new 4th "✋ Pan" mode alongside select/grid/pick, dragging
+  adjusts the wrap's scroll by the drag delta (mirrors the main map's own `panDrag` idiom).
+  Verified: engine **992/992** and UME **852/852** (both unchanged — block 3 only), hash vs v1.20
+  **ALL IDENTICAL including `icons`** (pure Asset Library UI, zero map-render effect), smoke
+  **243/243** (+7, driven purely through the DOM/real Playwright mouse input since
+  `SpriteSheetImporter` is intentionally not exposed on `window` — including a check that
+  cell-click-to-select still hits the right cell at a non-fit zoom, the real regression risk).
 - **v1.20 — owner: "let's go up to 4/5 different possible tree types (and for other landscape
   types and features) that can be placed at relatively random."** Follow-up to a walkthrough of
   the Asset Library's coverage: the opt-in procedural map-icon layer (`state.viz.icons`, default
@@ -1179,6 +1199,12 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   far more categories — ruins, standing stones, lighthouses, culture packs, etc. — than fit this
   request; those remain reachable today only via the Asset Library's existing free-form `custom`
   icon family + sprite-sheet slicer, manually placed one at a time, not auto-attached to anything).
+- **Sprite-sheet slicer zoom/pan (v1.21) — shipped.** Zoom buttons + wheel-zoom-to-cursor + a
+  dedicated Pan mode, leveraging the slicer's pre-existing (previously dormant)
+  `overflow:auto` wrap for native scroll-based panning. No scope cuts to speak of — the request
+  was fully self-contained to this one tool. Worth knowing for later: the zoom cap is a flat
+  ~6000px canvas-dimension ceiling (memory-bounded), not tied to the sheet's native resolution, so
+  even a modest sheet can zoom in well past 1:1 if that's genuinely useful for precision.
 - **Settlement generation refactor (v1.17) — shipped (audit + S1–S7).** Documented scope cuts,
   not forgotten: (a) per-culture town morphology — `civFactionCulture` now reaches
   `opts.culture`, but UME still ships 2 profiles ('medieval'/'venus'), so every faction resolves

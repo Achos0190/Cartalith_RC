@@ -12,6 +12,59 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.21 (2026-07-20)
+**Owner: "I'd like zoom and pan buttons and an option for the viewer to zoom. That way it should
+be easier to work accurately with larger resolution sheets."** Follow-up to a question about the
+Asset Library's sprite-sheet slicer (`SpriteSheetImporter`, script block 3): no size cap exists on
+upload, but the slicer's canvas always scaled the *entire* sheet down to fit a fixed box, so a
+large/detailed sheet just shrank — there was no way to work at higher precision.
+
+**Key finding that shaped the approach**: the slicer's canvas already sits inside
+`.al-slice-cv-wrap`, which is CSS `overflow:auto` — that never used to trigger because `redraw()`
+deliberately capped the canvas to always fit inside it. Lifting that cap when the user zooms in
+makes the canvas larger than its container, and the **browser's own scrollbars/wheel-scroll/
+touch-scroll pan it for free** — no custom camera system needed, unlike the main map's `viewT`/
+`zoomAt` or the v1.18 City Viewer's `_cvCam`. This also meant `evToSrc(e)` (the function every
+existing tool — cell select, grid-handle drag, the eyedropper — uses to convert a pointer event to
+source-sheet coordinates) needed **zero changes**: `getBoundingClientRect()` already reflects the
+canvas's current on-screen position, scrolled or not.
+
+- **Zoom**: new `zoomMul` state (default 1, reset on each new sheet load), multiplying the
+  existing fit-to-box scale. `−`/`+`/`Fit` buttons in a new small toolbar row, plus wheel-zoom-to-
+  cursor (captures the source point under the cursor via the existing `evToSrc`, applies the zoom
+  step, then adjusts the wrap's scroll offset so that point lands back under the cursor — the same
+  trick the main map's `zoomAt()` does, just via scroll instead of a CSS transform). A live `NN%`
+  readout. Capped so the canvas never exceeds ~6000px on either axis regardless of the sheet's
+  aspect ratio (memory-bounded, not an arbitrary "native size" cutoff — sheets that are still hard
+  to click precisely even at native resolution can zoom further).
+- **Pan**: new 4th mode (`'pan'`, alongside `select`/`grid`/`pick`) in the existing mode-picker
+  segmented control — "✋ Pan". A dedicated mode (not a modifier key) avoids any ambiguity with
+  cell-click-select or grid-handle-drag. Pointerdown/move/up in this mode adjust the wrap's
+  `scrollLeft`/`scrollTop` directly by the drag delta — mirrors the main map's own `panDrag` idiom,
+  just targeting scroll instead of a transform. Native scrollbars/trackpad/two-finger-scroll still
+  work in every mode as a fallback.
+- `.al-slice-cv-wrap` dropped its flex centering (a flex container centering an item that
+  overflows it is a known cross-browser quirk — the "before" overflow can end up unreachable by
+  scroll); the canvas now sits in plain top-left block flow, which is also the more common
+  raster-editor convention once you're zoomed in.
+
+**Verification:** `tests/run.sh`/`tests/run_um.sh` **992/852, unchanged** (script blocks 1/4
+untouched — this is entirely inside the block-3 `SpriteSheetImporter` object). `hash_gen1.js` vs
+v1.20 — **ALL IDENTICAL including the `icons` scenario** (Asset Library UI change, zero effect on
+map rendering, unlike v1.20's own intentional divergence there). `smoke_gen1.js` **243/243** (+7):
+new coverage drives the tool purely through the DOM/real input exactly like an actual user, since
+`SpriteSheetImporter` lives inside the Asset Library's own IIFE and is deliberately not exposed on
+`window`; pan-drag and click-to-select assertions use real Playwright mouse events rather than
+synthetic `dispatchEvent`-built `PointerEvent`s, since `canvas.setPointerCapture` requires a
+genuinely browser-tracked pointer. Confirms: the zoom toolbar/Pan button exist once a sheet loads;
+a sheet loads at a sane fit scale; Zoom In grows the canvas past the wrap (scrolling now applies)
+and Fit restores it; a Pan-mode drag moves the wrap's scroll by the exact drag delta; **cell
+click-to-select still hits the right cell at a non-fit zoom** (the real regression risk — proves
+`evToSrc` genuinely needed no changes); wheel-zoom actually zooms in. Playwright-probed against a
+synthetic 4096×2731 sheet (matching the dimensions of the reference sheet the owner shared
+earlier) with screenshots confirming a zoomed-in view renders cleanly with the grid overlay, cell
+labels, and selection highlight all correctly aligned.
+
 ### v1.20 (2026-07-20)
 **Owner: "let's go up to 4/5 different possible tree types (and for other landscape types and
 features) that can be placed at relatively random."** Follow-up to a walkthrough of the Asset

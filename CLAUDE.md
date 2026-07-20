@@ -3,20 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.20**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.21**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.20.html` | **Current** unified tool (~23.8k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.19.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.21.html` | **Current** unified tool (~23.9k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.20.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports, `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 984-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 992-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +28,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (984 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (992 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -387,6 +387,47 @@ steppe/desert/tundra.
   etc.) remains reachable only via the Asset Library's existing free-form `custom` icon family +
   sprite-sheet slicer, manually placed, not auto-attached to anything.
 
+### Sprite-sheet slicer zoom/pan (v1.21)
+
+Owner request, prompted by asking whether the slicer (`SpriteSheetImporter`, block 3) has a max
+upload size: it doesn't, but `redraw()` always scaled the WHOLE sheet down to fit a fixed box, so
+a large/detailed sheet just got small — no way to work at precision. Owner: *"I'd like zoom and
+pan buttons and an option for the viewer to zoom. That way it should be easier to work accurately
+with larger resolution sheets."*
+
+- **Key finding**: `.al-slice-cv-wrap` already had CSS `overflow:auto`, dormant only because
+  `redraw()` always capped the canvas to fit inside it. Lifting that cap on zoom lets the canvas
+  exceed its container and the browser's own scrollbars/wheel-scroll/touch-scroll do the panning
+  for free — no custom camera/transform system needed (unlike the main map's `viewT`/`zoomAt()` or
+  the v1.18 City Viewer's `_cvCam`). Consequently `evToSrc(e)` (the pointer→source-coordinate
+  converter every hit-test/drag function depends on) needed **zero changes** — it already derives
+  from `cv.getBoundingClientRect()`, which stays accurate regardless of scroll position.
+- **Zoom**: new `zoomMul` state (reset to `1` on every new sheet load); `redraw()`'s existing
+  fit-to-box math becomes the baseline (`fitScale()`), actual `scale = fitScale()*zoomMul` — every
+  downstream draw call already multiplied purely by `scale`, so no other redraw changes. `−`/`+`/
+  `Fit` buttons plus a live `NN%` readout (new `.al-slice-zoom` toolbar); wheel-zoom on the wrap
+  zooms to cursor (`zoomBy(factor,clientX,clientY)` captures the source point under the cursor via
+  `evToSrc` before rescaling, then adjusts `wrap.scrollLeft/scrollTop` to keep it fixed — the same
+  trick the main map's `zoomAt()` does via transform instead of scroll). `maxZoomMul()` caps zoom
+  at a flat ~6000px canvas-dimension ceiling (memory-bounded, not tied to the sheet's native
+  resolution).
+- **Pan**: new 4th mode (`'pan'`, "✋ Pan") in `#alSlMode` alongside select/grid/pick. Its
+  pointerdown/pointermove/pointerup handlers capture the starting scroll offset and client
+  position, then set `wrap.scrollLeft/scrollTop` from the client-space delta — mirrors the main
+  map's own `panDrag` idiom, just targeting native scroll instead of a CSS transform. Native
+  scrollbars/trackpad scroll keep working in every mode regardless — Pan mode is for click-drag
+  precision, not the only way to move around.
+- **Flex-centering fix**: `.al-slice-cv-wrap` changed from a flex container
+  (`align-items:flex-start;justify-content:center`) to plain block layout — a flex container
+  centering an item that overflows it is a known cross-browser quirk where the "before" overflow
+  can end up unreachable by scroll; the canvas now just sits top-left in normal flow.
+- **Known scope cuts**: none — the tool had zero prior headless/smoke coverage, so this feature
+  also added the first Playwright-driven smoke coverage for the slicer (`R.v121` in
+  `tests/perf/smoke_gen1.js`), necessarily DOM/real-mouse-driven since `SpriteSheetImporter` is
+  deliberately not exposed on `window` (synthetic `dispatchEvent` PointerEvents fail Chromium's
+  `setPointerCapture`, which requires a genuinely browser-tracked pointer — Playwright's real
+  `page.mouse.*` APIs sidestep this).
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -445,7 +486,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 984-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 992-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
