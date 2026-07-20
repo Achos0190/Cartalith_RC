@@ -1907,6 +1907,46 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
+  R.v117 = await page.evaluate(async () => {
+    const out = {};
+    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.getElementById('civAutoPopulateBtn').click();
+    await new Promise(r => setTimeout(r, 150));
+    const settlements = state.places.filter(p => p && p.category === 'settlement');
+    out.nSettlements = settlements.length;
+    out.allHaveSpecialisation = settlements.length > 0 && settlements.every(p => typeof p.specialisation === 'string');
+    // S4 wall-spec ladder spot checks (pure function)
+    const mk = (kind, pop, traits, extra) => Object.assign({ x: settlements[0].x, y: settlements[0].y, kind, pop, traits: traits || [], category: 'settlement' }, extra || {});
+    out.fortressStone = _umWallSpec(mk('fortress', 300, [])) === 'stone';
+    out.plainHamletNone = _umWallSpec(mk('hamlet', 80, [])) === 'none';
+    out.overrideFalseWins = _umWallSpec(mk('capital', 15000, [], { umWalls: false })) === 'none';
+    // S6: settlement function reaches the layout engine in-browser
+    const c = _umPlaceContext(Object.assign({}, settlements[0], { specialisation: 'trade_hub' }));
+    out.economyInCtx = !!(c.economy && c.economy.specialisation === 'trade_hub');
+    const m = UME.cityGen(c.seed, c);
+    out.warehouseTagged = !!m && m.parcels.some(par => par.district === 'warehouse');
+    // S7: Site-profile raster view
+    const btn = document.querySelector('#debugSeg button[data-d="siteprofile"]');
+    out.siteprofileBtn = !!btn;
+    if (btn) { btn.click(); await new Promise(r => setTimeout(r, 250)); }
+    out.siteprofileState = state.debug;
+    out.siteprofileLegend = (document.getElementById('legend') || { innerHTML: '' }).innerHTML.includes('buildable');
+    document.querySelector('#debugSeg button[data-d="off"]').click();
+    await new Promise(r => setTimeout(r, 120));
+    // S7: settlement-diagnostics overlay draws on the civ canvas
+    const ccv = document.getElementById('civCanvas');
+    const snap = () => { const d = ccv.getContext('2d').getImageData(0, 0, ccv.width, ccv.height).data; let h = 2166136261 >>> 0; for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    const before = snap();
+    const chk = document.getElementById('civDiagnosticsChk');
+    out.diagChk = !!chk;
+    if (chk) { chk.checked = true; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 250)); }
+    out.diagDraws = snap() !== before;
+    if (chk) { chk.checked = false; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 120)); }
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2139,6 +2179,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.15 Ctrl+Z (field-level undo, post-commit) reverts the bake', R.sculpt.undoRevertsField && R.sculpt.undoDifferedFromCommitted);
   A('v1.15 LOD-mode painting draws the stamp overlay (drawLODView tail) without throwing', R.sculpt.lodOverlayDrawsWithoutError === true);
   A('v1.15 brush size is real-world/zoom-relative: the km-radius readout tracks brushSize (grid cells), doubling brushSize doubles the reported km', R.sculpt.kmReadoutAt32 && R.sculpt.kmReadoutDoublesWithBrushSize);
+
+  // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
+  A('v1.17 S2: auto-populate assigns a specialisation to every settlement', R.v117.nSettlements > 0 && R.v117.allHaveSpecialisation === true);
+  A('v1.17 S4: wall-spec ladder — fortress stone, plain hamlet none, umWalls:false override wins', R.v117.fortressStone && R.v117.plainHamletNone && R.v117.overrideFalseWins);
+  A('v1.17 S6: settlement function reaches the layout engine (economy in ctx → warehouse district in the model)', R.v117.economyInCtx && R.v117.warehouseTagged);
+  A('v1.17 S7: Site-profile debug view wired (button + state.debug + legend)', R.v117.siteprofileBtn && R.v117.siteprofileState === 'siteprofile' && R.v117.siteprofileLegend);
+  A('v1.17 S7: settlement-diagnostics overlay toggle draws on the civ canvas', R.v117.diagChk && R.v117.diagDraws);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

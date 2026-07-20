@@ -9,11 +9,48 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.16.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.17.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.17 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.15` are kept and never edited.
+  (v1.18 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.16` are kept and never edited.
+- **v1.17 — owner: "Settlement Generation Audit & Refactor... make settlements emerge naturally
+  from the world's geography instead of appearing as generic procedural stamps... The renderer
+  should never invent geography."** Delivered in the owner's requested order: the full
+  architectural audit FIRST (`docs/research/settlement-generation-audit.md` — 25 subsystems
+  classified, weaknesses ranked; decisive findings: the UME engine modeled water but not land
+  — 3 invented Gaussian hills drove every in-town terrain decision — and no generated
+  settlement ever had a `specialisation`), then phases S1–S7, every engine capability keyed on
+  a NEW `opts.*` (v0.98 guard pattern ⇒ synthetic path byte-identical). **S1** `_umSiteProfile(p)`
+  (cached Site Profile from existing primitives; surfaced in the Inspector) + the model-cache
+  water-fingerprint collision fix (mask bytes FNV-hashed, not counted). **S2** auto-populate
+  derives `p.specialisation` from the profile (scored rules, 0.30 floor → honest 'none';
+  `==null`-guarded so hand-set values survive); `mining` trait re-keyed off real hinterland ore
+  (was elevation>0.55); faction culture passthrough. **S3** `_umTerrainCtx(p)` — the land twin
+  of `_umWaterCtx` (22 m bilinear raster of real `field`); `buildSite.height()` reads it,
+  every downstream consumer (street costs, market siting, bridgePt, slope rejection,
+  suitability) just works; `terrainAware` on ⇒ steep/flooded parcels excluded. Latent
+  2-point-riverPath crash in `addRiverBridges` fixed. **S4** `_umWallSpec(p)` none|ditch|
+  palisade|stone ladder (fortress always stone; most hamlets honestly unwalled; `umWalls`
+  override wins) threaded through `opts.wallStyle` to style-aware rendering; wall ring deflects
+  (bounded, relief-relative) onto genuinely higher real ground — proven by a synthetic-ridge
+  unit test + the `wallState.terrainDeflected` diagnostic. **S5** `_umWaterCtx` exports
+  `riverOrder`/`seaLakeCells` (pre-river-stamp); decorative auto-bridges gone —
+  `detectRiverCrossings` on the FINAL graph records road×centerline intersections as
+  `site.bridges` (the road IS the bridge), crossing-less through-towns get a `site.ford`;
+  `buildHarbour` requires navigability (sea/lake ≥40 cells or order ≥3) + non-cliff shore,
+  stamping `site.harbourInvalid` otherwise (fixed-seed run: 26 stream "harbours" suppressed,
+  16/16 bridges road-justified, 4/4 crossing-less through-towns got fords). **S6**
+  `opts.economy={specialisation,oreBearing}` → bounded district overrides (oreyard/fishery/
+  sawyard/granary/warehouse/paddocks) with physical predicates + scale-relative hamlet
+  fallbacks, yard-shed grammar, per-economy details (spoil heaps/drying racks/log booms),
+  renderer tints (36/38 economy towns carry their district; zero leakage). **S7** new
+  `siteprofile` debug raster view (slope+flood buildability composite, full established
+  pattern incl. `renderDebugTile` + new `currentSlopeField()`) + a `state.viz.civDiagnostics`
+  vector overlay (footprint box + specialisation/wall-spec/river-class/bridge-ford-harbour
+  validity card per settlement; peeks the model LRU by seed prefix, never triggers
+  generation). Verified: engine **984/984**, UME **852/852** (+21), hash vs v1.16 **ALL
+  IDENTICAL**, smoke **216/216** (+5), fixed-seed screenshots.
 - **v1.16 — owner: "redesigning the Civilization interface... a UI and data architecture
   refactor, not a rewrite of the underlying simulation... generation tools at the top, followed
   by faction administration, settlement management, and world statistics."** `#genCiv` reorganized
@@ -1003,11 +1040,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.95), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (984 as of v1.15), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`. Script block 4 (urban
    morphology, v0.95+) is pure/DOM-free like block 1 and gets its own harness, `tests/run_um.sh`
-   (831 assertions, ported from `urban-morphology/tests/`) — but the civ-layer adapter/renderer
-   that calls it is block 2, so that half still needs `tests/perf/smoke_gen1.js`.
+   (852 assertions as of v1.17, ported from `urban-morphology/tests/`) — but the civ-layer
+   adapter/renderer that calls it is block 2, so that half still needs `tests/perf/smoke_gen1.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
    seed 12345, 256px, region mode. `tests/perf/hash_gen1.js` is the Playwright A/B battery for
@@ -1030,6 +1067,18 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Settlement generation refactor (v1.17) — shipped (audit + S1–S7).** Documented scope cuts,
+  not forgotten: (a) per-culture town morphology — `civFactionCulture` now reaches
+  `opts.culture`, but UME still ships 2 profiles ('medieval'/'venus'), so every faction resolves
+  to 'medieval' morphology; (b) `model.details` (including the new per-economy spoil-heap/
+  drying-rack/log-boom props) are generated but the Gen1 map/preview renderers have never drawn
+  details — a pre-existing limitation; the economy reads via district tints + yard-shed/warehouse
+  building fabric instead; (c) wall terrain-following is bounded vertex deflection (±60 m,
+  relief-relative), not a full ridge-tracing solver (stated in the audit); (d) valley WIDTH has
+  no engine primitive — `currentFloodField()` is the documented floodplain proxy; (e) richer
+  diagnostics (colour-coded district fills, per-epoch growth-stage view) would extend
+  `state.viz.civDiagnostics`; the raster + fact-card overlays shipped cover the owner's
+  validation list's core (footprint, slope, river class, wall spec, bridge/harbour validity).
 - **Sculpt editor (v1.15) — fully shipped, all 8 phases of `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`
   §9 complete (P0 noise/geometry/registry through P7 docs/tests), including the P3 acceptance test
   (painting + committing with a Resources/Carry-Cap/Settlement debug view already open updates that

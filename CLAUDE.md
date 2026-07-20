@@ -3,20 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.16**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.17**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.16.html` | **Current** unified tool (~22.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.15.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.17.html` | **Current** unified tool (~23.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.16.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports, `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 984-assertion suite; `run_um.sh`, 831-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 984-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +28,8 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (984 assertions green).
+  until it passes (984 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
 - GPU (WebGL) code, Web Worker glue, and canvas interaction cannot be tested headlessly — flag
@@ -220,6 +221,59 @@ Prosperity) — no separate computation path.
 `_civRenderSettlementList()`/`#civSettlementList`/`#civSettlementCount` (superseded by the
 virtualized table) were deleted outright, not left as dead-but-harmless code.
 
+### Settlement generation refactor (v1.17)
+
+Owner-directed audit-then-refactor ("settlements emerge from geography, the renderer never
+invents geography"). The audit ships as `docs/research/settlement-generation-audit.md` — read it
+before touching settlement code. Every new UME capability is keyed on a NEW `opts.*` (the v0.98
+guard pattern), so the synthetic path — and the headless UME suite's goldens — stays
+byte-identical; everything renders only under opt-in `urbanLayouts`/the tap-popup, so the default
+map render is bit-identical to v1.16.
+
+- **Site Profile (S1)**: `_umSiteProfile(p)` (block 2, cached Map keyed `x,y,_fieldGen,_civAggGen`)
+  — elevation/slope/aspect/relief/visibility, coast distance (`_civCoastDistField()` chamfer DT),
+  river order/width/confluence/distance (`_civRiverPolylines()` cache), floodplain
+  (`currentFloodField()` — the documented valley-width proxy), roads, resources (point +
+  hinterland-disc max), biome/climate, defensibility, buildable fraction. Surfaced as the
+  Inspector's "Site" line; feeds S2–S6. `_umCacheKey` FNV-hashes mask/terrain content (the old
+  count-based water fingerprint could collide two coastlines onto one cached layout).
+- **Function (S2)**: auto-populate assigns `p.specialisation` via `_civDeriveSpecialisation`
+  (priority rules + scored argmax, 0.30 floor → 'none' means honestly no economic pull;
+  `==null`-guarded so hand-set values survive). `mining` trait keyed off real hinterland ore.
+  `civFactionCulture` → `opts.culture` (UME still resolves to 'medieval' — plumbing only).
+- **Real terrain (S3)**: `_umTerrainCtx(p)` — the land twin of `_umWaterCtx` (22 m bilinear
+  raster of real `field` over the town box) → `opts.terrain`; `buildSite.height()` samples it
+  (the 3 invented Gaussian hills are skipped), so street costs/market siting/bridgePt/slope
+  rejection/`terrainSuitability` all read real relief with zero downstream changes;
+  `terrainAware` enabled on this path. Flat/coarse boxes honestly build flat-site towns.
+- **Walls (S4)**: `_umWallSpec(p)` → none|ditch|palisade|stone (fortress always stone; most
+  hamlets unwalled; `p.umWalls` override wins: true→stone/false→none), threaded as
+  `opts.wallStyle` → `wallState.style`; both renderers draw palisade/ditch visibly lighter than
+  stone. `buildWall` deflects ring vertices (±60 m, relief-relative gains, gated relief≥0.01)
+  onto genuinely higher real ground; `wallState.terrainDeflected` is the diagnostic.
+- **Validity (S5)**: `_umWaterCtx` exports `riverOrder` + `seaLakeCells` (counted BEFORE the
+  river band is stamped). With real water the decorative auto-bridges are gone:
+  `detectRiverCrossings(site,g)` runs on the FINAL graph (after `removeWaterCrossings`/
+  `privatizeAlleys`/`clearFortZone`) — surviving road×centerline intersections become
+  `site.bridges` (the road IS the bridge), a crossing-less through-town gets `site.ford`.
+  `buildHarbour` requires navigability (seaLakeCells≥40 or order≥3) and a non-cliff shore,
+  else no quay/piers/mole + `site.harbourInvalid='unnavigable'|'cliff'`.
+- **Economy (S6)**: `opts.economy={specialisation, oreBearing}` (`_umOreBearing` = direction of
+  the strongest hinterland deposit, layout-frame). `assignDistricts` adds bounded overrides on
+  physical predicates: oreyard (periphery toward the ore), fishery (waterfront), sawyard (bank,
+  periphery fallback), granary (by the market), warehouse rows (along primaries, sharing the
+  harbour store grammar), pastoral paddocks; scale-relative fallbacks keep hamlets honest.
+  Yard-shed grammar + per-economy details (spoil heaps/drying racks/log booms) + renderer
+  district tints (`_UM_ECON_TINT`). Specialisation is part of the model cache key.
+- **Diagnostics (S7)**: `siteprofile` debug raster view (block 1 — slope+flood buildability
+  composite via new `currentSlopeField()`, full pattern incl. `renderDebugTile` mirror + legend
+  + LAYER_GROUPS) and the `state.viz.civDiagnostics` vector overlay (block 2 — per-settlement
+  footprint box + specialisation/wall-spec/river-class/bridge-ford-harbour-validity card; peeks
+  the model LRU by seed prefix, NEVER builds a context or triggers generation; 60-card/frame cap).
+- **Known scope cuts** (documented in the audit + HANDOFF): per-culture morphology (2 UME
+  profiles), `model.details` never drawn by the Gen1 renderers (pre-existing), wall deflection
+  is bounded not ridge-tracing, floodplain is the valley-width proxy.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -280,7 +334,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ```bash
 tests/run.sh                        # newest Gen1 file: extract engine → node --check → 984-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
-tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 831-assertion urban-morphology suite
+tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (onboarding/layers/presets/phase)
