@@ -12,6 +12,78 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.18 (2026-07-20)
+**Owner: "introducing a detailed interactive city view accessible from Explore mode"** (part 2 of a
+larger religion+city-viewer request; per the owner's own prioritization the City Viewer shipped
+first, extending the existing UME engine rather than a new one, reusing existing LOD/cache/
+viewport-cull patterns rather than new generic infrastructure — religion editing is a separate,
+later effort, untouched here). Research (three parallel codebase passes + direct spot-checks)
+established the decisive fact that reframed the whole feature: **`UME.cityGen`'s model already
+carries almost everything the spec asked a city's form to depend on** — named districts
+(`assignDistricts`), real growth-stage history (`wall.history`/`parcel.age`/edge `.epoch`), and a
+full civic/religious/economic building roster (`churches`/`markets`/`civic`/`games`/`details`) —
+but **neither existing renderer ever drew any of it** (`_umDrawLayout`'s on-map crossfade and
+`_umDrawLayoutPreview`'s popup thumbnail both stop at water→blocks→streets→wall→bridges→buildings).
+Second finding: Explore mode's "Info" tool (`_civInfoAt`) only ever filled a plain terrain/nearest-
+settlement text sidebar (`#civInfoPanel`) — it never drew a city; the existing rich preview popup is
+a Civilization-mode (world-building) tool reached via the Inspect tool, matching the owner's own
+framing exactly ("Explore Mode... instead of only displaying basic settlement information"). **Net
+effect: this shipped almost entirely as a civ-layer (script block 2) rendering/camera/UI project —
+zero new `UME.cityGen` capability, zero new `opts.*`, UME engine suite untouched.**
+
+**Entry point**: `_civInfoAt`'s settlement search gained a tight pin-hit companion test (reusing
+`_civSelectPlaceAt`'s own pick radius) — a genuine hit on a settlement with a valid (non-open-water)
+model opens the new City Viewer **instead of** the plain sidebar summary; a miss (empty terrain, or
+a bare-water pin) falls through to exactly the old behavior. The Civilization-mode editor
+(`_civOpenPlacePopup`) is completely untouched — a separate, deliberately preserved workflow.
+
+**City Viewer shell**: new full-viewport modal (`#cityViewerModal`, canvas + docked info panel +
+close button) with its own lightweight pan/zoom camera (`_cvCam={panX,panY,scale}`) mirroring the
+main map's `viewT`/`zoomAt`/`panDrag` math conventions but fully self-contained — it never reads or
+writes the main map's own camera state. Opens via the existing `_umModelForNow` (synchronous,
+cache-backed since v1.00) and fits the initial view to the same built-mass bounding box
+`_umDrawLayoutPreview` already computes.
+
+**LOD-tiered draw pipeline** (`_cvDrawCity`): starts from `_umDrawLayoutPreview`'s exact layer stack,
+generalized to an arbitrary camera, then reveals data no renderer has ever drawn, gated purely by
+camera scale (draw-time only — the whole model, including civic/religious/clutter data, is already
+generated in one `UME.cityGen()` call regardless of the viewer, so there is no new generation-
+laziness machinery, only a draw-time reveal): parcel district fills + gates + plaza outline at the
+"city" tier (a genuinely new draw pass — only `blocks` were ever filled before), courtyard-building
+distinction at "neighbourhood," and civic/religious/market/clutter glyphs — wells, crosses, cranes,
+spoil heaps, drying racks, log booms, garden trees, fences, named markets, the civic hall, churches/
+temples, and games/monuments — at "max" detail, each viewport-culled via the exact bbox-with-margin
+idiom `drawCivLayer` already uses for settlements (no new spatial index). Per-detail label jitter is
+deterministic via the existing global `hash(x,y,seed)` primitive (the UME engine's own `stream`/
+`fnv1a` pair lives inside its isolated IIFE and isn't reachable from the civ layer).
+
+**City Information Panel** (`_civPopulateCityViewerInfo`): seven sections — General/Economy/
+Infrastructure/Military/Religion/Demographics/History — sourcing exclusively data already confirmed
+to exist (`_umSiteProfile`, `_civFactionAggregates()`, the seven `_civPlace*` primitives, the
+model's own `wall.history`/`markets`/`churches`/`metrics`). Faction-level figures (culture/
+government/religion/power/trade) are explicitly labeled "(faction-level)"; anything genuinely not
+simulated — per-settlement religious diffusion, a structured war/siege/plague timeline, literacy/
+wealth distribution — gets an honest "not yet modeled" note instead of a fabricated value, the same
+discipline v1.16/v1.17 already established. An "✏️ Edit settlement" button opens the existing
+Civilization-mode editor rather than a new city-layout editor — deep procedural edits (rename a
+district, place a monument at an exact spot, edit an individual road/bridge in the generated fabric)
+would need a whole new persisted per-city edit-overlay data model and are explicitly out of scope,
+documented in HANDOFF's Next/open section, alongside two other spec items not modeled: literal
+contour-terracing of mountain-town street layout and a distinct "pilgrimage city" archetype with
+ceremonial roads (both are genuinely new engine capabilities, not data the model already has).
+
+**Verification:** `tests/run.sh` **984/984 unchanged** (block 1 untouched); `tests/run_um.sh`
+**852/852 unchanged** (block 4/UME untouched — zero new `opts.*`); `hash_gen1.js` vs v1.17 **ALL
+IDENTICAL** (the viewer only ever renders inside its own new modal, opened by explicit action);
+`smoke_gen1.js` **223/223** (+7: empty-terrain click leaves the plain sidebar + viewer closed
+exactly as before — a hard regression guard; a genuine settlement-pin click opens the viewer instead
+of the summary; all 7 info-panel sections render real data including the honest "not modeled" notes;
+the camera zooms and LOD tiers reveal different canvas content as scale crosses a threshold; the
+Edit button reaches the existing Civilization-mode popup; both close paths — × and Escape — work and
+clear camera state; the Civilization-mode editor itself is provably byte-for-byte unaffected).
+Fixed-seed (12345, 200km/1024px) screenshots: the viewer's fit-to-built-mass overview and its max-
+detail tier (visible market/church/well glyphs, all sourced from that settlement's own real model).
+
 ### v1.17 (2026-07-20)
 **Owner: "Settlement Generation Audit & Refactor... make settlements emerge naturally from the world's geography instead of appearing as generic procedural stamps... A settlement is not an independent object. It is the visible consequence of: terrain, hydrology, transport, resources, economy, political function, historical growth. The renderer should never invent geography. Every visible feature must be justified by the underlying simulation."** Delivered as the owner's explicitly requested sequence: a full architectural audit FIRST (`docs/research/settlement-generation-audit.md` — 25 subsystems classified Physically-correct / Simplified-but-acceptable / Decorative / Incorrect / Redundant / Missing, with line references and a prioritized weakness list), then phased implementation S1–S7. Every new engine capability is keyed on a NEW `opts.*` being present (the v0.98 guard pattern), so the synthetic path — and with it the headless UME suite's golden hashes — stays **byte-identical**, and everything downstream of `UME.cityGen` renders only under the opt-in `urbanLayouts` toggle + the tap-popup, so the default map render is **bit-identical to v1.16** (hash battery ALL IDENTICAL).
 

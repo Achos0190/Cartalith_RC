@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.17**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.18**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.17.html` | **Current** unified tool (~23.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.16.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.18.html` | **Current** unified tool (~23.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.17.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -273,6 +273,50 @@ map render is bit-identical to v1.16.
 - **Known scope cuts** (documented in the audit + HANDOFF): per-culture morphology (2 UME
   profiles), `model.details` never drawn by the Gen1 renderers (pre-existing), wall deflection
   is bounded not ridge-tracing, floodplain is the valley-width proxy.
+
+### Interactive City Viewer (v1.18)
+
+Owner request (part 2 of a religion+city-viewer ask; the owner prioritized this first via
+`AskUserQuestion`, deferring religion editing to a separate later effort). Extends the existing
+UME engine/adapter rather than a new one: `UME.cityGen`'s model already carried named districts,
+real growth-stage history (`wall.history`/`parcel.age`/edge `.epoch`), and a full civic/religious/
+economic building roster (`churches`/`markets`/`civic`/`games`/`details`) that neither existing
+renderer (`_umDrawLayout`, `_umDrawLayoutPreview`) ever drew — this feature is almost entirely a
+civ-layer (block 2) rendering/camera/UI addition, zero new `UME.cityGen` capability or `opts.*`.
+
+- **Entry point**: `_civInfoAt` (Explore mode's "Info" tool — previously a plain terrain/nearest-
+  settlement text sidebar, `#civInfoPanel`) gained a tight pin-hit test (reusing
+  `_civSelectPlaceAt`'s own pick radius) — a genuine settlement hit with a valid model calls
+  `_civOpenCityViewer(p)` instead of filling the sidebar; a miss falls through unchanged. The
+  Civilization-mode editor (`_civOpenPlacePopup`, reached via the Inspect tool/settlement table/
+  right-click) is untouched — a deliberately separate "author the world" vs. "explore the world"
+  split.
+- **Shell**: `#cityViewerModal` (full-viewport, canvas + docked `#cvInfoPanel`), its own camera
+  `_cvCam={panX,panY,scale}` (pan/zoom math mirrors the main map's `viewT`/`zoomAt`/`panDrag`
+  convention but is fully self-contained — never reads/writes the main map's camera). Opens via
+  the existing `_umModelForNow` (synchronous, cache-backed since v1.00); initial view fits the
+  same built-mass bounding box `_umDrawLayoutPreview` already computes.
+- **LOD draw pipeline** (`_cvDrawCity`): extends `_umDrawLayoutPreview`'s exact layer stack
+  (water→blocks→streets→wall→bridges→buildings+ridge), gated purely by camera scale (draw-time
+  only — the whole model is already generated in one `UME.cityGen()` call regardless of the
+  viewer, so there's no new generation-laziness machinery): parcel district fills
+  (`_UM_DISTRICT_FILL`) + gates + plaza at the "city" tier (`CV_LOD_CITY`), courtyard-building
+  distinction at "neighbourhood" (`CV_LOD_HOOD`), civic/religious/market/clutter glyphs at "max"
+  (`CV_LOD_MAX`) — each viewport-culled via the same bbox-with-margin idiom `drawCivLayer` already
+  uses for settlements. Per-glyph jitter uses the global `hash(x,y,seed)` primitive (block 1),
+  not the UME engine's own `stream`/`fnv1a` pair, which lives inside its isolated IIFE and isn't
+  reachable from block 2.
+- **Info panel** (`_civPopulateCityViewerInfo`): General/Economy/Infrastructure/Military/Religion/
+  Demographics/History, sourcing only data already confirmed to exist (`_umSiteProfile`,
+  `_civFactionAggregates()`, the `_civPlace*` primitives, `wall.history`). Faction-level figures
+  labeled "(faction-level)"; genuinely unsimulated data (per-settlement religion, a structured
+  event timeline) gets an honest "not yet modeled" note, never a fabricated value. Edit button
+  opens the existing settlement editor — no new city-layout editing.
+- **Known scope cuts** (documented in HANDOFF): deep procedural-layout editing (needs a new
+  persisted per-city edit-overlay model), literal contour-terracing, a "pilgrimage city"
+  archetype with ceremonial roads — all genuinely new engine capabilities, unlike everything else
+  this feature surfaces, which was already generated and simply never drawn. Religion Manager
+  (the deferred half of the original request) — not started.
 
 ### Engine (block 1) essentials
 

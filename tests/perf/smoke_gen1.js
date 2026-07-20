@@ -1947,6 +1947,77 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.18: Interactive City Viewer (Explore mode) ──
+  R.v118 = await page.evaluate(async () => {
+    const out = {};
+    const settlements = state.places.filter(p => p && p.category === 'settlement');
+    let target = null;
+    for (const p of settlements) { if (_umModelForNow(p)) { target = p; break; } }
+    out.foundTarget = !!target;
+    if (!target) return out;
+
+    // regression guard: an empty-terrain click still fills the plain sidebar summary, modal stays shut.
+    // Pick a corner cell provably far from EVERY settlement (not a hardcoded coord) — by this point
+    // in the suite, many earlier phases have left small synthetic worlds/test settlements behind,
+    // so a fixed low coordinate like (3,3) can coincide with a leftover pin and give a false failure.
+    const cvSafeR2 = Math.max(100, (GW / 50) * (GW / 50));
+    let emptyGx = 3, emptyGy = 3, triedCorner = false;
+    for (const [cx, cy] of [[3, 3], [GW - 3, 3], [3, GH - 3], [GW - 3, GH - 3], [Math.floor(GW / 2), 3]]) {
+      if (settlements.every(p => (p.x - cx) ** 2 + (p.y - cy) ** 2 > cvSafeR2)) { emptyGx = cx; emptyGy = cy; triedCorner = true; break; }
+    }
+    out.foundSafeEmptySpot = triedCorner;
+    document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset</div>';
+    _civInfoAt(emptyGx, emptyGy);
+    out.emptyClickFillsPanel = document.getElementById('civInfoPanel').innerHTML !== '<div class="hint">reset</div>';
+    out.emptyClickModalClosed = !document.getElementById('cityViewerModal').classList.contains('open');
+
+    // a genuine settlement-pin click opens the viewer INSTEAD of the plain summary
+    document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset2</div>';
+    _civInfoAt(Math.round(target.x), Math.round(target.y));
+    out.settlementClickOpensModal = document.getElementById('cityViewerModal').classList.contains('open');
+    out.settlementClickSkipsPlainPanel = document.getElementById('civInfoPanel').innerHTML === '<div class="hint">reset2</div>';
+
+    // info panel renders real sections, including the honest "not modeled" notes (never fabricated)
+    const infoHtml = document.getElementById('cvInfoPanel').innerHTML;
+    out.infoSectionsPresent = ['General', 'Economy', 'Infrastructure', 'Military', 'Religion', 'Demographics', 'History'].every(s => infoHtml.includes(s));
+    out.infoHonestNotes = infoHtml.includes('not yet modeled') && infoHtml.includes('not modeled');
+
+    // camera pan/zoom mutate state
+    const cv = document.getElementById('cvCanvas');
+    const s0 = _cvCam.scale;
+    _cvZoomAt(cv.width / 2, cv.height / 2, 1.3);
+    out.zoomChangesScale = _cvCam.scale !== s0;
+
+    // LOD tiers reveal different pixels as the camera scale crosses a threshold
+    const hashCanvas = () => { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let h = 2166136261 >>> 0; for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    _cvCam = _cvFitCam(_cvModel, cv.width, cv.height); _cvCam.scale = 0.2; _cvRender();
+    const hOverview = hashCanvas();
+    _cvCam.scale = 3.5; _cvRender();
+    out.lodTiersDiffer = hashCanvas() !== hOverview;
+
+    // the Edit button routes to the EXISTING (untouched) Civilization-mode editor
+    document.getElementById('cvEditBtn').click();
+    await new Promise(r => setTimeout(r, 100));
+    out.editOpensExistingPopup = document.getElementById('placeEditPopup').style.display !== 'none';
+    _civClosePlacePopup();
+
+    // close paths: × button and Escape both work; camera state clears
+    document.getElementById('cvCloseBtn').click();
+    out.closeButtonWorks = !document.getElementById('cityViewerModal').classList.contains('open') && _cvCam === null;
+    _civOpenCityViewer(target);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    out.escapeWorks = !document.getElementById('cityViewerModal').classList.contains('open');
+
+    // zero regression: the Civilization-mode settlement editor (_civOpenPlacePopup) still works,
+    // completely independent of the new viewer
+    _civSelectedPlace = target;
+    _civOpenPlacePopup();
+    out.civModeEditorUnaffected = document.getElementById('placeEditPopup').style.display !== 'none' && !!document.getElementById('placeEditPopupBody');
+    _civClosePlacePopup(); _civSelectedPlace = null;
+
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2186,6 +2257,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.17 S6: settlement function reaches the layout engine (economy in ctx → warehouse district in the model)', R.v117.economyInCtx && R.v117.warehouseTagged);
   A('v1.17 S7: Site-profile debug view wired (button + state.debug + legend)', R.v117.siteprofileBtn && R.v117.siteprofileState === 'siteprofile' && R.v117.siteprofileLegend);
   A('v1.17 S7: settlement-diagnostics overlay toggle draws on the civ canvas', R.v117.diagChk && R.v117.diagDraws);
+
+  // ── v1.18: Interactive City Viewer (Explore mode) ──
+  A('v1.18: an empty-terrain Explore-mode click still fills the plain sidebar summary and leaves the viewer closed (zero regression)', R.v118.emptyClickFillsPanel && R.v118.emptyClickModalClosed);
+  A('v1.18: a genuine settlement-pin click in Explore mode opens the City Viewer instead of the plain summary', R.v118.settlementClickOpensModal && R.v118.settlementClickSkipsPlainPanel);
+  A('v1.18: the City Information Panel renders all 7 sections with real data, including honest "not modeled" notes for undeveloped religion/history simulation (never fabricated)', R.v118.infoSectionsPresent && R.v118.infoHonestNotes);
+  A('v1.18: the viewer camera zooms (state mutates) and its LOD tiers reveal different content as scale crosses a threshold', R.v118.zoomChangesScale && R.v118.lodTiersDiffer);
+  A('v1.18: the info panel\'s Edit button routes to the existing, untouched Civilization-mode settlement editor', R.v118.editOpensExistingPopup);
+  A('v1.18: both close paths (× button, Escape) work and clear camera state', R.v118.closeButtonWorks && R.v118.escapeWorks);
+  A('v1.18: the Civilization-mode settlement editor (_civOpenPlacePopup) is completely unaffected by the new viewer', R.v118.civModeEditorUnaffected);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

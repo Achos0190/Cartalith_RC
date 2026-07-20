@@ -9,11 +9,40 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.17.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.18.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.18 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.16` are kept and never edited.
+  (v1.19 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.17` are kept and never edited.
+- **v1.18 — owner (2-part request): "making the religion system fully editable and... introducing
+  a detailed interactive city view accessible from Explore mode."** Owner prioritized the City
+  Viewer first (via `AskUserQuestion`): extend the existing UME engine rather than build a new
+  one, reuse existing LOD/cache/viewport-cull patterns rather than new generic infra, and defer
+  religion editing entirely to a later, separate effort (untouched here — still per-faction/
+  categorical). Research established the decisive reframe: `UME.cityGen`'s model already carries
+  named districts, real growth-stage history (`wall.history`/`parcel.age`/edge `.epoch`), and a
+  full civic/religious/economic building roster (`churches`/`markets`/`civic`/`games`/`details`)
+  that **neither existing renderer ever drew** — so this shipped almost entirely as a civ-layer
+  rendering/camera/UI project, zero new `UME.cityGen` capability, zero new `opts.*`, UME suite
+  untouched. Second finding: Explore mode's "Info" tool (`_civInfoAt`) only ever filled a plain
+  text sidebar — the rich preview popup is a Civilization-mode (world-building) tool. **Entry
+  point**: `_civInfoAt` gained a tight pin-hit test (reusing `_civSelectPlaceAt`'s pick radius) —
+  a genuine settlement hit opens the new City Viewer instead of the plain summary; a miss falls
+  through unchanged; the Civilization-mode editor (`_civOpenPlacePopup`) is untouched. **Shell**:
+  new full-viewport modal with its own pan/zoom camera (`_cvCam`, mirroring `viewT`/`zoomAt`/
+  `panDrag`'s math but fully self-contained), opened via the existing `_umModelForNow`. **LOD
+  draw pipeline** (`_cvDrawCity`): extends `_umDrawLayoutPreview`'s layer stack, camera-scale-gated
+  — parcel district fills/gates/plaza at "city," courtyard distinction at "neighbourhood," and
+  civic/religious/market/clutter glyphs (viewport-culled via the same bbox-margin idiom
+  `drawCivLayer` uses) at "max." **Info panel**: 7 sections sourcing only data confirmed to exist
+  (`_umSiteProfile`, `_civFactionAggregates()`, the `_civPlace*` primitives, `wall.history`),
+  faction-level figures explicitly labeled, genuinely unsimulated data (per-settlement religion,
+  a structured event timeline) gets an honest "not yet modeled" note rather than a fabricated
+  value. Edit button routes to the existing settlement editor — deep procedural-layout editing
+  (rename a district, place a monument, edit an individual road/bridge) is explicitly out of
+  scope (needs a new persisted per-city edit-overlay model, a separate future feature). Verified:
+  engine **984/984**, UME **852/852** (both unchanged), hash vs v1.17 **ALL IDENTICAL**, smoke
+  **223/223** (+7), fixed-seed screenshots (overview + max-detail tier).
 - **v1.17 — owner: "Settlement Generation Audit & Refactor... make settlements emerge naturally
   from the world's geography instead of appearing as generic procedural stamps... The renderer
   should never invent geography."** Delivered in the owner's requested order: the full
@@ -1067,6 +1096,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Religion Manager (deferred from the v1.18 request) — NOT started.** The owner's original ask
+  paired a fully editable religion system (CRUD/merge/split/holy cities/diffusion via trade/
+  migration/conquest/missionaries, per-settlement dominant/minority religion %/tension/conversion/
+  pilgrimage) with the Interactive City Viewer; the owner explicitly prioritized the viewer first
+  and deferred religion to a separate later effort. Religion today is still exactly what v1.10
+  shipped: one categorical `civFactionReligion` value per faction, editable only in the Faction
+  editor. Nothing per-settlement exists. Next session on this thread should treat it as its own
+  audit-then-plan effort (the same "research existing patterns first" discipline v1.17/v1.18 both
+  used), likely starting from `_civFactionAggregates()`'s `religious` power term and the City
+  Viewer's own Religion panel (which currently shows the faction's dominant faith + the model's
+  own `churches` — real data that a diffusion model would need to reconcile with, not replace).
+- **Interactive City Viewer (v1.18) — shipped.** Documented scope cuts, not forgotten: (a) deep
+  procedural-layout editing (rename a district, place a monument/landmark at an exact spot, edit
+  an individual road/bridge inside the generated fabric) — needs a new persisted per-city
+  edit-overlay data model (analogous to the Sculpt editor's stamp stack over the terrain field),
+  a genuinely separate future feature; today's Edit button routes to the existing settlement-level
+  editor (name/age/walls/specialisation/traits/history) instead. (b) Literal contour-terracing of
+  mountain-town street layout — not modeled; UME's real-terrain integration (v1.17 S3) already
+  lets street costs/building suitability read real slope, but there's no dedicated "grow along
+  contour lines" rule. (c) A distinct "pilgrimage city" archetype with ceremonial roads — not
+  modeled; a monastic/religious specialisation exists (v1.17 S2) but doesn't yet drive a
+  temple-complex-plus-processional-avenue layout. All three are genuinely new engine capabilities
+  (UME.cityGen would need new logic), not data the model already computes — unlike almost
+  everything else the City Viewer surfaces, which was already generated and simply never drawn.
 - **Settlement generation refactor (v1.17) — shipped (audit + S1–S7).** Documented scope cuts,
   not forgotten: (a) per-culture town morphology — `civFactionCulture` now reaches
   `opts.culture`, but UME still ships 2 profiles ('medieval'/'venus'), so every faction resolves
