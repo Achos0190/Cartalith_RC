@@ -2018,6 +2018,80 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.19: Sculpt editor touch pan joystick (owner: "put a small graphic joystick in the
+  // bottom right corner just as the cartalith v1.915 has" — on mobile, a single-finger drag over
+  // the canvas is captured as a paint stroke, so there was no gesture left to pan with while
+  // painting). Real touch-drag gestures aren't meaningfully simulable headlessly (the project's
+  // own carve-out for canvas/touch interaction), so these assertions call the joystick's own pan
+  // functions directly — exactly as a real pointerdown/pointermove would — and check the camera
+  // state they drive, reusing the exact _lodOn on/off/reset convention already used throughout
+  // this suite.
+  R.v119 = await page.evaluate(async () => {
+    const out = {};
+    const pad = document.getElementById('sculptNavpad'), stick = document.getElementById('sculptNavStick'), knob = document.getElementById('sculptNavKnob');
+    out.domPresent = !!(pad && stick && knob);
+
+    // entering Sculpt on a non-touch (headless) browser never shows the joystick — isMobile is false
+    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    await new Promise(r => setTimeout(r, 50));
+    out.sculptActiveOnTab = _sculptEditorActive();
+    out.hiddenOnDesktop = getComputedStyle(pad).display === 'none';
+
+    // off-LOD: pushing the knob pans viewT.panX exactly like a drag would (same sign convention as
+    // panDrag). At the default cover-fit scale there's no slack to pan into (_viewClampFill snaps
+    // straight back), so zoom in first — exactly what a real user would do before nudging the stick.
+    _lodOn = false;
+    const vwr = view.getBoundingClientRect();
+    zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 3);
+    const px0 = viewT.panX;
+    _sculptNavSetKnob(20, 0);
+    await new Promise(r => setTimeout(r, 150));
+    out.panDrivesViewT = viewT.panX > px0;
+    _sculptNavResetKnob();
+    const pxStopped = viewT.panX;
+    await new Promise(r => setTimeout(r, 150));
+    out.resetActuallyStopsLoop = viewT.panX === pxStopped;
+
+    // dead zone: a tiny push doesn't start panning at all
+    const px1 = viewT.panX;
+    _sculptNavSetKnob(1, 1);
+    await new Promise(r => setTimeout(r, 100));
+    out.deadZoneIgnoresTinyPush = viewT.panX === px1;
+    _sculptNavResetKnob();
+    zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 1 / 3);   // restore the default fit scale
+
+    // knob deflection is clamped to MAX_OFFSET and recenters on release (parse the px values —
+    // Chromium re-serializes .style.transform with its own comma/space convention, so compare the
+    // numbers it wrote, not an exact literal string)
+    const knobXY = () => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(knob.style.transform); return m ? [+m[1], +m[2]] : null; };
+    _sculptNavSetKnob(999, 0);
+    const kXY = knobXY();
+    out.knobClampsOffset = !!kXY && Math.abs(kXY[0] - 24) < 0.01 && Math.abs(kXY[1]) < 0.01;
+    _sculptNavResetKnob();
+    const kXY2 = knobXY();
+    out.knobResetsToCenter = !!kXY2 && kXY2[0] === 0 && kXY2[1] === 0;
+
+    // under Tiled LOD, the SAME stick drives _lodCx/_lodCy instead (mirrors the existing _lodPan handler)
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
+    const cx0 = _lodCx;
+    _sculptNavSetKnob(20, 0);
+    await new Promise(r => setTimeout(r, 150));
+    out.lodPanDrivesLodCx = _lodCx !== cx0;
+    _sculptNavResetKnob();
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+
+    // leaving Sculpt/Generate and coming back cycles _sculptNavSync with no throw
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    document.querySelector('.tab[data-tab="explore"]').click();
+    document.querySelector('.tab[data-tab="generate"]').click();
+    await new Promise(r => setTimeout(r, 50));
+    out.noThrowOnTabCycle = true;
+
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2266,6 +2340,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.18: the info panel\'s Edit button routes to the existing, untouched Civilization-mode settlement editor', R.v118.editOpensExistingPopup);
   A('v1.18: both close paths (× button, Escape) work and clear camera state', R.v118.closeButtonWorks && R.v118.escapeWorks);
   A('v1.18: the Civilization-mode settlement editor (_civOpenPlacePopup) is completely unaffected by the new viewer', R.v118.civModeEditorUnaffected);
+  A('v1.19: the sculpt nav joystick DOM (pad/stick/knob) is present', R.v119.domPresent);
+  A('v1.19: entering Generate → Sculpt on a non-touch browser leaves the joystick hidden (isMobile gate)', R.v119.sculptActiveOnTab && R.v119.hiddenOnDesktop);
+  A('v1.19: off-LOD, pushing the knob pans viewT.panX the same direction a drag would', R.v119.panDrivesViewT);
+  A('v1.19: releasing the knob stops the continuous pan loop', R.v119.resetActuallyStopsLoop);
+  A('v1.19: a sub-dead-zone nudge does not start panning', R.v119.deadZoneIgnoresTinyPush);
+  A('v1.19: knob travel is clamped to MAX_OFFSET and recenters on release', R.v119.knobClampsOffset && R.v119.knobResetsToCenter);
+  A('v1.19: under Tiled LOD, the same stick drives _lodCx/_lodCy instead of viewT', R.v119.lodPanDrivesLodCx);
+  A('v1.19: cycling Sculpt/Generate tabs re-syncs joystick visibility without throwing', R.v119.noThrowOnTabCycle);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

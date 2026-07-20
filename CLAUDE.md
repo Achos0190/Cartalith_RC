@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.18**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.19**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.18.html` | **Current** unified tool (~23.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.17.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.19.html` | **Current** unified tool (~23.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.18.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -317,6 +317,31 @@ civ-layer (block 2) rendering/camera/UI addition, zero new `UME.cityGen` capabil
   archetype with ceremonial roads — all genuinely new engine capabilities, unlike everything else
   this feature surfaces, which was already generated and simply never drawn. Religion Manager
   (the deferred half of the original request) — not started.
+
+### Sculpt mobile pan joystick (v1.19)
+
+Owner request: on touch, a single-finger canvas drag is captured as a sculpt paint stroke
+(`sculptPointerDown`), so there was no gesture left to pan with while painting — the existing
+`#panBtn` ✋ toggle only offers an either/or choice. Ported `Cartalith_V1.915.html`'s own "ANDROID
+NAV PAD" pan mechanics (read-only reference, never edited) as a new small `#sculptNavpad` stick,
+touch-only (`isMobile`), shown only while `_sculptEditorActive()`.
+
+- **Shell**: `#sculptNavpad` (CSS: `.sculpt-navpad-stick`/`.sculpt-navpad-knob`) stacks directly
+  above `#zoomOverlay` in the same bottom-right corner column. Stick-only — no zoom slider, since
+  `#zoomOverlay` already has dedicated `+`/`−`; "small graphic joystick" per the owner's own
+  phrasing.
+- **Pan mechanics**: `_sculptNavSetKnob`/`_sculptNavPanLoop`/`_sculptNavResetKnob` are a direct
+  port of V1.915's own knob-to-velocity mapping (`MAX_OFFSET`/`DEAD_ZONE`/`MAX_SPEED`) and
+  `requestAnimationFrame` continuous-pan loop. The loop drives whichever camera is actually active
+  — `viewT.panX/panY` off-LOD, `_lodCx/_lodCy` under Tiled LOD — branching on `_lodOn` exactly
+  like the existing `panDrag`/`_lodPan` drag handlers, so a knob nudge pans identically to a real
+  drag, just relocated off the paintable canvas.
+- **Visibility sync** (`_sculptNavSync`): re-run from every place `_sculptEditorActive()`'s
+  inputs can change — the top Generate/Explore tab switch, the `#genSubBar` sub-tab switch, and
+  `applyFinalizedUI` (finalizing forces read-only).
+- **Known scope cuts**: no zoom slider (deliberate — see Shell above); not extended to other
+  touch/paint tools (e.g. Cartography's paint mode) — not requested, left for a future session if
+  the same conflict is ever reported there.
 
 ### Engine (block 1) essentials
 

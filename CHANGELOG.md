@@ -12,6 +12,49 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.19 (2026-07-20)
+**Owner: "in generate - sculpt I have one small caveat. On mobile/android/ios when I need to drag
+the screen I'll paint at the same time. Can we put a small graphic joystick in the bottom right
+corner just as the cartalith v1.915 has."** A single-finger drag over the canvas is captured as a
+sculpt stroke (`sculptPointerDown`), so on touch there was no gesture left to pan the map with
+while painting — Gen1's existing `#panBtn` ✋ TOGGLE (in `#zoomOverlay`) forces a binary choice
+(pan mode OR paint mode) rather than letting both coexist. `Cartalith_V1.915.html`'s own
+"ANDROID NAV PAD" already solved exactly this in the pre-merge editor: a small always-available
+stick that drives continuous camera pan via a `requestAnimationFrame` loop, off the paintable
+canvas entirely. Ported (never edited the source file, per the "kept as reference" rule) as a new
+`#sculptNavpad` control, stacked directly above `#zoomOverlay` in the same bottom-right corner
+column (touch-only, shown only while `_sculptEditorActive()`).
+
+Simplified from V1.915's full nav pad (zoom bar + stick) to just the stick — Gen1 already has
+dedicated `+`/`−` zoom buttons in `#zoomOverlay`, so duplicating a zoom slider would be redundant;
+"small graphic joystick" per the owner's own phrasing. The pan mechanics
+(`_sculptNavSetKnob`/`_sculptNavPanLoop`/`_sculptNavResetKnob`: `MAX_OFFSET`/`DEAD_ZONE`/
+`MAX_SPEED` knob-to-velocity mapping, rAF loop, pointer capture on the stick) are a direct port of
+V1.915's own functions. The loop drives whichever camera is actually active — `viewT.panX/panY`
+off-LOD, `_lodCx/_lodCy` under Tiled LOD — branching on `_lodOn` exactly like the existing
+`panDrag`/`_lodPan` drag handlers already do, so a joystick nudge pans identically to a real drag,
+just relocated off the canvas. Visibility (`_sculptNavSync`, gated on the existing `isMobile`
+constant AND `_sculptEditorActive()`) is re-synced from every place the Sculpt sub-tab's active
+state can change: the top Generate/Explore tab switch, the `#genSubBar` sub-tab switch, and
+`applyFinalizedUI` (finalizing forces read-only, which also turns off `_sculptEditorActive()`).
+
+**Verification:** `tests/run.sh` **984/984 unchanged** and `tests/run_um.sh` **852/852 unchanged**
+(script blocks 1 and 4 untouched — this is entirely script-block-1 UI/CSS, alongside the existing
+sculpt pointer-capture code); `hash_gen1.js` vs v1.18 **ALL IDENTICAL** (the joystick is inert,
+touch-only UI chrome — the default map render path is untouched); `smoke_gen1.js` **231/231**
+(+8: joystick DOM present; hidden on a non-touch browser even with Sculpt active — an explicit
+regression guard against it leaking onto desktop; off-LOD knob deflection pans `viewT.panX` the
+same direction a real drag would, verified after zooming in past the cover-scale clamp floor;
+releasing the knob actually stops the continuous-pan rAF loop; a sub-dead-zone nudge doesn't pan at
+all; knob travel clamps to `MAX_OFFSET` and recenters on release — parsed from the knob's
+Chromium-reserialized `transform` numerically rather than by exact string match; under Tiled LOD
+the same stick drives `_lodCx`/`_lodCy` instead; cycling Sculpt/Generate tabs re-syncs visibility
+without throwing). Fixed-seed, mobile-viewport (Android UA + touch emulation) screenshots confirm
+placement: the stick sits cleanly above `#zoomOverlay`, clear of `#scaleBar`, and shows the accent-
+colored knob + `.dragging` state on a push. Real touch-drag gesture feel (as opposed to the
+pan/knob mechanics, which the suite exercises directly) is flagged for a manual device pass per
+the project's own GPU/Worker/canvas-interaction carve-out.
+
 ### v1.18 (2026-07-20)
 **Owner: "introducing a detailed interactive city view accessible from Explore mode"** (part 2 of a
 larger religion+city-viewer request; per the owner's own prioritization the City Viewer shipped

@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.18.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.19.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.19 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.17` are kept and never edited.
+  (v1.20 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.18` are kept and never edited.
+- **v1.19 — owner: "in generate - sculpt I have one small caveat. On mobile/android/ios when I
+  need to drag the screen I'll paint at the same time. Can we put a small graphic joystick in the
+  bottom right corner just as the cartalith v1.915 has."** A single-finger drag over the canvas is
+  captured as a sculpt paint stroke, so on touch there was no gesture left to pan with while
+  painting — the existing `#panBtn` ✋ toggle forces an either/or choice. Ported
+  `Cartalith_V1.915.html`'s own "ANDROID NAV PAD" pan-joystick mechanics (never edited the source
+  file — read-only reference, per the "kept as reference" rule) as a new small `#sculptNavpad`
+  stick, stacked above `#zoomOverlay` in the same bottom-right corner (touch-only, shown only
+  while `_sculptEditorActive()`), simplified from V1.915's full pad to just the stick since Gen1
+  already has dedicated zoom buttons. `_sculptNavSetKnob`/`_sculptNavPanLoop`/
+  `_sculptNavResetKnob` are a direct port of V1.915's own knob-to-velocity/rAF-loop functions; the
+  loop drives whichever camera is active (`viewT.panX/panY` off-LOD, `_lodCx/_lodCy` under Tiled
+  LOD), branching on `_lodOn` exactly like the existing drag handlers, so a nudge pans identically
+  to a real drag, just relocated off the paintable canvas. Verified: engine **984/984** and UME
+  **852/852** (both unchanged — script-block-1 UI/CSS only), hash vs v1.18 **ALL IDENTICAL**,
+  smoke **231/231** (+8), fixed-seed mobile-viewport (Android UA + touch emulation) screenshots
+  confirming placement and the dragging/accent-color knob state.
 - **v1.18 — owner (2-part request): "making the religion system fully editable and... introducing
   a detailed interactive city view accessible from Explore mode."** Owner prioritized the City
   Viewer first (via `AskUserQuestion`): extend the existing UME engine rather than build a new
@@ -1120,6 +1137,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   temple-complex-plus-processional-avenue layout. All three are genuinely new engine capabilities
   (UME.cityGen would need new logic), not data the model already computes — unlike almost
   everything else the City Viewer surfaces, which was already generated and simply never drawn.
+- **Sculpt mobile pan joystick (v1.19) — shipped.** `#sculptNavpad` (stick only, no zoom slider —
+  Gen1's `#zoomOverlay` already has dedicated `+`/`−`), touch-only, shown only while
+  `_sculptEditorActive()`. Not scoped beyond the Sculpt editor — a future session could extend the
+  same pattern to other touch/paint tools (e.g. Cartography's paint mode) if that friction is ever
+  reported; not requested here, so left alone.
 - **Settlement generation refactor (v1.17) — shipped (audit + S1–S7).** Documented scope cuts,
   not forgotten: (a) per-culture town morphology — `civFactionCulture` now reaches
   `opts.culture`, but UME still ships 2 profiles ('medieval'/'venus'), so every faction resolves
