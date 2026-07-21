@@ -12,6 +12,47 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.22 (2026-07-21)
+Three owner-reported items in one pass — two touch/joystick fixes and one LOD fidelity fix.
+
+**Owner: "The joystick works in the opposite direction that we push, and on mobile/tablet i
+think we should just have it in all views."** Plus: **"When using LOD pyramid tiling LOD0 seems
+to be of poor resolution (even if we pick 1k/2k) and the individual sub division of tiles below
+LOD0 should be tiles of 512px."**
+
+- **Sculpt pan joystick direction fixed.** The v1.19 port of `Cartalith_V1.915.html`'s ANDROID
+  NAV PAD dropped the source's velocity **negation** (`vx = -(dx/mag)*…`, whose comment reads
+  "drag the knob right → reveal map to the right"), so pushing the stick moved the view the
+  opposite way. Restoring that single sign in `_sculptNavSetKnob` fixes both pan-loop branches at
+  once — push the stick right and the view now travels right (off-LOD `viewT.panX += _svx` and LOD
+  `_lodCx -= _svx` already carry the opposite signs the two camera conventions need).
+- **Joystick shown in all main-map views on touch.** Was gated to the Generate → Sculpt sub-tab
+  (`_sculptEditorActive()`); now `_sculptNavSync` shows it on any touch device whenever the main
+  map is the active surface (Generate/Explore/Cartography/Civilization), hidden only where a
+  different camera owns the screen or there's nothing to pan: the setup gate (`#onboard`), the 3D
+  view (`_view3dOn`), and the City Viewer modal. Re-synced from each of those transition points.
+- **LOD0 resolution — supersampled compositor + finer base tiles.** The LOD viewer composited into
+  the GW×GH `#view` canvas, so fully zoomed out the whole map mapped 1:1 into GW pixels (the coarse
+  field resolution) and the pyramid's finer sub-tiles were downsampled straight back to GW, adding
+  no visible detail before the display upscaled it. New `_lodRenderW()` supersamples the LOD
+  backing canvas (2× the field width, hard-capped at 2560px so tablets stay smooth and big worlds
+  never downsample), `lodViewRect` picks the pyramid level against that render width (so LOD0 now
+  composes from 2×2 finer tiles instead of one coarse tile), and `drawLODView` maps its unchanged
+  GW×GH draw math onto the larger backing via a context transform. `renderNow` restores `#view` to
+  GW×GH on the non-LOD path (default render stays **byte-identical** — hash battery ALL IDENTICAL
+  incl. every opt-in scenario), and `_v3dGrabColor` downscales the whole (possibly supersampled)
+  canvas for the 3D drape instead of cropping its corner. `scheduleLodRefine` now sharpens on any
+  settle (was gated to zoom > 1.05, which skipped the fully zoomed-out base).
+- **Verified.** Engine `tests/run.sh` 992/992, UME `tests/run_um.sh` 852/852 (both unchanged),
+  `node tests/perf/hash_gen1.js` vs v1.21 **ALL IDENTICAL** (default + geoid/waves/ao/icons — the
+  changes are all opt-in LOD / touch-only paths), smoke `tests/perf/smoke_gen1.js` green.
+  Browser-probed: LOD0 at a 1024px world now picks pyramid z=1 (4 sub-tiles, each 1024px = 2×
+  procedural detail) into a 2048×1310 backing, rendering crisp fine rivers/coastlines where v1.21
+  showed one upscaled coarse tile; the joystick shows in Generate → World (non-Sculpt) on a mobile
+  UA, hides behind the setup gate and in 3D, and pushing right yields `_svx < 0` with `viewT.panX`
+  decreasing (view travels right). Canvas/pointer/GPU interaction — flagged for manual on-device
+  confirmation per CLAUDE.md's headless carve-out.
+
 ### v1.21 (2026-07-20)
 **Owner: "I'd like zoom and pan buttons and an option for the viewer to zoom. That way it should
 be easier to work accurately with larger resolution sheets."** Follow-up to a question about the

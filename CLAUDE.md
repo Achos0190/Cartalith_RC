@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.21**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.22**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.21.html` | **Current** unified tool (~23.9k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.20.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.22.html` | **Current** unified tool (~23.9k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.21.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -427,6 +427,52 @@ with larger resolution sheets."*
   deliberately not exposed on `window` (synthetic `dispatchEvent` PointerEvents fail Chromium's
   `setPointerCapture`, which requires a genuinely browser-tracked pointer — Playwright's real
   `page.mouse.*` APIs sidestep this).
+
+### Joystick direction + all-views + LOD0 supersample (v1.22)
+
+Three owner-reported items in one pass. Owner: *"The joystick works in the opposite direction that
+we push, and on mobile/tablet i think we should just have it in all views"* + *"When using LOD
+pyramid tiling LOD0 seems to be of poor resolution (even if we pick 1k/2k) and the individual sub
+division of tiles below LOD0 should be tiles of 512px."*
+
+- **Joystick direction** (`_sculptNavSetKnob`, block 1): the v1.19 port of `Cartalith_V1.915.html`'s
+  ANDROID NAV PAD dropped the source's velocity **negation** (`vx = -(dx/mag)*…`, whose own comment
+  reads "drag the knob right → reveal map to the right"), which inverted the feel. Restoring that one
+  sign fixes BOTH pan-loop branches at once — off-LOD `viewT.panX += _svx` (content translation ⇒
+  negative `_svx` moves content left ⇒ view travels right) and LOD `_lodCx -= _svx` (camera centre ⇒
+  negative `_svx` moves the centre right ⇒ view travels right) already carry the opposite signs the
+  two camera conventions need, so the single flip is the whole fix.
+- **Joystick in all main-map views** (`_sculptNavSync`): was gated to `isMobile && _sculptEditorActive()`;
+  now `isMobile && !_view3dOn`, further hidden while the setup gate (`#onboard`) is up or the City
+  Viewer modal is open. `isMobile` is checked FIRST so non-touch devices (and the headless suite,
+  where `getComputedStyle` is undefined) short-circuit before any modal query. Re-synced from every
+  place its inputs change: the top-tab / `#genSubBar` switch and `applyFinalizedUI` (as before) plus
+  `_setupHide`/`_setupOpen`, `enter3D`/`exit3D`, and `_civOpenCityViewer`/`_civCloseCityViewer`. The
+  `#sculptNavpad` element id and `_sculptNav*` names are kept (the joystick was born in the Sculpt
+  editor); only the gate widened.
+- **LOD0 supersample** (block 1): the LOD compositor drew into the GW×GH `#view` canvas, so fully
+  zoomed out the whole map mapped 1:1 into GW pixels (the coarse-field resolution) and the pyramid's
+  finer sub-tiles were downsampled straight back — no visible detail before the display upscaled it.
+  New `_lodRenderW()` (pure, GW-only → headless-safe) supersamples the LOD backing to `2× GW`, hard-
+  capped at `2560px` (`Math.max(GW, Math.min(2560, GW*2))`, so it never DOWNsamples a big world);
+  `lodViewRect` picks the pyramid level via `pyramidLevelForZoom(span, _lodRenderW(), _lodTile, …)`
+  instead of `GW`, so LOD0 already composes from finer tiles (z=1 at a 1024px world = 2×2 sub-tiles,
+  each 1024px = 2× procedural detail). `drawLODView` resizes `#view` to `RW×RH` and sets a context
+  transform `setTransform(RW/GW,0,0,RH/GH)` so ALL its existing GW×GH-logical draw math (overview
+  blit, tiles, reprojected vector overlays) maps onto the larger backing UNCHANGED. `renderNow`
+  restores `#view` to GW×GH on the non-LOD path (guarded off the partial-repaint `rect` fast path)
+  before its `putImageData(GW×GH)`, so the default render is **byte-identical** (hash battery ALL
+  IDENTICAL incl. every opt-in scenario — LOD is opt-in, default off). `_v3dGrabColor` downscales the
+  whole (possibly supersampled) canvas to the GW×GH 3D-drape grid instead of cropping its top-left
+  corner; the GL `uploadColor` path (normalized UVs) needs no change. `scheduleLodRefine` now
+  sharpens on any settle (was gated `_lodZoom>1.05`, which skipped the fully zoomed-out base).
+- **Known scope cuts**: the supersample factor is a fixed 2× capped at 2560px (not display-DPI
+  adaptive — a bounded default so tablets stay smooth; a 4K+ display can still gently upscale past
+  the cap); the instant LOD overview placeholder stays at the 512px `OV_TARGET_W` (covered by the
+  sharp finer tiles after refine, so it only affects the brief pre-refine frame); civ-layer overlay
+  canvases stay GW×GH (they read slightly softer than the supersampled terrain under LOD, alignment
+  unaffected). Canvas/GPU/touch interaction — manual on-device verification per this file's headless
+  carve-out.
 
 ### Engine (block 1) essentials
 

@@ -2038,16 +2038,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     out.sculptActiveOnTab = _sculptEditorActive();
     out.hiddenOnDesktop = getComputedStyle(pad).display === 'none';
 
-    // off-LOD: pushing the knob pans viewT.panX exactly like a drag would (same sign convention as
-    // panDrag). At the default cover-fit scale there's no slack to pan into (_viewClampFill snaps
+    // v1.22 (owner: "the joystick works in the opposite direction that we push"): pushing the knob
+    // RIGHT makes the VIEW travel right — i.e. content scrolls left, so viewT.panX DECREASES (the
+    // joystick moves the camera the way you push, not the drag-the-content convention the v1.19 port
+    // wrongly used). At the default cover-fit scale there's no slack to pan into (_viewClampFill snaps
     // straight back), so zoom in first — exactly what a real user would do before nudging the stick.
     _lodOn = false;
     const vwr = view.getBoundingClientRect();
     zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 3);
     const px0 = viewT.panX;
-    _sculptNavSetKnob(20, 0);
+    _sculptNavSetKnob(20, 0);                                     // push right
     await new Promise(r => setTimeout(r, 150));
-    out.panDrivesViewT = viewT.panX > px0;
+    out.pushRightPansViewRight = viewT.panX < px0;                // v1.22: panX decreases ⇒ view travels right
     _sculptNavResetKnob();
     const pxStopped = viewT.panX;
     await new Promise(r => setTimeout(r, 150));
@@ -2072,13 +2074,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const kXY2 = knobXY();
     out.knobResetsToCenter = !!kXY2 && kXY2[0] === 0 && kXY2[1] === 0;
 
-    // under Tiled LOD, the SAME stick drives _lodCx/_lodCy instead (mirrors the existing _lodPan handler)
+    // under Tiled LOD, the SAME stick drives _lodCx/_lodCy instead (mirrors the existing _lodPan
+    // handler) — and v1.22's corrected direction holds here too: push right ⇒ _lodCx INCREASES (camera
+    // centre moves right ⇒ view travels right), the sign the `_lodCx -= _svx` branch produces once _svx
+    // is negated.
     const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
     _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
     const cx0 = _lodCx;
-    _sculptNavSetKnob(20, 0);
+    _sculptNavSetKnob(20, 0);                                     // push right
     await new Promise(r => setTimeout(r, 150));
-    out.lodPanDrivesLodCx = _lodCx !== cx0;
+    out.lodPanDrivesLodCx = _lodCx > cx0;                         // v1.22: push right ⇒ _lodCx increases ⇒ view travels right
     _sculptNavResetKnob();
     _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
 
@@ -2484,11 +2489,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.18: the Civilization-mode settlement editor (_civOpenPlacePopup) is completely unaffected by the new viewer', R.v118.civModeEditorUnaffected);
   A('v1.19: the sculpt nav joystick DOM (pad/stick/knob) is present', R.v119.domPresent);
   A('v1.19: entering Generate → Sculpt on a non-touch browser leaves the joystick hidden (isMobile gate)', R.v119.sculptActiveOnTab && R.v119.hiddenOnDesktop);
-  A('v1.19: off-LOD, pushing the knob pans viewT.panX the same direction a drag would', R.v119.panDrivesViewT);
+  A('v1.22: off-LOD, pushing the knob RIGHT pans the VIEW right (viewT.panX decreases) — corrected joystick direction', R.v119.pushRightPansViewRight);
   A('v1.19: releasing the knob stops the continuous pan loop', R.v119.resetActuallyStopsLoop);
   A('v1.19: a sub-dead-zone nudge does not start panning', R.v119.deadZoneIgnoresTinyPush);
   A('v1.19: knob travel is clamped to MAX_OFFSET and recenters on release', R.v119.knobClampsOffset && R.v119.knobResetsToCenter);
-  A('v1.19: under Tiled LOD, the same stick drives _lodCx/_lodCy instead of viewT', R.v119.lodPanDrivesLodCx);
+  A('v1.22: under Tiled LOD, pushing right drives _lodCx right too (view travels right)', R.v119.lodPanDrivesLodCx);
   A('v1.19: cycling Sculpt/Generate tabs re-syncs joystick visibility without throwing', R.v119.noThrowOnTabCycle);
   A('v1.20: the Icon tool\'s "Feature icons" gallery lists all 10 slots (was 4)', R.v120.featureTileCount === 10);
   A('v1.20: a new kind (cactus) arms and places via the Icon tool exactly like the original 4', R.v120.armedCactus && R.v120.placedCactus);

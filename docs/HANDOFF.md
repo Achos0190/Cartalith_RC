@@ -9,11 +9,37 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.21.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.22.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.22 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.20` are kept and never edited.
+  (v1.23 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.21` are kept and never edited.
+- **v1.22 — owner: "The joystick works in the opposite direction that we push, and on mobile/tablet
+  i think we should just have it in all views" + "When using LOD pyramid tiling LOD0 seems to be of
+  poor resolution (even if we pick 1k/2k) and the individual sub division of tiles below LOD0 should
+  be tiles of 512px."** Three fixes in one pass. (1) **Joystick direction** — the v1.19 port of
+  `Cartalith_V1.915.html`'s ANDROID NAV PAD dropped the source's velocity **negation** (`vx =
+  -(dx/mag)*…`, comment "drag the knob right → reveal map to the right"); restoring that single sign
+  in `_sculptNavSetKnob` makes push-right travel right, fixing both off-LOD (`viewT.panX += _svx`)
+  and LOD (`_lodCx -= _svx`) branches at once. (2) **Joystick in all views** — `_sculptNavSync` no
+  longer gates on `_sculptEditorActive()`; on any touch device it shows whenever the main map is the
+  active surface, hidden only behind the setup gate (`#onboard`), in 3D (`_view3dOn`, its own
+  camera), and in the City Viewer modal — re-synced from each of those transitions. (3) **LOD0
+  resolution** — the LOD viewer composited into the GW×GH `#view` canvas, so fully zoomed out the
+  map mapped 1:1 into GW pixels (the coarse-field resolution) and the pyramid's finer sub-tiles were
+  downsampled straight back. New `_lodRenderW()` supersamples the LOD backing (2× field width, capped
+  2560px so tablets stay smooth / big worlds never downsample), `lodViewRect` picks the pyramid level
+  against that render width (LOD0 now composes from 2×2 finer tiles), and `drawLODView` maps its
+  unchanged GW×GH draw math onto the larger backing via a context transform; `renderNow` restores
+  `#view` to GW×GH on the non-LOD path so the default render is byte-identical, and `_v3dGrabColor`
+  downscales the whole (possibly supersampled) canvas for the 3D drape instead of cropping. Verified:
+  engine **992/992**, UME **852/852** (both unchanged), hash vs v1.21 **ALL IDENTICAL** (default +
+  geoid/waves/ao/icons — all changes are opt-in LOD / touch-only), smoke **243/243** (the two v1.19
+  joystick-direction assertions were flipped to assert the corrected direction). Browser-probed: LOD0
+  at 1024px now picks z=1 (4 sub-tiles, each 1024px = 2× detail) into a 2048×1310 backing rendering
+  crisp fine rivers/coastlines; joystick shows in Generate → World on a mobile UA, hides behind the
+  gate/in 3D, push-right ⇒ `_svx<0` and `viewT.panX` decreases. Canvas/GPU/touch — flagged for manual
+  on-device confirmation.
 - **v1.21 — owner: "I'd like zoom and pan buttons and an option for the viewer to zoom. That way
   it should be easier to work accurately with larger resolution sheets."** Follow-up to a question
   about the Asset Library's sprite-sheet slicer (`SpriteSheetImporter`, script block 3): the
@@ -1199,6 +1225,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   far more categories — ruins, standing stones, lighthouses, culture packs, etc. — than fit this
   request; those remain reachable today only via the Asset Library's existing free-form `custom`
   icon family + sprite-sheet slicer, manually placed one at a time, not auto-attached to anything).
+- **Joystick direction + all-views + LOD0 supersample (v1.22) — shipped.** Three owner-reported
+  items. (1) The Sculpt pan joystick moved the view opposite to the push — the v1.19 port dropped
+  `Cartalith_V1.915.html`'s velocity negation; restored in `_sculptNavSetKnob`. (2) The joystick is
+  now shown across all main-map views on touch (`_sculptNavSync` gate), hidden only behind the setup
+  gate / in 3D / in the City Viewer. (3) LOD0 read as low-resolution because the LOD compositor was
+  locked to the GW×GH `#view` canvas — new `_lodRenderW()` supersamples the LOD backing (2× field
+  width, capped 2560px) and `lodViewRect` picks a finer pyramid level against it, so LOD0 composes
+  from finer sub-tiles into a crisp canvas; the non-LOD path resets `#view` to GW×GH so the default
+  render stays byte-identical. **Known scope cuts / follow-ups worth knowing:** (a) the supersample
+  cap is a flat 2560px render-width ceiling and the supersample factor is a fixed 2× (not display-DPI
+  aware), so on a very large 4K+ display LOD0 can still be gently upscaled beyond 2560px — a bounded,
+  low-risk default chosen so low-end tablets stay smooth; making it DPI-adaptive is a possible future
+  refinement. (b) The instant LOD overview placeholder (shown for a beat before the sharp tiles land)
+  is still built at the 512px `OV_TARGET_W` cap — it's covered by the sharp finer tiles after the
+  toggle-on / settle refine, so this only affects the brief pre-refine frame, not the steady state.
+  (c) The civ-layer overlay canvases (settlements/labels) are still GW×GH; under LOD they read
+  slightly softer than the now-supersampled terrain beneath them — alignment is unaffected (both
+  CSS-fit the same box), only their own crispness. Not requested, left for a future pass if noticed.
 - **Sprite-sheet slicer zoom/pan (v1.21) — shipped.** Zoom buttons + wheel-zoom-to-cursor + a
   dedicated Pan mode, leveraging the slicer's pre-existing (previously dormant)
   `overflow:auto` wrap for native scroll-based panning. No scope cuts to speak of — the request
