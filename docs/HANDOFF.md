@@ -9,17 +9,288 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.13.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.23.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.14 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.12` are kept and never edited.
+  (v1.24 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.22` are kept and never edited.
+- **v1.23 — owner: "when zooming in, the area that is clickable to view a settlement stays fixed and
+  thusly becomes relatively bigger, making panning near impossible"** + a Journey Planner review
+  ("Coastal Waters faster than Open Sea — historically backwards"; "autoselect assigns a vessel to a
+  leg it isn't fit for, only caught downstream"). Three fixes, all civ/Journey-Planner (block 2), so
+  engine/UME suites and hash bit-identity are all unchanged. (1) **Settlement pick radius** — the
+  place-pick radii were flat GRID-space (`GW/50`, `GW/35`) while the pins draw at a constant
+  on-screen size, so zoomed in the clickable target ballooned and swallowed pan drags; new
+  `_civZoomPickR(gridR0)` divides the zoom-1 radius by the live zoom (`viewT.scale` off-LOD, `_lodZoom`
+  under LOD), applied at all five place-pick sites, unchanged at zoom 1. (2) **Sea speed ordering** —
+  `JP_TERRAIN.sea` had Open Sea `0.85` < Coastal Waters `1.00` (wind is a separate axis in
+  `JP_ROUTE.sea`; `1.00/0.85≈1.18` matched the reported 97/82), reordered to Sheltered Bay `0.95` <
+  Coastal `1.00` < Open Sea `1.20` (Rough Open Sea `0.60` the weather outlier); measured Open Sea
+  113→159.6 km/day (Cog/14h). (3) **Vessel↔terrain compat** — the selector (`_jpVesselFits`) and
+  validator (`jpCalcWater`) had duplicate inline copies of the compat rules; both now call one shared
+  `_jpVesselWaterBlock`, so an autoselected vessel can never be one the validator later rejects (the
+  validator still fires for a genuinely infeasible manual pick). The Dhow stays `openSea:true`
+  (historically correct — monsoon ocean trader); the task's "dhow restricted from open sea" premise
+  doesn't apply here. Verified: 992/852 unchanged, hash ALL IDENTICAL, smoke **251/251** (+8), and an
+  autoselection sweep across all nine water terrains showed zero invalid picks.
+- **v1.22 — owner: "The joystick works in the opposite direction that we push, and on mobile/tablet
+  i think we should just have it in all views" + "When using LOD pyramid tiling LOD0 seems to be of
+  poor resolution (even if we pick 1k/2k) and the individual sub division of tiles below LOD0 should
+  be tiles of 512px."** Three fixes in one pass. (1) **Joystick direction** — the v1.19 port of
+  `Cartalith_V1.915.html`'s ANDROID NAV PAD dropped the source's velocity **negation** (`vx =
+  -(dx/mag)*…`, comment "drag the knob right → reveal map to the right"); restoring that single sign
+  in `_sculptNavSetKnob` makes push-right travel right, fixing both off-LOD (`viewT.panX += _svx`)
+  and LOD (`_lodCx -= _svx`) branches at once. (2) **Joystick in all views** — `_sculptNavSync` no
+  longer gates on `_sculptEditorActive()`; on any touch device it shows whenever the main map is the
+  active surface, hidden only behind the setup gate (`#onboard`), in 3D (`_view3dOn`, its own
+  camera), and in the City Viewer modal — re-synced from each of those transitions. (3) **LOD0
+  resolution** — the LOD viewer composited into the GW×GH `#view` canvas, so fully zoomed out the
+  map mapped 1:1 into GW pixels (the coarse-field resolution) and the pyramid's finer sub-tiles were
+  downsampled straight back. New `_lodRenderW()` supersamples the LOD backing (2× field width, capped
+  2560px so tablets stay smooth / big worlds never downsample), `lodViewRect` picks the pyramid level
+  against that render width (LOD0 now composes from 2×2 finer tiles), and `drawLODView` maps its
+  unchanged GW×GH draw math onto the larger backing via a context transform; `renderNow` restores
+  `#view` to GW×GH on the non-LOD path so the default render is byte-identical, and `_v3dGrabColor`
+  downscales the whole (possibly supersampled) canvas for the 3D drape instead of cropping. Verified:
+  engine **992/992**, UME **852/852** (both unchanged), hash vs v1.21 **ALL IDENTICAL** (default +
+  geoid/waves/ao/icons — all changes are opt-in LOD / touch-only), smoke **243/243** (the two v1.19
+  joystick-direction assertions were flipped to assert the corrected direction). Browser-probed: LOD0
+  at 1024px now picks z=1 (4 sub-tiles, each 1024px = 2× detail) into a 2048×1310 backing rendering
+  crisp fine rivers/coastlines; joystick shows in Generate → World on a mobile UA, hides behind the
+  gate/in 3D, push-right ⇒ `_svx<0` and `viewT.panX` decreases. Canvas/GPU/touch — flagged for manual
+  on-device confirmation.
+- **v1.21 — owner: "I'd like zoom and pan buttons and an option for the viewer to zoom. That way
+  it should be easier to work accurately with larger resolution sheets."** Follow-up to a question
+  about the Asset Library's sprite-sheet slicer (`SpriteSheetImporter`, script block 3): the
+  slicer always scaled the *entire* sheet down to fit a fixed box, so a large/detailed sheet just
+  shrank with no way to work at higher precision. Key finding: the slicer's canvas already sits
+  inside `.al-slice-cv-wrap`, which is CSS `overflow:auto` — never triggered before because
+  `redraw()` deliberately capped the canvas to always fit. Lifting that cap on zoom makes the
+  canvas larger than its container and the **browser's own scrollbars/wheel-scroll/touch-scroll
+  pan it for free** — no custom camera system needed (unlike the main map's `viewT`/`zoomAt` or
+  the v1.18 City Viewer's `_cvCam`), and `evToSrc()` (every existing tool's pointer→source-
+  coordinate conversion) needed zero changes since `getBoundingClientRect()` already reflects
+  scroll position. New `−`/`+`/`Fit` zoom buttons + a live `%` readout + wheel-zoom-to-cursor
+  (same "keep the point under the cursor fixed" trick as the main map's `zoomAt()`, via scroll
+  offsets instead of a transform); new 4th "✋ Pan" mode alongside select/grid/pick, dragging
+  adjusts the wrap's scroll by the drag delta (mirrors the main map's own `panDrag` idiom).
+  Verified: engine **992/992** and UME **852/852** (both unchanged — block 3 only), hash vs v1.20
+  **ALL IDENTICAL including `icons`** (pure Asset Library UI, zero map-render effect), smoke
+  **243/243** (+7, driven purely through the DOM/real Playwright mouse input since
+  `SpriteSheetImporter` is intentionally not exposed on `window` — including a check that
+  cell-click-to-select still hits the right cell at a non-fit zoom, the real regression risk).
+- **v1.20 — owner: "let's go up to 4/5 different possible tree types (and for other landscape
+  types and features) that can be placed at relatively random."** Follow-up to a walkthrough of
+  the Asset Library's coverage: the opt-in procedural map-icon layer (`state.viz.icons`, default
+  `false`) only ever drew 2 tree styles (conifer/broadleaf) and nothing at all on grassland/
+  steppe/desert/tundra. Scoped via `AskUserQuestion` to the broadest option. Trees grew to 5 kinds
+  keyed off the frozen `BIOME_KEYS` biome index — conifer/broadleaf unchanged, + rainforest
+  (temperate rainforest/jungle), + savanna (sparse, thinned by a hash-probability keep test), +
+  wetland (a REAL terrain signal via `currentWetlandMask()`, checked first and overriding whatever
+  biome sits underneath a marsh pocket). New ground-scatter category: shrub (grass/steppe),
+  cactus (warm desert), boulder (tundra + cold desert, split by `tempField` at 10°C). `tempField`/
+  `wetlandMask` are OPTIONAL additions to `placeMapIcons`'s `opts` — the function stays the "pure
+  primitive, no globals" contract the headless suite already relies on. Mountains/hills gained
+  variety in the **procedural fallback only** (snow cap below ~2°C, rockier hill outline when
+  arid) — pack art for those two slots deliberately stays climate-unconditioned, a disclosed scope
+  cut to avoid schema churn. Every new kind is both auto-scattered AND manually placeable via the
+  Icon tool's "Feature icons" family (`PACK_ICON_SLOTS`/`CIV_FEATURE_ICON_TYPES` both 4→10). The
+  sample-pack generator (`assets/make_sample_pack.py`) gained 6 matching procedural silhouette
+  functions and `sample_pack.zip` was regenerated (21 icon sprites, up from 9). Verified: engine
+  **992/992** (+8), UME **852/852 unchanged**, hash vs v1.19 — `default`/`geoid`/`waves`/`ao`
+  **ALL IDENTICAL**, the `icons` scenario **intentionally diverges** for the first time (the
+  feature is opt-in, so this is the expected effect, not a regression), smoke **236/236** (+5),
+  the regenerated sample pack imports with zero warnings, fixed-seed whole-world screenshots
+  confirm rendering across real biome diversity.
+- **v1.19 — owner: "in generate - sculpt I have one small caveat. On mobile/android/ios when I
+  need to drag the screen I'll paint at the same time. Can we put a small graphic joystick in the
+  bottom right corner just as the cartalith v1.915 has."** A single-finger drag over the canvas is
+  captured as a sculpt paint stroke, so on touch there was no gesture left to pan with while
+  painting — the existing `#panBtn` ✋ toggle forces an either/or choice. Ported
+  `Cartalith_V1.915.html`'s own "ANDROID NAV PAD" pan-joystick mechanics (never edited the source
+  file — read-only reference, per the "kept as reference" rule) as a new small `#sculptNavpad`
+  stick, stacked above `#zoomOverlay` in the same bottom-right corner (touch-only, shown only
+  while `_sculptEditorActive()`), simplified from V1.915's full pad to just the stick since Gen1
+  already has dedicated zoom buttons. `_sculptNavSetKnob`/`_sculptNavPanLoop`/
+  `_sculptNavResetKnob` are a direct port of V1.915's own knob-to-velocity/rAF-loop functions; the
+  loop drives whichever camera is active (`viewT.panX/panY` off-LOD, `_lodCx/_lodCy` under Tiled
+  LOD), branching on `_lodOn` exactly like the existing drag handlers, so a nudge pans identically
+  to a real drag, just relocated off the paintable canvas. Verified: engine **984/984** and UME
+  **852/852** (both unchanged — script-block-1 UI/CSS only), hash vs v1.18 **ALL IDENTICAL**,
+  smoke **231/231** (+8), fixed-seed mobile-viewport (Android UA + touch emulation) screenshots
+  confirming placement and the dragging/accent-color knob state.
+- **v1.18 — owner (2-part request): "making the religion system fully editable and... introducing
+  a detailed interactive city view accessible from Explore mode."** Owner prioritized the City
+  Viewer first (via `AskUserQuestion`): extend the existing UME engine rather than build a new
+  one, reuse existing LOD/cache/viewport-cull patterns rather than new generic infra, and defer
+  religion editing entirely to a later, separate effort (untouched here — still per-faction/
+  categorical). Research established the decisive reframe: `UME.cityGen`'s model already carries
+  named districts, real growth-stage history (`wall.history`/`parcel.age`/edge `.epoch`), and a
+  full civic/religious/economic building roster (`churches`/`markets`/`civic`/`games`/`details`)
+  that **neither existing renderer ever drew** — so this shipped almost entirely as a civ-layer
+  rendering/camera/UI project, zero new `UME.cityGen` capability, zero new `opts.*`, UME suite
+  untouched. Second finding: Explore mode's "Info" tool (`_civInfoAt`) only ever filled a plain
+  text sidebar — the rich preview popup is a Civilization-mode (world-building) tool. **Entry
+  point**: `_civInfoAt` gained a tight pin-hit test (reusing `_civSelectPlaceAt`'s pick radius) —
+  a genuine settlement hit opens the new City Viewer instead of the plain summary; a miss falls
+  through unchanged; the Civilization-mode editor (`_civOpenPlacePopup`) is untouched. **Shell**:
+  new full-viewport modal with its own pan/zoom camera (`_cvCam`, mirroring `viewT`/`zoomAt`/
+  `panDrag`'s math but fully self-contained), opened via the existing `_umModelForNow`. **LOD
+  draw pipeline** (`_cvDrawCity`): extends `_umDrawLayoutPreview`'s layer stack, camera-scale-gated
+  — parcel district fills/gates/plaza at "city," courtyard distinction at "neighbourhood," and
+  civic/religious/market/clutter glyphs (viewport-culled via the same bbox-margin idiom
+  `drawCivLayer` uses) at "max." **Info panel**: 7 sections sourcing only data confirmed to exist
+  (`_umSiteProfile`, `_civFactionAggregates()`, the `_civPlace*` primitives, `wall.history`),
+  faction-level figures explicitly labeled, genuinely unsimulated data (per-settlement religion,
+  a structured event timeline) gets an honest "not yet modeled" note rather than a fabricated
+  value. Edit button routes to the existing settlement editor — deep procedural-layout editing
+  (rename a district, place a monument, edit an individual road/bridge) is explicitly out of
+  scope (needs a new persisted per-city edit-overlay model, a separate future feature). Verified:
+  engine **984/984**, UME **852/852** (both unchanged), hash vs v1.17 **ALL IDENTICAL**, smoke
+  **223/223** (+7), fixed-seed screenshots (overview + max-detail tier).
+- **v1.17 — owner: "Settlement Generation Audit & Refactor... make settlements emerge naturally
+  from the world's geography instead of appearing as generic procedural stamps... The renderer
+  should never invent geography."** Delivered in the owner's requested order: the full
+  architectural audit FIRST (`docs/research/settlement-generation-audit.md` — 25 subsystems
+  classified, weaknesses ranked; decisive findings: the UME engine modeled water but not land
+  — 3 invented Gaussian hills drove every in-town terrain decision — and no generated
+  settlement ever had a `specialisation`), then phases S1–S7, every engine capability keyed on
+  a NEW `opts.*` (v0.98 guard pattern ⇒ synthetic path byte-identical). **S1** `_umSiteProfile(p)`
+  (cached Site Profile from existing primitives; surfaced in the Inspector) + the model-cache
+  water-fingerprint collision fix (mask bytes FNV-hashed, not counted). **S2** auto-populate
+  derives `p.specialisation` from the profile (scored rules, 0.30 floor → honest 'none';
+  `==null`-guarded so hand-set values survive); `mining` trait re-keyed off real hinterland ore
+  (was elevation>0.55); faction culture passthrough. **S3** `_umTerrainCtx(p)` — the land twin
+  of `_umWaterCtx` (22 m bilinear raster of real `field`); `buildSite.height()` reads it,
+  every downstream consumer (street costs, market siting, bridgePt, slope rejection,
+  suitability) just works; `terrainAware` on ⇒ steep/flooded parcels excluded. Latent
+  2-point-riverPath crash in `addRiverBridges` fixed. **S4** `_umWallSpec(p)` none|ditch|
+  palisade|stone ladder (fortress always stone; most hamlets honestly unwalled; `umWalls`
+  override wins) threaded through `opts.wallStyle` to style-aware rendering; wall ring deflects
+  (bounded, relief-relative) onto genuinely higher real ground — proven by a synthetic-ridge
+  unit test + the `wallState.terrainDeflected` diagnostic. **S5** `_umWaterCtx` exports
+  `riverOrder`/`seaLakeCells` (pre-river-stamp); decorative auto-bridges gone —
+  `detectRiverCrossings` on the FINAL graph records road×centerline intersections as
+  `site.bridges` (the road IS the bridge), crossing-less through-towns get a `site.ford`;
+  `buildHarbour` requires navigability (sea/lake ≥40 cells or order ≥3) + non-cliff shore,
+  stamping `site.harbourInvalid` otherwise (fixed-seed run: 26 stream "harbours" suppressed,
+  16/16 bridges road-justified, 4/4 crossing-less through-towns got fords). **S6**
+  `opts.economy={specialisation,oreBearing}` → bounded district overrides (oreyard/fishery/
+  sawyard/granary/warehouse/paddocks) with physical predicates + scale-relative hamlet
+  fallbacks, yard-shed grammar, per-economy details (spoil heaps/drying racks/log booms),
+  renderer tints (36/38 economy towns carry their district; zero leakage). **S7** new
+  `siteprofile` debug raster view (slope+flood buildability composite, full established
+  pattern incl. `renderDebugTile` + new `currentSlopeField()`) + a `state.viz.civDiagnostics`
+  vector overlay (footprint box + specialisation/wall-spec/river-class/bridge-ford-harbour
+  validity card per settlement; peeks the model LRU by seed prefix, never triggers
+  generation). Verified: engine **984/984**, UME **852/852** (+21), hash vs v1.16 **ALL
+  IDENTICAL**, smoke **216/216** (+5), fixed-seed screenshots.
+- **v1.16 — owner: "redesigning the Civilization interface... a UI and data architecture
+  refactor, not a rewrite of the underlying simulation... generation tools at the top, followed
+  by faction administration, settlement management, and world statistics."** `#genCiv` reorganized
+  around **Generation → Factions → Settlements → Economy → Statistics** sub-pages (`#civSubBar`,
+  mirroring `#genSubBar`'s own pattern), replacing the old flat Peoples/Settlements/Polity/
+  Infrastructure `<details>` accordions. All work in script block 2 + HTML around `#genCiv`;
+  blocks 1/3/4 untouched throughout. **Data layer** (`_civFactionAggregates()`, cached/gated on
+  `[_civAggGen,_civTerrGen,_fieldGen,faction count]`, modeled on the pre-existing
+  `_civRegionalPopulation()` single-pass shape): one GW×GH pass + one `state.places` pass per
+  faction → population (Σ settlement pop, NOT the density-integral ceiling — that's kept
+  separate as `foodProductionCapacity`), territory km², food surplus, trade/tax income, a
+  5-way power breakdown (military/economic/political/cultural/religious + derived overall,
+  explicitly labeled heuristic, never presented as simulated), imports/exports/strategic
+  resources (territory-mean resource potential vs. world mean), and a craft-production share
+  (non-primary-sector population, the one field with no direct backing signal — labeled
+  "(approximate)"). Never re-runs `_civNetworkMetrics`' Brandes betweenness — faction
+  economic/political numbers consume the persisted `economicImportance`/`tradeVolume` from the
+  last Auto-Populate/Generate-Roads run (accepted staleness tradeoff). New `civFactionGovernment`
+  parallel array (`CIV_GOVERNMENTS`, 9 types) follows the exact v1.07 culture/v1.10 religion
+  convention (push/pop in add/remove-faction, old-save-compatible rebuild in
+  `_civSyncFromState`). New `_civFactionBannerCanvas` draws a small deterministic per-faction
+  shield glyph (pure rendering, cached, no new persisted bytes). **Generation page**: pure
+  relocation of Auto-Populate/`civAutoPolityBtn` (relabeled "Recalculate Territories")/
+  `civAutoRoutesBtn` (relabeled "Generate Roads") — same ids/handlers, zero logic change;
+  provinces/territory-radius/scale-opacity sliders/way list parked under an "Advanced"
+  disclosure. **Factions page**: existing pill picker kept (still drives `_civActiveFaction` for
+  the Territory/Settlement map tools — a deliberately separate concern from Faction Inspector
+  browsing) above a new richer faction list; clicking a faction opens `_civPopulateFactionEditor`
+  inline (Name/Government/Culture/Religion editable, Capital/Population/Territory/Power/
+  Economy/Diplomacy-placeholder read-only from the aggregate) with a lazy-loaded settlement
+  sublist (`<details>` `toggle`, gated on `builtGen===_civAggGen` so an unchanged re-expand
+  rebuilds nothing — node-identity verified). **Settlements page**: a virtual-scrolling
+  sortable/filterable table (`ST_ROW_H=28`, fixed recycled row pool + overscan, positioned via
+  `transform:translateY`) — search/faction/type/econ-role/pop-range filters plus 7 sort keys
+  (Population/Prosperity/Importance/Economy/Age/Distance/Military value), `state.civTableFilter`
+  (transient, not persisted). Verified against a synthetic 4,000-settlement world: DOM row count
+  stays ~21-28 regardless of total count, filter/sort results cross-checked against an
+  independent recomputation, row click opens the identical popup a map click would. The
+  Settlement Inspector (`_civPopulatePlaceEditor`, still the map-anchored popup, not replaced)
+  gained read-only Prosperity/Food-surplus/Defensibility/Connected-roads/Connected-rivers/
+  Nearby-resources rows plus a Focus-camera button; all thin wrappers around already-cheap
+  single-point/small-radius primitives (`_umInferWalls`, `_umSiteKindFromTerrain`,
+  `buildSettlementSuitability`'s defensibility term, `currentResourcePotentials()`'s cached
+  fields, `_civCatchmentDensityMean`) — no new full-grid pass anywhere. **Economy/Statistics
+  pages**: render exclusively from `_civFactionAggregates()` + trivial extra tallies (way km/
+  count, settlement-tier counts, mean prosperity), gated by `_civRefreshActiveSubPage()` so
+  either page costs nothing while inactive (verified: switching away and back leaves the DOM
+  byte-identical without an explicit refresh). Old `_civRenderSettlementList()`/
+  `#civSettlementList`/`#civSettlementCount` (superseded by the virtualized table) deleted
+  outright, all 3 call sites cleaned up — confirmed zero remaining references. One pre-existing
+  smoke assertion ("Civilization → Polity no longer duplicates the timeline controls") checked a
+  `<details>` literally named "Polity", which no longer exists after the redesign folded it into
+  Generation → Territories; updated to check the whole `#genCiv` subtree instead (the invariant
+  it guards still holds). Verified: engine **984/984** (block 1 untouched throughout), UME
+  **831/831** (block 4 untouched), hash vs v1.15 **ALL IDENTICAL** at every phase (P0 data-layer-
+  only, then each UI phase — nothing in the redesign touches any render path), smoke
+  **211/211** (0 new assertions added to the suite file directly, but every phase was probed via
+  standalone Playwright scripts: P0 numeric/cache-identity sanity, P1/P2 sub-tab shell + A/B
+  button-relocation parity, P3 settlement-inspector cross-checks, P4 faction-list/inspector
+  lazy-load + node-identity, P5 4,000-row virtual-scroll stress test, P6 economy/statistics
+  cross-checks against independent recomputation).
+- **v1.15 — owner: "integrate this sculpting tool and replace the one that's already in
+  cartalith v1.14... follow the planning doc... goal is to complete this work completely."**
+  Full port of `fractal-geology/Fractal Geology Painter v0.1.html`'s stamp-based,
+  non-destructive terrain sculptor per `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`, **replacing
+  the old "Manual Terrain" accordion entirely** (plotline feature brush + direct paint, both
+  fully retired — HTML and JS). New 4th Generate sub-tab "Sculpt": paint intent with a
+  13-feature registry (mountains/hills/ridge/plateau/cliff/canyon/valley/river/lake/basin/
+  coastline/volcano/freehand, each with its own fractal edge-warp character) into a
+  session-scoped DRAFT stamp stack (own undo/redo, never touches `field`, previewed as a
+  translucent overlay) → **Commit** bakes the whole stack once, re-clamps any pre-existing
+  locked river channel a non-river stamp raised (`enforceRiverChannels()`), carves+locks new
+  River stamps, deposits Lake stamps into `lakeMask` (same mechanism the retired Water tool
+  used), then one flow/climate recompute + one undo snapshot + one render. Brush size lives in
+  grid cells (real-world/zoom-independent), pointer capture is LOD-aware throughout. **Two real
+  bugs caught by the new test coverage and fixed:** the river-commit hook was passing `{x,y}`
+  stamp points to a helper that expects `[x,y]` arrays (silently carving at grid cell (0,0)
+  every time — a total river-tool failure that would have shipped unnoticed); and commit never
+  re-protected a pre-existing locked river channel from being raised by an unrelated stamp.
+  Verified: engine **984/984**, UME **831/831** (untouched), hash vs v1.14 **ALL IDENTICAL**
+  (no stamps committed by default), smoke **211/211** (+8). See the CHANGELOG v1.15 entry for
+  full detail on what old code was retired vs. kept.
 - **Owner: "implement the top 6 borrow list from the research"** — `docs/research/azgaar-comparative-
   analysis.md` §4's ranked list, comparing against Azgaar's Fantasy Map Generator. **ALL 6 ITEMS
   SHIPPED**, one version per item (per the "finish one thing before starting the next" rule):
   (1) culture-flavored naming — v1.07. (2) setup-gate world archetype presets — v1.08. (3)
   GeoJSON/GIS export — v1.09. (4) province tier + religions layer — v1.10. (5) submap/resample UX —
   v1.11. (6) label placement + per-layer style editors — v1.12. The borrow-list arc is complete.
+- **v1.14 — owner: "a multitude of rivers... in close proximity, as if two different engines are
+  trying to achieve the very same thing... poor unnatural looking."** Confirmed literal: two river
+  renderers really were both drawing the same network on top of each other on the main (non-LOD)
+  Biome view — `surfaceColor()`'s per-pixel raster blend (Strahler/Rosgen width + Beer–Lambert
+  depth off `_riverNet.intensity`/`depth`) AND `drawRiverWays()`'s Catmull-Rom+sinuosity vector
+  spline over the SAME `_riverNet` (the v0.94 comment literally said "both render"). The vector
+  path's smoothing/jitter wanders off the raster's exact cell-centerline, so away from dead-centre
+  the two diverge into what reads as a second, parallel river — worst on terrain with many close
+  channels. Fix: `surfaceColor`'s raster blend now skips itself whenever `state.viz.riverWays` is
+  on (matching the Strahler debug view's existing vector-only precedent); off keeps the exact
+  pre-v1.14 raster-only render. **Flagged, not fixed:** a separate, deeper "closely-spaced parallel
+  channels" hatch pattern showed up in BOTH raster-only and vector-only renders during
+  investigation on certain uniformly-sloped terrain — that's the underlying drainage network's own
+  density (a flow-routing/channel-threshold question), not a render-duplication artifact; would
+  need a separate engine-level pass if pursued (`state.viz.minRiverOrder` already thins it
+  per-map). Verified: engine **923/923** (field/temp/rain/flow hashes identical to v1.13 — vctx-only
+  change), UME **831/831**, hash vs v1.13 shows the intended default-rendering rgba diff (not
+  neutral — this is a default-behavior bug fix), smoke **204/204** (+1).
 - **v1.13 — owner: "3 fixes: labels give no visual results; let me zoom out until the full map
   WIDTH stays in view (furthest zoom-out currently uses map height, forcing L/R drag); clicked
   info keeps its coord at the original zoom, doesn't adapt."** Three civ/UI bug fixes, engine
@@ -903,11 +1174,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## How to verify (the discipline we hold)
 
-1. `tests/run.sh` must pass — the full assertion suite (923 as of v0.89, unchanged through v0.95), CPU paths of the engine block. Extend
+1. `tests/run.sh` must pass — the full assertion suite (984 as of v1.15), CPU paths of the engine block. Extend
    `tests/test_tail.js` when adding a stage; stubs in `tests/stub_head.js`. Script block 4 (urban
    morphology, v0.95+) is pure/DOM-free like block 1 and gets its own harness, `tests/run_um.sh`
-   (831 assertions, ported from `urban-morphology/tests/`) — but the civ-layer adapter/renderer
-   that calls it is block 2, so that half still needs `tests/perf/smoke_gen1.js`.
+   (852 assertions as of v1.17, ported from `urban-morphology/tests/`) — but the civ-layer
+   adapter/renderer that calls it is block 2, so that half still needs `tests/perf/smoke_gen1.js`.
 2. **Cross-version neutrality**: any additive/opt-in change must be proven byte-identical to the
    prior version at defaults — FNV checksums of field/temp/rain (and render where applicable) at
    seed 12345, 256px, region mode. `tests/perf/hash_gen1.js` is the Playwright A/B battery for
@@ -930,6 +1201,112 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Religion Manager (deferred from the v1.18 request) — NOT started.** The owner's original ask
+  paired a fully editable religion system (CRUD/merge/split/holy cities/diffusion via trade/
+  migration/conquest/missionaries, per-settlement dominant/minority religion %/tension/conversion/
+  pilgrimage) with the Interactive City Viewer; the owner explicitly prioritized the viewer first
+  and deferred religion to a separate later effort. Religion today is still exactly what v1.10
+  shipped: one categorical `civFactionReligion` value per faction, editable only in the Faction
+  editor. Nothing per-settlement exists. Next session on this thread should treat it as its own
+  audit-then-plan effort (the same "research existing patterns first" discipline v1.17/v1.18 both
+  used), likely starting from `_civFactionAggregates()`'s `religious` power term and the City
+  Viewer's own Religion panel (which currently shows the faction's dominant faith + the model's
+  own `churches` — real data that a diffusion model would need to reconcile with, not replace).
+- **Interactive City Viewer (v1.18) — shipped.** Documented scope cuts, not forgotten: (a) deep
+  procedural-layout editing (rename a district, place a monument/landmark at an exact spot, edit
+  an individual road/bridge inside the generated fabric) — needs a new persisted per-city
+  edit-overlay data model (analogous to the Sculpt editor's stamp stack over the terrain field),
+  a genuinely separate future feature; today's Edit button routes to the existing settlement-level
+  editor (name/age/walls/specialisation/traits/history) instead. (b) Literal contour-terracing of
+  mountain-town street layout — not modeled; UME's real-terrain integration (v1.17 S3) already
+  lets street costs/building suitability read real slope, but there's no dedicated "grow along
+  contour lines" rule. (c) A distinct "pilgrimage city" archetype with ceremonial roads — not
+  modeled; a monastic/religious specialisation exists (v1.17 S2) but doesn't yet drive a
+  temple-complex-plus-processional-avenue layout. All three are genuinely new engine capabilities
+  (UME.cityGen would need new logic), not data the model already computes — unlike almost
+  everything else the City Viewer surfaces, which was already generated and simply never drawn.
+- **Sculpt mobile pan joystick (v1.19) — shipped.** `#sculptNavpad` (stick only, no zoom slider —
+  Gen1's `#zoomOverlay` already has dedicated `+`/`−`), touch-only, shown only while
+  `_sculptEditorActive()`. Not scoped beyond the Sculpt editor — a future session could extend the
+  same pattern to other touch/paint tools (e.g. Cartography's paint mode) if that friction is ever
+  reported; not requested here, so left alone.
+- **Expanded natural-feature vocabulary (v1.20) — shipped.** Documented scope cuts, not forgotten:
+  (a) `mountain`/`hill` pack-art variant *selection* stays purely positional, not climate-aware —
+  only the zero-asset procedural fallback varies by temperature/aridity; a pack author who wants
+  a snow-mountain vs. bare-mountain distinction still can't target one directly, only supply more
+  variants that get distributed randomly. (b) The desert cactus/boulder split and the mountain
+  snow-cap both key off a single, un-tuned threshold (10°C, 2°C respectively) — reasonable
+  defaults, not validated against the climate sim's actual real-world calibration. (c) Not
+  extended to `structures.trait` badges or biome/terrain ground-texture art (both already parsed
+  by schema 2 but not drawn anywhere — a pre-existing gap, unrelated to this feature, still open).
+  (d) No new POI/settlement slots — this was scoped to trees/ground-scatter/mountain-hill variety
+  specifically, not a broader POI-vocabulary expansion (the user's uploaded reference sheet had
+  far more categories — ruins, standing stones, lighthouses, culture packs, etc. — than fit this
+  request; those remain reachable today only via the Asset Library's existing free-form `custom`
+  icon family + sprite-sheet slicer, manually placed one at a time, not auto-attached to anything).
+- **Settlement pick-radius zoom scaling + Journey Planner sea-speed/vessel fixes (v1.23) — shipped.**
+  (1) The settlement clickable area was a flat grid-space radius that ballooned on screen when zoomed
+  in and blocked panning near a settlement — now zoom-scaled (`_civZoomPickR`) to a constant on-screen
+  size at all five place-pick sites. (2) `JP_TERRAIN.sea` had Open Sea slower than Coastal Waters
+  (systemic; wind is a separate axis) — reordered so Open Sea is fastest. (3) The vessel autoselector
+  and the leg validator shared no compatibility source of truth (two inline copies) — consolidated to
+  `_jpVesselWaterBlock`, so the selector can never pick what the validator rejects. **Known
+  decisions / follow-ups:** (a) the sea multiplier for Open Sea (1.20) is a conservative +20%
+  continuous-sailing edge over coastal; the absolute km/day (159.6 for a Cog at 14 h) runs a touch
+  above the task's ~80-150 reference band purely because of the out-of-scope base ship speed + hours,
+  not the multiplier — the ORDERING is what the bug was about. (b) The Dhow is deliberately kept
+  open-sea capable (historically correct — Indian-Ocean monsoon dhows were ocean traders); if a
+  coastal-only dhow variant is ever wanted, flip its `JP_SHIPS` entry (`openSea:false` +
+  `invalidWater:["Open Sea","Rough Open Sea"]`) and both the selector and validator pick it up from
+  the one shared rule. (c) Settlement pan-near-pin feel is canvas/pointer interaction — flagged for
+  manual on-device confirmation; the headless smoke only asserts the radius shrinks with zoom.
+- **Joystick direction + all-views + LOD0 supersample (v1.22) — shipped.** Three owner-reported
+  items. (1) The Sculpt pan joystick moved the view opposite to the push — the v1.19 port dropped
+  `Cartalith_V1.915.html`'s velocity negation; restored in `_sculptNavSetKnob`. (2) The joystick is
+  now shown across all main-map views on touch (`_sculptNavSync` gate), hidden only behind the setup
+  gate / in 3D / in the City Viewer. (3) LOD0 read as low-resolution because the LOD compositor was
+  locked to the GW×GH `#view` canvas — new `_lodRenderW()` supersamples the LOD backing (2× field
+  width, capped 2560px) and `lodViewRect` picks a finer pyramid level against it, so LOD0 composes
+  from finer sub-tiles into a crisp canvas; the non-LOD path resets `#view` to GW×GH so the default
+  render stays byte-identical. **Known scope cuts / follow-ups worth knowing:** (a) the supersample
+  cap is a flat 2560px render-width ceiling and the supersample factor is a fixed 2× (not display-DPI
+  aware), so on a very large 4K+ display LOD0 can still be gently upscaled beyond 2560px — a bounded,
+  low-risk default chosen so low-end tablets stay smooth; making it DPI-adaptive is a possible future
+  refinement. (b) The instant LOD overview placeholder (shown for a beat before the sharp tiles land)
+  is still built at the 512px `OV_TARGET_W` cap — it's covered by the sharp finer tiles after the
+  toggle-on / settle refine, so this only affects the brief pre-refine frame, not the steady state.
+  (c) The civ-layer overlay canvases (settlements/labels) are still GW×GH; under LOD they read
+  slightly softer than the now-supersampled terrain beneath them — alignment is unaffected (both
+  CSS-fit the same box), only their own crispness. Not requested, left for a future pass if noticed.
+- **Sprite-sheet slicer zoom/pan (v1.21) — shipped.** Zoom buttons + wheel-zoom-to-cursor + a
+  dedicated Pan mode, leveraging the slicer's pre-existing (previously dormant)
+  `overflow:auto` wrap for native scroll-based panning. No scope cuts to speak of — the request
+  was fully self-contained to this one tool. Worth knowing for later: the zoom cap is a flat
+  ~6000px canvas-dimension ceiling (memory-bounded), not tied to the sheet's native resolution, so
+  even a modest sheet can zoom in well past 1:1 if that's genuinely useful for precision.
+- **Settlement generation refactor (v1.17) — shipped (audit + S1–S7).** Documented scope cuts,
+  not forgotten: (a) per-culture town morphology — `civFactionCulture` now reaches
+  `opts.culture`, but UME still ships 2 profiles ('medieval'/'venus'), so every faction resolves
+  to 'medieval' morphology; (b) `model.details` (including the new per-economy spoil-heap/
+  drying-rack/log-boom props) are generated but the Gen1 map/preview renderers have never drawn
+  details — a pre-existing limitation; the economy reads via district tints + yard-shed/warehouse
+  building fabric instead; (c) wall terrain-following is bounded vertex deflection (±60 m,
+  relief-relative), not a full ridge-tracing solver (stated in the audit); (d) valley WIDTH has
+  no engine primitive — `currentFloodField()` is the documented floodplain proxy; (e) richer
+  diagnostics (colour-coded district fills, per-epoch growth-stage view) would extend
+  `state.viz.civDiagnostics`; the raster + fact-card overlays shipped cover the owner's
+  validation list's core (footprint, slope, river class, wall spec, bridge/harbour validity).
+- **Sculpt editor (v1.15) — fully shipped, all 8 phases of `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md`
+  §9 complete (P0 noise/geometry/registry through P7 docs/tests), including the P3 acceptance test
+  (painting + committing with a Resources/Carry-Cap/Settlement debug view already open updates that
+  view in the same frame — reverified directly for v1.15, since `computeFlow(true)` inside
+  `sculptCommit()` invalidates `_resourcePots`/`_carryCapField`/`_settleSuitField` exactly like any
+  other terrain edit). Nothing from the plan was deliberately deferred; the plan's own §4 registry
+  table, §6 edge-character table, and §7 water table are the reference for any future per-feature
+  tuning. World-wrap (equirectangular seam) handling was out of scope for the PoC-ported features
+  from the start (`applyFeatureAlongCurve`, the retired plotline's own primitive, never had it
+  either — parity, not a regression) — a future pass could add it to `sculptApplyStamp` uniformly
+  if a `state.world`-mode sculpt session needs it.
 - **Seamless region↔settlement refactor — Stage 1 (roads, v0.97), Stage 2 (water, v0.98) and Stage 3's
   coastline pass (v0.99) SHIPPED; the coastal WALL SIZING is the one substantive item left.** The
   coordinate trick below is the crux and is realised in `_umWaterCtx` + `buildSite`'s `opts.water` branch:

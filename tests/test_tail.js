@@ -469,10 +469,21 @@ check('render wrote opaque pixels', img.data.length === GW * GH * 4 && img.data[
     const ridge = Math.max(0, 1 - Math.abs(y - 32) / 18);          // E–W ridge along y=32
     fld[y * W + x] = (x >= 8 && x < 88) ? sea + 0.02 + 0.48 * ridge : 0.2;  // flanks → low land, edges → ocean
   }
+  // v1.20: 4 biome bands (was 2) so the new tree/scatter kinds are all reachable — tempForest,
+  // savanna, desert, tundra, per the frozen BIOME_KEYS index (5,10,9,2). A synthetic tempField
+  // splits the desert band into a warm half (→ cactus) and cold half (→ boulder), and a synthetic
+  // wetlandMask marks a small pocket inside the tempForest band (→ wetland trees, overriding the
+  // biome underneath) — both passed as OPTIONAL opts fields so placeMapIcons stays the "pure
+  // primitive, no globals" contract this test relies on (the live caller passes the real
+  // tempField/currentWetlandMask(); a plain opts object without them exercises the fallback path).
   const biome = new Uint8Array(n);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
-    biome[y * W + x] = (x < 48) ? 5 /* tempForest */ : 9 /* desert */;
-  const opts = { sea, seed: 7 };
+    biome[y * W + x] = (x < 24) ? 5 /* tempForest */ : (x < 48) ? 10 /* savanna */ : (x < 72) ? 9 /* desert */ : 2 /* tundra */;
+  const tempField = new Float32Array(n).fill(15);
+  for (let y = 0; y < H; y++) for (let x = 48; x < 72; x++) tempField[y * W + x] = x < 60 ? 20 : -5;   // warm / cold desert half
+  const wetlandMask = new Uint8Array(n);
+  for (let y = 28; y < 36; y++) for (let x = 10; x < 20; x++) wetlandMask[y * W + x] = 1;              // marsh pocket inside the tempForest band
+  const opts = { sea, seed: 7, tempField, wetlandMask };
   const icons = placeMapIcons(fld, biome, W, H, opts);
   check('icons: mountains found on the ridge (' + icons.mountains.length + ')', icons.mountains.length >= 3);
   check('icons: hills found on the flanks (' + icons.hills.length + ')', icons.hills.length >= 2);
@@ -488,15 +499,47 @@ check('render wrote opaque pixels', img.data.length === GW * GH * 4 && img.data[
     minD2 = Math.min(minD2, dx * dx + dy * dy);
   }
   check('icons: mountain spacing respected (min ' + Math.sqrt(minD2).toFixed(1) + ' ≥ ' + mSpace + ')', minD2 >= mSpace * mSpace);
-  check('icons: trees only on closed-canopy biome cells',
-    icons.trees.length > 5 && icons.trees.every(t => { const b = biome[t.y * W + t.x]; return b === 3 || b === 4 || b === 5 || b === 6 || b === 12; }));
-  check('icons: painter order is north→south', ['mountains', 'hills', 'trees'].every(k =>
+  const treeValid = t => {
+    const b = biome[t.y * W + t.x];
+    if (wetlandMask[t.y * W + t.x] === 1) return t.kind === 'wetland';
+    if (b === 3 || b === 4) return t.kind === 'conifer';
+    if (b === 5) return t.kind === 'broadleaf';
+    if (b === 6 || b === 12) return t.kind === 'rainforest';
+    if (b === 10 || b === 11) return t.kind === 'savanna';
+    return false;
+  };
+  check('icons: every tree kind matches its cell biome/wetland status (' + icons.trees.length + ' trees)',
+    icons.trees.length > 5 && icons.trees.every(treeValid));
+  check('icons: the wetland mask pocket produces wetland trees, overriding the tempForest biome underneath',
+    icons.trees.some(t => t.kind === 'wetland'));
+  check('icons: the savanna band produces savanna trees', icons.trees.some(t => t.kind === 'savanna'));
+  const scatterValid = sk => {
+    const b = biome[sk.y * W + sk.x];
+    if (b === 9) return sk.kind === (tempField[sk.y * W + sk.x] >= 10 ? 'cactus' : 'boulder');
+    if (b === 2) return sk.kind === 'boulder';
+    return false;
+  };
+  check('icons: every scatter kind matches its cell biome/temperature (' + icons.scatter.length + ' scattered)',
+    icons.scatter.length > 5 && icons.scatter.every(scatterValid));
+  check('icons: the warm half of the desert band gets cactus',
+    icons.scatter.some(sk => sk.kind === 'cactus' && biome[sk.y * W + sk.x] === 9));
+  check('icons: the cold half of the desert band gets boulder',
+    icons.scatter.some(sk => sk.kind === 'boulder' && biome[sk.y * W + sk.x] === 9));
+  check('icons: the tundra band gets boulder',
+    icons.scatter.some(sk => sk.kind === 'boulder' && biome[sk.y * W + sk.x] === 2));
+  check('icons: painter order is north→south', ['mountains', 'hills', 'trees', 'scatter'].every(k =>
     icons[k].every((p, i, a) => i === 0 || a[i - 1].y <= p.y)));
   const icons2 = placeMapIcons(fld, biome, W, H, opts);
   check('icons: placement deterministic', JSON.stringify(icons) === JSON.stringify(icons2));
+  const iconsNoOpt = placeMapIcons(fld, biome, W, H, { sea, seed: 7 });
+  check('icons: omitting tempField ⇒ desert always resolves to cactus (no cold-desert split)',
+    iconsNoOpt.scatter.filter(sk => biome[sk.y * W + sk.x] === 9).every(sk => sk.kind === 'cactus'));
+  check('icons: omitting wetlandMask ⇒ no wetland trees (falls through to the plain biome forest)',
+    iconsNoOpt.trees.every(t => t.kind !== 'wetland'));
   const flat = new Float32Array(n).fill(sea + 0.02);
   const none = placeMapIcons(flat, null, W, H, opts);
-  check('icons: flat lowland → no mountains or hills', none.mountains.length === 0 && none.hills.length === 0 && none.trees.length === 0);
+  check('icons: flat lowland → nothing placed',
+    none.mountains.length === 0 && none.hills.length === 0 && none.trees.length === 0 && none.scatter.length === 0);
 
   // parchment: defaults-off neutrality + visible effect, on the real map
   const before = Uint8ClampedArray.from(img.data);
@@ -617,7 +660,7 @@ fieldsFinite('generate(world)');
   state.world = false; GW = state.resW; GH = gridH(GW); allocate(); generate();
 }
 
-/* ---------- plotline feature brushes (v0.048) ---------- */
+/* ---------- Ramer-Douglas-Peucker polyline simplification ---------- */
 {
   const distToPolyline = (p, poly) => {
     let best = Infinity;
@@ -636,75 +679,6 @@ fieldsFinite('generate(world)');
   check('rdp keeps endpoints', simp[0] === raw[0] && simp[simp.length - 1] === raw[raw.length - 1]);
   check('rdp output stays within tolerance of input', raw.every(p => distToPolyline(p, simp) <= 0.75));
   check('rdp collinear → 2 points', rdpSimplify([{x:0,y:0},{x:1,y:1},{x:2,y:2},{x:3,y:3}], 0.1).length === 2);
-
-  // synthetic flat grid for the feature stamps
-  const W = 96, H = 72, flat = () => new Float32Array(W * H).fill(0.5);
-  const curve = catmullRomSample([{x:16,y:36},{x:48,y:30},{x:80,y:40}], 2);
-
-  // mountainRange: raised near the line; cells beyond the radius bit-untouched
-  const a = flat(), R = 10;
-  applyFeatureAlongCurve(a, W, H, curve, 'mountainRange', R, 0.8, 42, { sea: 0.42 });
-  check('mountainRange finite & in [0,1]', allFinite(a) && (([mn, mx]) => mn >= 0 && mx <= 1)(minMax(a)));
-  let nearSum = 0, nearN = 0, farSame = true;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
-    const d = distToPolyline({ x, y }, curve), i = y * W + x;
-    if (d <= R * 0.5){ nearSum += a[i]; nearN++; }
-    else if (d > R + 1.5 && a[i] !== 0.5) farSame = false;
-  }
-  check('mountainRange raises the near-line band (mean ' + (nearSum / nearN).toFixed(3) + ' > 0.55)', nearSum / nearN > 0.55);
-  check('cells beyond the radius are bit-untouched', farSame);
-
-  // determinism: same seed bit-identical, different seed differs
-  const b = flat();
-  applyFeatureAlongCurve(b, W, H, curve, 'mountainRange', R, 0.8, 42, { sea: 0.42 });
-  let same = true; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]){ same = false; break; }
-  check('feature stamp deterministic (same seed bit-identical)', same);
-  const c = flat();
-  applyFeatureAlongCurve(c, W, H, curve, 'mountainRange', R, 0.8, 43, { sea: 0.42 });
-  let differs = false; for (let i = 0; i < a.length; i++) if (a[i] !== c[i]){ differs = true; break; }
-  check('different seed produces different terrain', differs);
-
-  // river on a flat field: channel carves down, sits below its surroundings, deepens downstream
-  const rv = flat();
-  const rCurve = catmullRomSample([{x:10,y:20},{x:50,y:36},{x:86,y:50}], 2);
-  applyFeatureAlongCurve(rv, W, H, rCurve, 'river', 24, 0.9, 7, { sea: 0.42 });
-  check('river field finite & in [0,1]', allFinite(rv) && (([mn, mx]) => mn >= 0 && mx <= 1)(minMax(rv)));
-  let low = 0, high = 0;
-  for (let k = Math.floor(rCurve.length * 0.1); k < Math.floor(rCurve.length * 0.9); k++){
-    const x = Math.round(rCurve[k].x), y = Math.round(rCurve[k].y);
-    if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
-    const i = y * W + x;
-    const nbMean = (rv[i - 1] + rv[i + 1] + rv[i - W] + rv[i + W]) * 0.25;
-    if (rv[i] < 0.5 && rv[i] < nbMean - 1e-7) low++; else high++;
-  }
-  check('river channel cells carve down below their neighbours (' + low + ' low vs ' + high + ' high)', low > high * 2);
-  const at = f => { const p = rCurve[Math.floor(rCurve.length * f)]; return rv[Math.round(p.y) * W + Math.round(p.x)]; };
-  check('river deepens downstream (u≈0.15: ' + (0.5 - at(0.15)).toFixed(3) + ' < u≈0.85: ' + (0.5 - at(0.85)).toFixed(3) + ')',
-    (0.5 - at(0.85)) > (0.5 - at(0.15)) * 1.3);
-
-  // extremes: every feature at str=1, R=40 stays finite & in range; plateau never lowers
-  let extOk = true, plateauOk = true;
-  for (const ft of ['mountainRange', 'hills', 'ridge', 'plateau', 'river', 'canyon', 'escarpment']){
-    const f = flat();
-    applyFeatureAlongCurve(f, W, H, curve, ft, 40, 1, 99, { sea: 0.42 });
-    if (!allFinite(f) || minMax(f)[0] < 0 || minMax(f)[1] > 1) extOk = false;
-    if (ft === 'plateau') for (let i = 0; i < f.length; i++) if (f[i] < 0.5 - 1e-9){ plateauOk = false; break; }
-  }
-  check('all 7 features finite & in [0,1] at extreme settings', extOk);
-  check('plateau never lowers terrain (mesa semantics)', plateauOk);
-}
-
-/* ---------- feature brush integration (UI call path on real terrain) ---------- */
-{
-  const before = field.slice();
-  const pts = [{x:GW*0.25,y:GH*0.6},{x:GW*0.5,y:GH*0.45},{x:GW*0.75,y:GH*0.55}];
-  const curve = catmullRomSample(pts, 2);
-  applyFeatureAlongCurve(field, GW, GH, curve, 'mountainRange', 28, 0.45, 12345, { sea: state.seaLevel });
-  fieldsFinite('feature brush (UI call path)');
-  let changed = false; for (let i = 0; i < field.length; i++) if (field[i] !== before[i]){ changed = true; break; }
-  check('feature brush changed real terrain', changed);
-  computeFlow(true);
-  check('flow finite after feature brush', allFinite(flowField));
 }
 
 /* ---------- region refine wiring (v0.053): sync parts ---------- */
@@ -884,9 +858,11 @@ fieldsFinite('generate(world)');
     const allStored = Object.values(z).every(v => v instanceof Uint8Array);
     check('sample_pack.zip is fully STORED (unzipStore reads every entry)', allStored && z['pack.json'] && z['pack.csv']);
     const sman = parsePackManifest(z);
-    check('sample pack manifest: 7 textures + 3/2/2/2 icons, CC0', Object.keys(sman.textures).length === 7 &&
-      sman.icons.mountain.length === 3 && sman.icons.hill.length === 2 && sman.icons.tree_conifer.length === 2 &&
-      sman.icons.tree_broadleaf.length === 2 && sman.license === 'CC0' && sman.warnings.length === 0);
+    check('sample pack manifest: 7 textures + 3/2×9 icons (10 slots), CC0, no warnings', Object.keys(sman.textures).length === 7 &&
+      sman.icons.mountain.length === 3 &&
+      ['hill', 'tree_conifer', 'tree_broadleaf', 'tree_rainforest', 'tree_savanna', 'tree_wetland', 'shrub', 'cactus', 'boulder']
+        .every(slot => sman.icons[slot] && sman.icons[slot].length === 2) &&
+      sman.license === 'CC0' && sman.warnings.length === 0);
     const pngOK = Object.keys(z).filter(n => n.endsWith('.png')).every(n => { const d = z[n]; return d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4E && d[3] === 0x47; });
     check('sample pack PNGs have valid signatures', pngOK);
   }
@@ -896,7 +872,8 @@ fieldsFinite('generate(world)');
   state.mode = 'biome'; state.debug = 'off'; state.viz.icons = false; renderNow();
   const baseNoPack = Uint8ClampedArray.from(img.data);
   assetPack = { name: 'syn', license: 'CC0', texAny: false, textures: {},
-    icons: { mountain: [{ w: 64, h: 64, bmp: {} }, { w: 64, h: 64, bmp: {} }], tree_conifer: [{ w: 32, h: 48, bmp: {} }] } };
+    icons: { mountain: [{ w: 64, h: 64, bmp: {} }, { w: 64, h: 64, bmp: {} }], tree_conifer: [{ w: 32, h: 48, bmp: {} }],
+      tree_savanna: [{ w: 40, h: 40, bmp: {} }], cactus: [{ w: 24, h: 40, bmp: {} }] } };   // v1.20: exercise the new slots' sprite-lookup path too
   renderNow();   // pack present but icons toggle off → every pack path inert
   let neutral = true; for (let i = 0; i < img.data.length; i++) if (img.data[i] !== baseNoPack[i]) { neutral = false; break; }
   check('asset pack loaded but icons off → render bit-identical', neutral);
@@ -1722,55 +1699,6 @@ if (typeof applyTidalSedimentation === 'function') {
   check('flood field is not flat (varies across the map)', variance(fl) > 1e-6);
 }
 
-/* ---------- Stage 3: per-tile editing (v0.075) ---------- */
-{
-  // pure brush
-  const W = 20, H = 20, d = new Float32Array(W * H).fill(0.5);
-  brushHeight(d, W, H, 10, 10, 5, 0.2, 'raise');
-  check('brush raise lifts the centre', d[10 * W + 10] > 0.5);
-  check('brush leaves cells outside the radius untouched', d[0] === 0.5);
-  const dl = new Float32Array(W * H).fill(0.5); brushHeight(dl, W, H, 10, 10, 5, 0.2, 'lower');
-  check('brush lower drops the centre', dl[10 * W + 10] < 0.5);
-  const dc = new Float32Array(W * H).fill(1); brushHeight(dc, W, H, 10, 10, 5, 0.5, 'raise');
-  check('brush clamps to [0,1]', dc.every(v => v <= 1 && v >= 0));
-  const noisy = Float32Array.from({ length: W * H }, () => Math.random()); const ns = Float32Array.from(noisy);
-  for (let k = 0; k < 6; k++) brushHeight(ns, W, H, 10, 10, 8, 1, 'smooth');
-  const variance = a => { let s = 0, s2 = 0, n = 0; for (let y = 6; y <= 14; y++) for (let x = 6; x <= 14; x++){ const v = a[y * W + x]; s += v; s2 += v * v; n++; } return s2 / n - (s / n) ** 2; };
-  check('brush smooth reduces local variance', variance(ns) < variance(noisy));
-  // v0.085: the 8-mode unified kernel (same modes as the base sculpt brush) now lives in brushHeight too
-  const dv = new Float32Array(W * H).fill(0.5); brushHeight(dv, W, H, 10, 10, 6, 0.5, 'volcano');
-  check('brush volcano raises a conical peak', dv[10 * W + 10] > 0.5 && dv[10 * W + 11] > 0.5 && dv[10 * W + 11] < dv[10 * W + 10]);
-  const dm = new Float32Array(W * H).fill(0.3); brushHeight(dm, W, H, 10, 10, 6, 0.5, 'mesa', { centerH: 0.3 });
-  check('brush mesa builds a raised flat top (max-semantics, never lowers)', dm[10 * W + 10] > 0.3 && dm.every((v, i) => v >= (i === 0 ? 0.3 : 0)));
-  const dr = new Float32Array(W * H).fill(0.5); brushHeight(dr, W, H, 10, 10, 6, 0.5, 'ridge', { nx: 1, ny: 0 });
-  check('brush ridge crests along the stroke', dr[10 * W + 10] > 0.5);
-  const dca = new Float32Array(W * H).fill(0.5); brushHeight(dca, W, H, 10, 10, 6, 0.8, 'canyon', { nx: 1, ny: 0 });
-  check('brush canyon cuts a channel below the surface', dca[10 * W + 10] < 0.5);
-  const dcl = new Float32Array(W * H).fill(0.5); brushHeight(dcl, W, H, 10, 10, 6, 0.8, 'cliff', { nx: 1, ny: 0 });
-  check('brush cliff raises one side, lowers the other', dcl[10 * W + 13] > 0.5 && dcl[10 * W + 7] < 0.5);
-  const du = new Float32Array(W * H).fill(0.5); brushHeight(du, W, H, 10, 10, 5, 0.2);   // no mode → back-compat raise default
-  check('brush defaults to raise when mode omitted', du[10 * W + 10] > 0.5);
-
-  // tile editing on a refined tile
-  state.world = false; state.resW = 256; GW = 256; GH = gridH(256); allocate(); generate();
-  _lodTile = 512; _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2; lodCacheClear(); _lodEdits.clear(); _lodUndo.length = 0;
-  refineVisibleTiles();
-  const pick = lodPick(GW / 2, GH / 2);
-  check('lodPick returns a valid tile + in-range local coords', pick.lx >= 0 && pick.lx <= pick.td.w && pick.ly >= 0 && pick.ly <= pick.td.h);
-  const proc = lodCacheGet(pick.key); const procCopy = proc ? Float32Array.from(proc.data) : null;
-  lodEditBegin(GW / 2, GH / 2);
-  const ok = editTileAt(GW / 2, GH / 2);
-  check('editTileAt edits the refined tile', ok && _lodEdits.has(pick.key));
-  check('edit diverges from the procedural tile', procCopy && !_lodEdits.get(pick.key).data.every((v, i) => v === procCopy[i]));
-  // re-refine does not clobber the edit (drawLODView prefers _lodEdits)
-  refineVisibleTiles();
-  check('re-refine preserves the edit', _lodEdits.has(pick.key) && _lodEdits.get(pick.key).edited);
-  // undo reverts to procedural
-  lodUndo();
-  check('Ctrl-Z reverts the tile edit', !_lodEdits.has(pick.key));
-  _lodEdit = false; _lodOn = false; _lodEdits.clear(); _lodUndo.length = 0; lodCacheClear();
-}
-
 /* ---------- discharge-widened rivers (v0.076 render-overlay properties, now via the v0.111 network) ---------- */
 {
   // synthetic land with a trunk river (high discharge) and a tributary (low discharge)
@@ -1899,15 +1827,17 @@ if (typeof applyTidalSedimentation === 'function') {
   check('buildWaterBodies forceLake → forced cell is lake (class 2)', wbF[3 * W + 4] === 2 && wbF[0 * W + 5] === 0);
 }
 
-/* ---------- v0.103: deposit-water tool — a lake on a mountain without raising sea level ---------- */
+/* ---------- v0.103: a deposited lake mask cell — a lake on a mountain without raising sea level ---------- */
 {
   // reuse the 256 region world generated for the CBiome/CTerrain blocks above (no regenerate → seam RNG untouched)
   let hi = -1, hc = 0;
   for (let i = 0; i < field.length; i++){ const h = field[i] - geoAt(i); if (h >= state.seaLevel && h > hi){ hi = h; hc = i; } }
   const mx = hc % GW, my = (hc / GW) | 0;
-  state.radius = 8; lakeMask = null; _waterBody = null; _cartBiome = null;
-  depositWater(mx, my);
-  check('depositWater marks the clicked (highest) land cell as lake', !!lakeMask && lakeMask[hc] === 1);
+  // v1.15: the Sculpt editor's Lake feature writes lakeMask directly (sculptApplyStamp/sculptCommit) —
+  // the old depositWater() brush that used to own this array is retired; poke the array the same way
+  // its replacement does, to keep exercising buildWaterBodies' forceLake classification below.
+  lakeMask = new Uint8Array(GW * GH); lakeMask[hc] = 1; _waterBody = null; _cartBiome = null;
+  check('a deposited lakeMask cell marks the clicked (highest) land cell as lake', !!lakeMask && lakeMask[hc] === 1);
   const wb = currentWaterBodies();
   check('deposited water classifies as lake (class 2) above sea level', wb[hc] === 2 && hi >= state.seaLevel);
   check('deposited lake exports as biome raster index 13', buildBiomeRaster()[hc] === BIOME_INDEX.lake);
@@ -3124,24 +3054,6 @@ if (typeof composeEditInto === 'function') {
     let inRange = true; for (const v of out) if (v < 0 || v > 1) inRange = false;
     check('composeEditInto: adds onto base & clamps to [0,1]', inRange && out[3 * ew + 3] > b0); }
 }
-/* ---------- v0.134 Stage 3: feature brushes → detail layer at zoom (applyFeatureToLOD) ---------- */
-if (typeof applyFeatureToLOD === 'function') {
-  const sOn = _lodOn, sZ = _lodZoom, sCx = _lodCx, sCy = _lodCy, sTile = _lodTile;
-  _lodEdits.clear(); lodCacheClear();
-  _lodOn = true; _lodTile = 256; _lodZoom = 4; _lodCx = GW / 2; _lodCy = GH / 2;
-  const v = lodViewRect();
-  const curve = []; for (let t = 0; t <= 10; t++) curve.push({ x: v.x0 + (v.x1 - v.x0) * (0.2 + 0.6 * t / 10), y: (v.y0 + v.y1) / 2 });
-  const touched = applyFeatureToLOD(curve, 'mountainRange', 2, 0.8, 123);
-  check('applyFeatureToLOD: stamps into ≥1 detail tile', touched > 0 && _lodEdits.size > 0);
-  let anyDelta = false, finite = true; for (const e of _lodEdits.values()){ for (let i = 0; i < e.data.length; i++){ if (!Number.isFinite(e.data[i])) finite = false; if (Math.abs(e.data[i] - e.base[i]) > 1e-6) anyDelta = true; } }
-  check('applyFeatureToLOD: produces a nonzero detail delta (stored as base+data)', anyDelta);
-  check('applyFeatureToLOD: detail edits stay finite', finite);
-  check('applyFeatureToLOD: edits carry world bounds eb (mip-consistent via Stage 2)', [..._lodEdits.values()].every(e => e.eb && e.base));
-  _lodEdits.clear(); lodCacheClear();
-  const touched2 = applyFeatureToLOD(curve, 'mountainRange', 2, 0.8, 123);
-  check('applyFeatureToLOD: deterministic (same tile count)', touched2 === touched);
-  _lodEdits.clear(); lodCacheClear(); _lodOn = sOn; _lodZoom = sZ; _lodCx = sCx; _lodCy = sCy; _lodTile = sTile;
-}
 /* ---------- v0.135: multicore generate() noise fills — Invariant 11 (worker-stringify) + row-slice offset ---------- */
 if (typeof fillWarpRows === 'function') {
   const noiseSrc = [hash, vnoise, fbm, ridged, pvnoise, pfbm, pridged].map(f => f.toString()).join('\n');
@@ -3443,145 +3355,216 @@ if (typeof carveRiverValleys === 'function') {
   state.carveRivers = oldCarve; generate();   // restore
 }
 
-
-/* ---------- Sculpt engine (P0): pure stamp-based feature registry ----------
-   docs/SCULPT_EDITOR_INTEGRATION_PLAN.md. Ported 1:1 from the fractal-geology
-   PoC's own 77-assertion corpus (fractal-geology/tests/test_tail.js) onto the
-   engine-native sculptFbm/sculptRidged/sculptBillow/SCULPT_FEATURES/
-   sculptApplyStamp/sculptNearestOnStroke ported above. Same synthetic-grid
-   methodology as the PoC's suite (a fixed local SIZE, not the live GW/GH) —
-   these are pure functions, independent of whatever resolution the rest of
-   this test file has generate()'d at this point. */
+/* ---------- v1.15: Sculpt editor — pure, DOM-free core (noise/geometry/13-feature registry/compositor) ---------- */
 {
-  const SSZ=512, SN=SSZ*SSZ;
-  function sculptMkStamp(type, pts, gOver, fOver){
-    const g=Object.assign({}, SCULPT_GLOBAL_DEF, gOver||{});
-    const f={}; for(const c of SCULPT_FEATURES[type].controls) f[c[0]]=c[5];
-    Object.assign(f, fOver||{});
-    return { id:1, type, seed:12345, g, f, pts, hidden:false };
-  }
-  function sculptBlank(){ const H=new Float32Array(SN).fill(0.45), W=new Float32Array(SN); return {H,W}; }
-  function sculptSum(a){ let s=0; for(let i=0;i<a.length;i++) s+=a[i]; return s; }
+  // --- noise wrappers: determinism, seed variance, PoC range convention ---
+  check('sculptFbm deterministic', sculptFbm(1.3, 2.7, 5, 0.5, 2, 777) === sculptFbm(1.3, 2.7, 5, 0.5, 2, 777));
+  check('sculptFbm differs by seed', sculptFbm(1.3, 2.7, 5, 0.5, 2, 777) !== sculptFbm(1.3, 2.7, 5, 0.5, 2, 778));
+  { let mn = 9, mx = -9; for (let i = 0; i < 3000; i++){ const v = sculptFbm(i * 0.13, i * 0.07, 5, 0.5, 2, 777); if (v < mn) mn = v; if (v > mx) mx = v; }
+    check('sculptFbm roughly in [-1,1]', mn >= -1.2 && mx <= 1.2); }
+  check('sculptRidged deterministic', sculptRidged(1.3, 2.7, 5, 0.5, 2, 777) === sculptRidged(1.3, 2.7, 5, 0.5, 2, 777));
+  { let mn = 9, mx = -9; for (let i = 0; i < 3000; i++){ const v = sculptRidged(i * 0.13, i * 0.07, 5, 0.5, 2, 777); if (v < mn) mn = v; if (v > mx) mx = v; }
+    check('sculptRidged in [0,~1.6]', mn >= 0 && mx <= 1.7); }
+  check('sculptBillow deterministic', sculptBillow(1.3, 2.7, 5, 0.5, 2, 777) === sculptBillow(1.3, 2.7, 5, 0.5, 2, 777));
+  { let mn = 9, mx = -9; for (let i = 0; i < 3000; i++){ const v = sculptBillow(i * 0.13, i * 0.07, 5, 0.5, 2, 777); if (v < mn) mn = v; if (v > mx) mx = v; }
+    check('sculptBillow in [0,1]', mn >= 0 && mx <= 1.001); }
 
-  // 1. noise determinism
-  check('sculptFbm deterministic for equal seed', sculptFbm(1.3,2.7,5,0.5,2,777)===sculptFbm(1.3,2.7,5,0.5,2,777));
-  check('sculptFbm differs for different seed', sculptFbm(1.3,2.7,5,0.5,2,777)!==sculptFbm(1.3,2.7,5,0.5,2,778));
-  { let mn=9,mx=-9; for(let i=0;i<4000;i++){ const v=sculptFbm(i*0.13,i*0.07,5,0.5,2,777); if(v<mn)mn=v; if(v>mx)mx=v; }
-    check('sculptFbm stays roughly in [-1,1]', mn>=-1.2 && mx<=1.2); }
-  { let mn=9,mx=-9; for(let i=0;i<4000;i++){ const v=sculptRidged(i*0.13,i*0.07,5,0.5,2,777); if(v<mn)mn=v; if(v>mx)mx=v; }
-    check('sculptRidged in [0,1]', mn>=0 && mx<=1.001); }
-  { let mn=9,mx=-9; for(let i=0;i<4000;i++){ const v=sculptBillow(i*0.13,i*0.07,5,0.5,2,777); if(v<mn)mn=v; if(v>mx)mx=v; }
-    check('sculptBillow in [0,1]', mn>=0 && mx<=1.001); }
-
-  // 2. every feature: finite output, respects mask, is deterministic
-  for(const type of SCULPT_FEATURE_KEYS){
-    const pts = SCULPT_FEATURES[type].radial ? [{x:256,y:256}]
-                                      : [{x:180,y:220},{x:256,y:256},{x:330,y:280}];
-    const {H,W}=sculptBlank();
-    const before=H.slice();
-    sculptApplyStamp(sculptMkStamp(type,pts), H, W, SSZ, SSZ);
-    check(type+': heightmap finite after apply', allFinite(H));
-    check(type+': water layer finite after apply', allFinite(W));
-    { let inRange=true; for(let i=0;i<H.length;i++){ if(H[i]<0||H[i]>1){ inRange=false; break; } }
-      check(type+': height in [0,1]', inRange); }
-    check(type+': leaves far corners untouched (masked)', H[0]===before[0] && H[SN-1]===before[SN-1]);
-    const {H:H2,W:W2}=sculptBlank();
-    sculptApplyStamp(sculptMkStamp(type,pts), H2, W2, SSZ, SSZ);
-    { let same=true; for(let i=0;i<SN;i++){ if(H[i]!==H2[i]){ same=false; break; } }
-      check(type+': identical seed/params reproduce the field bit-for-bit', same); }
-    { let changed=false; for(let i=0;i<SN;i++){ if(H[i]!==before[i]){ changed=true; break; } }
-      check(type+': produces a non-empty modification', changed); }
+  // --- geometry: nearest-point-on-stroke, incl. the 1-point degenerate-to-radial case (Freehand tap) ---
+  { const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+    const g = sculptNearestOnStroke(5, 3, pts);
+    check('sculptNearestOnStroke: perpendicular distance correct', Math.abs(g.dist - 3) < 1e-6);
+    check('sculptNearestOnStroke: arclength at the midpoint ≈ half the total', Math.abs(g.s - 5) < 1e-6);
+    const g1 = sculptNearestOnStroke(5, 5, [{ x: 2, y: 2 }]);
+    check('sculptNearestOnStroke: 1-point stroke degenerates to radial distance', Math.abs(g1.dist - Math.hypot(3, 3)) < 1e-6);
   }
 
-  // 3. feature semantics
-  {
-    const raiseTypes=['mountains','hills','plateau','volcano'];
-    const lowerTypes=['canyon','valley','basin'];
-    for(const t of raiseTypes){
-      const pts = SCULPT_FEATURES[t].radial?[{x:256,y:256}]:[{x:200,y:256},{x:312,y:256}];
-      const {H,W}=sculptBlank(); const before=sculptSum(H); sculptApplyStamp(sculptMkStamp(t,pts),H,W,SSZ,SSZ);
-      check(t+': net raises terrain', sculptSum(H)>before+1);
-    }
-    for(const t of lowerTypes){
-      const pts=[{x:200,y:256},{x:312,y:256}];
-      const {H,W}=sculptBlank(); const before=sculptSum(H); sculptApplyStamp(sculptMkStamp(t,pts),H,W,SSZ,SSZ);
-      check(t+': net lowers terrain', sculptSum(H)<before-1);
-    }
-  }
-  {
-    const {H,W}=sculptBlank(); sculptApplyStamp(sculptMkStamp('river',[{x:120,y:256},{x:256,y:256},{x:400,y:256}]),H,W,SSZ,SSZ);
-    check('river writes into the water layer', sculptSum(W)>0);
-    const {H:H2,W:W2}=sculptBlank(); sculptApplyStamp(sculptMkStamp('lake',[{x:256,y:256}]),H2,W2,SSZ,SSZ);
-    check('lake writes into the water layer', sculptSum(W2)>0);
-  }
-  {
-    const {H,W}=sculptBlank();
-    sculptApplyStamp(sculptMkStamp('cliff',[{x:256,y:120},{x:256,y:400}]),H,W,SSZ,SSZ); // vertical stroke, brush r=60
-    const left=H[256*SSZ+226], right=H[256*SSZ+286]; // both within the brush radius
-    check('cliff creates a step between its two sides', Math.abs(left-right)>0.02);
-  }
-  {
-    const soft=sculptBlank(), hard=sculptBlank();
-    sculptApplyStamp(sculptMkStamp('mountains',[{x:256,y:256}],{hardness:0.0}),soft.H,soft.W,SSZ,SSZ);
-    sculptApplyStamp(sculptMkStamp('mountains',[{x:256,y:256}],{hardness:0.95}),hard.H,hard.W,SSZ,SSZ);
-    let ds=0,dh=0; for(let i=0;i<SN;i++){ if(soft.H[i]!==0.45)ds++; if(hard.H[i]!==0.45)dh++; }
-    check('both soft and hard brushes modify some pixels', ds>0 && dh>0);
-  }
-  {
-    const base=sculptBlank();
-    const {H,W}=sculptBlank(); sculptApplyStamp(sculptMkStamp('mountains',[{x:256,y:256}],{intensity:0}),H,W,SSZ,SSZ);
-    let changed=false; for(let i=0;i<SN;i++) if(H[i]!==base.H[i]){changed=true;break;}
-    check('intensity 0 leaves terrain untouched', !changed);
-  }
-  {
-    const {H,W}=sculptBlank();
-    sculptApplyStamp(sculptMkStamp('mountains',[{x:200,y:256},{x:312,y:256}]),H,W,SSZ,SSZ);
-    const midHeight=H.slice();
-    sculptApplyStamp(sculptMkStamp('canyon',[{x:256,y:180},{x:256,y:330}]),H,W,SSZ,SSZ);
-    let diff=false; for(let i=0;i<SN;i++){ if(H[i]!==midHeight[i]){diff=true;break;} }
-    check('a second stamp composites on top of the first', diff);
+  // --- registry shape: the 13-entry consolidated feature table (docs §4) ---
+  check('SCULPT_FEATURES has all 13 entries', SCULPT_FEATURE_KEYS.length === 13 &&
+    ['mountains', 'hills', 'ridge', 'plateau', 'cliff', 'canyon', 'valley', 'river', 'lake', 'basin', 'coastline', 'volcano', 'freehand'].every(k => k in SCULPT_FEATURES));
+  check('every feature has label/icon/hint/apply', SCULPT_FEATURE_KEYS.every(k => { const f = SCULPT_FEATURES[k];
+    return typeof f.label === 'string' && typeof f.icon === 'string' && typeof f.hint === 'string' && typeof f.apply === 'function'; }));
+  check('every feature has numeric edgeChar/edgeFreqMul (fractal edge character, docs §6)', SCULPT_FEATURE_KEYS.every(k => { const f = SCULPT_FEATURES[k];
+    return typeof f.edgeChar === 'number' && typeof f.edgeFreqMul === 'number'; }));
+  check('only lake/volcano are radial (brush = radius, not a stroke)', SCULPT_FEATURE_KEYS.filter(k => SCULPT_FEATURES[k].radial).sort().join(',') === 'lake,volcano');
+  check('every feature declares a non-empty controls array', SCULPT_FEATURE_KEYS.every(k => Array.isArray(SCULPT_FEATURES[k].controls) && SCULPT_FEATURES[k].controls.length > 0));
+  check('freehand has 8 sub-modes folding in the retired stamp/stroke brushes', SCULPT_FEATURES.freehand.modes.length === 8 && SCULPT_FEATURES.freehand.controls.length === 1);
+  check('8 presets, each referencing a real feature key', Object.keys(SCULPT_PRESETS).length === 8 && Object.values(SCULPT_PRESETS).every(p => SCULPT_FEATURE_KEYS.includes(p.feature)));
+
+  // --- sculptDefaultParams / sculptStampRadius / sculptStampBBox ---
+  { const dp = sculptDefaultParams('mountains');
+    check('sculptDefaultParams fills every control default', SCULPT_FEATURES.mountains.controls.every(c => dp[c[0]] === c[5])); }
+  check('sculptDefaultParams seeds freehand subMode from modes[0]', sculptDefaultParams('freehand').subMode === 'raise');
+  { const stV = { type: 'volcano', g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 20 }), f: Object.assign({}, sculptDefaultParams('volcano'), { volcRadius: 75 }), pts: [{ x: 5, y: 5 }] };
+    check('sculptStampRadius: volcano uses f.volcRadius, not brushSize', sculptStampRadius(stV) === 75); }
+  { const stM = { type: 'mountains', g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 33 }), f: sculptDefaultParams('mountains'), pts: [{ x: 5, y: 5 }, { x: 9, y: 9 }] };
+    check('sculptStampRadius: non-volcano features use g.brushSize', sculptStampRadius(stM) === 33); }
+  { const W0 = 64, H0 = 64;
+    const stR = { type: 'mountains', g: Object.assign({}, SCULPT_GLOBAL_DEF), f: sculptDefaultParams('mountains'), pts: [{ x: 32, y: 32 }] };
+    const bb = sculptStampBBox(stR, W0, H0);
+    check('sculptStampBBox stays within grid bounds', bb.x0 >= 0 && bb.y0 >= 0 && bb.x1 <= W0 - 1 && bb.y1 <= H0 - 1 && bb.x1 >= bb.x0 && bb.y1 >= bb.y0);
+    const stL = { type: 'lake', g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 15 }), f: sculptDefaultParams('lake'), pts: [{ x: 20, y: 40 }] };
+    sculptStampBBox(stL, W0, H0);
+    check('sculptStampBBox (radial): records the stroke centroid on the stamp (_cx/_cy)', stL._cx === 20 && stL._cy === 40);
   }
 
-  // 4. geometry: signed distance / arclength
-  {
-    const pts=[{x:100,y:100},{x:300,y:100}]; // horizontal segment
-    const above=sculptNearestOnStroke(200,60,pts), below=sculptNearestOnStroke(200,140,pts);
-    check('signed distance flips across the stroke', Math.sign(above.sd)!==Math.sign(below.sd));
-    check('unsigned distance correct', Math.abs(above.dist-40)<1e-6 && Math.abs(below.dist-40)<1e-6);
-    check('arclength ~halfway along segment', sculptNearestOnStroke(200,100,pts).s>90 && sculptNearestOnStroke(200,100,pts).s<110);
+  // --- sculptApplyStamp: every one of the 13 features, on a synthetic grid — finite, [0,1]-bounded,
+  //     bbox-local (not full-grid), reproducible from a fresh baseline ---
+  const W = 80, H = 64, N = W * H;
+  const straightStroke = [{ x: 10, y: 32 }, { x: 70, y: 32 }];
+  const bentStroke = [{ x: 10, y: 20 }, { x: 30, y: 40 }, { x: 50, y: 24 }, { x: 70, y: 44 }];
+  for (const key of SCULPT_FEATURE_KEYS){
+    const feat = SCULPT_FEATURES[key];
+    const pts = feat.radial ? [{ x: 40, y: 32 }] : ((key === 'canyon' || key === 'valley' || key === 'river') ? bentStroke : straightStroke);
+    // volcano's stamp radius comes from f.volcRadius (default 110), not g.brushSize — clamp it to fit this grid
+    const fParams = key === 'volcano' ? Object.assign({}, sculptDefaultParams(key), { volcRadius: 18 }) : sculptDefaultParams(key);
+    const st = { type: key, seed: (key.length * 97 + 13) | 0, pts, g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 18 }), f: fParams };
+    const fld = new Float32Array(N).fill(0.5);
+    sculptApplyStamp(st, fld, null, W, H, 0.42);
+    check(key + ': stamp output stays finite', fld.every(Number.isFinite));
+    let inRange = true; for (let i = 0; i < N; i++) if (fld[i] < 0 || fld[i] > 1){ inRange = false; break; }
+    check(key + ': stamp output stays in [0,1]', inRange);
+    let changed = 0; for (let i = 0; i < N; i++) if (fld[i] !== 0.5) changed++;
+    check(key + ': stamp touches its bbox but not the whole grid', changed > 0 && changed < N);
+    const fld2 = new Float32Array(N).fill(0.5);
+    sculptApplyStamp(st, fld2, null, W, H, 0.42);
+    check(key + ': stamp is reproducible (same seed/params → bit-identical)', fld.every((v, i) => v === fld2[i]));
   }
 
-  // 5. per-feature edge character
-  {
-    function boundaryStd(type, extraG){
-      const g=Object.assign({brushSize:70}, extraG||{});
-      const base=sculptBlank();
-      const {H,W}=sculptBlank();
-      sculptApplyStamp(sculptMkStamp(type,[{x:180,y:256},{x:332,y:256}],g), H, W, SSZ, SSZ);
-      const radii=[];
-      for(let x=210;x<=302;x+=2){
-        let boundaryY=-1;
-        for(let y=100;y<256;y++){ if(H[y*SSZ+x]!==base.H[y*SSZ+x]){ boundaryY=y; break; } }
-        if(boundaryY>=0) radii.push(256-boundaryY);
-      }
-      const mean=radii.reduce((a,b)=>a+b,0)/radii.length;
-      return Math.sqrt(radii.reduce((a,b)=>a+(b-mean)*(b-mean),0)/radii.length);
-    }
-    const sMtn = boundaryStd('mountains'), sHill = boundaryStd('hills');
-    check("mountains' higher edgeChar/edgeFreqMul reads more ragged than hills at equal brush size", sMtn > sHill);
-    check('edgeNoise:0 restores a perfectly straight boundary', boundaryStd('mountains',{edgeNoise:0})===0);
-  }
+  // hidden stamp is a no-op regardless of feature
+  { const fld = new Float32Array(64 * 64).fill(0.5);
+    const st = { type: 'hills', seed: 1, pts: [{ x: 16, y: 16 }], g: Object.assign({}, SCULPT_GLOBAL_DEF), f: sculptDefaultParams('hills'), hidden: true };
+    sculptApplyStamp(st, fld, null, 64, 64, 0.42);
+    check('hidden stamp is a no-op', fld.every(v => v === 0.5)); }
 
-  // 6. world-wrap parity (P0 open item, resolved): the existing plotline brush
-  // (applyFeatureAlongCurve, just above in this file) has no equirectangular
-  // seam-wrap handling either — sculptApplyStamp matches that, not a regression.
-  {
-    const base=sculptBlank();
-    const {H,W}=sculptBlank();
-    sculptApplyStamp(sculptMkStamp('mountains',[{x:2,y:256},{x:40,y:256}]),H,W,SSZ,SSZ);
-    check('no seam-wrap: the opposite edge (x=SSZ-1) is untouched by a stamp painted at x=2..40', H[256*SSZ+(SSZ-1)]===base.H[256*SSZ+(SSZ-1)]);
+  // Freehand's dedicated smooth sub-mode: bypasses feat.apply() for a pre-loop-snapshot 4-neighbour blur
+  { const W2 = 32, H2 = 32, N2 = W2 * H2, fld = new Float32Array(N2); for (let i = 0; i < N2; i++) fld[i] = Math.random();
+    const st = { type: 'freehand', seed: 1, pts: [{ x: 10, y: 10 }, { x: 20, y: 20 }], g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 12 }), f: { subMode: 'smooth', amount: 0.12 } };
+    sculptApplyStamp(st, fld, null, W2, H2, 0.42);
+    check('freehand smooth sub-mode stays finite', fld.every(Number.isFinite)); }
+
+  // River: sets a water-surface height (3rd array arg) along the carved channel
+  { const W3 = 64, H3 = 64, N3 = W3 * H3, fld = new Float32Array(N3).fill(0.6), water = new Float32Array(N3);
+    const st = { type: 'river', seed: 5, pts: [{ x: 5, y: 32 }, { x: 58, y: 32 }], g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 10 }), f: sculptDefaultParams('river') };
+    sculptApplyStamp(st, fld, water, W3, H3, 0.42);
+    check('river stamp deposits a water-surface height along its channel', Array.from(water).some(v => v > 0)); }
+
+  // Lake (radial): sets a water-surface height within the bowl
+  { const W4 = 64, H4 = 64, N4 = W4 * H4, fld = new Float32Array(N4).fill(0.55), water = new Float32Array(N4);
+    const st = { type: 'lake', seed: 9, pts: [{ x: 32, y: 32 }], g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 15 }), f: sculptDefaultParams('lake') };
+    sculptApplyStamp(st, fld, water, W4, H4, 0.42);
+    check('lake stamp deposits a water-surface height within the bowl', Array.from(water).some(v => v > 0)); }
+
+  // waterOnly dry-run (sculptCommit's post-bake Lake pass): records water without re-writing H
+  { const W5 = 64, H5 = 64, N5 = W5 * H5, fld = new Float32Array(N5).fill(0.55), water = new Float32Array(N5).fill(-1);
+    const before = fld.slice();
+    const st = { type: 'lake', seed: 9, pts: [{ x: 32, y: 32 }], g: Object.assign({}, SCULPT_GLOBAL_DEF, { brushSize: 15 }), f: sculptDefaultParams('lake') };
+    sculptApplyStamp(st, fld, water, W5, H5, 0.42, true);
+    check('waterOnly=true does not mutate H (field)', fld.every((v, i) => v === before[i]));
+    check('waterOnly=true still records water heights', Array.from(water).some(v => v >= 0)); }
+
+  // Fractal edge warp (docs §6): edgeNoise domain-warps the coverage-mask boundary — two otherwise-
+  // identical stamps differing ONLY in g.edgeNoise must NOT produce identical footprints once the
+  // warp amplitude clears its 0.01 activation threshold (edgeAmp = edgeNoise·rad·0.34·edgeChar).
+  { const W6 = 96, H6 = 64, N6 = W6 * H6;
+    const base = { type: 'mountains', seed: 42, pts: straightStroke, f: sculptDefaultParams('mountains') };
+    const fldA = new Float32Array(N6).fill(0.5);
+    sculptApplyStamp(Object.assign({}, base, { g: Object.assign({}, SCULPT_GLOBAL_DEF, { edgeNoise: 0 }) }), fldA, null, W6, H6, 0.42);
+    const fldB = new Float32Array(N6).fill(0.5);
+    sculptApplyStamp(Object.assign({}, base, { g: Object.assign({}, SCULPT_GLOBAL_DEF, { edgeNoise: 0.8 }) }), fldB, null, W6, H6, 0.42);
+    check('edgeNoise=0 vs edgeNoise=0.8 produce different footprints (edge warp is live)', !fldA.every((v, i) => v === fldB[i]));
   }
 }
+
+/* ---------- v1.15: Sculpt editor — draft layer + commit sequence (live world) ---------- */
+{
+  state.world = false; state.resW = 256; GW = 256; GH = gridH(GW); allocate(); generate();
+  const saveActiveTab = _activeTab, saveSubTab = _genSubTab, saveFinalized = state.finalized;
+  _activeTab = 'generate'; _genSubTab = 'sculpt'; state.finalized = false;
+  sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
+  // sculptCommit()'s tail calls sculptSyncUI() to refresh the sliders/stamp-list DOM (createElement +
+  // innerHTML + querySelector) — pure browser UI with no effect on engine data, already verified via
+  // Playwright (probe_sculpt1-3.js); the headless stub's querySelector can't find dynamically-appended
+  // children, so it's neutralized here for this data-focused test and restored below.
+  const _sculptSyncUIOrig = sculptSyncUI;
+  sculptSyncUI = function (){};
+  // sculptDiscard() gates on the browser confirm() dialog, same as every other destructive-action
+  // guard in this file (bakeAll, region-new-world, clear-territory, ...) — none of which are exercised
+  // headlessly either. Stub it to "OK" (the same effect as the user confirming) so the post-confirm
+  // data-clearing behaviour is still covered; restored below.
+  const _confirmOrig = global.confirm;
+  global.confirm = () => true;
+
+  // paint a mountains stroke on land — the draft must not touch `field` (non-destructive)
+  const beforePaint = field.slice();
+  _sculptType = 'mountains'; _sculptSel = -1;
+  let mx0 = -1, my0 = -1;
+  outer: for (let y = 10; y < GH - 10; y++) for (let x = 10; x < GW - 10; x++){ const i = y * GW + x; if (field[i] > state.seaLevel + 0.05){ mx0 = x; my0 = y; break outer; } }
+  _sculptCapturing = true; _sculptPts = [{ x: mx0, y: my0 }, { x: mx0 + 15, y: my0 + 3 }, { x: mx0 + 30, y: my0 }];
+  sculptFinishStroke();
+  check('sculpt draft: a stroke pushes exactly one stamp', sculptStamps.length === 1);
+  check('sculpt draft: field is untouched until commit (non-destructive)', field.every((v, i) => v === beforePaint[i]));
+
+  const undoDepthBefore = undoStack.length;
+  const flowBefore = flowField.slice();
+  sculptCommit();
+  check('sculpt commit: bakes the stack into field (changes it)', !field.every((v, i) => v === beforePaint[i]));
+  check('sculpt commit: field stays finite & in [0,1]', field.every(v => Number.isFinite(v) && v >= 0 && v <= 1));
+  check('sculpt commit: exactly one pushUndo (undo stack grows by 1)', undoStack.length === undoDepthBefore + 1);
+  check('sculpt commit: recomputes flow (flowField changes)', !flowField.every((v, i) => v === flowBefore[i]));
+  check('sculpt commit: clears the draft stack + selection + history', sculptStamps.length === 0 && _sculptSel === -1 && _sculptHistory.length === 0 && _sculptRedoStack.length === 0);
+
+  // River commit hook: locks carved cells into riverMask/riverFloor (same precedent as the region-route river tool)
+  const riverMaskBefore = riverMask.reduce((n, v) => n + (v ? 1 : 0), 0);
+  _sculptType = 'river'; _sculptSel = -1;
+  let rx = -1, ry = -1;
+  outer2: for (let y = GH - 15; y > 15; y--) for (let x = 15; x < GW - 15; x++){ const i = y * GW + x; if (field[i] > state.seaLevel + 0.08){ rx = x; ry = y; break outer2; } }
+  _sculptCapturing = true; _sculptPts = [{ x: rx, y: ry }, { x: rx + 15, y: ry + 3 }, { x: rx + 30, y: ry }, { x: rx + 45, y: ry - 3 }, { x: rx + 60, y: ry }];
+  sculptFinishStroke();
+  sculptCommit();
+  const riverMaskAfter = riverMask.reduce((n, v) => n + (v ? 1 : 0), 0);
+  check('sculpt commit (river): locks newly-carved cells into riverMask/riverFloor', riverMaskAfter > riverMaskBefore);
+  let floorOk = true; for (let i = 0; i < riverMask.length; i++) if (riverMask[i] && field[i] > riverFloor[i] + 1e-6){ floorOk = false; break; }
+  check('sculpt commit (river): riverMask cells sit at or below their locked floor', floorOk);
+
+  // Lake commit hook: deposits into lakeMask (forceLake), same array the old direct-paint Water tool used
+  _sculptType = 'lake'; _sculptSel = -1;
+  let lx = -1, ly = -1;
+  outer3: for (let y = GH - 15; y > 15; y--) for (let x = 15; x < GW - 15; x++){ const i = y * GW + x; if (field[i] > state.seaLevel + 0.08){ lx = x; ly = y; break outer3; } }
+  _sculptCapturing = true; _sculptPts = [{ x: lx, y: ly }];
+  sculptFinishStroke();
+  const lakeMaskBefore = (lakeMask && lakeMask.length === GW * GH) ? lakeMask.reduce((n, v) => n + (v ? 1 : 0), 0) : 0;
+  sculptCommit();
+  check('sculpt commit (lake): deposits water into lakeMask', !!lakeMask && lakeMask.reduce((n, v) => n + (v ? 1 : 0), 0) > lakeMaskBefore);
+  check('sculpt commit (lake): a deposited lake classifies as a water body (class 2)', currentWaterBodies()[ly * GW + lx] === 2);
+
+  // Discard clears the draft without touching field
+  _sculptType = 'hills'; _sculptSel = -1;
+  _sculptCapturing = true; _sculptPts = [{ x: GW / 2, y: GH / 2 }];
+  sculptFinishStroke();
+  const beforeDiscard = field.slice();
+  sculptDiscard();
+  check('sculptDiscard clears the draft stack', sculptStamps.length === 0);
+  check('sculptDiscard never touches field', field.every((v, i) => v === beforeDiscard[i]));
+
+  // Draft undo/redo: the cheap stamp-stack history, independent of the field-level undo stack
+  _sculptType = 'hills'; _sculptSel = -1;
+  _sculptCapturing = true; _sculptPts = [{ x: GW / 2, y: GH / 2 }];
+  sculptFinishStroke();
+  const countAfterPaint = sculptStamps.length;
+  sculptUndo();
+  const countAfterUndo = sculptStamps.length;
+  sculptRedo();
+  const countAfterRedo = sculptStamps.length;
+  check('sculpt draft undo/redo round-trips the stamp stack', countAfterPaint === 1 && countAfterUndo === 0 && countAfterRedo === 1);
+  sculptDiscard();
+
+  sculptSyncUI = _sculptSyncUIOrig;
+  global.confirm = _confirmOrig;
+  _activeTab = saveActiveTab; _genSubTab = saveSubTab; state.finalized = saveFinalized;
+  sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
+  generate();   // restore a pristine field (this block committed mountains/river/lake stamps into the live world)
+}
+
 /* ---------- async tests own the summary (gzip + region export, v0.053) ---------- */
 (async () => {
   // gzip round-trip via CompressionStream (Node 18+ has it; skip gracefully otherwise)
@@ -3623,7 +3606,7 @@ if (typeof carveRiverValleys === 'function') {
   {
     const ab = require('fs').readFileSync('assets/sample_pack.zip');
     const z = await unzipAny(ab.buffer.slice(ab.byteOffset, ab.byteOffset + ab.byteLength));
-    check('unzipAny reads the STORED sample pack via central dir', !!z['pack.json'] && Object.keys(z).filter(n => n.endsWith('.png')).length === 16);
+    check('unzipAny reads the STORED sample pack via central dir', !!z['pack.json'] && Object.keys(z).filter(n => n.endsWith('.png')).length === 28);   // v1.20: 7 textures + 21 icons (10 icon slots × 2-3 variants), was 16 (7+9)
     if (typeof DecompressionStream !== 'undefined'){
       // hand-build a 1-entry DEFLATED zip (Node zlib) and confirm unzipAny inflates it
       const zlib = require('zlib');

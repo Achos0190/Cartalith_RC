@@ -727,23 +727,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     }
     return { vacuous: false, short, exact };
   });
-  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}]; });
+  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',category:'settlement',faction:0,pop:100,traits:[]}]; });
 
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
   // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
   // labels/icons are unchanged (still the sidebar-pinned inspector).
-  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  // v1.16: the sidebar settlement list was replaced by the virtualized Settlements-page table
+  // (#stSpacer) — switch to that sub-page so the table is populated before checking it.
+  await page.evaluate(() => {
+    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.querySelector('#civSubBar [data-civsub="settlements"]').click();
+    _civSelectedPlace = state.places[0]; _civRenderPlaceEditor();
+  });
   await page.waitForTimeout(100);
   R.editorInPopup = await page.$eval('#placeEditPopup', el => !!el.querySelector('#_civPeName') && el.style.display === 'block');
   R.editorNotInInspector = await page.$eval('#inspectorBody', el => !el.querySelector('#_civPeName'));
   R.popupOnScreen = await page.evaluate(() => { const r = document.getElementById('placeEditPopup').getBoundingClientRect(); return r.x >= 0 && r.x < window.innerWidth && r.y >= 0 && r.y < window.innerHeight; });
-  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('civSettlementList').querySelector('#_civPeName') === null);
+  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('stSpacer').querySelector('#_civPeName') === null);
   await page.fill('#_civPeName', 'Renamed');
   await page.dispatchEvent('#_civPeName', 'input');
   await page.waitForTimeout(100);
   R.liveModelUpdate = await page.evaluate(() => state.places[0].name === 'Renamed');
-  R.liveRowPatch = await page.evaluate(() => document.getElementById('civSettlementList').textContent.includes('Renamed'));
+  R.liveRowPatch = await page.evaluate(() => document.getElementById('stSpacer').textContent.includes('Renamed'));
   await page.evaluate(() => {
     state.labels.push({x:5,y:5,name:'ALabel'});
     _civSelectLabel(state.labels[0]);
@@ -1027,10 +1033,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const sec = document.getElementById('explTimelineSection');
     const controlsInExplore = !!(sec && sec.querySelector('#civTlYear') && sec.querySelector('#civTlAddYearBtn')
       && sec.querySelector('#civTimelinePanel') && sec.querySelector('#civSimulateBtn') && sec.querySelector('#explTimelineSlider'));
-    const polity = [...document.querySelectorAll('#genCiv details.cat-acc')].find(d => {
-      const s = d.querySelector('summary'); return s && s.textContent.trim() === 'Polity';
-    });
-    const controlsNotInPolity = !!polity && !polity.querySelector('#civTlYear') && !polity.querySelector('#civSimulateBtn');
+    // v1.16: Civilization → Polity was folded into Generation → Territories by the sub-page redesign
+    // (#civSubGeneration); the invariant this guards — timeline/simulate controls never duplicated
+    // inside Civilization — still holds, so check the whole #genCiv subtree rather than a section
+    // literally named "Polity".
+    const controlsNotInPolity = !document.querySelector('#genCiv #civTlYear') && !document.querySelector('#genCiv #civSimulateBtn');
 
     civTimeline.length = 0; civYear = 0;
     civAddYear(10);
@@ -1507,8 +1514,27 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       if (Math.abs(lodOn[i] - lodOff[i]) + Math.abs(lodOn[i + 1] - lodOff[i + 1]) + Math.abs(lodOn[i + 2] - lodOff[i + 2]) > 6) lodDiffPx++;
     }
 
+    // v1.14 (owner report: "a multitude of rivers... in close proximity, as if two different engines
+    // are trying to achieve the very same thing... poor unnatural looking"): confirmed root cause —
+    // surfaceColor's own per-pixel raster network blend and drawRiverWays' vector spline both traced
+    // the SAME _riverNet and both rendered whenever riverWays was on (the v0.94 comment literally said
+    // "both render"), and the vector path's Catmull-Rom smoothing + sinuosity jitter visibly diverges
+    // from the raster's raw cell-centerline blend, reading as a second, parallel river. Fix: surfaceColor
+    // now skips its raster blend whenever the vector overlay is about to draw the same network right
+    // after it (state.viz.riverWays on) — direct regression guard: calling surfaceColor at an identical
+    // river cell with riverWays on vs off must still differ (on ⇒ raw/no blend, off ⇒ blended), proving
+    // the skip branch is live and doesn't quietly get short-circuited back to "always blend".
+    let dedupDiffer = null;
+    if (found) {
+      const di = spotY * GW + spotX, vw = field[di];
+      state.viz.riverWays = true; const onC = surfaceColor(spotX, spotY, di, vw);
+      state.viz.riverWays = false; const offC = surfaceColor(spotX, spotY, di, vw);
+      state.viz.riverWays = true;
+      dedupDiffer = (Math.abs(onC[0] - offC[0]) + Math.abs(onC[1] - offC[1]) + Math.abs(onC[2] - offC[2])) > 3;
+    }
+
     _lodOn = false; _lodZoom = 1; applyView(); renderNow();
-    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx };
+    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx, dedupDiffer };
   });
 
   // v0.94 (owner report: "when using a very long route where a split or partial is possible by sea
@@ -1815,6 +1841,459 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  R.sculpt = await page.evaluate(async () => {
+    const out = {};
+    // (1) tab mechanics: the 4th Generate sub-tab shows its panel, hides World, and arms the editor
+    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    out.panelShown = getComputedStyle(document.getElementById('genSculpt')).display !== 'none';
+    out.worldHidden = getComputedStyle(document.getElementById('genWorld')).display === 'none';
+    out.featureButtons = document.querySelectorAll('#sculptFeatureSeg button').length;
+    out.presetButtons = document.querySelectorAll('#sculptPresetSeg button').length;
+    out.editorActive = _sculptEditorActive();
+
+    // (2) paint → draft: neither `field` nor the rendered pixels change until commit (non-destructive)
+    state.debug = 'off'; renderNow();
+    const beforeField = field.slice(), beforePixels = img.data.slice();
+    _sculptType = 'mountains'; _sculptSel = -1;
+    const cx = GW / 2, cy = GH / 2;
+    _sculptCapturing = true; _sculptPts = [{ x: cx - 30, y: cy }, { x: cx, y: cy }, { x: cx + 30, y: cy }];
+    sculptFinishStroke();
+    out.draftLeavesFieldUntouched = field.every((v, i) => v === beforeField[i]);
+    out.draftLeavesRenderUntouched = img.data.every((v, i) => v === beforePixels[i]);
+    out.stampCountAfterPaint = sculptStamps.length;
+
+    // (3) commit: bakes the stack (field changes), a real renderNow ran (pixels change in the same
+    //     pass — the currently-open view, here the default Biome map, updates immediately)
+    const undoBefore = undoStack.length;
+    sculptCommit();
+    out.commitChangesField = !field.every((v, i) => v === beforeField[i]);
+    out.commitChangesRender = !img.data.every((v, i) => v === beforePixels[i]);
+    out.commitClearsStamps = sculptStamps.length === 0;
+    out.commitPushedUndo = undoStack.length === undoBefore + 1;
+
+    // (4) Ctrl+Z (field-level undo, since the draft above was already committed) reverts the bake
+    const committedField = field.slice();
+    undoLast();
+    out.undoRevertsField = field.every((v, i) => v === beforeField[i]);
+    out.undoDifferedFromCommitted = !field.every((v, i) => v === committedField[i]);
+
+    // (5) LOD cursor/overlay: painting under Tiled LOD draws the stamp-footprint overlay without
+    //     throwing (drawLODView's own tail calls this every frame while a stamp/stroke is live)
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
+    _sculptType = 'hills'; _sculptSel = -1;
+    _sculptCapturing = true; _sculptPts = [{ x: GW / 2 - 10, y: GH / 2 }, { x: GW / 2 + 10, y: GH / 2 }];
+    sculptFinishStroke();
+    let overlayThrew = false;
+    try { sculptDrawLODOverlay(lodViewRect()); } catch (e) { overlayThrew = true; }
+    out.lodOverlayDrawsWithoutError = !overlayThrew;
+    sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];   // discard the LOD-mode draft directly (no confirm() dialog)
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+
+    // (6) zoom-relative brush size: brushSize is stored in GRID CELLS, so its real-world (km)
+    //     footprint is a pure function of state.mapWidthKm/GW — independent of view zoom — and the
+    //     UI readout reflects that live as the slider (or the map's real-world width) changes.
+    const brushEl = document.getElementById('sBrush'), kmEl = document.getElementById('sBrushKm');
+    brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));
+    const kmAt32 = kmEl.textContent;
+    out.kmReadoutAt32 = /≈ [\d.]+ km radius/.test(kmAt32);
+    const numAt32 = parseFloat(kmAt32.replace('≈', '').trim());
+    brushEl.value = 64; brushEl.dispatchEvent(new Event('input'));
+    const numAt64 = parseFloat(kmEl.textContent.replace('≈', '').trim());
+    out.kmReadoutDoublesWithBrushSize = Math.abs(numAt64 - 2 * numAt32) < 0.05;
+    brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));   // restore
+
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    return out;
+  });
+
+  // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
+  R.v117 = await page.evaluate(async () => {
+    const out = {};
+    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.getElementById('civAutoPopulateBtn').click();
+    await new Promise(r => setTimeout(r, 150));
+    const settlements = state.places.filter(p => p && p.category === 'settlement');
+    out.nSettlements = settlements.length;
+    out.allHaveSpecialisation = settlements.length > 0 && settlements.every(p => typeof p.specialisation === 'string');
+    // S4 wall-spec ladder spot checks (pure function)
+    const mk = (kind, pop, traits, extra) => Object.assign({ x: settlements[0].x, y: settlements[0].y, kind, pop, traits: traits || [], category: 'settlement' }, extra || {});
+    out.fortressStone = _umWallSpec(mk('fortress', 300, [])) === 'stone';
+    out.plainHamletNone = _umWallSpec(mk('hamlet', 80, [])) === 'none';
+    out.overrideFalseWins = _umWallSpec(mk('capital', 15000, [], { umWalls: false })) === 'none';
+    // S6: settlement function reaches the layout engine in-browser
+    const c = _umPlaceContext(Object.assign({}, settlements[0], { specialisation: 'trade_hub' }));
+    out.economyInCtx = !!(c.economy && c.economy.specialisation === 'trade_hub');
+    const m = UME.cityGen(c.seed, c);
+    out.warehouseTagged = !!m && m.parcels.some(par => par.district === 'warehouse');
+    // S7: Site-profile raster view
+    const btn = document.querySelector('#debugSeg button[data-d="siteprofile"]');
+    out.siteprofileBtn = !!btn;
+    if (btn) { btn.click(); await new Promise(r => setTimeout(r, 250)); }
+    out.siteprofileState = state.debug;
+    out.siteprofileLegend = (document.getElementById('legend') || { innerHTML: '' }).innerHTML.includes('buildable');
+    document.querySelector('#debugSeg button[data-d="off"]').click();
+    await new Promise(r => setTimeout(r, 120));
+    // S7: settlement-diagnostics overlay draws on the civ canvas
+    const ccv = document.getElementById('civCanvas');
+    const snap = () => { const d = ccv.getContext('2d').getImageData(0, 0, ccv.width, ccv.height).data; let h = 2166136261 >>> 0; for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    const before = snap();
+    const chk = document.getElementById('civDiagnosticsChk');
+    out.diagChk = !!chk;
+    if (chk) { chk.checked = true; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 250)); }
+    out.diagDraws = snap() !== before;
+    if (chk) { chk.checked = false; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 120)); }
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    return out;
+  });
+
+  // ── v1.18: Interactive City Viewer (Explore mode) ──
+  R.v118 = await page.evaluate(async () => {
+    const out = {};
+    const settlements = state.places.filter(p => p && p.category === 'settlement');
+    let target = null;
+    for (const p of settlements) { if (_umModelForNow(p)) { target = p; break; } }
+    out.foundTarget = !!target;
+    if (!target) return out;
+
+    // regression guard: an empty-terrain click still fills the plain sidebar summary, modal stays shut.
+    // Pick a corner cell provably far from EVERY settlement (not a hardcoded coord) — by this point
+    // in the suite, many earlier phases have left small synthetic worlds/test settlements behind,
+    // so a fixed low coordinate like (3,3) can coincide with a leftover pin and give a false failure.
+    const cvSafeR2 = Math.max(100, (GW / 50) * (GW / 50));
+    let emptyGx = 3, emptyGy = 3, triedCorner = false;
+    for (const [cx, cy] of [[3, 3], [GW - 3, 3], [3, GH - 3], [GW - 3, GH - 3], [Math.floor(GW / 2), 3]]) {
+      if (settlements.every(p => (p.x - cx) ** 2 + (p.y - cy) ** 2 > cvSafeR2)) { emptyGx = cx; emptyGy = cy; triedCorner = true; break; }
+    }
+    out.foundSafeEmptySpot = triedCorner;
+    document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset</div>';
+    _civInfoAt(emptyGx, emptyGy);
+    out.emptyClickFillsPanel = document.getElementById('civInfoPanel').innerHTML !== '<div class="hint">reset</div>';
+    out.emptyClickModalClosed = !document.getElementById('cityViewerModal').classList.contains('open');
+
+    // a genuine settlement-pin click opens the viewer INSTEAD of the plain summary
+    document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset2</div>';
+    _civInfoAt(Math.round(target.x), Math.round(target.y));
+    out.settlementClickOpensModal = document.getElementById('cityViewerModal').classList.contains('open');
+    out.settlementClickSkipsPlainPanel = document.getElementById('civInfoPanel').innerHTML === '<div class="hint">reset2</div>';
+
+    // info panel renders real sections, including the honest "not modeled" notes (never fabricated)
+    const infoHtml = document.getElementById('cvInfoPanel').innerHTML;
+    out.infoSectionsPresent = ['General', 'Economy', 'Infrastructure', 'Military', 'Religion', 'Demographics', 'History'].every(s => infoHtml.includes(s));
+    out.infoHonestNotes = infoHtml.includes('not yet modeled') && infoHtml.includes('not modeled');
+
+    // camera pan/zoom mutate state
+    const cv = document.getElementById('cvCanvas');
+    const s0 = _cvCam.scale;
+    _cvZoomAt(cv.width / 2, cv.height / 2, 1.3);
+    out.zoomChangesScale = _cvCam.scale !== s0;
+
+    // LOD tiers reveal different pixels as the camera scale crosses a threshold
+    const hashCanvas = () => { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let h = 2166136261 >>> 0; for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    _cvCam = _cvFitCam(_cvModel, cv.width, cv.height); _cvCam.scale = 0.2; _cvRender();
+    const hOverview = hashCanvas();
+    _cvCam.scale = 3.5; _cvRender();
+    out.lodTiersDiffer = hashCanvas() !== hOverview;
+
+    // the Edit button routes to the EXISTING (untouched) Civilization-mode editor
+    document.getElementById('cvEditBtn').click();
+    await new Promise(r => setTimeout(r, 100));
+    out.editOpensExistingPopup = document.getElementById('placeEditPopup').style.display !== 'none';
+    _civClosePlacePopup();
+
+    // close paths: × button and Escape both work; camera state clears
+    document.getElementById('cvCloseBtn').click();
+    out.closeButtonWorks = !document.getElementById('cityViewerModal').classList.contains('open') && _cvCam === null;
+    _civOpenCityViewer(target);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    out.escapeWorks = !document.getElementById('cityViewerModal').classList.contains('open');
+
+    // zero regression: the Civilization-mode settlement editor (_civOpenPlacePopup) still works,
+    // completely independent of the new viewer
+    _civSelectedPlace = target;
+    _civOpenPlacePopup();
+    out.civModeEditorUnaffected = document.getElementById('placeEditPopup').style.display !== 'none' && !!document.getElementById('placeEditPopupBody');
+    _civClosePlacePopup(); _civSelectedPlace = null;
+
+    return out;
+  });
+
+  // ── v1.19: Sculpt editor touch pan joystick (owner: "put a small graphic joystick in the
+  // bottom right corner just as the cartalith v1.915 has" — on mobile, a single-finger drag over
+  // the canvas is captured as a paint stroke, so there was no gesture left to pan with while
+  // painting). Real touch-drag gestures aren't meaningfully simulable headlessly (the project's
+  // own carve-out for canvas/touch interaction), so these assertions call the joystick's own pan
+  // functions directly — exactly as a real pointerdown/pointermove would — and check the camera
+  // state they drive, reusing the exact _lodOn on/off/reset convention already used throughout
+  // this suite.
+  R.v119 = await page.evaluate(async () => {
+    const out = {};
+    const pad = document.getElementById('sculptNavpad'), stick = document.getElementById('sculptNavStick'), knob = document.getElementById('sculptNavKnob');
+    out.domPresent = !!(pad && stick && knob);
+
+    // entering Sculpt on a non-touch (headless) browser never shows the joystick — isMobile is false
+    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    await new Promise(r => setTimeout(r, 50));
+    out.sculptActiveOnTab = _sculptEditorActive();
+    out.hiddenOnDesktop = getComputedStyle(pad).display === 'none';
+
+    // v1.22 (owner: "the joystick works in the opposite direction that we push"): pushing the knob
+    // RIGHT makes the VIEW travel right — i.e. content scrolls left, so viewT.panX DECREASES (the
+    // joystick moves the camera the way you push, not the drag-the-content convention the v1.19 port
+    // wrongly used). At the default cover-fit scale there's no slack to pan into (_viewClampFill snaps
+    // straight back), so zoom in first — exactly what a real user would do before nudging the stick.
+    _lodOn = false;
+    const vwr = view.getBoundingClientRect();
+    zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 3);
+    const px0 = viewT.panX;
+    _sculptNavSetKnob(20, 0);                                     // push right
+    await new Promise(r => setTimeout(r, 150));
+    out.pushRightPansViewRight = viewT.panX < px0;                // v1.22: panX decreases ⇒ view travels right
+    _sculptNavResetKnob();
+    const pxStopped = viewT.panX;
+    await new Promise(r => setTimeout(r, 150));
+    out.resetActuallyStopsLoop = viewT.panX === pxStopped;
+
+    // dead zone: a tiny push doesn't start panning at all
+    const px1 = viewT.panX;
+    _sculptNavSetKnob(1, 1);
+    await new Promise(r => setTimeout(r, 100));
+    out.deadZoneIgnoresTinyPush = viewT.panX === px1;
+    _sculptNavResetKnob();
+    zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 1 / 3);   // restore the default fit scale
+
+    // knob deflection is clamped to MAX_OFFSET and recenters on release (parse the px values —
+    // Chromium re-serializes .style.transform with its own comma/space convention, so compare the
+    // numbers it wrote, not an exact literal string)
+    const knobXY = () => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(knob.style.transform); return m ? [+m[1], +m[2]] : null; };
+    _sculptNavSetKnob(999, 0);
+    const kXY = knobXY();
+    out.knobClampsOffset = !!kXY && Math.abs(kXY[0] - 24) < 0.01 && Math.abs(kXY[1]) < 0.01;
+    _sculptNavResetKnob();
+    const kXY2 = knobXY();
+    out.knobResetsToCenter = !!kXY2 && kXY2[0] === 0 && kXY2[1] === 0;
+
+    // under Tiled LOD, the SAME stick drives _lodCx/_lodCy instead (mirrors the existing _lodPan
+    // handler) — and v1.22's corrected direction holds here too: push right ⇒ _lodCx INCREASES (camera
+    // centre moves right ⇒ view travels right), the sign the `_lodCx -= _svx` branch produces once _svx
+    // is negated.
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
+    const cx0 = _lodCx;
+    _sculptNavSetKnob(20, 0);                                     // push right
+    await new Promise(r => setTimeout(r, 150));
+    out.lodPanDrivesLodCx = _lodCx > cx0;                         // v1.22: push right ⇒ _lodCx increases ⇒ view travels right
+    _sculptNavResetKnob();
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+
+    // leaving Sculpt/Generate and coming back cycles _sculptNavSync with no throw
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    document.querySelector('.tab[data-tab="explore"]').click();
+    document.querySelector('.tab[data-tab="generate"]').click();
+    await new Promise(r => setTimeout(r, 50));
+    out.noThrowOnTabCycle = true;
+
+    return out;
+  });
+
+  // ── v1.20: expanded natural-feature vocabulary (owner: "let's go up to 4/5 different possible
+  // tree types (and for other landscape types and features) that can be placed at relatively
+  // random") — trees grew from 2 to 5 biome-conditioned kinds, plus new shrub/cactus/boulder
+  // ground scatter, all also manually placeable via the Icon tool's "Feature icons" family
+  // exactly like the original 4. The auto-scatter placement logic itself (placeMapIcons) is
+  // covered in depth by the headless engine suite (tests/test_tail.js); this block only proves
+  // the manual-placement side (gallery/arm/place/draw) works end-to-end in the real UI.
+  R.v120 = await page.evaluate(async () => {
+    const out = {};
+    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#genSubBar [data-gsub="carto"]').click();
+    await new Promise(r => setTimeout(r, 50));
+
+    // the gallery is populated at load time with the default 'feature' family (v1.20.html:19671)
+    const gal = document.getElementById('carIconGallery');
+    const famSel = document.getElementById('carIconFam');
+    famSel.value = 'feature'; famSel.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 50));
+    out.featureTileCount = gal.querySelectorAll('figure.caropt:not(.none)').length;
+
+    // arm one of the NEW kinds and place it — same {x,y,fam,slot,scale} shape the real
+    // click-to-place handler constructs (v1.20.html ~7911-7914), just without simulating exact
+    // canvas pointer coordinates
+    const before = state.mapIcons.length;
+    _carIconGalleryPick('feature', 'cactus');
+    out.armedCactus = !!_carIconArmed && _carIconArmed.fam === 'feature' && _carIconArmed.slot === 'cactus';
+    const gx = Math.floor(GW / 2), gy = Math.floor(GH / 2);
+    state.mapIcons.push({ x: gx, y: gy, fam: _carIconArmed.fam, slot: _carIconArmed.slot, scale: 1 });
+    renderNow();
+    out.placedCactus = state.mapIcons.length === before + 1 && state.mapIcons[state.mapIcons.length - 1].slot === 'cactus';
+
+    // it draws (pack sprite or the generic circle+glyph fallback) without throwing
+    let threw = false;
+    try { drawCivLayerAuto(); } catch (e) { threw = true; }
+    out.drawsWithoutThrow = !threw;
+
+    // every new feature-icon key has a real glyph fallback (no missing entries)
+    out.allNewKeysHaveGlyphs = ['tree_rainforest', 'tree_savanna', 'tree_wetland', 'shrub', 'cactus', 'boulder']
+      .every(k => CIV_FEATURE_ICON_TYPES.some(t => t.key === k && t.glyph));
+
+    // the sample pack's 10 icon slots exactly match the engine's PACK_ICON_SLOTS vocabulary
+    out.packIconSlotsCount = PACK_ICON_SLOTS.length;
+
+    // clean up: remove the placed test icon and disarm so it doesn't leak into later assertions
+    state.mapIcons.pop();
+    _carIconGalleryPick(null);
+    renderNow();
+
+    return out;
+  });
+
+  // ── v1.21: sprite-sheet slicer zoom/pan (owner: "I'd like zoom and pan buttons and an option
+  // for the viewer to zoom. That way it should be easier to work accurately with larger
+  // resolution sheets.") — SpriteSheetImporter lives inside the Asset Library's own IIFE (block 3)
+  // and is deliberately not exposed on window, so this block drives it purely through the DOM/real
+  // input, the same way an actual user would, rather than reaching into module internals. Pan-drag
+  // and click-to-select use real Playwright mouse events (not page.evaluate-dispatched synthetic
+  // PointerEvents) because canvas.setPointerCapture requires a genuinely browser-tracked pointer.
+  R.v121 = {};
+  {
+    const b64 = await page.evaluate(async () => {
+      const cv = document.createElement('canvas'); cv.width = 4096; cv.height = 2731;
+      const cx = cv.getContext('2d');
+      for (let i = 0; i < 20; i++) { cx.fillStyle = `hsl(${i * 17},60%,50%)`; cx.fillRect((i % 5) * 800, Math.floor(i / 5) * 700, 780, 680); }
+      const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+      const buf = await blob.arrayBuffer();
+      let binary = ''; const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    });
+    await page.evaluate(() => { if (!document.getElementById('assetsHeaderBtn').classList.contains('on')) document.getElementById('assetsHeaderBtn').click(); });
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.getElementById('alSlicerBtn').click());
+    await page.waitForTimeout(100);
+    await page.setInputFiles('#alSheetPicker', { name: 'v121_big_sheet.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') });
+    await page.waitForTimeout(200);
+
+    R.v121.scaffold = await page.evaluate(() => ({
+      zoomToolbarShown: getComputedStyle(document.getElementById('alSlZoom')).display !== 'none',
+      hasPanBtn: !!document.querySelector('#alSlMode [data-m="pan"]'),
+      cvW0: document.getElementById('alSlCv').width, pct0: document.getElementById('alSlZoomPct').textContent,
+    }));
+
+    R.v121.zoomButtons = await page.evaluate(() => {
+      const before = document.getElementById('alSlCv').width;
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      const afterIn = { w: document.getElementById('alSlCv').width, pct: document.getElementById('alSlZoomPct').textContent, scrollable: document.getElementById('alSlWrap').scrollWidth > document.getElementById('alSlWrap').clientWidth };
+      document.getElementById('alSlZoomFit').click();
+      const afterFit = { w: document.getElementById('alSlCv').width, pct: document.getElementById('alSlZoomPct').textContent, scrollLeft: document.getElementById('alSlWrap').scrollLeft };
+      return { before, afterIn, afterFit };
+    });
+
+    // real-mouse Pan-mode drag
+    await page.evaluate(() => {
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.querySelector('#alSlMode [data-m="pan"]').click();
+      document.getElementById('alSlWrap').scrollLeft = 200; document.getElementById('alSlWrap').scrollTop = 150;
+    });
+    await page.waitForTimeout(50);
+    let r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const panBefore = await page.evaluate(() => ({ l: document.getElementById('alSlWrap').scrollLeft, t: document.getElementById('alSlWrap').scrollTop }));
+    await page.mouse.move(r.x + 300, r.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(r.x + 240, r.y + 230, { steps: 5 });
+    const panCursor = await page.evaluate(() => document.getElementById('alSlCv').className);
+    await page.mouse.up();
+    const panAfter = await page.evaluate(() => ({ l: document.getElementById('alSlWrap').scrollLeft, t: document.getElementById('alSlWrap').scrollTop, cls: document.getElementById('alSlCv').className }));
+    R.v121.pan = { before: panBefore, duringCursor: panCursor, after: panAfter,
+      movedCorrectly: (panBefore.l - (r.x + 240 - (r.x + 300))) === panAfter.l && (panBefore.t - (r.y + 230 - (r.y + 300))) === panAfter.t };
+
+    // cell-select still hits the right cell at a non-fit zoom (the real regression risk — proves
+    // evToSrc needed no changes for the new camera)
+    await page.evaluate(() => {
+      document.querySelector('#alSlMode [data-m="select"]').click();
+      document.getElementById('alSlZoomFit').click();
+      document.getElementById('alSlCols').value = 4; document.getElementById('alSlCols').dispatchEvent(new Event('input'));
+      document.getElementById('alSlRows').value = 4; document.getElementById('alSlRows').dispatchEvent(new Event('input'));
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.getElementById('alSlWrap').scrollLeft = 0; document.getElementById('alSlWrap').scrollTop = 0;
+    });
+    await page.waitForTimeout(80);
+    r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const selBefore = await page.evaluate(() => document.getElementById('alSlCount').textContent);
+    await page.mouse.click(r.x + 40, r.y + 40);
+    const selAfter = await page.evaluate(() => document.getElementById('alSlCount').textContent);
+    R.v121.selectAtZoom = { selBefore, selAfter, pct: await page.evaluate(() => document.getElementById('alSlZoomPct').textContent) };
+
+    // wheel-zoom-to-cursor
+    await page.evaluate(() => document.getElementById('alSlZoomFit').click());
+    await page.waitForTimeout(50);
+    const pctBefore = await page.evaluate(() => document.getElementById('alSlZoomPct').textContent);
+    r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left + 150, y: b.top + 100 }; });
+    await page.mouse.move(r.x, r.y);
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(80);
+    R.v121.wheelZoom = { pctBefore, pctAfter: await page.evaluate(() => document.getElementById('alSlZoomPct').textContent) };
+
+    await page.evaluate(() => document.getElementById('alSlClose').click());
+    await page.evaluate(() => { const b = document.getElementById('assetsHeaderBtn'); if (b && b.classList.contains('on')) b.click(); });
+  }
+
+  // ── v1.23: Journey Planner travel fixes + settlement pick-radius zoom scaling (block 2) ──
+  // BUG 1 (owner: "Coastal Waters faster than Open Sea — historically backwards"): the sea water-type
+  // modifier (JP_TERRAIN.sea) must rank Open Sea above Coastal Waters (wind/current is a SEPARATE axis
+  // in JP_ROUTE.sea). BUG 2 (owner: "autoselect assigns a vessel to a leg it isn't fit for, only caught
+  // downstream"): the selector (_jpVesselFits) and validator (_jpVesselWaterBlock, which jpCalcWater now
+  // calls) share ONE source of truth, so an autoselected vessel can never be flagged invalid. All pure
+  // JP data/functions — no world/DOM needed beyond GW being defined (generated earlier in this run).
+  R.v123 = await page.evaluate(() => {
+    const out = {};
+    out.sea = { sheltered: JP_TERRAIN.sea['Sheltered Bay'], coastal: JP_TERRAIN.sea['Coastal Waters'],
+                open: JP_TERRAIN.sea['Open Sea'], rough: JP_TERRAIN.sea['Rough Open Sea'] };
+    out.openFasterThanCoastal = JP_TERRAIN.sea['Open Sea'] > JP_TERRAIN.sea['Coastal Waters'];
+    out.shelteredNotFastest = JP_TERRAIN.sea['Sheltered Bay'] < JP_TERRAIN.sea['Open Sea'];
+
+    const seaT = Object.keys(JP_TERRAIN.sea), rivT = Object.keys(JP_TERRAIN.river);
+    const stages = [...seaT.map(t => ({ cat: 'sea', terrain: t })), ...rivT.map(t => ({ cat: 'river', terrain: t }))];
+    let mismatches = 0, autoInvalid = 0, autoPicks = 0, checks = 0;
+    for (const st of stages) {
+      const pick = JP_VESSEL_PREFERENCE.find(n => _jpVesselFits(n, [st]));
+      if (pick) { autoPicks++; if (_jpVesselWaterBlock(JP_SHIPS[pick], st.cat, st.terrain, pick)) autoInvalid++; }
+      for (const n of Object.keys(JP_SHIPS)) {
+        checks++;
+        const fits = _jpVesselFits(n, [st]);
+        const blocked = !!_jpVesselWaterBlock(JP_SHIPS[n], st.cat, st.terrain, n);
+        if (fits === blocked) mismatches++;   // fits must be the exact negation of blocked
+      }
+    }
+    out.selValidatorMismatches = mismatches; out.autoInvalid = autoInvalid; out.autoPicks = autoPicks; out.checks = checks;
+
+    // end-to-end through the REAL validator: autoselect a vessel for an Open Sea leg, run jpCalcWater,
+    // confirm it is NOT blocked (proves jpCalcWater consumes the shared compat rule, not a stale copy)
+    const mkStage = (cat, terrain) => ({ km: 60, cat, terrain, routeCond: 'Neutral', infra: 'auto', biome: 'Temperate Forest' });
+    const mkPlan = (vessel) => ({ vessel, pace: 'Standard Pace', season: 'Summer', groupSize: 4, cargoKg: 0, hours: 10, carryFood: false });
+    const openStage = mkStage('sea', 'Open Sea');
+    const autoOpen = JP_VESSEL_PREFERENCE.find(n => _jpVesselFits(n, [openStage]));
+    out.autoOpenPick = autoOpen;
+    out.autoOpenNotBlocked = autoOpen ? !jpCalcWater(openStage, mkPlan(autoOpen)).blocked : false;
+    // the validator STILL fires for a genuinely infeasible manual pick (river-only barge on open sea)
+    out.manualInfeasibleStillBlocked = !!jpCalcWater(openStage, mkPlan('River Barge')).blocked;
+    // dhow spot-check: openSea-capable (historically correct — monsoon ocean trader), sea not river
+    out.dhow = { openSea: JP_SHIPS['Dhow'].openSea, fitsOpenSea: _jpVesselFits('Dhow', [openStage]),
+                 fitsCoastal: _jpVesselFits('Dhow', [mkStage('sea', 'Coastal Waters')]),
+                 fitsRiver: _jpVesselFits('Dhow', [mkStage('river', 'Calm River')]) };
+
+    // settlement pick radius must SHRINK as you zoom in (constant on-screen), off-LOD and under LOD
+    const sLod = _lodOn, sZoom = (typeof _lodZoom !== 'undefined' ? _lodZoom : 1), sScale = (viewT ? viewT.scale : 1);
+    _lodOn = false; if (viewT) viewT.scale = 1; const r1 = _civZoomPickR(20);
+    if (viewT) viewT.scale = 4; const r4 = _civZoomPickR(20);
+    _lodOn = true; _lodZoom = 8; const rLod = _civZoomPickR(20);
+    _lodOn = sLod; if (typeof _lodZoom !== 'undefined') _lodZoom = sZoom; if (viewT) viewT.scale = sScale;
+    out.pickR = { atZoom1: r1, atZoom4: r4, atLod8: rLod };
+    out.pickShrinksOnZoomIn = (r4 < r1) && (rLod < r1) && (Math.abs(r1 - 20) < 1e-9);
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1871,7 +2350,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('un-finalize clears phase-explore', R.phaseOff === false);
   A('v0.74 finalize button is the first button in Generate → World, not behind a disclosure', R.finalizeTop.inFinalizeSec && R.finalizeTop.notInDetails && R.finalizeTop.isFirstButton && R.finalizeTop.depthInSec);
   A('Undo button lives in header', R.undoInHeader === true);
-  A('Generate sub-tab bar restored (world/civ/carto)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto']));
+  A('Generate sub-tab bar has world/civ/carto/sculpt (v1.15 adds the Sculpt editor)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','sculpt']));
   A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);
   A('faction picker lives in Generate → Civilization', R.factionPickerInGenCiv === true);
   A('Map style lives in Generate → Cartography', R.mapStyleInGenCarto === true);
@@ -1948,6 +2427,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.94: a real river cell is found on the fixed-seed world (test precondition)', R.riverWays.foundRiverSpot === true);
   A('v0.94: river ways toggle produces a real pixel difference on the main canvas', R.riverWays.mainDiffPx > 0);
   A('v0.94: river ways toggle produces a real pixel difference under Tiled LOD (closes the old "LOD shows no river color" gap)', R.riverWays.lodDiffPx > 0);
+  A('v1.14: surfaceColor skips its own raster river blend when the vector overlay (riverWays) is on — no more double-rendering the same network (the "two engines... in close proximity" report)', R.riverWays.dedupDiffer === true);
   A('v0.94 routing fix: both fixed-seed coastal detour pairs resolve to a valid mixed route', R.routingSeaShortcut.pairs.every(p => p.ok));
   A('v0.94 routing fix: a coastal route with a land detour now uses a real sea shortcut (was ~5-6% water, now materially more)', R.routingSeaShortcut.pairs.every(p => p.waterFrac >= 0.2));
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
@@ -2037,6 +2517,60 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.13 #1: a region/area name label still draws even when settlement auto-labels crowd its cell (pre-v1.13 the occupancy grid could suppress it entirely)', R.v113.regionLabelDraws >= 1);
   A('v1.13 #2: zoom-out floors at the FIT scale so the whole map — width AND height — fits the viewport (was cover: one axis overflowed, forcing L/R drag)', R.v113.fitAtOrBelowCover === true && R.v113.overflowsAtCover === true && R.v113.widthFitsAtFloor === true && R.v113.heightFitsAtFloor === true);
   A('v1.13 #3: under deep LOD zoom a left-click reaches _civInfoAt with the correct settlement cell (LOD-aware evtToGridLOD); the old un-zoomed mapping would have been far off', R.v113.lodClickHandlerErr < 3 && R.v113.plainMappingErr > 10);
+
+  // ── v1.15: Sculpt editor (stamp-based non-destructive terrain sculpting, replaces Manual Terrain) ──
+  A('v1.15 Sculpt tab: clicking the sub-tab shows the panel, hides World, and lists the 13-feature palette + 8 presets', R.sculpt.panelShown && R.sculpt.worldHidden && R.sculpt.featureButtons === 13 && R.sculpt.presetButtons === 8);
+  A('v1.15 Sculpt tab: _sculptEditorActive() is true while the tab is open on an un-finalized world', R.sculpt.editorActive === true);
+  A('v1.15 draft is non-destructive: painting a stroke touches neither `field` nor the rendered pixels until commit', R.sculpt.draftLeavesFieldUntouched && R.sculpt.draftLeavesRenderUntouched && R.sculpt.stampCountAfterPaint === 1);
+  A('v1.15 commit bakes the draft into `field`, runs a real renderNow (pixels update in the same pass), clears the stack, and pushes exactly one undo snapshot', R.sculpt.commitChangesField && R.sculpt.commitChangesRender && R.sculpt.commitClearsStamps && R.sculpt.commitPushedUndo);
+  A('v1.15 Ctrl+Z (field-level undo, post-commit) reverts the bake', R.sculpt.undoRevertsField && R.sculpt.undoDifferedFromCommitted);
+  A('v1.15 LOD-mode painting draws the stamp overlay (drawLODView tail) without throwing', R.sculpt.lodOverlayDrawsWithoutError === true);
+  A('v1.15 brush size is real-world/zoom-relative: the km-radius readout tracks brushSize (grid cells), doubling brushSize doubles the reported km', R.sculpt.kmReadoutAt32 && R.sculpt.kmReadoutDoublesWithBrushSize);
+
+  // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
+  A('v1.17 S2: auto-populate assigns a specialisation to every settlement', R.v117.nSettlements > 0 && R.v117.allHaveSpecialisation === true);
+  A('v1.17 S4: wall-spec ladder — fortress stone, plain hamlet none, umWalls:false override wins', R.v117.fortressStone && R.v117.plainHamletNone && R.v117.overrideFalseWins);
+  A('v1.17 S6: settlement function reaches the layout engine (economy in ctx → warehouse district in the model)', R.v117.economyInCtx && R.v117.warehouseTagged);
+  A('v1.17 S7: Site-profile debug view wired (button + state.debug + legend)', R.v117.siteprofileBtn && R.v117.siteprofileState === 'siteprofile' && R.v117.siteprofileLegend);
+  A('v1.17 S7: settlement-diagnostics overlay toggle draws on the civ canvas', R.v117.diagChk && R.v117.diagDraws);
+
+  // ── v1.18: Interactive City Viewer (Explore mode) ──
+  A('v1.18: an empty-terrain Explore-mode click still fills the plain sidebar summary and leaves the viewer closed (zero regression)', R.v118.emptyClickFillsPanel && R.v118.emptyClickModalClosed);
+  A('v1.18: a genuine settlement-pin click in Explore mode opens the City Viewer instead of the plain summary', R.v118.settlementClickOpensModal && R.v118.settlementClickSkipsPlainPanel);
+  A('v1.18: the City Information Panel renders all 7 sections with real data, including honest "not modeled" notes for undeveloped religion/history simulation (never fabricated)', R.v118.infoSectionsPresent && R.v118.infoHonestNotes);
+  A('v1.18: the viewer camera zooms (state mutates) and its LOD tiers reveal different content as scale crosses a threshold', R.v118.zoomChangesScale && R.v118.lodTiersDiffer);
+  A('v1.18: the info panel\'s Edit button routes to the existing, untouched Civilization-mode settlement editor', R.v118.editOpensExistingPopup);
+  A('v1.18: both close paths (× button, Escape) work and clear camera state', R.v118.closeButtonWorks && R.v118.escapeWorks);
+  A('v1.18: the Civilization-mode settlement editor (_civOpenPlacePopup) is completely unaffected by the new viewer', R.v118.civModeEditorUnaffected);
+  A('v1.19: the sculpt nav joystick DOM (pad/stick/knob) is present', R.v119.domPresent);
+  A('v1.19: entering Generate → Sculpt on a non-touch browser leaves the joystick hidden (isMobile gate)', R.v119.sculptActiveOnTab && R.v119.hiddenOnDesktop);
+  A('v1.22: off-LOD, pushing the knob RIGHT pans the VIEW right (viewT.panX decreases) — corrected joystick direction', R.v119.pushRightPansViewRight);
+  A('v1.19: releasing the knob stops the continuous pan loop', R.v119.resetActuallyStopsLoop);
+  A('v1.19: a sub-dead-zone nudge does not start panning', R.v119.deadZoneIgnoresTinyPush);
+  A('v1.19: knob travel is clamped to MAX_OFFSET and recenters on release', R.v119.knobClampsOffset && R.v119.knobResetsToCenter);
+  A('v1.22: under Tiled LOD, pushing right drives _lodCx right too (view travels right)', R.v119.lodPanDrivesLodCx);
+  A('v1.19: cycling Sculpt/Generate tabs re-syncs joystick visibility without throwing', R.v119.noThrowOnTabCycle);
+  A('v1.20: the Icon tool\'s "Feature icons" gallery lists all 10 slots (was 4)', R.v120.featureTileCount === 10);
+  A('v1.20: a new kind (cactus) arms and places via the Icon tool exactly like the original 4', R.v120.armedCactus && R.v120.placedCactus);
+  A('v1.20: the manually-placed icon draws without throwing (pack sprite or generic glyph fallback)', R.v120.drawsWithoutThrow);
+  A('v1.20: every new feature-icon key has a real glyph fallback', R.v120.allNewKeysHaveGlyphs);
+  A('v1.20: PACK_ICON_SLOTS grew from 4 to 10', R.v120.packIconSlotsCount === 10);
+  A('v1.21: the zoom toolbar and Pan mode button exist once a sheet is loaded', R.v121.scaffold.zoomToolbarShown && R.v121.scaffold.hasPanBtn);
+  A('v1.21: a sheet loads at a sane fit-to-view scale (not 100%, not 0)', R.v121.scaffold.cvW0 > 0 && R.v121.scaffold.pct0 !== '100%');
+  A('v1.21: Zoom In grows the canvas past the wrap (native scroll now applies)', R.v121.zoomButtons.afterIn.w > R.v121.zoomButtons.before && R.v121.zoomButtons.afterIn.scrollable);
+  A('v1.21: Fit restores the original scale and resets scroll to 0,0', R.v121.zoomButtons.afterFit.w === R.v121.zoomButtons.before && R.v121.zoomButtons.afterFit.scrollLeft === 0);
+  A('v1.21: dragging in Pan mode moves the wrap\'s scroll offset by the drag delta', R.v121.pan.duringCursor.includes('panning') && R.v121.pan.movedCorrectly);
+  A('v1.21: cell click-to-select still hits the right cell at a non-fit zoom (evToSrc needed no changes)', R.v121.selectAtZoom.selBefore === '0 selected' && R.v121.selectAtZoom.selAfter === '1 selected' && R.v121.selectAtZoom.pct !== '100%');
+  A('v1.21: wheel-zoom actually zooms in', parseInt(R.v121.wheelZoom.pctAfter) > parseInt(R.v121.wheelZoom.pctBefore));
+
+  A('v1.23 BUG1: Open Sea base speed > Coastal Waters (systemic sea ordering fixed)', R.v123.openFasterThanCoastal);
+  A('v1.23 BUG1: Sheltered Bay is not the fastest sea terrain (no residual pair-ordering bug)', R.v123.shelteredNotFastest);
+  A('v1.23 BUG2: selector and validator agree for every vessel × water terrain (single source of truth)', R.v123.selValidatorMismatches === 0 && R.v123.checks > 0);
+  A('v1.23 BUG2: autoselect never picks a vessel the compat rule flags invalid', R.v123.autoInvalid === 0 && R.v123.autoPicks > 0);
+  A('v1.23 BUG2: an autoselected Open Sea vessel passes the real jpCalcWater validator (not blocked)', !!R.v123.autoOpenPick && R.v123.autoOpenNotBlocked);
+  A('v1.23 BUG2: jpCalcWater still blocks a genuinely infeasible manual pick (river barge on open sea)', R.v123.manualInfeasibleStillBlocked);
+  A('v1.23 BUG2: dhow is rated open-sea capable (sea, not river) — historically correct', R.v123.dhow.openSea && R.v123.dhow.fitsOpenSea && R.v123.dhow.fitsCoastal && !R.v123.dhow.fitsRiver);
+  A('v1.23: settlement pick radius shrinks as you zoom in (constant on-screen), off-LOD and under LOD', R.v123.pickShrinksOnZoomIn);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

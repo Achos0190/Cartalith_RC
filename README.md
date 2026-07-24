@@ -10,7 +10,7 @@ zero-dependency HTML file.
 
 ## Use it
 
-Open the newest **`Cartalith Gen1 v*.html`** (currently **`Cartalith Gen1 v1.13.html`**) in a
+Open the newest **`Cartalith Gen1 v*.html`** (currently **`Cartalith Gen1 v1.23.html`**) in a
 modern browser. It works straight from `file://`; a local HTTP server is optional (enables a few
 extras like multicore worker pools on some browsers) and nothing breaks without it.
 
@@ -23,10 +23,11 @@ v0.70): naive version sort compares the minor numerically, so a `v0.7` would sor
 
 | Path | What it is |
 |------|------------|
-| `Cartalith Gen1 v1.13.html` | **The tool.** Current version |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.12.html` | Previous versions (kept, frozen) |
+| `Cartalith Gen1 v1.23.html` | **The tool.** Current version |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.22.html` | Previous versions (kept, frozen) |
 | `Cartalith_V1.915.html` | The pre-merge map editor, kept as a reference implementation |
 | `urban-morphology/` | Standalone procedural city-layout PoC; its engine was ported into Gen1's 4th script block (v0.95) — kept as reference, never edited |
+| `fractal-geology/` | Standalone stamp-based terrain-sculpt PoC; its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15) — kept as reference, never edited |
 | `assets/` | CC0 sample asset pack + its generator script |
 | `docs/` | Handoff, roadmap, design plans, research reports |
 | `tests/` | Headless verification suite (engine + urban-morphology) + Playwright perf/bit-identity harness |
@@ -41,7 +42,7 @@ file; their inputs are not in this repository (see `legacy/README.md`).
 ## Verify
 
 ```bash
-tests/run.sh                                 # newest Gen1 file → 911-assertion headless suite
+tests/run.sh                                 # newest Gen1 file → 992-assertion headless suite
 tests/run.sh "Cartalith Gen1 v0.57.html"     # explicit target
 node tests/perf/hash_gen1.js A.html B.html   # A/B bit-identity battery (Playwright)
 ```
