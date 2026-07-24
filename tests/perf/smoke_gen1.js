@@ -2239,6 +2239,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     await page.evaluate(() => { const b = document.getElementById('assetsHeaderBtn'); if (b && b.classList.contains('on')) b.click(); });
   }
 
+  // ── v1.23: Journey Planner travel fixes + settlement pick-radius zoom scaling (block 2) ──
+  // BUG 1 (owner: "Coastal Waters faster than Open Sea — historically backwards"): the sea water-type
+  // modifier (JP_TERRAIN.sea) must rank Open Sea above Coastal Waters (wind/current is a SEPARATE axis
+  // in JP_ROUTE.sea). BUG 2 (owner: "autoselect assigns a vessel to a leg it isn't fit for, only caught
+  // downstream"): the selector (_jpVesselFits) and validator (_jpVesselWaterBlock, which jpCalcWater now
+  // calls) share ONE source of truth, so an autoselected vessel can never be flagged invalid. All pure
+  // JP data/functions — no world/DOM needed beyond GW being defined (generated earlier in this run).
+  R.v123 = await page.evaluate(() => {
+    const out = {};
+    out.sea = { sheltered: JP_TERRAIN.sea['Sheltered Bay'], coastal: JP_TERRAIN.sea['Coastal Waters'],
+                open: JP_TERRAIN.sea['Open Sea'], rough: JP_TERRAIN.sea['Rough Open Sea'] };
+    out.openFasterThanCoastal = JP_TERRAIN.sea['Open Sea'] > JP_TERRAIN.sea['Coastal Waters'];
+    out.shelteredNotFastest = JP_TERRAIN.sea['Sheltered Bay'] < JP_TERRAIN.sea['Open Sea'];
+
+    const seaT = Object.keys(JP_TERRAIN.sea), rivT = Object.keys(JP_TERRAIN.river);
+    const stages = [...seaT.map(t => ({ cat: 'sea', terrain: t })), ...rivT.map(t => ({ cat: 'river', terrain: t }))];
+    let mismatches = 0, autoInvalid = 0, autoPicks = 0, checks = 0;
+    for (const st of stages) {
+      const pick = JP_VESSEL_PREFERENCE.find(n => _jpVesselFits(n, [st]));
+      if (pick) { autoPicks++; if (_jpVesselWaterBlock(JP_SHIPS[pick], st.cat, st.terrain, pick)) autoInvalid++; }
+      for (const n of Object.keys(JP_SHIPS)) {
+        checks++;
+        const fits = _jpVesselFits(n, [st]);
+        const blocked = !!_jpVesselWaterBlock(JP_SHIPS[n], st.cat, st.terrain, n);
+        if (fits === blocked) mismatches++;   // fits must be the exact negation of blocked
+      }
+    }
+    out.selValidatorMismatches = mismatches; out.autoInvalid = autoInvalid; out.autoPicks = autoPicks; out.checks = checks;
+
+    // end-to-end through the REAL validator: autoselect a vessel for an Open Sea leg, run jpCalcWater,
+    // confirm it is NOT blocked (proves jpCalcWater consumes the shared compat rule, not a stale copy)
+    const mkStage = (cat, terrain) => ({ km: 60, cat, terrain, routeCond: 'Neutral', infra: 'auto', biome: 'Temperate Forest' });
+    const mkPlan = (vessel) => ({ vessel, pace: 'Standard Pace', season: 'Summer', groupSize: 4, cargoKg: 0, hours: 10, carryFood: false });
+    const openStage = mkStage('sea', 'Open Sea');
+    const autoOpen = JP_VESSEL_PREFERENCE.find(n => _jpVesselFits(n, [openStage]));
+    out.autoOpenPick = autoOpen;
+    out.autoOpenNotBlocked = autoOpen ? !jpCalcWater(openStage, mkPlan(autoOpen)).blocked : false;
+    // the validator STILL fires for a genuinely infeasible manual pick (river-only barge on open sea)
+    out.manualInfeasibleStillBlocked = !!jpCalcWater(openStage, mkPlan('River Barge')).blocked;
+    // dhow spot-check: openSea-capable (historically correct — monsoon ocean trader), sea not river
+    out.dhow = { openSea: JP_SHIPS['Dhow'].openSea, fitsOpenSea: _jpVesselFits('Dhow', [openStage]),
+                 fitsCoastal: _jpVesselFits('Dhow', [mkStage('sea', 'Coastal Waters')]),
+                 fitsRiver: _jpVesselFits('Dhow', [mkStage('river', 'Calm River')]) };
+
+    // settlement pick radius must SHRINK as you zoom in (constant on-screen), off-LOD and under LOD
+    const sLod = _lodOn, sZoom = (typeof _lodZoom !== 'undefined' ? _lodZoom : 1), sScale = (viewT ? viewT.scale : 1);
+    _lodOn = false; if (viewT) viewT.scale = 1; const r1 = _civZoomPickR(20);
+    if (viewT) viewT.scale = 4; const r4 = _civZoomPickR(20);
+    _lodOn = true; _lodZoom = 8; const rLod = _civZoomPickR(20);
+    _lodOn = sLod; if (typeof _lodZoom !== 'undefined') _lodZoom = sZoom; if (viewT) viewT.scale = sScale;
+    out.pickR = { atZoom1: r1, atZoom4: r4, atLod8: rLod };
+    out.pickShrinksOnZoomIn = (r4 < r1) && (rLod < r1) && (Math.abs(r1 - 20) < 1e-9);
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2507,6 +2562,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.21: dragging in Pan mode moves the wrap\'s scroll offset by the drag delta', R.v121.pan.duringCursor.includes('panning') && R.v121.pan.movedCorrectly);
   A('v1.21: cell click-to-select still hits the right cell at a non-fit zoom (evToSrc needed no changes)', R.v121.selectAtZoom.selBefore === '0 selected' && R.v121.selectAtZoom.selAfter === '1 selected' && R.v121.selectAtZoom.pct !== '100%');
   A('v1.21: wheel-zoom actually zooms in', parseInt(R.v121.wheelZoom.pctAfter) > parseInt(R.v121.wheelZoom.pctBefore));
+
+  A('v1.23 BUG1: Open Sea base speed > Coastal Waters (systemic sea ordering fixed)', R.v123.openFasterThanCoastal);
+  A('v1.23 BUG1: Sheltered Bay is not the fastest sea terrain (no residual pair-ordering bug)', R.v123.shelteredNotFastest);
+  A('v1.23 BUG2: selector and validator agree for every vessel × water terrain (single source of truth)', R.v123.selValidatorMismatches === 0 && R.v123.checks > 0);
+  A('v1.23 BUG2: autoselect never picks a vessel the compat rule flags invalid', R.v123.autoInvalid === 0 && R.v123.autoPicks > 0);
+  A('v1.23 BUG2: an autoselected Open Sea vessel passes the real jpCalcWater validator (not blocked)', !!R.v123.autoOpenPick && R.v123.autoOpenNotBlocked);
+  A('v1.23 BUG2: jpCalcWater still blocks a genuinely infeasible manual pick (river barge on open sea)', R.v123.manualInfeasibleStillBlocked);
+  A('v1.23 BUG2: dhow is rated open-sea capable (sea, not river) — historically correct', R.v123.dhow.openSea && R.v123.dhow.fitsOpenSea && R.v123.dhow.fitsCoastal && !R.v123.dhow.fitsRiver);
+  A('v1.23: settlement pick radius shrinks as you zoom in (constant on-screen), off-LOD and under LOD', R.v123.pickShrinksOnZoomIn);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

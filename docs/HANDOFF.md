@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.22.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.23.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.23 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.21` are kept and never edited.
+  (v1.24 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.22` are kept and never edited.
+- **v1.23 — owner: "when zooming in, the area that is clickable to view a settlement stays fixed and
+  thusly becomes relatively bigger, making panning near impossible"** + a Journey Planner review
+  ("Coastal Waters faster than Open Sea — historically backwards"; "autoselect assigns a vessel to a
+  leg it isn't fit for, only caught downstream"). Three fixes, all civ/Journey-Planner (block 2), so
+  engine/UME suites and hash bit-identity are all unchanged. (1) **Settlement pick radius** — the
+  place-pick radii were flat GRID-space (`GW/50`, `GW/35`) while the pins draw at a constant
+  on-screen size, so zoomed in the clickable target ballooned and swallowed pan drags; new
+  `_civZoomPickR(gridR0)` divides the zoom-1 radius by the live zoom (`viewT.scale` off-LOD, `_lodZoom`
+  under LOD), applied at all five place-pick sites, unchanged at zoom 1. (2) **Sea speed ordering** —
+  `JP_TERRAIN.sea` had Open Sea `0.85` < Coastal Waters `1.00` (wind is a separate axis in
+  `JP_ROUTE.sea`; `1.00/0.85≈1.18` matched the reported 97/82), reordered to Sheltered Bay `0.95` <
+  Coastal `1.00` < Open Sea `1.20` (Rough Open Sea `0.60` the weather outlier); measured Open Sea
+  113→159.6 km/day (Cog/14h). (3) **Vessel↔terrain compat** — the selector (`_jpVesselFits`) and
+  validator (`jpCalcWater`) had duplicate inline copies of the compat rules; both now call one shared
+  `_jpVesselWaterBlock`, so an autoselected vessel can never be one the validator later rejects (the
+  validator still fires for a genuinely infeasible manual pick). The Dhow stays `openSea:true`
+  (historically correct — monsoon ocean trader); the task's "dhow restricted from open sea" premise
+  doesn't apply here. Verified: 992/852 unchanged, hash ALL IDENTICAL, smoke **251/251** (+8), and an
+  autoselection sweep across all nine water terrains showed zero invalid picks.
 - **v1.22 — owner: "The joystick works in the opposite direction that we push, and on mobile/tablet
   i think we should just have it in all views" + "When using LOD pyramid tiling LOD0 seems to be of
   poor resolution (even if we pick 1k/2k) and the individual sub division of tiles below LOD0 should
@@ -1225,6 +1244,22 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   far more categories — ruins, standing stones, lighthouses, culture packs, etc. — than fit this
   request; those remain reachable today only via the Asset Library's existing free-form `custom`
   icon family + sprite-sheet slicer, manually placed one at a time, not auto-attached to anything).
+- **Settlement pick-radius zoom scaling + Journey Planner sea-speed/vessel fixes (v1.23) — shipped.**
+  (1) The settlement clickable area was a flat grid-space radius that ballooned on screen when zoomed
+  in and blocked panning near a settlement — now zoom-scaled (`_civZoomPickR`) to a constant on-screen
+  size at all five place-pick sites. (2) `JP_TERRAIN.sea` had Open Sea slower than Coastal Waters
+  (systemic; wind is a separate axis) — reordered so Open Sea is fastest. (3) The vessel autoselector
+  and the leg validator shared no compatibility source of truth (two inline copies) — consolidated to
+  `_jpVesselWaterBlock`, so the selector can never pick what the validator rejects. **Known
+  decisions / follow-ups:** (a) the sea multiplier for Open Sea (1.20) is a conservative +20%
+  continuous-sailing edge over coastal; the absolute km/day (159.6 for a Cog at 14 h) runs a touch
+  above the task's ~80-150 reference band purely because of the out-of-scope base ship speed + hours,
+  not the multiplier — the ORDERING is what the bug was about. (b) The Dhow is deliberately kept
+  open-sea capable (historically correct — Indian-Ocean monsoon dhows were ocean traders); if a
+  coastal-only dhow variant is ever wanted, flip its `JP_SHIPS` entry (`openSea:false` +
+  `invalidWater:["Open Sea","Rough Open Sea"]`) and both the selector and validator pick it up from
+  the one shared rule. (c) Settlement pan-near-pin feel is canvas/pointer interaction — flagged for
+  manual on-device confirmation; the headless smoke only asserts the radius shrinks with zoom.
 - **Joystick direction + all-views + LOD0 supersample (v1.22) — shipped.** Three owner-reported
   items. (1) The Sculpt pan joystick moved the view opposite to the push — the v1.19 port dropped
   `Cartalith_V1.915.html`'s velocity negation; restored in `_sculptNavSetKnob`. (2) The joystick is

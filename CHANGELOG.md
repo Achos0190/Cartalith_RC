@@ -12,6 +12,51 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.23 (2026-07-24)
+Two owner-reported issues: a map-interaction bug and a pair of travel/logistics (Journey Planner)
+bugs.
+
+- **Settlement clickable area now scales with zoom** (owner: *"when zooming in, the area that is
+  clickable to view a settlement stays fixed and thusly becomes relatively bigger, making panning
+  near impossible"*). The settlement/POI pins draw at a roughly constant on-screen size
+  (`_civZoomK`), but the pick radii were flat GRID-space values (`GW/50`, `GW/35`) that never
+  shrank — so zoomed in, the clickable target ballooned on screen and swallowed pan drags near a
+  settlement. New `_civZoomPickR(gridR0)` divides the zoom-1 grid radius by the live zoom
+  (`viewT.scale` off-LOD, clamped exactly like `_civZoomK`; `_lodZoom` under Tiled LOD), keeping
+  the target a constant on-screen size; applied at all five place-pick sites (`_civSelectPlaceAt`,
+  `_civDropPlace`, both `_civInfoAt` radii, and the right-click "nearest place" menu). At zoom 1 the
+  radius is unchanged, so nothing regresses at the default view.
+- **Journey Planner — Open Sea was slower than Coastal Waters** (owner: *"historically backwards"*).
+  `JP_TERRAIN.sea` (the STRUCTURAL water-type modifier; wind/current is a SEPARATE axis in
+  `JP_ROUTE.sea`) had Open Sea `0.85` < Coastal Waters `1.00` — and `1.00/0.85 ≈ 1.18` was exactly
+  the reported 97/82 km-day ratio, confirming a systemic base-table sign error, not a one-off
+  adverse-weather roll. Reordered so speed rises with distance from shore (pre-industrial coastal
+  sailing hugged the coast and anchored at night; open-sea passages ran continuously): Sheltered Bay
+  `0.95` < Coastal Waters `1.00` < Open Sea `1.20`, with Rough Open Sea `0.60` the weather-degraded
+  outlier. Measured (Cog, 14 h, neutral wind): Open Sea went **113 → 159.6 km/day**, Coastal
+  unchanged at 133. Land/river rows untouched.
+- **Journey Planner — vessel autoselect vs. terrain validity consolidated to one source of truth**
+  (owner: *"the autoselect assigns a vessel to a leg it isn't fit for, only caught downstream as an
+  impossibility flag"*). The selector (`_jpVesselFits`) and the validator (`jpCalcWater`) each
+  carried their OWN inline copy of the mode / open-sea-rating / `invalidWater` compatibility rules —
+  two definitions free to drift. Both now call one shared `_jpVesselWaterBlock(ship,cat,terrain)`,
+  so a vessel the autoselector is allowed to pick can never be one the validator later rejects,
+  while the validator still fires for a genuinely infeasible manual/per-stage-override choice. The
+  Dhow is left `openSea:true` — historically correct (Indian-Ocean monsoon dhows were genuine
+  open-water traders), so the task's "dhow restricted from open sea" premise doesn't apply here; the
+  fix is the structural consolidation that prevents the described select-then-reject class of bug for
+  any genuinely coastal/river-only craft (Fishing Vessel, River Barge, River Galley, Keelboat).
+- **Verified.** Engine `tests/run.sh` 992/992, UME `tests/run_um.sh` 852/852 (both unchanged — the
+  edits are all civ/Journey-Planner, block 2), `node tests/perf/hash_gen1.js` vs v1.22 **ALL
+  IDENTICAL** (JP tables and pick radii never touch the terrain raster), smoke
+  `tests/perf/smoke_gen1.js` **251/251** (+8: Open Sea > Coastal; no residual sea-pair ordering bug;
+  selector⟺validator agree for every vessel × water terrain; autoselect never flagged invalid; an
+  autoselected Open Sea vessel passes the real `jpCalcWater`; a manual river-barge-on-open-sea is
+  still blocked; the Dhow spot-check; and the settlement pick radius shrinking with zoom). An
+  autoselection sweep across all nine water terrains showed zero invalid picks. Canvas/pointer
+  interaction (the settlement pan-near-pin feel) — flagged for manual on-device confirmation per the
+  headless carve-out.
+
 ### v1.22 (2026-07-21)
 Three owner-reported items in one pass — two touch/joystick fixes and one LOD fidelity fix.
 

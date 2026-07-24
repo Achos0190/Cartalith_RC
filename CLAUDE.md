@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.22**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.23**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.22.html` | **Current** unified tool (~23.9k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.21.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.23.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.22.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -473,6 +473,48 @@ division of tiles below LOD0 should be tiles of 512px."*
   canvases stay GW×GH (they read slightly softer than the supersampled terrain under LOD, alignment
   unaffected). Canvas/GPU/touch interaction — manual on-device verification per this file's headless
   carve-out.
+
+### Settlement pick-radius + Journey Planner fixes (v1.23)
+
+Three owner-reported bugs, all civ/Journey-Planner (block 2) — engine/UME suites and hash
+bit-identity unchanged (these paths never touch the terrain raster).
+
+- **Settlement clickable area now scales with zoom** (`_civZoomPickR`, block 2). The place-pick
+  radii were flat GRID-space values (`GW/50`, `GW/35`) while the pins draw at a roughly constant
+  on-screen size (`_civZoomK`), so zooming in ballooned the clickable target on screen and swallowed
+  pan drags near a settlement. `_civZoomPickR(gridR0)` divides the zoom-1 grid radius by the live
+  zoom — `viewT.scale` off-LOD (clamped exactly like `_civZoomK`), `_lodZoom` under Tiled LOD —
+  keeping it a constant on-screen size; unchanged at zoom 1. Applied at all five place-pick sites:
+  `_civSelectPlaceAt`, `_civDropPlace`'s select-near-existing, both `_civInfoAt` radii (generous
+  nearest + tight City-Viewer pin-hit), and the right-click "nearest place" context menu. (The
+  internal `_jpSettlements` route-snap radius is NOT a screen interaction — left grid-space.)
+- **Journey Planner sea speed ordering** (`JP_TERRAIN.sea`, block 2). This row is the STRUCTURAL
+  water-type modifier; wind/current is a SEPARATE axis in `JP_ROUTE.sea`, so it must not be
+  double-counted. Open Sea (0.85) was slower than Coastal Waters (1.00) — and `1.00/0.85≈1.18`
+  matched the owner-reported 97/82 km-day ratio, confirming a systemic base-table sign error, not a
+  one-off weather roll. Reordered to rise with distance from shore (pre-industrial coastal sailing
+  hugged the coast and anchored at night; open-sea passages ran continuously): `Sheltered Bay 0.95 <
+  Coastal Waters 1.00 < Open Sea 1.20`, with `Rough Open Sea 0.60` the weather-degraded outlier.
+- **Vessel↔terrain compatibility — one source of truth** (`_jpVesselWaterBlock`, block 2). The
+  autoselector (`_jpVesselFits` → `jpAutoPickVessel`/`_jpAutoStageVessel`) and the validator
+  (`jpCalcWater`) each carried their own inline copy of the mode / open-sea-rating / `invalidWater`
+  rules — two definitions free to drift. Both now call `_jpVesselWaterBlock(ship,cat,terrain)`, so a
+  vessel the selector is allowed to pick can never be one the validator later rejects, while the
+  validator still fires for a genuinely infeasible MANUAL / per-stage-override choice (the selector
+  path just never produces one). The Dhow is deliberately left `openSea:true` — historically correct
+  (Indian-Ocean monsoon dhows were genuine open-water traders); `JP_SHIPS` stays the authoritative
+  per-vessel data, so a coastal-only variant is a one-line override that both paths pick up.
+- **Tests**: 8 new smoke assertions (`R.v123` in `tests/perf/smoke_gen1.js`) — Open Sea > Coastal
+  Waters; no residual sea-pair ordering bug; selector⟺validator agreement across every vessel ×
+  water terrain; autoselect never flagged invalid; an autoselected Open Sea vessel passes the real
+  `jpCalcWater`; a manual river-barge-on-open-sea is still blocked; the Dhow spot-check; and the
+  settlement pick radius shrinking with zoom (off-LOD and under LOD). Journey-Planner logic lives in
+  block 2, so it is smoke-tested (Playwright in-page `evaluate`), not by the block-1 headless suite.
+- **Known scope cuts**: base ship speeds (`JP_SHIPS.speed`) and per-scenario `hours` are untouched,
+  so the absolute km/day can run above the historical reference band for a large ship on a long day —
+  the fix is the ORDERING, not the absolute magnitude. Land/river terrain speeds and unrelated vessel
+  types are untouched. Settlement pan-near-pin feel is canvas/pointer — manual on-device
+  verification per this file's headless carve-out.
 
 ### Engine (block 1) essentials
 
