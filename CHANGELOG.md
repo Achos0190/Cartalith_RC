@@ -12,6 +12,66 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.24 (2026-07-24)
+An external QA report (headless jsdom harness + real-event dispatch against v1.21) — all 8 findings
+verified real against the current file before fixing (line numbers had shifted; behavior hadn't).
+
+- **BUG-1 (HIGH) — World Structure sliders were completely dead.** `segOn` is a `const` scoped
+  inside `syncUI()`; the `wsp()` slider `change` handler (a separate top-level closure) called it
+  anyway, throwing `ReferenceError: segOn is not defined` — after `archetype='custom'` was set but
+  *before* `deriveFromWorldStructure()`/regeneration ran. Releasing any of the five sliders silently
+  did nothing. Fixed by inlining the same toggle the archetype-button click handler already used
+  directly, instead of calling the out-of-scope helper.
+- **BUG-2 (HIGH, data loss) — Delete key while typing deleted the selected settlement.** The global
+  keydown handler for Delete/Escape had no typing guard, unlike every sibling keydown listener (layer
+  hotkeys, Ctrl+Z/space-pan, Shift+D). One stray `Delete` keypress while editing a place's Name/Pop/
+  History field silently removed it — no confirm, no undo. Added the same `INPUT`/`TEXTAREA`/
+  `SELECT`/`isContentEditable` guard the sibling handlers already use.
+- **BUG-4 (MEDIUM, data loss) — inconsistent confirmation on destructive actions.** "Clear all
+  labels", "Clear all icons", and the place-editor's "Delete place" button all mutated immediately
+  with no confirm/undo, unlike the matching civ-tab clears (territory/roads/places) which already
+  confirm with counts. Added matching `confirm()` calls to all three.
+- **BUG-5 (MEDIUM) — no `beforeunload` guard anywhere.** Manual "File → Export .zip" is the only save
+  path; an accidental refresh/close silently lost everything since the last export. New
+  `_hasLiveWorld()` (setup gate hidden = a world exists) + a `beforeunload` listener. Deliberately
+  NOT a fine-grained "dirty since export" flag — threading that through every mutation site (places/
+  labels/icons/ways/journeys/factions/terrain sculpt/paint…) risks a missed spot silently failing to
+  warn; a blanket "warn whenever a world exists" can never silently under-warn.
+- **BUG-3 (MEDIUM) — busy overlay hid prematurely with queued operations.** `showBusy`/`hideBusy` had
+  no nesting counter, so two ops queued via `withBusy`'s `_busyChain` (e.g. two quick slider changes)
+  hid the overlay when the *first* finished while the second was still running — the user saw an idle
+  app mid-generation. Added a `_busyDepth` counter as a pure internal-accounting change (every
+  existing call site is already a balanced 1:1 pair, so nothing else needed to change), clamped at 0
+  so a stray extra `hideBusy()` can never go negative and get "owed" a future hide.
+- **BUG-6 (LOW) — dead asset-pack thumbnail gallery.** `renderPackInspector()` has always targeted
+  `#packGrid`, which had real, unused CSS but no HTML host element — it silently no-op'd and a loaded
+  pack's texture/icon thumbnails never rendered anywhere. Restored the missing `<div id="packGrid">`
+  next to `#packInfo`.
+- **BUG-7 (LOW) — unescaped user text in `innerHTML` content contexts.** Attribute contexts and the
+  History textarea already escaped correctly, but several content-context sites didn't: a settlement/
+  faction name containing `<` corrupted the row markup, and `<img src=x onerror=…>` executed. New
+  shared `_escHtml()` helper (promoted from an existing local one-off), applied at the settlement/POI
+  list row, both faction `<option>` dropdowns, the City Viewer header, and the virtual-scroll
+  settlements table row (name + faction) — the confirmed content-interpolation sites of user-editable
+  text, not an exhaustive file-wide sweep.
+- **BUG-8 (LOW) — stuck Space-pan on focus loss.** `spaceDown` only cleared on `keyup`; an Alt-Tab
+  while holding Space meant the browser never delivered that keyup, leaving the next left-drag
+  panning instead of using the active tool. Added a `window` `blur` listener clearing `spaceDown`
+  (and `_cam3dDrag`, the analogous 3D orbit/pan drag state).
+- **Verified.** Engine `tests/run.sh` 992/992, UME `tests/run_um.sh` 852/852 (both unchanged — every
+  fix is civ/UI-layer or a pure accounting/escaping change), `node tests/perf/hash_gen1.js` vs v1.23
+  **ALL IDENTICAL**, smoke `tests/perf/smoke_gen1.js` **259/259** (+8, one per bug). Each fix was also
+  spot-verified directly in a real browser (dispatched real `KeyboardEvent`s, stubbed `window.confirm`
+  to decline, toggled `window` `blur`) before being written as a permanent assertion; one test-only
+  bug was found and fixed during verification — the BUG-3 assertion needed to force a clean
+  `_busyDepth=0` baseline, since an earlier `withBusy()`-queued op elsewhere in the long smoke run can
+  still be in flight on its own timer when this block runs.
+- **Non-issues from the report, confirmed and left alone**: duplicate `id="finalizeSec"` (the second
+  is inside an HTML comment, not a real duplicate); the `generate`/`exportZip`/`loadZip`/`renderNow`
+  reassignment-wrapper pattern (every call site resolves the wrapped global lazily, no stale
+  reference); the `_sculptCtx.waterOut===_sculptCtx.waterOut` line (an intentional NaN check); modern
+  API usage (`CompressionStream`/`OffscreenCanvas`/etc.) already consistently feature-detected.
+
 ### v1.23 (2026-07-24)
 Two owner-reported issues: a map-interaction bug and a pair of travel/logistics (Journey Planner)
 bugs.

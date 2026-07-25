@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.23**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.24**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.23.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.22.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.24.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.23.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -515,6 +515,82 @@ bit-identity unchanged (these paths never touch the terrain raster).
   the fix is the ORDERING, not the absolute magnitude. Land/river terrain speeds and unrelated vessel
   types are untouched. Settlement pan-near-pin feel is canvas/pointer — manual on-device
   verification per this file's headless carve-out.
+
+### External QA report fixes (v1.24)
+
+An external QA report (headless jsdom + real-event harness run against v1.21) flagged 8 findings.
+All 8 were independently re-verified against the current file (line numbers had shifted since v1.21,
+behavior hadn't) before fixing. Every fix is civ/UI-layer or a pure internal-accounting/escaping
+change, so engine/UME suites and hash bit-identity are unchanged.
+
+- **BUG-1 (HIGH) — World Structure sliders were completely dead.** `segOn` is a `const` declared
+  inside `syncUI()`'s own scope; the `wsp()` per-slider `change` handler (a separate top-level
+  closure) called it anyway, throwing `ReferenceError: segOn is not defined` — *after*
+  `state.world_structure.archetype='custom'` was set but *before* `deriveFromWorldStructure()`/
+  `syncDerivedTectSliders()`/regeneration ever ran. Releasing any of the five sliders silently did
+  nothing (the archetype-button click handler right above it was unaffected — it toggles the pill
+  directly, never calling `segOn`). Fixed by inlining that same direct toggle in the slider handler
+  instead of calling the out-of-scope helper.
+- **BUG-2 (HIGH, data loss) — Delete while typing deleted the selected settlement.** The global
+  keydown listener for Delete (removes `_civSelectedPlace`) and Escape (commits an in-progress route/
+  way) had no typing guard, unlike every sibling keydown listener in the file (layer hotkeys, Ctrl+Z/
+  space-pan, Shift+D — all check `tag==='INPUT'||'TEXTAREA'||'SELECT'||isContentEditable`). The
+  place-edit popup is exactly the context where a place is selected AND the user is typing (Name/Pop/
+  History) — one stray forward-Delete keypress silently deleted the settlement, no confirm, no undo.
+  Added the same guard the sibling handlers already use.
+- **BUG-4 (MEDIUM, data loss) — inconsistent confirmation on destructive actions.** "Clear all
+  labels", "Clear all icons", and the place-editor's "Delete place" button all mutated immediately
+  with zero confirmation, unlike the matching civ-tab clears (`civClearTerrBtn`/`civClearRoadsBtn`/
+  `civClearPlacesBtn`), which already `confirm()` with a count. Added matching `confirm()` calls
+  (with counts, same wording convention) to all three — hand-placed labels/icons/settlements can
+  represent real work.
+- **BUG-5 (MEDIUM) — no `beforeunload` guard anywhere.** Manual "File → Export .zip" is the only save
+  path; an accidental refresh/tab-close silently lost every edit since the last export. New
+  `_hasLiveWorld()` (the setup gate — `_obEl` — is hidden ⇒ a world exists, the same contract
+  `_setupHide`/`_setupOpen` already enforce) plus a `beforeunload` listener that warns whenever it's
+  true. Deliberately NOT a fine-grained "dirty since last export" flag: threading that through every
+  mutation site (places/labels/icons/ways/journeys/factions/terrain sculpt/paint…) is a lot of surface
+  area to keep in sync, and a single missed spot would silently fail to warn — worse than no guard at
+  all. A blanket "warn whenever a world exists" can never silently under-warn; the cost is one extra
+  prompt right after an export, ordinary browser UX for an unsaved-work editor.
+- **BUG-3 (MEDIUM) — busy overlay hid prematurely with queued operations.** `showBusy`/`hideBusy` had
+  no nesting counter, so two ops queued via `withBusy`'s `_busyChain` (e.g. two quick slider changes)
+  hid the overlay when the *first* op finished while the second was still queued/running — the app
+  read as idle mid-generation. New `_busyDepth` counter, a pure internal-accounting change inside
+  `showBusy`/`hideBusy` themselves — every existing call site (erosion ops guarded by `_eroBusy`,
+  bake/finalize/loadZip guarded by disabled buttons) is already a balanced 1:1 pair, so no call site
+  needed to change; clamped at 0 so a stray extra `hideBusy()` (e.g. `generate()`'s
+  already-finalized early return) can never go negative and get "owed" a future hide.
+- **BUG-6 (LOW) — dead asset-pack thumbnail gallery.** `renderPackInspector()` has always targeted
+  `#packGrid` — real, fully-specified CSS (`#packGrid{display:flex;...}`) with no corresponding HTML
+  element — so it silently no-op'd and a loaded pack's texture/icon thumbnails never rendered
+  anywhere. Restored the missing `<div id="packGrid">` next to `#packInfo`.
+- **BUG-7 (LOW) — unescaped user text in `innerHTML` content contexts.** Attribute contexts and the
+  History textarea already escaped correctly (pre-existing), but several content-context sites
+  didn't: a settlement/faction name containing `<` corrupted the row markup, and
+  `<img src=x onerror=…>` executed. New shared `_escHtml(s)` (promoted from an ad hoc local one-off
+  that already existed for the Journey Planner's route-stops line), applied at the confirmed
+  content-interpolation sites of user-editable text: the settlement/POI list row, both faction
+  `<option>` dropdowns (map-filter select + the place-editor's faction picker), the City Viewer
+  header, and the virtual-scroll settlements table row (name + faction). This is the reported
+  examples fixed, not an exhaustive file-wide sweep — see the scope note in `docs/HANDOFF.md`.
+- **BUG-8 (LOW) — stuck Space-pan on focus loss.** `spaceDown` was only ever cleared on `keyup`; an
+  Alt-Tab / OS shortcut fired while holding Space means that keyup is never delivered to the page,
+  leaving `spaceDown` stuck `true` — the next left-drag pans instead of using the active tool until
+  Space is tapped again. Added a `window` `blur` listener clearing `spaceDown` (and `_cam3dDrag`, the
+  analogous stuck-drag case for the 3D orbit/pan camera).
+- **Tests**: 8 new smoke assertions (`R.v124` in `tests/perf/smoke_gen1.js`), one per bug — dispatched
+  real `KeyboardEvent`s (Delete/Escape/Space), stubbed `window.confirm` to decline and checked data
+  survived, exercised `showBusy`/`hideBusy` directly, checked `_escHtml`'s output and `_stRowHtml`'s
+  actual rendered markup for a deliberately hostile name. One test-only bug found during
+  verification: the BUG-3 assertion needed to force a clean `_busyDepth=0` baseline before probing,
+  since an earlier `withBusy()`-queued op elsewhere in the long smoke run can still be in flight on
+  its own timer by the time this block runs — not an app bug, a test-isolation gap.
+- **Confirmed as non-issues, left alone** (per the report's own findings): the duplicate
+  `id="finalizeSec"` (the second instance is inside an HTML comment, not live markup); the
+  `generate`/`exportZip`/`loadZip`/`renderNow` reassignment-wrapper pattern (every call site resolves
+  the wrapped global lazily inside its own closure, so no stale-reference bug); the
+  `_sculptCtx.waterOut===_sculptCtx.waterOut` line (an intentional NaN self-check, not a typo).
 
 ### Engine (block 1) essentials
 

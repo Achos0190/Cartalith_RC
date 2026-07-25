@@ -9,11 +9,36 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.23.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.24.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.24 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.22` are kept and never edited.
+  (v1.25 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.23` are kept and never edited.
+- **v1.24 — an external QA report** (headless jsdom + real-event harness against v1.21) flagged 8
+  bugs; all 8 verified real against the current file (line numbers shifted, behavior hadn't) before
+  fixing, all civ/UI-layer or pure accounting/escaping changes so engine/UME/hash are unchanged.
+  **BUG-1 (HIGH):** World Structure sliders were completely dead — `segOn` is `const`-scoped inside
+  `syncUI()`, the slider `change` handler (a separate closure) called it anyway and threw
+  `ReferenceError` before regeneration ever ran; fixed by inlining the toggle. **BUG-2 (HIGH, data
+  loss):** the global Delete/Escape keydown handler had no typing guard (unlike every sibling
+  listener) — one stray Delete while editing a place's Name/Pop/History field silently deleted the
+  settlement; added the same `INPUT`/`TEXTAREA`/`SELECT`/`isContentEditable` guard. **BUG-4 (MEDIUM,
+  data loss):** Clear-labels/Clear-icons/Delete-place all mutated with no confirm, unlike the matching
+  civ-tab clears; added matching `confirm()`. **BUG-5 (MEDIUM):** no `beforeunload` guard anywhere —
+  new `_hasLiveWorld()` + listener (deliberately a blanket "world exists" check, not a fine-grained
+  dirty flag — too many mutation sites to thread reliably without a silent gap). **BUG-3 (MEDIUM):**
+  `showBusy`/`hideBusy` had no nesting counter, so two queued `withBusy` ops hid the overlay early;
+  added a `_busyDepth` counter (pure internal accounting, every call site already balanced 1:1).
+  **BUG-6 (LOW):** the asset-pack thumbnail gallery's `#packGrid` had real CSS but no HTML host
+  element — restored it. **BUG-7 (LOW):** user names in several `innerHTML` CONTENT contexts weren't
+  escaped (attributes/History textarea already were) — new shared `_escHtml()`, applied at the
+  confirmed sites (place list row, faction dropdowns ×2, City Viewer header, settlements table row).
+  **BUG-8 (LOW):** `spaceDown` only cleared on keyup — an Alt-Tab while holding Space left it stuck;
+  added a `window` blur listener. Verified: 992/852 unchanged, hash ALL IDENTICAL, smoke **259/259**
+  (+8). One test-only bug found during verification: the BUG-3 smoke assertion needed to force a
+  clean `_busyDepth=0` baseline (an earlier queued op elsewhere in the long smoke run can still be in
+  flight). Several report items were confirmed as non-issues and left alone (duplicate id inside an
+  HTML comment, the function-reassignment-wrapper pattern, an intentional NaN check).
 - **v1.23 — owner: "when zooming in, the area that is clickable to view a settlement stays fixed and
   thusly becomes relatively bigger, making panning near impossible"** + a Journey Planner review
   ("Coastal Waters faster than Open Sea — historically backwards"; "autoselect assigns a vessel to a
@@ -1244,6 +1269,16 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   far more categories — ruins, standing stones, lighthouses, culture packs, etc. — than fit this
   request; those remain reachable today only via the Asset Library's existing free-form `custom`
   icon family + sprite-sheet slicer, manually placed one at a time, not auto-attached to anything).
+- **External QA report fixes (v1.24) — shipped.** 8 bugs (2 HIGH, 3 MEDIUM, 3 LOW), all verified real
+  against the current file before fixing: World Structure sliders were completely dead
+  (`ReferenceError` from an out-of-scope `segOn`); Delete-while-typing deleted the selected settlement
+  (missing typing guard); three destructive actions had no confirm; no `beforeunload` guard existed;
+  the busy overlay could hide early with queued ops; the asset-pack thumbnail gallery's host element
+  was missing; several settlement/faction names weren't HTML-escaped in content contexts; a stuck
+  Space-pan on Alt-Tab. **Known scope note:** BUG-7 (escaping) was fixed at the confirmed reported
+  sites, not swept file-wide — a broader audit of every `innerHTML` content interpolation is possible
+  future work if more instances are found, but wasn't attempted here (low severity, local-tool-only
+  impact, and the file is ~24k lines).
 - **Settlement pick-radius zoom scaling + Journey Planner sea-speed/vessel fixes (v1.23) — shipped.**
   (1) The settlement clickable area was a flat grid-space radius that ballooned on screen when zoomed
   in and blocked panning near a settlement — now zoom-scaled (`_civZoomPickR`) to a constant on-screen

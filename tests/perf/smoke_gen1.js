@@ -2294,6 +2294,78 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.24: external QA report fixes (8 bugs), all confirmed real against this file before fixing ──
+  R.v124 = await page.evaluate(() => {
+    const out = {};
+
+    // BUG-1: World Structure slider `change` no longer throws ReferenceError (segOn was out of
+    // scope), and the archetype pill correctly flips to "custom" — the whole feature was dead.
+    const wsChk = document.getElementById('wsEnabled'); if (wsChk && !wsChk.checked) { wsChk.checked = true; wsChk.dispatchEvent(new Event('change')); }
+    let threwBug1 = false;
+    try { const el = document.getElementById('wsCont'); el.value = 70; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }
+    catch (e) { threwBug1 = true; }
+    out.bug1 = { threw: threwBug1, archetypeIsCustom: state.world_structure.archetype === 'custom',
+                 archetypeBtnOn: !!document.querySelector('#archetypeSeg button[data-arc="custom"].on') };
+
+    // BUG-2: Delete/Escape keydown must ignore keystrokes while typing (place editor Name/Pop/
+    // History fields) — previously one stray Delete forward-keypress silently deleted the settlement.
+    if (!state.places.some(p => p && p.category === 'settlement')) state.places.push({ x: Math.floor(GW/2), y: Math.floor(GH/2), category: 'settlement', name: 'Testville', kind: 'town', faction: 1, pop: 1000, traits: [] });
+    _civSelectedPlace = state.places.find(p => p && p.category === 'settlement');
+    if (typeof _civRenderPlaceEditor === 'function') _civRenderPlaceEditor();
+    const nameInput = document.getElementById('_civPeName');
+    const placesBefore = state.places.length;
+    if (nameInput) nameInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+    out.bug2 = { hadInput: !!nameInput, placeSurvived: state.places.length === placesBefore };
+
+    // BUG-3: showBusy/hideBusy now nest — the overlay must stay visible until every queued op's
+    // hideBusy() has actually fired, not just the first one. Force a clean depth-0 baseline first:
+    // earlier in this long smoke run a withBusy()-queued op (slider-triggered regenerate) may still
+    // be in flight on its own setTimeout/_busyChain tick, leaving _busyDepth non-zero by this point —
+    // this test is about the counter's OWN mechanics, not a race against unrelated pending app ops.
+    _busyDepth = 0; busy.style.display = 'none';
+    showBusy('op A'); showBusy('op B');
+    const stillVisibleAfterOneHide = (hideBusy(), busy.style.display === 'flex');
+    const hiddenAfterSecondHide = (hideBusy(), busy.style.display === 'none');
+    hideBusy(); // extra call must clamp, not go negative (would owe a future phantom hide)
+    showBusy('x'); const recoversNormally = busy.style.display === 'flex'; hideBusy();
+    out.bug3 = { stillVisibleAfterOneHide, hiddenAfterSecondHide, recoversNormally };
+
+    // BUG-4: destructive one-click actions (Clear labels/icons) must confirm() first — declining
+    // must leave the data untouched. (Delete-place button is popup-DOM-dependent; covered by code
+    // presence, not re-simulated here to keep this block fast/robust.)
+    state.labels.push({ x: 5, y: 5, name: 'Test Region', angle: 0, arc: 0, size: 16 });
+    state.mapIcons.push({ x: 5, y: 5, fam: 'feature', slot: 'shrub', scale: 1 });
+    const labelsBefore = state.labels.length, iconsBefore = state.mapIcons.length;
+    const origConfirm = window.confirm; let confirmCalls = 0;
+    window.confirm = () => { confirmCalls++; return false; };
+    document.getElementById('carClearLabelsBtn').click();
+    document.getElementById('carClearIconsBtn').click();
+    window.confirm = origConfirm;
+    out.bug4 = { confirmCalls, labelsSurvivedDecline: state.labels.length === labelsBefore, iconsSurvivedDecline: state.mapIcons.length === iconsBefore };
+
+    // BUG-5: a beforeunload guard exists and correctly reads "a world is live" (setup gate hidden).
+    out.bug5 = { hasFn: typeof _hasLiveWorld === 'function', reportsTrue: typeof _hasLiveWorld === 'function' && _hasLiveWorld() };
+
+    // BUG-6: the asset-pack thumbnail gallery has a host element again (was CSS-only, no HTML tag).
+    let threwBug6 = false; try { renderPackInspector(); } catch (e) { threwBug6 = true; }
+    out.bug6 = { hasEl: !!document.getElementById('packGrid'), threw: threwBug6 };
+
+    // BUG-7: shared HTML-escape helper exists and is actually wired into the settlements table row
+    // renderer (the class of bug: a `<b>`/`<img onerror>` name corrupting rendered markup).
+    const escOk = typeof _escHtml === 'function' && _escHtml('<img src=x onerror=1>') === '&lt;img src=x onerror=1&gt;';
+    const rowHtml = typeof _stRowHtml === 'function' ? _stRowHtml({ name: '<b>Evil</b>', type: 't', faction: '<i>F</i>', pop: 1, prosperity: 0, econRole: 'e', roads: 0, status: 's' }) : '';
+    out.bug7 = { escOk, rowEscaped: rowHtml.includes('&lt;b&gt;Evil&lt;/b&gt;') && rowHtml.includes('&lt;i&gt;F&lt;/i&gt;'), rowHasRawTag: rowHtml.includes('<b>Evil</b>') };
+
+    // BUG-8: a stuck Space-pan (Alt-Tab away while holding Space never delivers keyup) clears on
+    // window blur instead of requiring another Space tap.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    const setTrue = spaceDown;
+    window.dispatchEvent(new Event('blur'));
+    out.bug8 = { setTrue, clearedOnBlur: spaceDown === false };
+
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2571,6 +2643,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.23 BUG2: jpCalcWater still blocks a genuinely infeasible manual pick (river barge on open sea)', R.v123.manualInfeasibleStillBlocked);
   A('v1.23 BUG2: dhow is rated open-sea capable (sea, not river) — historically correct', R.v123.dhow.openSea && R.v123.dhow.fitsOpenSea && R.v123.dhow.fitsCoastal && !R.v123.dhow.fitsRiver);
   A('v1.23: settlement pick radius shrinks as you zoom in (constant on-screen), off-LOD and under LOD', R.v123.pickShrinksOnZoomIn);
+
+  A('v1.24 BUG-1: releasing a World Structure slider no longer throws and correctly sets archetype=custom', !R.v124.bug1.threw && R.v124.bug1.archetypeIsCustom && R.v124.bug1.archetypeBtnOn);
+  A('v1.24 BUG-2: Delete while typing in the place editor does not delete the selected settlement', R.v124.bug2.hadInput && R.v124.bug2.placeSurvived);
+  A('v1.24 BUG-3: busy overlay stays visible until every queued op has hidden it, then recovers normally', R.v124.bug3.stillVisibleAfterOneHide && R.v124.bug3.hiddenAfterSecondHide && R.v124.bug3.recoversNormally);
+  A('v1.24 BUG-4: declining the confirm() on Clear labels/icons leaves the data untouched', R.v124.bug4.confirmCalls === 2 && R.v124.bug4.labelsSurvivedDecline && R.v124.bug4.iconsSurvivedDecline);
+  A('v1.24 BUG-5: a beforeunload guard exists and correctly reports a live world', R.v124.bug5.hasFn && R.v124.bug5.reportsTrue);
+  A('v1.24 BUG-6: the asset-pack thumbnail gallery has its host element back (was CSS-only)', R.v124.bug6.hasEl && !R.v124.bug6.threw);
+  A('v1.24 BUG-7: user-entered names are HTML-escaped in the settlements table row (no tag corruption)', R.v124.bug7.escOk && R.v124.bug7.rowEscaped && !R.v124.bug7.rowHasRawTag);
+  A('v1.24 BUG-8: a stuck Space-pan clears on window blur instead of requiring another key tap', R.v124.bug8.setTrue && R.v124.bug8.clearedOnBlur);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
