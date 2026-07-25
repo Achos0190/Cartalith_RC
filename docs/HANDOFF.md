@@ -9,11 +9,51 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.24.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.25.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.25 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.23` are kept and never edited.
+  (v1.26 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.24` are kept and never edited.
+- **v1.25 — owner: "when selecting the preset worldshapes like volcanic, archiapello or islands
+  the result isn't what is suggested."** Root-caused with a Playwright probe (measured land
+  fraction + connected-component landmass fragmentation across all six archetypes at a fixed
+  seed/resolution, BEFORE writing any fix). Root cause: `deriveFromWorldStructure()` derives
+  plates/tectonicEnergy/volcanism from an archetype's bundle but never touches `state.seaLevel`
+  — an independent user slider (default 0.42) that stays put regardless of archetype;
+  `normalize()` is a pure min-max stretch, also continentality-independent. Combined with the
+  height formula's disproportionate orogeny contribution for exactly the low-continentality
+  archetypes (Archipelago tectonicEnergy 0.80, Volcanic 0.90), the fixed sea level landed in the
+  wrong place for those worlds' own height distributions: measured pre-fix at seed 12345/512px,
+  **Archipelago (continentality 0.15) rendered 71.5% land; Volcanic (continentality 0.05)
+  rendered 60.6% land** — both MORE land than plain Classic's 56.5%, backwards from what those
+  names promise. Fix: `applyWorldStructureSeaLevel()`, gated on `state.world_structure.enabled`,
+  called inside `generate()` right after `normalize()` + the volcanism/craters clamp. Reuses
+  `generateContinentalityField()`'s own O(N) histogram-percentile technique — measures the
+  ACTUAL generated field's height histogram and re-anchors `state.seaLevel` to the threshold
+  that yields exactly the archetype's promised `(1−continentality)` ocean fraction (clamped
+  `[0.05,0.95]`), refreshing the `#sea`/`#seaV` sidebar slider via the existing `v()`/`lab()`
+  globals (needed since `_suGenCommit()` calls `syncUI()` *before* `generate()`). Chosen over a
+  predictive pre-generation formula because it's self-correcting regardless of how
+  tectonicEnergy/oceanDepth reshape the distribution — same reasoning that already justifies
+  `generateContinentalityField()`'s own percentile approach. Does NOT touch the height formula
+  itself (invariant 8: no re-added γC term) — only the independent land/ocean threshold. No
+  effect when `world_structure.enabled` is false (Classic/default), so bit-identity holds.
+  **Re-measured post-fix** (same seed/resolution): land fraction now tracks each archetype's
+  continentality almost exactly — Earth-like 0.300, Supercontinent 0.601, Archipelago 0.150,
+  Volcanic 0.050, Rift 0.401. Landmass-dominance also improved incidentally (Volcanic's largest-
+  landmass share 84.0%→44.2%, Archipelago's 96.8%→81.6%) though this wasn't the target of the
+  fix. **Known scope cut, disclosed:** landmass SHAPE/fragmentation still doesn't fully track
+  `fragmentation`'s intended noise frequency — `buildPlates()` samples the smooth
+  `continentalField` at only each plate's single centroid, so achievable island count is capped
+  by plate count (≤40), not fragmentation's frequency; Archipelago still concentrates most of
+  its (now correctly small) land total in one dominant landmass rather than many similarly-sized
+  islands. A real fix needs per-cell continentalField blending into the height formula's
+  plate-base signal, which risks brushing invariant 8 — left as a candidate follow-up. Verified:
+  engine **992/992** unchanged, UME **852/852** unchanged (fix lives entirely in block 1's
+  `generate()`, gated off by default), hash vs v1.24 **ALL IDENTICAL** (default/WS-disabled
+  scenario — the gate is airtight), smoke **266/266** (+7: per-archetype land-fraction sane
+  bounds, cross-archetype land-fraction ordering, land fraction tracks continentality within a
+  wide band for every archetype, sidebar sea-level slider DOM reflects the auto-derived value).
 - **v1.24 — an external QA report** (headless jsdom + real-event harness against v1.21) flagged 8
   bugs; all 8 verified real against the current file (line numbers shifted, behavior hadn't) before
   fixing, all civ/UI-layer or pure accounting/escaping changes so engine/UME/hash are unchanged.

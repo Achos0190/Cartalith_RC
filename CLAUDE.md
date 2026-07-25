@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.24**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.25**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.24.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.23.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.25.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.24.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -591,6 +591,59 @@ change, so engine/UME suites and hash bit-identity are unchanged.
   `generate`/`exportZip`/`loadZip`/`renderNow` reassignment-wrapper pattern (every call site resolves
   the wrapped global lazily inside its own closure, so no stale-reference bug); the
   `_sculptCtx.waterOut===_sculptCtx.waterOut` line (an intentional NaN self-check, not a typo).
+
+### World-Structure archetype sea-level fix (v1.25)
+
+Owner report: "when selecting the preset worldshapes like volcanic, archipelago or islands the
+result isn't what is suggested." Root-caused with a Playwright probe (measured land fraction +
+connected-component landmass fragmentation across all six `ARCHETYPES` at a fixed seed/
+resolution) BEFORE writing any fix, per this file's own working-rules discipline.
+
+- **Root cause.** `deriveFromWorldStructure()` (line ~2181) derives `state.tect.plates`/`vel`/
+  `volc.count`/`tectonicGraph`/`foldIntensity`/`trenchDepth` from an archetype's bundle but never
+  touches `state.seaLevel` — an independent user slider (`#sea`, default 0.42) that stays wherever
+  it was left. `normalize()` is a pure min-max stretch of `field`, also continentality-
+  independent. Combined with the height formula's (`fillHeightRows`) disproportionate orogeny
+  contribution for exactly the low-continentality archetypes (Archipelago `tectonicEnergy:0.80`,
+  Volcanic `tectonicEnergy:0.90`), the fixed sea level didn't land at the right threshold for
+  those worlds' own height distributions. Measured pre-fix at seed 12345/512px: **Archipelago
+  (continentality 0.15) rendered 71.5% land; Volcanic (continentality 0.05) rendered 60.6% land**
+  — both MORE land than plain Classic's 56.5%, backwards from what those archetype names promise.
+- **Fix**: `applyWorldStructureSeaLevel()` (new, defined right after `generateContinentalityField()`),
+  gated on `state.world_structure.enabled`, called inside `generate()` right after `normalize()` +
+  the volcanism/craters `[0,1]` clamp, before `computeFlow()`/`refreshClimate()`/
+  `carveRiverValleys()` (all of which read `state.seaLevel` for land/ocean classification). Reuses
+  `generateContinentalityField()`'s own O(N) histogram-percentile technique (same `BINS=2000`
+  approach): measures the ACTUAL generated field's height histogram and re-anchors
+  `state.seaLevel` to the threshold yielding exactly the archetype's promised
+  `(1−continentality)` ocean fraction, clamped to `[0.05,0.95]`. Chosen over a predictive pre-
+  generation formula because it's self-correcting regardless of how tectonicEnergy/oceanDepth
+  reshape the distribution — a post-hoc EXACT measurement rather than a fragile guess. Refreshes
+  the `#sea`/`#seaV` sidebar slider via the existing `v()`/`lab()` globals (invariant 7), since
+  `_suGenCommit()` calls `syncUI()` *before* `generate()`, so a mid-generate `state.seaLevel`
+  change needs its own explicit DOM update to avoid a stale on-screen slider. Does **not** touch
+  the height formula itself — invariant 8 (no re-added γC term) is respected; only the
+  independent downstream land/ocean threshold changes. No effect when `world_structure.enabled`
+  is false (Classic/default path), so bit-identity holds.
+- **Re-measured post-fix** (same seed/resolution): land fraction now tracks each archetype's own
+  `continentality` almost exactly — Earth-like 0.300, Supercontinent 0.601, Archipelago 0.150,
+  Volcanic 0.050, Rift 0.401 (vs. their continentality params 0.30/0.60/0.15/0.05/0.40).
+  Landmass-dominance also improved incidentally (Volcanic's largest-landmass share of total land
+  84.0%→44.2%, Archipelago's 96.8%→81.6%) though fragmentation shape wasn't this fix's target.
+- **Known scope cut, disclosed (not fixed this pass)**: landmass SHAPE/fragmentation still doesn't
+  fully track `fragmentation`'s intended noise frequency — `buildPlates()` samples the smooth
+  `continentalField` at only each plate's single centroid, discarding its fine multi-blob spatial
+  structure, so achievable island count is capped by plate count (≤40), not by fragmentation's
+  frequency. Archipelago (continentality 0.15, fragmentation 0.90) still concentrates most of its
+  (now correctly small) land total in one dominant landmass rather than many similarly-sized
+  islands. A real fix needs per-cell `continentalField` blending into the height formula's
+  plate-base signal (or an equivalent), which risks brushing invariant 8's height-formula
+  restriction — left as a candidate follow-up, not attempted here.
+- **Tests**: 7 new smoke assertions (`R.v125` in `tests/perf/smoke_gen1.js`) — per-archetype land-
+  fraction sane bounds (Volcanic/Archipelago below a threshold, Supercontinent above), cross-
+  archetype land-fraction ordering (Volcanic < Archipelago < Earth-like < Supercontinent), land
+  fraction tracks continentality within a wide band for every archetype, and the `#sea` slider DOM
+  reflects the auto-derived `state.seaLevel` (not left stale).
 
 ### Engine (block 1) essentials
 

@@ -2366,6 +2366,38 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.25 (owner: "when selecting the preset worldshapes like volcanic, archipelago or
+  // islands the result isn't what is suggested"): deriveFromWorldStructure() derives plates/
+  // tectonicEnergy/volcanism from the archetype's bundle but never touched state.seaLevel — an
+  // independent user slider — so a low-continentality archetype (Archipelago 0.15, Volcanic
+  // 0.05) could still render MOSTLY LAND if the fixed default sea level (0.42) didn't happen to
+  // land at the right threshold against that world's own height distribution (independently
+  // verified: Archipelago rendered 71.5% land, Volcanic 60.6%, both MORE land than plain
+  // Classic's 56.5% — the opposite of what those names promise). Fixed by
+  // applyWorldStructureSeaLevel() — a histogram-quantile re-anchor of state.seaLevel to the
+  // archetype's promised land fraction, gated on world_structure.enabled, called inside
+  // generate() right after normalize()+the volcanism/craters clamp. Regression guard: at a fixed
+  // seed/small resolution, land fraction must now track each archetype's own continentality
+  // parameter (last test in the suite — no later assertion depends on the shared world after this).
+  R.v125 = await page.evaluate(async () => {
+    const out = { archetypes: {} };
+    state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    for (const arc of ['earth', 'supercontinent', 'archipelago', 'volcanic', 'rift']) {
+      state.tect.seed = 20260725;
+      _suApplyArchetype(arc);
+      await generate();
+      let land = 0;
+      for (let i = 0; i < field.length; i++) if (field[i] >= state.seaLevel) land++;
+      out.archetypes[arc] = {
+        continentality: state.world_structure.continentality,
+        landFraction: land / field.length,
+        seaLevel: state.seaLevel,
+        seaSliderReflectsState: Math.abs(+document.getElementById('sea').value - Math.round(state.seaLevel * 100)) <= 1
+      };
+    }
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2652,6 +2684,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.24 BUG-6: the asset-pack thumbnail gallery has its host element back (was CSS-only)', R.v124.bug6.hasEl && !R.v124.bug6.threw);
   A('v1.24 BUG-7: user-entered names are HTML-escaped in the settlements table row (no tag corruption)', R.v124.bug7.escOk && R.v124.bug7.rowEscaped && !R.v124.bug7.rowHasRawTag);
   A('v1.24 BUG-8: a stuck Space-pan clears on window blur instead of requiring another key tap', R.v124.bug8.setTrue && R.v124.bug8.clearedOnBlur);
+
+  A('v1.25: Volcanic (continentality 0.05) now renders MOSTLY OCEAN, not majority land', R.v125.archetypes.volcanic.landFraction < 0.25);
+  A('v1.25: Archipelago (continentality 0.15) now renders mostly ocean', R.v125.archetypes.archipelago.landFraction < 0.35);
+  A('v1.25: Supercontinent (continentality 0.60) still renders a dominant landmass', R.v125.archetypes.supercontinent.landFraction > 0.45);
+  A('v1.25: Volcanic renders less land than Archipelago, which renders less land than Earth-like', R.v125.archetypes.volcanic.landFraction < R.v125.archetypes.archipelago.landFraction && R.v125.archetypes.archipelago.landFraction < R.v125.archetypes.earth.landFraction);
+  A('v1.25: Archipelago renders less land than Supercontinent (ocean-world vs land-world ordering preserved)', R.v125.archetypes.archipelago.landFraction < R.v125.archetypes.supercontinent.landFraction);
+  A('v1.25: land fraction tracks each archetype\'s own continentality parameter within a sane band', Object.values(R.v125.archetypes).every(a => Math.abs(a.landFraction - a.continentality) < 0.12));
+  A('v1.25: the #sea slider DOM is refreshed to reflect the auto-derived seaLevel (not left stale)', Object.values(R.v125.archetypes).every(a => a.seaSliderReflectsState));
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
