@@ -9,11 +9,44 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.25.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.26.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.26 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.24` are kept and never edited.
+  (v1.27 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.25` are kept and never edited.
+- **v1.26 — owner: "replace my current SVG-based cartography icons with a rich, Nortantis-style
+  raster asset scattering system"** (5 numbered requirements: pack autopopulation, per-asset
+  inspector controls, a procedural scatterer, a manual brush, Y-sorted raster rendering).
+  **Investigation changed the scope: three of the five already existed.** `drawMapIcons` has always
+  drawn raster pack sprites (`ctx.drawImage(v.bmp,…)`, bottom-anchored via `spriteDrawRect`) with
+  the vector glyphs as a *fallback*, already Y-sorted, and already picked random variants;
+  `placeMapIcons` already did spacing-rejection placement (grid-bucket `fits()` — Poisson-disk in
+  all but name); `_carPopulateIconGallery` already drew pack bitmaps, not SVG; pack import already
+  auto-assigned art to the 10 frozen `PACK_ICON_SLOTS` via the manifest. The real gap was **per-asset
+  control** — the biome→asset mapping was HARD-CODED in `placeMapIcons`, so behaviour was fixed by
+  which frozen slot an asset occupied and nothing outside that list could scatter. Three design
+  forks were put to the owner via `AskUserQuestion` (answers: Library-as-source-of-truth bridge;
+  climate `BIOME_KEYS`; open vocabulary via custom sets). Shipped: **D1** a `ScatterRule` data layer
+  whose presets reproduce v1.25's hard-coded behaviour exactly; **D3** `placeMapIconsRuled()`,
+  reached only via a new OPTIONAL `opts.rules` so its absence is a guaranteed bit-identical
+  fall-through (relief mode = elevation-ranked + shared blue-noise spacing grid; scatter mode =
+  jittered grid + density-as-keep-probability); **D5** a unified Y-sorted `items[]` draw list, fixing
+  a real occlusion bug where category (not latitude) decided overlap so a mountain always painted
+  over a tree standing in front of it; **D2** the **Library→runtime bridge** — the missing link the
+  request didn't account for, since block 3's AssetDB only reached the map via a project-zip export/
+  re-import round-trip — plus a "Procedural scattering" section in `#alInsp` (enable/mode/13-biome
+  grid/min-max size/density/elevation band/wetland-only/per-variant weights) that syncs live; **D4** a
+  Cartography density brush that dart-throws with blue-noise rejection using the asset's OWN rule for
+  size and variant weighting. Verified: engine **992/992** and UME **852/852** unchanged, hash vs
+  v1.25 — `default`/`geoid`/`waves`/`ao` **ALL IDENTICAL** with the `icons` scenario intentionally
+  diverging (`field`/`temp`/`rain`/`flow` all identical, only `rgba` differs ⇒ purely the Y-sort draw
+  order, not terrain — same pattern as v1.20), smoke **274/274** (+8). Behaviour was proved in a real
+  browser first: 244/244 icons inside a biome-restricted rule and none in water, density 581→3872,
+  relief spacing exactly the requested 8.0, unweighted variant picks byte-matching `pickIconVariant`
+  across 200 samples, one brush stamp painting 10 correctly sized/spaced/on-land icons.
+  **Known scope cuts:** rules bind to climate biomes only (no `CART_BIOMES`/`CART_TERRAINS` painted-
+  layer targeting — the owner's own choice); no slope/aspect/coast-distance rule terms; the brush has
+  no eraser or per-stroke undo; settlement/trait/POI families deliberately get no scatter rules.
 - **v1.25 — owner: "when selecting the preset worldshapes like volcanic, archiapello or islands
   the result isn't what is suggested."** Root-caused with a Playwright probe (measured land
   fraction + connected-component landmass fragmentation across all six archetypes at a fixed

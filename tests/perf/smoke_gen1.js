@@ -2398,6 +2398,105 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.26 (owner: Nortantis-style raster asset scattering with per-asset control) ─────────────
+  // Until v1.25 the biome→asset mapping was HARD-CODED in placeMapIcons, so an asset's placement was
+  // fixed by which of the 10 frozen PACK_ICON_SLOTS it occupied — nothing user-tunable, and no asset
+  // outside that list could scatter at all. v1.26 makes that mapping DATA (ScatterRule), edited in the
+  // Asset Library inspector and pushed to the engine by a new Library→runtime bridge. Guard the three
+  // things that could silently break: (a) the legacy path stays reachable and byte-compatible when no
+  // rules are configured (this is what keeps the default map bit-identical), (b) the rules actually
+  // constrain placement, and (c) the density brush paints with the asset's own rule.
+  R.v126 = await page.evaluate(() => {
+    const out = {}, br = buildBiomeRaster();
+    const base = { sea: state.seaLevel, seed: state.tect.seed, tempField: tempField, wetlandMask: currentWetlandMask() };
+
+    // (a) no rules ⇒ legacy engine, four category arrays intact, plus the new unified Y-sorted items[]
+    const legacy = placeMapIcons(field, br, GW, GH, base);
+    out.legacyKeepsCategories = legacy.mountains.length > 0 && legacy.trees.length > 0;
+    out.legacyItemsEqualSum = legacy.items.length === (legacy.mountains.length + legacy.hills.length + legacy.trees.length + legacy.scatter.length);
+    let ySorted = true; for (let i = 1; i < legacy.items.length; i++) if (legacy.items[i].y < legacy.items[i - 1].y) { ySorted = false; break; }
+    out.legacyYSorted = ySorted;
+    // categories must genuinely interleave — that IS the v1.26 occlusion fix (a mountain no longer
+    // unconditionally paints over a tree standing south of it)
+    let interleaved = false; for (let i = 1; i < legacy.items.length; i++) if (legacy.items[i].cat !== legacy.items[i - 1].cat) { interleaved = true; break; }
+    out.legacyInterleaved = interleaved;
+    out.rulesNullByDefault = (assetRules === null) && (currentScatterRules() === null);
+
+    // (b) a rule restricted to one biome places ONLY there, never in water, within its size range
+    const ruled = placeMapIcons(field, br, GW, GH, Object.assign({}, base,
+      { rules: [Object.assign(defaultScatterRule(), { key: 'tree_broadleaf', biomes: [5], density: 1.0, minSize: 0.4, maxSize: 0.9 })] }));
+    out.ruledPlaced = ruled.items.length > 0;
+    out.ruledObeysBiome = ruled.items.every(it => br[it.y * GW + it.x] === 5);
+    out.ruledNeverInWater = ruled.items.every(it => field[it.y * GW + it.x] > state.seaLevel);
+    out.ruledSizeInRange = ruled.items.every(it => it.s >= 0.4 - 1e-6 && it.s <= 0.9 + 1e-6);
+    out.ruledLegacyArraysEmpty = ruled.mountains.length === 0 && ruled.trees.length === 0;
+    // density is monotonic
+    const cnt = d => placeMapIcons(field, br, GW, GH, Object.assign({}, base, { rules: [Object.assign(defaultScatterRule(), { key: 'shrub', density: d })] })).items.length;
+    out.densityMonotonic = cnt(1.0) > cnt(0.15);
+    // relief mode: elevation band + blue-noise spacing (no clumping/clipping)
+    const relief = placeMapIcons(field, br, GW, GH, Object.assign({}, base,
+      { rules: [Object.assign(defaultScatterRule(), { key: 'mountain', mode: 'relief', elevMin: 0.7, spacing: 8 })] }));
+    const landDen = (1 - state.seaLevel) || 1;
+    out.reliefObeysBand = relief.items.every(it => ((field[it.y * GW + it.x] - state.seaLevel) / landDen) >= 0.7);
+    let minD = 1e9;
+    for (let i = 0; i < relief.items.length; i++) for (let j = i + 1; j < relief.items.length; j++) {
+      const dx = relief.items[i].x - relief.items[j].x, dy = relief.items[i].y - relief.items[j].y;
+      const d = Math.sqrt(dx * dx + dy * dy); if (d < minD) minD = d;
+    }
+    out.reliefRespectsSpacing = relief.items.length < 2 || minD >= 8;
+
+    // weighted variants: a zero weight is never selected; NO weights must reproduce the v1.25 hash pick
+    let picked0 = 0, sameAsLegacy = true;
+    for (let x = 0; x < 200; x++) { if (pickWeightedVariant(x, 7, 123, 3, [0, 1, 1]) === 0) picked0++;
+      if (pickWeightedVariant(x, 7, 123, 3, null) !== pickIconVariant(x, 7, 123, 3)) sameAsLegacy = false; }
+    out.weightZeroNeverPicked = picked0 === 0;
+    out.unweightedMatchesLegacy = sameAsLegacy;
+
+    // (c) the Library→runtime bridge, and pack-import autopopulation
+    const gen0 = _scatterRulesGen;
+    applyLibraryAssets({ icons: {}, custom: {}, rules: { shrub: Object.assign(defaultScatterRule(), { density: 0.5 }) } });
+    out.bridgeSetRules = !!(assetRules && assetRules.shrub) && _scatterRulesGen > gen0;
+    assetRules.shrub.enabled = false;
+    out.bridgeFiltersDisabled = currentScatterRules() === null;   // disabled asset never reaches the engine
+    applyLibraryAssets(null);
+    autopopulateScatterRules({ icons: { tree_conifer: [{ w: 8, h: 8 }] }, custom: { MySet: { ruin: [{ w: 8, h: 8 }] } } });
+    out.autoBindsDefaultBiomes = !!(assetRules && assetRules.tree_conifer && assetRules.tree_conifer.enabled)
+      && assetRules.tree_conifer.biomes.join(',') === '3,4';               // boreal+conifer = the v1.25 hard-coded mapping
+    out.autoCustomStartsDisabled = assetRules['custom::MySet::ruin'].enabled === false;   // no invented intent
+    out.customKeySpelling = scatterRuleKey('ruin', 'MySet') === 'custom::MySet::ruin'
+      && iconSlotForItem({ key: 'custom::S::a' }) === 'custom::S::a'
+      && iconSlotForItem({ cat: 'tree', kind: 'conifer' }) === 'tree_conifer';
+    applyLibraryAssets(null);
+    return out;
+  });
+
+  // density brush: one stamp scatters MANY icons, on land, spaced, sized from the asset's own rule
+  R.v126brush = await page.evaluate(() => {
+    const out = {}, saved = state.mapIcons.slice();
+    state.mapIcons.length = 0;
+    _carIconArmed = { fam: 'feature', slot: 'tree_conifer', set: undefined };
+    _carIconBrush.on = true; _carIconBrush.r = 14; _carIconBrush.density = 0.8;
+    let lx = -1, ly = -1;
+    for (let y = 2; y < GH - 2 && lx < 0; y++) for (let x = 2; x < GW - 2; x++) if (field[y * GW + x] > state.seaLevel + 0.05) { lx = x; ly = y; break; }
+    const n = _carIconBrushStamp(lx, ly);
+    out.paintedMultiple = n > 1;
+    out.allOnLand = state.mapIcons.every(ic => field[ic.y * GW + ic.x] > state.seaLevel);
+    out.allCorrectSlot = state.mapIcons.every(ic => ic.slot === 'tree_conifer');
+    const ss = state.mapIcons.map(ic => ic.scale);
+    out.sizeVaries = new Set(ss.map(v => v.toFixed(3))).size > 1;
+    out.sizeFromRule = ss.every(v => v >= 0.7 - 1e-6 && v <= 1.2 + 1e-6);   // defaultScatterRule min/max
+    let minD = 1e9;
+    for (let i = 0; i < state.mapIcons.length; i++) for (let j = i + 1; j < state.mapIcons.length; j++) {
+      const dx = state.mapIcons[i].x - state.mapIcons[j].x, dy = state.mapIcons[i].y - state.mapIcons[j].y;
+      const d = Math.sqrt(dx * dx + dy * dy); if (d < minD) minD = d;
+    }
+    out.noOverlap = state.mapIcons.length < 2 || minD >= 1.2;
+    out.withinBrush = state.mapIcons.every(ic => Math.hypot(ic.x - lx, ic.y - ly) <= 15);
+    state.mapIcons.length = 0; for (const ic of saved) state.mapIcons.push(ic);
+    _carIconBrush.on = false; _carIconArmed = null;
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2692,6 +2791,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.25: Archipelago renders less land than Supercontinent (ocean-world vs land-world ordering preserved)', R.v125.archetypes.archipelago.landFraction < R.v125.archetypes.supercontinent.landFraction);
   A('v1.25: land fraction tracks each archetype\'s own continentality parameter within a sane band', Object.values(R.v125.archetypes).every(a => Math.abs(a.landFraction - a.continentality) < 0.12));
   A('v1.25: the #sea slider DOM is refreshed to reflect the auto-derived seaLevel (not left stale)', Object.values(R.v125.archetypes).every(a => a.seaSliderReflectsState));
+
+  A('v1.26: with no rules configured placeMapIcons keeps its legacy categories (bit-identical path)', R.v126.legacyKeepsCategories && R.v126.legacyItemsEqualSum && R.v126.rulesNullByDefault);
+  A('v1.26: the unified items[] draw list is Y-sorted and interleaves categories (mountains no longer always on top)', R.v126.legacyYSorted && R.v126.legacyInterleaved);
+  A('v1.26: a biome-restricted rule places only in that biome, never in water, within its size range', R.v126.ruledPlaced && R.v126.ruledObeysBiome && R.v126.ruledNeverInWater && R.v126.ruledSizeInRange && R.v126.ruledLegacyArraysEmpty);
+  A('v1.26: density is monotonic, and relief mode obeys its elevation band + blue-noise spacing', R.v126.densityMonotonic && R.v126.reliefObeysBand && R.v126.reliefRespectsSpacing);
+  A('v1.26: variant weighting honours a zero weight, and no weights reproduces the v1.25 hash pick exactly', R.v126.weightZeroNeverPicked && R.v126.unweightedMatchesLegacy);
+  A('v1.26: the Library→runtime bridge installs rules, bumps the cache gen, and filters disabled assets out', R.v126.bridgeSetRules && R.v126.bridgeFiltersDisabled);
+  A('v1.26: pack import autopopulates default biomes; custom-set assets start disabled (no invented intent)', R.v126.autoBindsDefaultBiomes && R.v126.autoCustomStartsDisabled && R.v126.customKeySpelling);
+  A('v1.26: the density brush scatters many icons per stamp, on land, spaced, sized from the asset rule', R.v126brush.paintedMultiple && R.v126brush.allOnLand && R.v126brush.allCorrectSlot && R.v126brush.sizeVaries && R.v126brush.sizeFromRule && R.v126brush.noOverlap && R.v126brush.withinBrush);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

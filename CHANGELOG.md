@@ -12,6 +12,90 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.26 (2026-07-25)
+Owner request: replace the cartography icons with a "rich, Nortantis-style raster asset scattering
+system" — per-asset enable/disable, biome restriction, size/density/variant-weight rules in the
+Asset Library inspector, a procedural scatterer, a manual density brush, and Y-sorted raster
+rendering.
+
+- **Investigated first; three of the five requested items already existed.** `drawMapIcons` has
+  drawn **raster pack sprites** (`ctx.drawImage(v.bmp,…)` via bottom-anchored `spriteDrawRect`)
+  since the pack system landed — the vector glyphs are only a *fallback* when a slot has no art, so
+  the premise "replace my current SVG-based icons" did not hold. `placeMapIcons` already did
+  spacing-rejection placement (a grid-bucket `fits()` radius test — Poisson-disk in all but name)
+  and already Y-sorted, and `_carPopulateIconGallery` already drew pack bitmaps, not SVG. Pack
+  import already auto-assigned art to the 10 frozen `PACK_ICON_SLOTS` via the manifest. What was
+  genuinely missing was **per-asset control**: the biome→asset mapping was HARD-CODED in
+  `placeMapIcons` (`bi===3||bi===4 ⇒ conifer`), so an asset's behaviour was fixed by which frozen
+  slot it occupied, nothing was tunable, and no asset outside that list could scatter at all.
+  Scope was therefore *extend*, not *replace* — three owner decisions taken via `AskUserQuestion`
+  (Library-as-source-of-truth bridge; climate `BIOME_KEYS`; open vocabulary via custom sets).
+- **D1 — ScatterRule data layer.** `defaultScatterRule()` (`enabled`, `mode`, `biomes[]`,
+  `minSize`/`maxSize`, `density`, `spacing`, `elevMin`/`elevMax`, `requireWetland`,
+  `variantWeights`), `scatterRuleKey()` (one place the `'mountain'` vs
+  `'custom::<set>::<slot>'` spelling is decided), `normalizeScatterRule()` (merges partial/legacy
+  rules onto defaults so an old save never yields `undefined` arithmetic), and
+  `SCATTER_RULE_PRESETS` — presets that **reproduce v1.25's hard-coded behaviour exactly**, so the
+  rule table is a generalisation of the old switch rather than a new look. Rules target the frozen
+  climate `BIOME_KEYS`/`BIOME_INDEX` vocabulary (not `CART_BIOMES`, which only exists where the
+  user has painted and would silently scatter nothing on a fresh map).
+- **D3 — rule-driven scatterer.** New `placeMapIconsRuled()`, reached only when the caller passes
+  `opts.rules`; `placeMapIcons` keeps its v1.25 body verbatim and simply delegates, so the absence
+  of rules is a *guaranteed* bit-identical fall-through (that guard is why the new engine is a
+  separate function rather than interleaved branches). Two modes: **relief** (elevation-ranked
+  candidates accepted only outside a `spacing` radius, all relief rules sharing one bucket grid,
+  highest band first — mountains and hills mutually exclude exactly as before) and **scatter**
+  (deterministic jittered grid, biome/wetland predicate, density as keep-probability). `opts.rules`
+  is an OPTIONAL addition exactly like v1.20's `tempField`/`wetlandMask`, so the "pure primitive,
+  no globals" contract `tests/test_tail.js` relies on is preserved.
+- **D5 — unified Y-sorted rendering.** `placeMapIcons` now also returns `items` — ONE Y-sorted draw
+  list across every category — and `drawMapIcons` walks it. Previously the renderer ran
+  hills → trees → scatter → mountains, so **category, not latitude, decided occlusion**: a mountain
+  always painted over a tree standing south of (in front of) it. The four legacy arrays are still
+  returned unchanged for existing consumers. Vector art was moved verbatim into a slot-keyed
+  `drawIconGlyph()`; `iconVariantsFor()` unifies the flat icon table and custom sets so an
+  arbitrary user asset renders through the identical path as a frozen slot.
+- **D2 — inspector controls + the Library→runtime bridge.** The bridge was the missing link the
+  request's framing didn't account for: script block 3's AssetDB is an *editing* surface whose art
+  only reached the map by being exported into a project zip and re-imported as a pack, because
+  `drawMapIcons` reads block 1's `assetPack`, which only `loadAssetPack()` ever wrote — so
+  "enable/disable this asset for generation" had nothing to talk to. New
+  `AssetLibrary.syncToRuntime()` rasterises each item through the same `renderToCanvas()` the
+  thumbnails use (so the map shows exactly what the inspector preview shows; the canvas doubles as
+  the `bmp`, no PNG round-trip) and hands art + rules to block 1's `applyLibraryAssets()`. A new
+  **Procedural scattering** section in `#alInsp` (enable, mode, 13-biome checkbox grid, min/max
+  size, density, elevation band, wetland-only, per-variant weight sliders) writes onto `slot.rules`
+  and syncs immediately. Rules travel in `assetlib/library.json`; a pre-v1.26 project restores via
+  `normalizeScatterRule()` onto its own preset, so it comes back looking as it did.
+- **D4 — Cartography density brush.** New "Density brush" toggle + radius/density sliders beside
+  the existing icon gallery. Dragging scatters the armed asset by dart-throwing with a blue-noise
+  rejection radius tested against both existing and in-stroke icons, never into water, with size
+  drawn from **the asset's own scatter rule** — so a hand-painted stand matches the procedurally
+  scattered ones. Deliberately uses `Math.random`, not `hash()`: a brush stroke is an authoring
+  action persisted in `state.mapIcons`, so re-painting a spot should add, not deterministically
+  repeat. `_featureSprite`/`_customSprite` also now honour variant weighting, so a weight set in
+  the Library applies whether an icon was scattered or hand-placed.
+- **Autopopulation.** `autopopulateScatterRules()` binds each imported slot that carries art to its
+  default biome behaviour on import, never clobbering an existing rule (so re-importing can't undo
+  tuning). Custom-set assets default to **disabled** — an arbitrary user set has no defensible
+  default biome, and silently scattering it would invent intent the user never expressed.
+- **Verified.** Engine `tests/run.sh` **992/992** and UME `tests/run_um.sh` **852/852** unchanged;
+  `node tests/perf/hash_gen1.js` vs v1.25 — `default`/`geoid`/`waves`/`ao` **ALL IDENTICAL**, the
+  `icons` scenario **intentionally diverges** (its `field`/`temp`/`rain`/`flow` hashes are all
+  identical and only `rgba` differs, confirming the change is purely the new Y-sort draw order, not
+  any terrain change — the same expected-divergence pattern as v1.20). Smoke **274/274** (+8).
+  Behaviour was proved in a real browser before being written as assertions: a biome-restricted
+  rule placed 244/244 icons inside its biome and none in water; density scaled 581 → 3872 icons;
+  relief spacing came back at exactly the requested 8.0 minimum; unweighted variant picks matched
+  `pickIconVariant` byte-for-byte across 200 samples; and one brush stamp painted 10 correctly
+  sized, spaced, on-land icons.
+- **Known scope cuts.** Rules bind to climate biomes only — no `CART_BIOMES`/`CART_TERRAINS`
+  (painted-layer) targeting, per the owner's own choice. Slope/aspect/coast-distance predicates
+  from `_umSiteProfile` are not exposed as rule terms. The brush has no eraser (Delete on a
+  selected icon still works) and no per-stroke undo beyond the existing icon-level editing.
+  Settlement/trait/POI families deliberately get no scatter rules — those are placed by the civ
+  layer from real settlement data.
+
 ### v1.25 (2026-07-25)
 Owner report: *"When selecting the preset worldshapes like volcanic, archipelago or islands the
 result isn't what is suggested."* Root-caused with a Playwright probe measuring actual land

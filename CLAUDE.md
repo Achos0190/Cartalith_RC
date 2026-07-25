@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.25**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.26**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.25.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.24.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.26.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.25.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -644,6 +644,64 @@ resolution) BEFORE writing any fix, per this file's own working-rules discipline
   archetype land-fraction ordering (Volcanic < Archipelago < Earth-like < Supercontinent), land
   fraction tracks continentality within a wide band for every archetype, and the `#sea` slider DOM
   reflects the auto-derived `state.seaLevel` (not left stale).
+
+### Asset scatter rules (v1.26)
+
+Owner request: a "Nortantis-style raster asset scattering system". **Audit first — three of the
+five requested items already existed**: `drawMapIcons` already drew raster pack sprites
+(`ctx.drawImage(v.bmp,…)` via bottom-anchored `spriteDrawRect`, vector glyphs only a *fallback*),
+already Y-sorted, already picked random variants; `placeMapIcons` already did spacing-rejection
+placement; `_carPopulateIconGallery` already drew pack bitmaps, not SVG; pack import already
+auto-assigned art to `PACK_ICON_SLOTS` via the manifest. The real gap was **per-asset control** —
+the biome→asset mapping was hard-coded in `placeMapIcons`, so behaviour was fixed by which frozen
+slot an asset occupied and nothing outside that list could scatter. Three design forks were put to
+the owner (`AskUserQuestion`): Library-as-source-of-truth bridge, climate `BIOME_KEYS`, open
+vocabulary via custom sets.
+
+- **Rule layer (block 1)**: `defaultScatterRule()` / `presetScatterRule(slotKey)` /
+  `normalizeScatterRule()` / `scatterRuleKey(slot,setName)` — the last is the ONE place the
+  `'mountain'` vs `'custom::<set>::<slot>'` spelling is decided, so scatterer, renderer, brush and
+  Library can't drift. `SCATTER_RULE_PRESETS` reproduces v1.25's hard-coded mapping exactly (the
+  rule table generalises the old switch; it is not a new look). Rules key off the FROZEN
+  `BIOME_INDEX` numbering (ocean 0, `BIOME_KEYS` in order) — deliberately not `CART_BIOMES`, which
+  only exists where the user has painted. `assetRules` is a module global (never serialised —
+  invariant 6; the authoritative copy lives in `assetlib/library.json`), `_scatterRulesGen` bumps
+  on every change and is part of the `_mapIconsCache` key so an inspector edit re-scatters.
+- **Scatterer**: `placeMapIconsRuled()` is reached ONLY via a new optional `opts.rules`;
+  `placeMapIcons` keeps its v1.25 body verbatim and delegates, so the absence of rules is a
+  guaranteed bit-identical fall-through (that guard is why it's a separate function, not
+  interleaved branches). `opts.rules` is optional exactly like v1.20's `tempField`/`wetlandMask`,
+  preserving the "pure primitive, no globals" contract `tests/test_tail.js` depends on. Two modes:
+  **relief** (elevation-ranked candidates, blue-noise `spacing` rejection over one shared bucket
+  grid, highest band first ⇒ mountains/hills mutually exclude as before) and **scatter** (jittered
+  grid, biome/wetland predicate, density as keep-probability).
+- **Renderer**: `placeMapIcons` also returns `items` — ONE Y-sorted list across all categories —
+  and `drawMapIcons` walks it. This fixes a real occlusion bug: the old hills→trees→scatter→
+  mountains order meant **category, not latitude, decided overlap**, so a mountain always painted
+  over a tree standing in front of it. The four legacy arrays are still returned. Vector art moved
+  verbatim into slot-keyed `drawIconGlyph()`; `iconVariantsFor()` unifies the flat icon table with
+  custom sets; `pickWeightedVariant()` falls through to the exact `pickIconVariant` hash when no
+  weights are set (so unweighted picks stay byte-identical).
+- **Library→runtime bridge (blocks 3→1)**: the missing link the request didn't account for — block
+  3's AssetDB is an *editing* surface that previously only reached the map via a project-zip
+  export/re-import, because `drawMapIcons` reads block 1's `assetPack`, written only by
+  `loadAssetPack()`. `AssetLibrary.syncToRuntime()` rasterises each item through the same
+  `renderToCanvas()` the thumbnails use (canvas doubles as `bmp`; no PNG round-trip) and hands art
+  + rules to `applyLibraryAssets()`. Inspector gains a **Procedural scattering** section
+  (enable/mode/13-biome grid/min-max size/density/elevation band/wetland-only/per-variant weights)
+  on `slot.rules`, rendered only for `famScatters()` families (feature icons + custom; settlement/
+  trait/POI are placed by the civ layer from real data, so a density slider would be meaningless).
+  `autopopulateScatterRules()` binds imported art on import without clobbering existing rules;
+  custom-set assets start **disabled** (no defensible default biome ⇒ don't invent user intent).
+- **Density brush (block 1/2)**: `_carIconBrush` + `_carIconBrushStamp()` — dart-throwing with
+  blue-noise rejection against both existing and in-stroke icons, never into water, size drawn from
+  the asset's OWN rule. Uses `Math.random`, not `hash()`, deliberately: a stroke is an authoring
+  action persisted in `state.mapIcons`, so re-painting should add, not deterministically repeat.
+  `_featureSprite`/`_customSprite` also honour variant weighting now.
+- **Known scope cuts**: no `CART_BIOMES`/`CART_TERRAINS` painted-layer targeting (owner's choice);
+  no slope/aspect/coast-distance rule terms (`_umSiteProfile` has them, unexposed); brush has no
+  eraser or per-stroke undo; the `icons` hash scenario intentionally diverges from v1.25 (Y-sort
+  order only — `field`/`temp`/`rain`/`flow` all identical).
 
 ### Engine (block 1) essentials
 
