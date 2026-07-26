@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.26**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.27**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.26.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.25.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.27.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.26.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -702,6 +702,35 @@ vocabulary via custom sets.
   no slope/aspect/coast-distance rule terms (`_umSiteProfile` has them, unexposed); brush has no
   eraser or per-stroke undo; the `icons` hash scenario intentionally diverges from v1.25 (Y-sort
   order only — `field`/`temp`/`rain`/`flow` all identical).
+
+### Scatter-system review fixes (v1.27)
+
+Senior-review pass over v1.26. All six fixes live in code that only executes once scatter rules are
+configured, so hash vs v1.26 is ALL IDENTICAL *including* `icons`. Worth reading before touching
+`placeMapIconsRuled`, `normalizeScatterRule` or the Library bridge.
+
+- **Predicate semantics**: `requireWetland` and `biomes` are ANDed in BOTH modes. v1.26's scatter
+  branch let wetland *replace* the biome test while relief ANDed them, so ticking both in the
+  inspector silently dropped the biome selection. Empty `biomes` still means "any land".
+- **`normalizeScatterRule` is an untrusted-input boundary** — rules arrive from
+  `assetlib/library.json` inside a user-supplied `.zip`. Every numeric field clamps through a local
+  `num()`; `enabled`/`requireWetland` coerce to booleans; `elevMax` reorders if below `elevMin`.
+  Two concrete v1.26 failure modes this closes: a `NaN` density made `keep >= Math.min(1,NaN)`
+  false for every cell (icon on *every* land cell), and a `NaN` spacing collapsed the relief bucket
+  grid to one bucket (O(1) neighbour test → O(n²)). **It copies into a fresh object** —
+  `Object.assign(base,r)` returns `base`, so `out` and `base` aliased and each `base.<field>`
+  fallback read the garbage it was replacing.
+- **The bridge owns what it writes**: `syncToRuntime` tracks `_pushedIcons`/`_pushedCustom` and
+  sends `dropIcons`/`dropCustom`, so deleting a Library asset retires its runtime art. v1.26
+  `continue`d past empty slots and never cleared them, leaving deleted art scattering forever.
+  Scoped to keys the Library wrote — imported-pack art it never touched is never collateral damage.
+- **Scatter priority is specificity-ordered**, not insertion-ordered (the rule table is built by
+  iterating an object, so v1.26's winner depended on the order the user added assets).
+- **The brush caps darts per stamp** (`BRUSH_MAX_DARTS`); dart count scales with brush *area* and a
+  stamp runs per `pointermove`, so max radius × max density asked for ~15k darts a frame.
+- **Comment policy**: stale comments get removed (v1.27 dropped a `TREE_SLOT` header still calling
+  sprite packs "a later, optional upgrade"), but historical *rationale* comments stay — notes like
+  v0.61's "deliberately NOT an async function" are load-bearing regression prevention, not clutter.
 
 ### Engine (block 1) essentials
 

@@ -2497,6 +2497,89 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.27: senior-review bug fixes on the v1.26 scatter system ───────────────────────────────
+  // Six defects found reviewing v1.26, each with a regression guard here. The rule table is loaded
+  // from assetlib/library.json inside a user-supplied .zip, so normalizeScatterRule is an untrusted
+  // input boundary — most of these are about it failing safe.
+  R.v127 = await page.evaluate(() => {
+    const out = {}, br = buildBiomeRaster(), wm = currentWetlandMask();
+    const base = { sea: state.seaLevel, seed: state.tect.seed, tempField: tempField, wetlandMask: wm };
+    const run = rules => placeMapIcons(field, br, GW, GH, Object.assign({}, base, { rules }));
+
+    // FIX 1: wetland and biome are ANDed in scatter mode (v1.26 let requireWetland REPLACE the
+    // biome test in this mode only, silently discarding the user's biome picks).
+    const wetB = {}; for (let i = 0; i < wm.length; i++) if (wm[i] === 1) wetB[br[i]] = (wetB[br[i]] || 0) + 1;
+    const target = Object.keys(wetB).map(Number).filter(b => b > 0).sort((a, b) => wetB[b] - wetB[a])[0];
+    out.hasWetlandBiome = target != null;
+    if (target != null) {
+      const both = run([Object.assign(defaultScatterRule(), { key: 'tree_wetland', requireWetland: true, biomes: [target], density: 1.0 })]);
+      const wetOnly = run([Object.assign(defaultScatterRule(), { key: 'tree_wetland', requireWetland: true, biomes: [], density: 1.0 })]);
+      out.andSatisfiesBoth = both.items.length > 0 && both.items.every(it => { const i = it.y * GW + it.x; return wm[i] === 1 && br[i] === target; });
+      out.biomeNarrows = both.items.length < wetOnly.items.length;   // proves the biome term really filters
+    }
+
+    // FIX 2: normalizeScatterRule rejects non-finite input and keeps a legitimate 0.
+    const bad = normalizeScatterRule({ enabled: 1, mode: 'nonsense', density: 'abc', minSize: 'x', maxSize: null,
+      spacing: 'NaN', elevMin: 'zzz', biomes: 'not-an-array', variantWeights: 'nope' }, 'shrub');
+    out.normAllFinite = Number.isFinite(bad.density) && Number.isFinite(bad.minSize) && Number.isFinite(bad.maxSize);
+    out.normSane = bad.mode === 'scatter' && bad.spacing === null && bad.elevMin === null
+      && Array.isArray(bad.biomes) && bad.biomes.length === 0 && bad.variantWeights === null && bad.enabled === true;
+    out.zeroDensityKept = normalizeScatterRule({ density: 0 }, 'shrub').density === 0;      // `+x||dflt` used to eat 0
+    out.densityClamped = normalizeScatterRule({ density: 99 }, 'shrub').density === 3;
+    // FIX 2b: normalize must not alias its own defaults object (Object.assign(base,r) returned base,
+    // so every `base.<field>` fallback read the garbage it was meant to replace).
+    out.noAliasing = normalizeScatterRule({ minSize: 'x' }, 'shrub').minSize === defaultScatterRule().minSize;
+    // a NaN density must not scatter on literally every land cell (the v1.26 failure mode)
+    const nanRule = normalizeScatterRule({ density: 'abc', biomes: [] }, 'shrub'); nanRule.key = 'shrub';
+    let landCells = 0; for (let i = 0; i < field.length; i++) if (field[i] > state.seaLevel) landCells++;
+    out.nanDensityBounded = run([nanRule]).items.length < landCells * 0.5;
+
+    // FIX 3: a rule that bypassed normalize (direct caller / unit test) with NaN spacing must not
+    // collapse the relief bucket grid into one bucket (O(1) neighbour test → O(n²) scan).
+    const t0 = performance.now();
+    const reliefNaN = run([{ key: 'mountain', enabled: true, mode: 'relief', biomes: [], minSize: 0.5, maxSize: 1,
+      density: NaN, spacing: NaN, elevMin: 0.6, elevMax: null, requireWetland: false, variantWeights: null }]);
+    out.reliefNaNSurvives = reliefNaN.items.length > 0 && (performance.now() - t0) < 2000;
+
+    // FIX 4: the bridge retires art it previously owned (deleting every variant in the Library used
+    // to leave the old bitmaps live in assetPack forever).
+    applyLibraryAssets(null);
+    const fake = [{ w: 8, h: 8, bmp: document.createElement('canvas') }];
+    applyLibraryAssets({ icons: { shrub: fake }, custom: { Set1: { ruin: fake } }, rules: {} });
+    const installed = !!assetPack.icons.shrub && !!(assetPack.custom && assetPack.custom.Set1);
+    applyLibraryAssets({ icons: {}, custom: {}, rules: {}, dropIcons: ['shrub'], dropCustom: ['Set1::ruin'] });
+    out.bridgeRetires = installed && !assetPack.icons.shrub && !(assetPack.custom && assetPack.custom.Set1);
+    applyLibraryAssets(null);
+
+    // FIX 5: scatter priority is specificity-ordered, so the winner no longer depends on the order
+    // rules happened to be inserted into the table.
+    if (target != null) {
+      const broad = Object.assign(defaultScatterRule(), { key: 'BROAD', biomes: [], density: 1.0 });
+      const narrow = Object.assign(defaultScatterRule(), { key: 'NARROW', biomes: [target], density: 1.0 });
+      const keysIn = res => { const s = {}; for (const it of res.items) if (br[it.y * GW + it.x] === target) s[it.key] = 1; return Object.keys(s).sort().join(','); };
+      out.priorityStable = keysIn(run([broad, narrow])) === keysIn(run([narrow, broad]));
+      out.prioritySpecificWins = keysIn(run([broad, narrow])) === 'NARROW';
+    }
+    return out;
+  });
+
+  // FIX 6: the brush bounds its dart count, so a max-radius/max-density stamp can't blow a frame.
+  R.v127brush = await page.evaluate(() => {
+    const out = {}, saved = state.mapIcons.slice();
+    state.mapIcons.length = 0;
+    _carIconArmed = { fam: 'feature', slot: 'tree_conifer', set: undefined };
+    _carIconBrush.on = true; _carIconBrush.r = 60; _carIconBrush.density = 2.0;   // slider maxima
+    let lx = -1, ly = -1;
+    for (let y = 80; y < GH - 80 && lx < 0; y++) for (let x = 80; x < GW - 80; x++) if (field[y * GW + x] > state.seaLevel + 0.05) { lx = x; ly = y; break; }
+    const t0 = performance.now(); const n = _carIconBrushStamp(lx, ly); const ms = performance.now() - t0;
+    out.stillPaints = n > 0;
+    out.bounded = ms < 500;
+    out.allOnLand = state.mapIcons.every(ic => field[ic.y * GW + ic.x] > state.seaLevel);
+    state.mapIcons.length = 0; for (const ic of saved) state.mapIcons.push(ic);
+    _carIconBrush.on = false; _carIconArmed = null;
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2800,6 +2883,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.26: the Library→runtime bridge installs rules, bumps the cache gen, and filters disabled assets out', R.v126.bridgeSetRules && R.v126.bridgeFiltersDisabled);
   A('v1.26: pack import autopopulates default biomes; custom-set assets start disabled (no invented intent)', R.v126.autoBindsDefaultBiomes && R.v126.autoCustomStartsDisabled && R.v126.customKeySpelling);
   A('v1.26: the density brush scatters many icons per stamp, on land, spaced, sized from the asset rule', R.v126brush.paintedMultiple && R.v126brush.allOnLand && R.v126brush.allCorrectSlot && R.v126brush.sizeVaries && R.v126brush.sizeFromRule && R.v126brush.noOverlap && R.v126brush.withinBrush);
+
+  A('v1.27 FIX-1: wetland and biome are ANDed in scatter mode (vacuously true if this world has no wetland biome)', R.v127.hasWetlandBiome ? (R.v127.andSatisfiesBoth && R.v127.biomeNarrows) : true);
+  A('v1.27 FIX-2: normalizeScatterRule rejects non-finite input and keeps a legitimate 0 density', R.v127.normAllFinite && R.v127.normSane && R.v127.zeroDensityKept && R.v127.densityClamped);
+  A('v1.27 FIX-2b: normalize does not alias its own defaults object, and a NaN density cannot scatter everywhere', R.v127.noAliasing && R.v127.nanDensityBounded);
+  A('v1.27 FIX-3: a NaN spacing cannot collapse the relief bucket grid into an O(n^2) scan', R.v127.reliefNaNSurvives);
+  A('v1.27 FIX-4: the Library bridge retires art it previously owned when the asset is deleted', R.v127.bridgeRetires);
+  A('v1.27 FIX-5: scatter priority is specificity-ordered, not dependent on rule insertion order (vacuous without a wetland biome)', R.v127.hasWetlandBiome ? (R.v127.priorityStable && R.v127.prioritySpecificWins) : true);
+  A('v1.27 FIX-6: the density brush bounds one stamp\'s work at max radius/density', R.v127brush.stillPaints && R.v127brush.bounded && R.v127brush.allOnLand);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

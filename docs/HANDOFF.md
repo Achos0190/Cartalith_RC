@@ -9,11 +9,39 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.26.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.27.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.27 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.25` are kept and never edited.
+  (v1.28 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.26` are kept and never edited.
+- **v1.27 — owner: "clean up the code, annotate each block with what it does, remove old comments
+  and check for bugs."** Senior-review pass over v1.26's scatter system. Six defects found by
+  reading + one found by the verification probe; all inside code that only runs once rules are
+  configured, so hash vs v1.26 is **ALL IDENTICAL including `icons`**. **FIX-1:** wetland/biome were
+  ORed in scatter mode but ANDed in relief mode — ticking "Wetland only" silently discarded the
+  user's biome picks; both now AND. **FIX-2:** `normalizeScatterRule` didn't reject non-finite
+  input, and rules come from a user-supplied project zip — a `NaN` density scattered on EVERY land
+  cell (`keep >= Math.min(1,NaN)` is always false) and a `NaN` spacing collapsed the relief bucket
+  grid into an O(n²) scan; all numeric fields now clamp through a `num()` helper. **FIX-2b (probe,
+  not reading):** `Object.assign(base,r)` mutates and returns `base`, so `out===base` and every
+  `base.<field>` fallback read the garbage it was meant to replace — **this bug was in v1.26 too**,
+  and was only caught because the probe asserted `Number.isFinite` instead of trusting the code.
+  **FIX-3:** `spaceOf` falls back on the computed value so an un-normalised rule can't collapse the
+  grid. **FIX-4 (data correctness):** deleting every variant of a Library asset left its bitmaps
+  live on the map forever — `syncToRuntime` skipped empty slots and never cleared what it had
+  written; it now tracks owned slots and passes `dropIcons`/`dropCustom`, never touching
+  imported-pack art it didn't write. **FIX-5:** scatter priority depended on rule *insertion* order
+  (the table is built by iterating an object); now most-specific-first, verified order-independent.
+  **FIX-6:** the brush asked for ~15k darts per stamp at max radius×density, on every pointermove —
+  capped at 1500 (437 icons in 3 ms at the maxima). **Comments:** removed one stale header (the
+  `TREE_SLOT` note still called sprite packs "a later, optional upgrade" — they've been the primary
+  draw path for many versions); historical rationale comments deliberately KEPT, since notes like
+  v0.61's "deliberately NOT an async function" are what stop a shipped regression being
+  reintroduced. Verified: engine **992/992**, UME **852/852**, hash **ALL IDENTICAL**, smoke
+  **281/281** (+7). **Flake recorded, not reproduced:** one engine run reported 991/1 and never
+  recurred across 16 further v1.27 runs / 3 v1.26 runs; the v1.27 edits are unreachable from the
+  headless suite (it never passes `opts.rules`). Note the harness prints failures as `FAIL - <name>`
+  on **stderr** — worth knowing when grepping.
 - **v1.26 — owner: "replace my current SVG-based cartography icons with a rich, Nortantis-style
   raster asset scattering system"** (5 numbered requirements: pack autopopulation, per-asset
   inspector controls, a procedural scatterer, a manual brush, Y-sorted raster rendering).

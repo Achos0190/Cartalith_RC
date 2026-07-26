@@ -12,6 +12,71 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.27 (2026-07-26)
+Owner: *"clean up the code, annotate each block with what it does, remove old comments and check for
+bugs."* A senior-review pass over the v1.26 scatter system. Six real defects found by reading, plus a
+seventh found by the verification probe. Every fix is inside the v1.26 rule/bridge/brush code, which
+only executes once rules are configured — so `hash_gen1.js` vs v1.26 is **ALL IDENTICAL including
+`icons`**, and the engine/UME suites are untouched.
+
+- **FIX-1 (correctness) — wetland and biome were ORed in one mode and ANDed in the other.** In
+  `placeMapIconsRuled`'s scatter branch, `requireWetland` *replaced* the biome test
+  (`if(requireWetland){…} else if(!biomeOk)`), while the relief branch ANDed them. The inspector
+  exposes both controls at once, so ticking "Wetland only" on a scatter asset silently discarded the
+  user's entire biome selection. Both branches now AND. An empty biome list still means "any land",
+  so the wetland presets are unaffected. Verified: a rule restricted to wetland **and** one biome now
+  places 14 icons all satisfying both, against 17 for wetland-only — i.e. the biome term demonstrably
+  filters instead of being ignored.
+- **FIX-2 (robustness) — `normalizeScatterRule` did not reject non-finite input.** Rules load from
+  `assetlib/library.json` inside a user-supplied project `.zip`, so this is an untrusted input
+  boundary. The v1.26 code used `+x||fallback`, which mishandled two cases: a legitimate `0` fell
+  through to the default (0 is falsy), and a non-numeric value produced `NaN` that then propagated.
+  The `NaN` cases were not benign — a `NaN` density made `keep >= Math.min(1,NaN)` false for *every*
+  cell, so one corrupt rule scattered an icon on every land cell; a `NaN` spacing collapsed the relief
+  bucket grid to a single bucket, turning the O(1) neighbour test into an O(n²) scan. Every numeric
+  field now goes through a clamping `num()` helper, with `enabled`/`requireWetland` coerced to real
+  booleans, `elevMax` reordered if it is below `elevMin`, and `variantWeights` element-wise sanitised.
+- **FIX-2b (found by the probe, not by reading) — the normalizer aliased its own defaults.**
+  `Object.assign(base,r)` *mutates* `base` and returns it, so `out === base` and every
+  `base.<field>` fallback read the very garbage it was meant to replace: `minSize:'x'` "defaulted"
+  to `'x'`, and `maxSize` then went `NaN` via `Math.max('x',…)`. Fixed by copying into a fresh
+  object. **This aliasing was present in v1.26 as well** — the v1.27 review only caught it because
+  the probe asserted `Number.isFinite` on the normalised output rather than trusting the code.
+- **FIX-3 (defence in depth) — a rule reaching the engine without normalisation could still collapse
+  the spacing grid.** `spaceOf` now falls back on the *computed* value, so a direct caller or unit
+  test passing `spacing:NaN` still yields a finite spacing.
+- **FIX-4 (data correctness) — deleting a Library asset left its art live on the map.**
+  `syncToRuntime` skipped empty slots with `continue`, so it never cleared what it had previously
+  written; removing every variant of an asset left the old bitmaps scattering forever. The bridge now
+  tracks the slots it owns (`_pushedIcons`/`_pushedCustom`) and passes `dropIcons`/`dropCustom` so
+  `applyLibraryAssets` retires exactly those keys — imported-pack art for slots the Library never
+  touched is never collateral damage. An emptied custom set is removed entirely.
+- **FIX-5 (determinism) — scatter priority depended on rule insertion order.** The candidate list was
+  iterated in whatever order the table happened to be built, and since the table is produced by
+  iterating an object, two rules matching the same cell would swap winners depending on the sequence
+  the user added them in. Now sorted most-specific-first (wetland-constrained outranks a biome list;
+  fewest biomes wins; unrestricted "any land" is the last resort), so the result is a stable function
+  of the rules themselves. Verified order-independent across both input permutations.
+- **FIX-6 (performance) — the density brush had a cliff at maximum settings.** Dart count scales with
+  brush *area*, so radius 60 at density 2.0 requested ~15k darts **per stamp**, and a stamp runs on
+  every `pointermove`. Capped at 1500 darts; a dense fill is still reachable by dragging over the
+  area again, which is how a brush is used. Measured 437 icons placed in 3 ms at the slider maxima.
+- **Comment hygiene.** Removed one genuinely stale comment (the `TREE_SLOT` header still described
+  sprite packs as *"a later, optional upgrade, B2/B3 asset tier"* — raster pack art has been the
+  primary draw path for many versions and the vector glyphs are the fallback) and replaced it with
+  an accurate description of what the lookup tables are for. Historical rationale comments were
+  deliberately **kept**: entries like the `v0.61` "deliberately NOT an async function" note are the
+  only thing preventing a previously-shipped regression from being reintroduced, and CLAUDE.md
+  treats that archaeology as project memory rather than clutter.
+- **Verified.** Engine `tests/run.sh` **992/992** (16 consecutive clean runs — see the flake note
+  below), UME `tests/run_um.sh` **852/852**, `node tests/perf/hash_gen1.js` vs v1.26 **ALL IDENTICAL
+  including `icons`** (these paths are inert until rules exist), smoke **281/281** (+7, one per fix).
+- **Flake observed, not reproduced.** One engine run reported 991/1 before any behavioural change had
+  been exercised; it did not reproduce across 16 subsequent runs of v1.27 or 3 of v1.26, and the
+  v1.27 edits are unreachable from the headless suite (it never passes `opts.rules`). Recorded here
+  rather than silently ignored — the harness prints failures as `FAIL - <name>` on **stderr**, which
+  is worth knowing when grepping for them.
+
 ### v1.26 (2026-07-25)
 Owner request: replace the cartography icons with a "rich, Nortantis-style raster asset scattering
 system" — per-asset enable/disable, biome restriction, size/density/variant-weight rules in the
