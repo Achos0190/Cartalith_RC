@@ -9,11 +9,39 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.27.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.28.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.28 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.26` are kept and never edited.
+  (v1.29 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.27` are kept and never edited.
+- **v1.28 — owner: "all the things that aren't live I want you to wire them so they are."** The v1.26
+  audit found **35 of the 71** non-custom Asset Library slots had storage, an inspector card and an
+  export slot but no consumer — art could be authored and would never appear. All 35 now render, and
+  every path is inert without a pack, so hash vs v1.27 is **ALL IDENTICAL**. **Biome (15) + Terrain
+  (13) textures** bound to the two PAINTED Cartography layers: new `PACK_BIOME_SLOTS`/
+  `PACK_TERRAIN_SLOTS` whose index order is 1:1 with the frozen `CART_BIOMES`/`CART_TERRAINS`
+  (slot N = paint value N+1), manifest `biomes`/`terrains` sections (JSON + CSV), and
+  `surfaceColor`'s existing paint-tint step samples the texture instead of the flat `CART_*_COLS`
+  swatch — same 0.60 weight, same pipeline position, so relief still shows through. These two are
+  sampled as **TRUE COLOUR**: they deliberately skip `finalizePackTexture`, whose per-channel
+  `inv=1/mean` is what makes the splat family divide a texture's absolute hue out. **Traits (7)** were
+  dead in three places at once — the manifest importer only handled `settlement`/`poi`, there was no
+  `_traitSprite`, and nothing drew traits at all despite the civ layer's own comment claiming they
+  were "drawn beside the marker"; all three added, badges drawn in a capped centred row under the pin
+  with a glyph fallback. `administrative` **appended** to `CIV_TRAITS` — a genuine gap, since
+  `_civNetworkMetrics` already assigned it and the Library already reserved its slot, but it had no
+  vocabulary entry so it could never be toggled or given art. **Cache bug found while wiring:**
+  `_lodRenderKey()` and the civ bake key had no asset-pack term, so an imported pack only appeared
+  once something unrelated changed the key — the same bug class those keys already carry v0.86/v0.88
+  comments about. New `_assetGen` in both keys, bumped on import/clear/Library-sync; **this also fixes
+  the pre-existing splat-texture case**. Bridge extended to push ground textures + structures.
+  **Block 3 needed no changes** — its importer and exporter already handled all three families, so the
+  engine really was the only missing half. **Visible default change:** settlements with traits now
+  draw badges where they previously drew nothing (no toggle added — ask if you want one). Verified:
+  **992/992**, **852/852**, hash **ALL IDENTICAL**, smoke **288/288** (+7); browser-proved a magenta
+  biome texture rendering `[166,51,155]` and cyan terrain `[51,166,155]` against flat-swatch baselines.
+  **Probe gotcha worth remembering:** writing a paint array directly without bumping `_paintGen` leaves
+  the render cached and shows no tint at all — that artefact is what surfaced the `_assetGen` gap.
 - **v1.27 — owner: "clean up the code, annotate each block with what it does, remove old comments
   and check for bugs."** Senior-review pass over v1.26's scatter system. Six defects found by
   reading + one found by the verification probe; all inside code that only runs once rules are

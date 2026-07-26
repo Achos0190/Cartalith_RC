@@ -2580,6 +2580,87 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  // ── v1.28: wire up the three families the Asset Library reserved but nothing ever drew ────────
+  // Before this pass, Settlement traits, Biome textures and Terrain textures all had Library storage,
+  // an inspector card and an export slot, but no render path: 'trait' was skipped by the pack manifest
+  // importer and never drawn beside a pin, and neither texture family appeared in PACK_TEX_SLOTS.
+  // These guards install distinctive synthetic art and assert the rendered pixels actually change.
+  R.v128 = await page.evaluate(() => {
+    const out = {};
+    const solid = (r, g, b, n) => { n = n || 8; const d = new Uint8ClampedArray(n * n * 4);
+      for (let i = 0; i < n * n; i++) { d[i*4] = r; d[i*4+1] = g; d[i*4+2] = b; d[i*4+3] = 255; }
+      return { w: n, h: n, data: d }; };
+    const px = (x, y) => { const d = document.getElementById('view').getContext('2d').getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2]]; };
+    const savedPack = assetPack;
+    let LX = -1, LY = -1;
+    for (let y = 40; y < GH - 40 && LX < 0; y++) for (let x = 40; x < GW - 40; x++) if (field[y*GW+x] > state.seaLevel + 0.08) { LX = x; LY = y; break; }
+    out.foundCell = LX >= 0;
+
+    // frozen-vocabulary alignment: a slot's index IS its CART_* paint value, so a length drift here
+    // would silently map art to the wrong biome/terrain
+    out.vocabAligned = PACK_BIOME_SLOTS.length === CART_BIOMES.length
+      && PACK_TERRAIN_SLOTS.length === CART_TERRAINS.length
+      && PACK_STRUCT_SLOTS.trait.length === CIV_TRAITS.length
+      && CIV_TRAITS.every(t => PACK_STRUCT_SLOTS.trait.includes(t.key));
+
+    if (LX >= 0) {
+      // BIOME texture: painted cell must take the texture's TRUE colour, not the flat palette swatch
+      const pb = getPaintLayer('biome');
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) pb[(LY+dy)*GW+(LX+dx)] = 2;   // Temperate Forest
+      _paintGen++; assetPack = null; _assetGen++; renderNow();
+      const bioFlat = px(LX, LY);
+      applyLibraryAssets({ biomes: { temperate_forest: solid(255, 0, 255) } }); renderNow();
+      const bioTex = px(LX, LY);
+      out.biomeTexture = (bioTex[0] - bioFlat[0]) > 40 && (bioTex[2] - bioFlat[2]) > 40;
+      // and removing the pack falls back to the flat swatch (keeps a pack-less world unchanged)
+      assetPack = null; _assetGen++; renderNow();
+      const back = px(LX, LY);
+      out.biomeFallback = Math.abs(back[0]-bioFlat[0]) < 3 && Math.abs(back[1]-bioFlat[1]) < 3 && Math.abs(back[2]-bioFlat[2]) < 3;
+      pb.fill(0); _paintGen++;
+
+      // TERRAIN texture: same, on the other painted layer
+      const pt = getPaintLayer('terrain');
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) pt[(LY+dy)*GW+(LX+dx)] = 1;   // Paved Road
+      _paintGen++; renderNow();
+      const terFlat = px(LX, LY);
+      applyLibraryAssets({ terrains: { paved: solid(0, 255, 255) } }); renderNow();
+      const terTex = px(LX, LY);
+      out.terrainTexture = (terTex[1] - terFlat[1]) > 40 && (terTex[2] - terFlat[2]) > 40;
+      pt.fill(0); _paintGen++; assetPack = null; _assetGen++; renderNow();
+    }
+
+    // _assetGen must participate in the bake/tile cache keys, or a freshly imported pack would only
+    // appear once some unrelated key component happened to change (the v0.86/v0.88 bug class)
+    const g0 = _assetGen; applyLibraryAssets({ biomes: {} });
+    out.assetGenBumps = _assetGen > g0;
+    out.assetGenInKeys = _lodRenderKey().split('|').length >= 12;
+
+    // TRAITS: 'administrative' was assigned by the economy code and had a Library slot, but was
+    // missing from CIV_TRAITS entirely, so it could never be toggled or drawn.
+    out.administrativeAdded = CIV_TRAITS.some(t => t.key === 'administrative');
+    out.traitFnsExist = typeof _traitSprite === 'function' && typeof _civDrawTraitBadges === 'function';
+    const cv = document.createElement('canvas'); cv.width = cv.height = 160; const cx = cv.getContext('2d');
+    const place = { x: 0, y: 0, kind: 'town', name: '', faction: 1, traits: [] };
+    const ink = c => { let n = 0; const d = c.getImageData(0, 0, 160, 160).data; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; };
+    cx.clearRect(0, 0, 160, 160); _civDrawSettlementPin(cx, 80, 80, place, false, { skipLabel: true });
+    const bare = ink(cx);
+    place.traits = ['fortified', 'mining', 'port'];
+    cx.clearRect(0, 0, 160, 160); _civDrawSettlementPin(cx, 80, 80, place, false, { skipLabel: true });
+    out.traitBadgesDrawn = ink(cx) > bare;
+    // with real trait art the badge uses the sprite rather than the glyph fallback
+    const red = document.createElement('canvas'); red.width = red.height = 8;
+    { const g = red.getContext('2d'); g.fillStyle = '#ff0000'; g.fillRect(0, 0, 8, 8); }
+    applyLibraryAssets({ structures: { trait: { fortified: [{ w: 8, h: 8, bmp: red }] } } });
+    place.traits = ['fortified'];
+    cx.clearRect(0, 0, 160, 160); _civDrawSettlementPin(cx, 80, 80, place, false, { skipLabel: true });
+    const d2 = cx.getImageData(0, 0, 160, 160).data; let redPx = 0;
+    for (let i = 0; i < d2.length; i += 4) if (d2[i] > 200 && d2[i+1] < 60 && d2[i+2] < 60) redPx++;
+    out.traitSpriteUsed = redPx > 0;
+
+    assetPack = savedPack; _assetGen++; renderNow();
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2891,6 +2972,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.27 FIX-4: the Library bridge retires art it previously owned when the asset is deleted', R.v127.bridgeRetires);
   A('v1.27 FIX-5: scatter priority is specificity-ordered, not dependent on rule insertion order (vacuous without a wetland biome)', R.v127.hasWetlandBiome ? (R.v127.priorityStable && R.v127.prioritySpecificWins) : true);
   A('v1.27 FIX-6: the density brush bounds one stamp\'s work at max radius/density', R.v127brush.stillPaints && R.v127brush.bounded && R.v127brush.allOnLand);
+
+  A('v1.28: biome/terrain/trait slot vocabularies stay aligned with the frozen CART_*/CIV_TRAITS indices', R.v128.vocabAligned);
+  A('v1.28: a painted biome cell renders the pack texture\'s TRUE colour, not the flat palette swatch', R.v128.foundCell ? R.v128.biomeTexture : true);
+  A('v1.28: removing the pack falls back to the flat swatch (pack-less render unchanged)', R.v128.foundCell ? R.v128.biomeFallback : true);
+  A('v1.28: a painted terrain cell renders its pack texture too', R.v128.foundCell ? R.v128.terrainTexture : true);
+  A('v1.28: _assetGen bumps on pack change and participates in the bake/tile cache keys', R.v128.assetGenBumps && R.v128.assetGenInKeys);
+  A('v1.28: "administrative" is now a real trait (was assigned by the economy code but absent from CIV_TRAITS)', R.v128.administrativeAdded);
+  A('v1.28: settlement trait badges are actually drawn beside the pin, and use sprite art when present', R.v128.traitFnsExist && R.v128.traitBadgesDrawn && R.v128.traitSpriteUsed);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

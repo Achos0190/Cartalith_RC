@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.27**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.28**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.27.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.26.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.28.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.27.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -731,6 +731,40 @@ configured, so hash vs v1.26 is ALL IDENTICAL *including* `icons`. Worth reading
 - **Comment policy**: stale comments get removed (v1.27 dropped a `TREE_SLOT` header still calling
   sprite packs "a later, optional upgrade"), but historical *rationale* comments stay — notes like
   v0.61's "deliberately NOT an async function" are load-bearing regression prevention, not clutter.
+
+### Dead-slot wiring: ground textures + traits (v1.28)
+
+The v1.26 audit found 35 of the Asset Library's 71 non-custom slots had storage, an inspector card and
+an export slot but **no consumer**. All now render. Everything here is inert without pack art, so the
+default render is unchanged (hash vs v1.27 ALL IDENTICAL).
+
+- **Biome (15) / Terrain (13) textures → the PAINTED Cartography layers.** `PACK_BIOME_SLOTS` /
+  `PACK_TERRAIN_SLOTS` are index-aligned 1:1 with the frozen `CART_BIOMES` / `CART_TERRAINS`
+  (invariant 13) — slot N is paint value N+1 — so art can't drift onto the wrong biome. Consumed by
+  `_paintedTex()` at `surfaceColor`'s existing paint-tint step: it replaces the flat `CART_*_COLS`
+  swatch at the same 0.60 weight and same pipeline position, so hillshade/relief still shows through.
+  Wrapped, one texel per grid cell — identical addressing to the splat path's `sp()`.
+- **These are TRUE COLOUR and the splat family is not.** Biome/terrain deliberately skip
+  `finalizePackTexture`, whose per-channel `inv = 1/mean` makes the splat path render
+  `materialColor × texel/mean` — that divides a texture's absolute hue out, so full-colour splat art
+  never renders as painted. Storing no `inv` here is what makes the artist's colour land. Keep that
+  asymmetry in mind before "unifying" the two paths.
+- **`_paintedTex` writes into a shared scratch triple**, not a fresh array — it runs per pixel on the
+  main render path. Safe only because `surfaceColor` consumes the biome result before the terrain
+  call overwrites it; preserve that ordering.
+- **Traits (7)** were dead in three places: the manifest importer handled only `settlement`/`poi`,
+  there was no `_traitSprite`, and nothing ever drew traits despite the civ layer's comment claiming
+  otherwise. Now `PACK_STRUCT_SLOTS.trait` + `_traitSprite` + `_civDrawTraitBadges` (capped row under
+  the pin, glyph fallback, `'below'` labels offset clear). `administrative` was **appended** to
+  `CIV_TRAITS` — append-only, since these keys are written into saves.
+- **`_assetGen` is required in every render cache key.** `_lodRenderKey()` and the civ bake key had no
+  asset-pack term, so pack art (which changes what a cell renders as without touching field/climate/
+  paint) only appeared once something unrelated invalidated the key — the same bug class those keys
+  already carry v0.86/v0.88 comments about. Bump `_assetGen` from anywhere pack art is installed,
+  replaced or cleared.
+- **Block 3 needed no changes** — its pack importer and exporter already routed
+  `biomes`/`terrains`/`structures.trait` via each family's `section`/`sub`. The engine was the only
+  missing half.
 
 ### Engine (block 1) essentials
 

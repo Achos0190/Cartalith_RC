@@ -12,6 +12,65 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.28 (2026-07-26)
+Owner: *"All the things that aren't 'live' I want you to wire them so they are."* The v1.26 asset audit
+found 35 of the Asset Library's 71 non-custom slots had full storage, an inspector card and an export
+slot but **no consumer** — art could be authored for them and would simply never appear. All 35 now
+render. Every change is inert until a pack/Library actually supplies art, so `hash_gen1.js` vs v1.27 is
+**ALL IDENTICAL** including `icons`.
+
+- **Biome textures (15) + Terrain textures (13) — bound to the painted Cartography layers.** Neither
+  family appeared in `PACK_TEX_SLOTS`, so nothing read them. New `PACK_BIOME_SLOTS`/
+  `PACK_TERRAIN_SLOTS`, whose index order is 1:1 with the FROZEN `CART_BIOMES`/`CART_TERRAINS`
+  vocabularies (invariant 13) — slot N is paint value N+1 — so a slot's meaning can't drift from the
+  value that selects it. Manifest gains `biomes`/`terrains` sections (JSON and CSV), decode fills
+  `assetPack.biomes`/`.terrains`, and `surfaceColor`'s existing paint-tint step samples the texture
+  instead of the flat `CART_*_COLS` swatch when one is loaded — same 0.60 weight and same pipeline
+  position, so hillshade/relief still shows through and a painted cell still isn't a flat sticker.
+- **These two are sampled as TRUE COLOUR, deliberately unlike the splat family.** They skip
+  `finalizePackTexture`, which stores a per-channel `inv = 1/mean` that the splat path uses to
+  modulate a procedural ramp (`materialColor × texel/mean`) — correct there, but it divides a
+  texture's absolute hue out, so full-colour splat art never renders as painted. Storing no `inv`
+  for biome/terrain is what makes "full colour" mean what it says: the artist's colour is what lands.
+- **Settlement traits (7) — the family that was dead in three separate places.** The pack manifest
+  importer only ever handled `settlement`/`poi`, so trait art was skipped on import; there was no
+  `_traitSprite`; and nothing drew traits on the map at all, despite the civ layer's own comment
+  claiming they were "drawn beside the marker". Added all three: `trait` in `PACK_STRUCT_SLOTS` and
+  the import loop, a `_traitSprite`, and `_civDrawTraitBadges` drawing a centred badge row under the
+  pin (capped at 4 so a fully-traited settlement can't grow a strip wider than its own label, with a
+  glyph fallback when there's no art). A `'below'` label is offset clear of the badges.
+- **`administrative` was a real vocabulary gap, not a new invention.** The Asset Library reserved a
+  trait slot for it and `_civNetworkMetrics` already pushes it onto high-centrality settlements, but
+  `CIV_TRAITS` had no entry — so it could never be toggled in the editor or given art. **Appended**
+  (never reordered; these keys are written into save files).
+- **Cache-invalidation bug found while wiring (`_assetGen`).** `_lodRenderKey()` and the civ bake key
+  include `_fieldGen`/`_climGen`/`_paintGen` but nothing about the asset pack — yet pack art changes
+  what a cell *renders as* without touching field, climate or paint. So a freshly imported pack only
+  appeared once some unrelated key component happened to change. This is exactly the bug class those
+  two keys already carry comments about (the v0.86 climate-redraw and v0.88 sea-level fixes). New
+  monotonic `_assetGen`, added to both keys and bumped on pack import, pack clear, and every Library
+  bridge sync. **This also fixes the pre-existing splat-texture case, not just the new families.**
+- **Library bridge extended.** `syncToRuntime` previously pushed only scatter families; it now also
+  carries biome/terrain ground (via a 2D readback, since the renderer samples `data[]` rather than a
+  bitmap) and settlement/trait/POI sprites, so Library edits reach the map with no pack round-trip.
+  `applyLibraryAssets` merges these per-slot rather than wholesale, so a Library holding two biome
+  textures can't wipe the other thirteen that came from an imported pack.
+- **Block 3 needed no changes.** Its pack importer already parsed `biomes`/`terrains`/`structures.trait`,
+  and its exporter already routed them correctly via each family's `section`/`sub` — confirming the
+  Library was ready on both ends the whole time and the engine was the only missing half.
+- **Visible default change, flagged:** settlements carrying traits now draw badges under their pin
+  where previously they drew nothing. That's the point of the wiring (and the family's original
+  documented intent), but it's the one change here that alters an existing map without any pack
+  loaded. No toggle was added — say the word if it wants one.
+- **Verified.** Engine `tests/run.sh` **992/992**, UME `tests/run_um.sh` **852/852** (both unchanged),
+  `node tests/perf/hash_gen1.js` vs v1.27 **ALL IDENTICAL**, smoke **288/288** (+7). Behaviour was
+  proved in a browser first: a magenta biome texture on a painted cell rendered `[166,51,155]` and a
+  cyan terrain texture `[51,166,155]` — both the expected 60% blend of the true colour — against flat
+  swatch baselines of `[77,106,74]`/`[113,113,103]`, with the flat fallback restored exactly on pack
+  removal. One probe-side bug found and fixed during verification: writing a paint array directly
+  without bumping `_paintGen` leaves the render cached, so the first run showed no tint at all — an
+  artefact of the harness, not the app, but it is what surfaced the `_assetGen` gap.
+
 ### v1.27 (2026-07-26)
 Owner: *"clean up the code, annotate each block with what it does, remove old comments and check for
 bugs."* A senior-review pass over the v1.26 scatter system. Six real defects found by reading, plus a
