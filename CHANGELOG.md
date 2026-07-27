@@ -12,7 +12,85 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.30 (2026-07-27)
+### v1.31 — Pre-industrial resource grounding (settlement-resources.md)
+
+Owner supplied a reference document (`docs/research/settlement-resources.md`) on pre-industrial
+settlement resources and asked for Cartalith to be updated with it. Six of its sections are now
+built in. Everything is either a new opt-in `opts.*`, a new resource key, or civ-layer (block 2)
+display/derivation, so the terrain pipeline is untouched: **hash vs v1.30 is ALL IDENTICAL in every
+scenario, including `icons`.** 1001 headless / 852 UME / 326 smoke green.
+
+- **§1–§4 — the resource vocabulary grew 6 → 15, append-only** (invariant 13; these keys name the
+  `.f32` exports and `resource_index.json`). New: lead, silver, clay, buildstone, flint, obsidian,
+  gems, sulfur, alum — every one keyed on a geological signal the engine already computed
+  (lithology, boundary type, shear, crustal age, volcanism, flow, rain, biome), so no new pipeline
+  stage was needed. Lead is limestone-hosted hydrothermal veining, silver is its argentiferous
+  by-product, obsidian needs young silica-rich volcanism, gems are pegmatite (co-occurring with tin,
+  as the reference notes) plus metamorphic contact zones.
+- **§10.1 — deposits are thinned by crustal abundance.** `RESOURCE_ABUNDANCE_PPM` (Fe 50000 → Au
+  0.005) drives `resourceScarcityCut`, which log-compresses the five-decade span onto a 0.02–0.45
+  land-fraction occupancy band; `applyResourceScarcity` then keeps only that fraction of the
+  strongest cells. **Rank-based, so it can only ever thin, never invent a deposit where the geology
+  says none.** Log rather than linear because the reference is explicit that crustal abundance is
+  *the floor of scarcity*, not deposit frequency — workable ore is clustered, so its map frequency
+  is far higher than its crustal share (a linear map would put gold at 1e-7 of the map, i.e. absent).
+  Applied to the nine NEW resources only: thinning the original six would silently rewrite every
+  existing world's copper/tin/iron. `buildResourcePotentials` takes `opts.scarcityLegacy` if that is
+  ever wanted.
+- **§10.2/§10.3 — iron is gated by FUEL, not ore.** The reference's most interesting constraint and
+  one nothing here modelled. `_civPlaceSmelting` computes both budgets over the settlement's own
+  catchment — ore × 33% bloom recovery, and woodland × 1000 kg charcoal/ha/yr ÷ 6.7 kg charcoal per
+  kg iron — and reports the binding one. At seed 12345/256px, **2 of the 3 iron-producing
+  settlements come out fuel-limited, not ore-limited**, which is the documented Elba case; the
+  attested historical response (move ore to fuel) shows up as a charcoal import rather than an iron
+  export.
+- **§9 — a 7-category trade-need checklist** (metals/salt/fibre/fuel/husbandry/ceramics/luxury), each
+  carrying the severity the reference assigns. v1.30's `_civPlaceTrade` already did the mechanical
+  half but emitted a flat list of resource keys, so "no iron" and "no dye" read as equally important.
+- **§8 — composite settlement profiles**: bog-iron smithing, bronze-age hub, obsidian tool tradition,
+  arid salt-and-textile, pastoral, generalist floodplain. **Thresholds are relative to the world
+  mean, not absolute** — a first cut used peak-scale absolute cut-offs against what is actually a
+  windowed catchment MEAN and matched almost nothing.
+- **§6 — pastoral ↔ arable tension** (`_civPlacePastoralBalance`): pasture and cropland compete for
+  the same catchment while manure is the only large-scale fertiliser available, so grazing land
+  raises adjacent cropland yield. The uplift peaks at a pasture share near 45% and falls away either
+  side — too little livestock means no manure, too much means the cropland it would have fertilised
+  is gone.
+- **§7 — navigability gates bulk trade.** Water carriage ran ~10–20× cheaper than overland, so each
+  export is tagged with the reach it can actually achieve: bulk goods (grain, ore, stone, timber)
+  without navigable water are `local` however much a settlement produces, while luxuries travel
+  regardless. A bulk-only producer with no water is flagged `tradeIsolated`.
+- **§10.7 — population density now varies by SUBSISTENCE MODE.** `AGRARIAN_MAX_KM2` was one flat
+  number for every cell, so land use carried no information at all. Four bands now do (gathering 0–4
+  → annual cultivation 64–256 people/km²). **Per the owner's explicit call, the reference's separate
+  25–70% realized-vs-theoretical discount is NOT applied**: `currentAgrarianDensity` normalises per
+  world so the land-integrated total is exactly v1.30's (1,326,919 at seed 12345/256px, asserted to
+  0.1%). The distribution changes, the total does not. Applying the discount is a one-line change at
+  that constant.
+  - **Calibration warning worth reading before touching this.** A first cut pinned the scale so an
+    annual-cultivation cell at K=1 read the old 200/km². That looks right and is badly wrong: almost
+    no cell *is* annual cultivation, so the rest of the map fell to the lower bands and the world
+    ceiling collapsed 13× (1,326,919 → 99,460), taking settled population down 8.7×. The bands
+    describe relative productivity across land uses; pinning one of them to this engine's carrying-
+    capacity scale says nothing about where the others land.
+- **Two latent bugs found by probing, not by tests** (both silent — NaN compares false, so they
+  simply matched nothing): `_civFactionAggregates`' `mkResMap` was a frozen six-key literal while its
+  own loops iterate `CIV_RESOURCE_KEYS`, so every new key accumulated onto `undefined` and poisoned
+  `worldMeanResource` (which the import/export rule and the archetype thresholds both divide by); and
+  `channelAtlasGroups` hand-listed six resources across two RGB files, so nine fields would have
+  dropped out of the channel atlas and its manifest entirely. Both are now generated from the
+  vocabulary, and the atlas assertion checks the formula rather than a frozen group count. The `.f32`
+  export was also hand-listed and had been silently missing **tin** since v0.105.
+- **Measured effect on placement** (seed 12345/256px): settlements 18 → 29, total population
+  122,342 → 123,185 (+0.7%), tier mix shifts toward more hamlets and cities as good farmland now
+  genuinely outproduces marginal ground.
+- **Known scope cuts**: §5 (soil formation from parent rock) and §10.5/§10.6 (labour budgets, storage
+  losses) are not built — the first largely duplicates the existing `buildSoilFertility`, the second
+  needs a labour model that does not exist. The grain seed-to-yield floor (§10.4) is defined and
+  exposed but only reported, not yet wired into the food-surplus rows. Archetype coverage is thin on
+  this seed (floodplain matches, the rarer profiles need the specific geology they name).
+
+## v1.30 (2026-07-27)
 Owner: *"can we also auto select/define export sources? And are we using all the underlying layers …
 to define the best places for settlements as stated in Settlement Suitability?"* Audited before
 building, and the audit changed the answer to both.

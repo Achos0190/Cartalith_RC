@@ -2469,11 +2469,15 @@ if (typeof applyTidalSedimentation === 'function') {
 
   // channelAtlasGroups + manifest structure (on the live world)
   const groups = channelAtlasGroups();
-  check('channelAtlasGroups: 5 groups', groups.length === 5);
+  /* v1.31: the resource files are generated from RESOURCE_KEYS in threes, so the group count follows
+     the vocabulary (habitat + settlement + ceil(keys/3) resource files + classes) instead of being a
+     frozen 5. Asserting the formula rather than a number is what makes growing the vocabulary safe. */
+  check('channelAtlasGroups: 3 fixed groups + one resource file per 3 keys',
+    groups.length === 3 + Math.ceil(RESOURCE_KEYS.length / 3));
   check('channelAtlasGroups: every non-null channel src is length GW*GH', (() => {
     for (const g of groups) for (const c of g.channels) if (c.src && c.src.length !== GW * GH) return false; return true;
   })());
-  check('channelAtlasGroups: resource channels cover all 6 RESOURCE_KEYS', (() => {
+  check('channelAtlasGroups: resource channels cover every RESOURCE_KEY', (() => {
     const keys = new Set(); for (const g of groups) for (const c of g.channels) keys.add(c.key);
     return RESOURCE_KEYS.every(k => keys.has(k));
   })());

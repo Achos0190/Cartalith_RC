@@ -3,19 +3,19 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.30**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.31**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.30.html` | **Current** unified tool (~24.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.29.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.31.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.30.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports, `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
 | `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
@@ -863,6 +863,51 @@ terms and different seed thresholds. Now one.
   food surplus), measured against the same world mean `_civFactionAggregates` uses so town and faction
   are on one scale. Faction-level rows stay, labelled as such. Feeds nothing — display only.
 
+
+### Pre-industrial resource grounding (v1.31)
+
+Owner supplied `docs/research/settlement-resources.md` and asked for the tool to be updated with it.
+Six sections are built in. Every change is a new resource key, a new optional `opts.*`, or civ-layer
+(block 2) derivation/display, so the terrain pipeline never moves — **hash vs v1.30 is ALL IDENTICAL
+in every scenario including `icons`**. Read the reference before touching resource or trade code.
+
+- **Vocabulary 6 → 15, append-only** (invariant 13 — these keys name `.f32` exports and
+  `resource_index.json`): lead, silver, clay, buildstone, flint, obsidian, gems, sulfur, alum, each
+  keyed on a geological signal the engine already computed. No new pipeline stage.
+- **Crustal abundance sets map FOOTPRINT, not magnitude.** `RESOURCE_ABUNDANCE_PPM` →
+  `resourceScarcityCut` (log-compressed over the Au→Fe five-decade span onto a 0.02–0.45 land-fraction
+  band) → `applyResourceScarcity`, which is **rank-based and can only thin, never invent**. Log not
+  linear because the reference is explicit that crustal abundance is the *floor* of scarcity — ore
+  bodies are clustered, so map frequency far exceeds crustal share. Applied to the nine NEW keys only;
+  `opts.scarcityLegacy` extends it to the original six, which would rewrite every existing world.
+- **`_civPlaceSmelting` — iron is gated by FUEL, not ore** (§10.2/§10.3: 6.7 kg charcoal per kg iron,
+  ~1000 kg charcoal/ha/yr sustained coppice). Computes both budgets over the catchment and reports the
+  binding one. Ore-rich/fuel-poor is a real state with a real trade signature (import charcoal, export
+  raw ore) — the documented Elba case, and 2 of 3 iron settlements hit it at seed 12345.
+- **`_civPlaceTrade` carries §9's 7-category checklist + §8's archetype + §6 + §7.** Archetype
+  thresholds are **relative to the world mean, not absolute** — `rc.mean` is a windowed catchment
+  mean, and peak-scale absolute cut-offs against a mean match essentially nothing (a first cut did
+  exactly that). §7 tags each export with the reach navigable water actually allows: bulk stays
+  `local` without water, luxuries travel regardless.
+- **Density varies by subsistence mode (§10.7), total held.** `subsistenceModeAt`/`agrarianDensityKm2`
+  replace the flat per-cell `AGRARIAN_MAX_KM2`; `currentAgrarianDensity` then **normalises per world so
+  the land-integrated ceiling exactly equals v1.30's** (asserted to 0.1%). The reference's separate
+  25–70% realized-vs-theoretical discount is deliberately NOT applied (owner's call) — it is a
+  one-line change at that constant.
+  - **Do not calibrate this by pinning one band.** A first cut set the scale so annual cultivation at
+    K=1 read the old 200/km²; because almost no cell is annual cultivation, the world ceiling
+    collapsed 13× and population 8.7×. The bands are relative across land uses and say nothing about
+    this engine's K scale — normalise the integral, not a band.
+- **Any table indexed by `CIV_RESOURCE_KEYS`/`RESOURCE_KEYS` must be BUILT from it.** Two frozen
+  six-key literals survived until v1.31 and both failed silently: `mkResMap` (NaN-poisoned
+  `worldMeanResource`, which the trade rule and archetype thresholds divide by) and
+  `channelAtlasGroups` (nine fields would have vanished from the channel atlas). The `.f32` export was
+  hand-listed too and had been missing **tin** since v0.105. NaN compares false, so none of it threw.
+- **Known scope cuts**: §5 (soil from parent rock) duplicates `buildSoilFertility`; §10.5/§10.6
+  (labour budgets, storage losses) need a labour model that does not exist; §10.4's seed-to-yield floor
+  is defined and exposed but only reported, not wired into food surplus; archetype coverage is thin on
+  any one seed since the rarer profiles need the specific geology they name.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -926,7 +971,7 @@ tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (310 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (326 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

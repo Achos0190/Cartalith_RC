@@ -9,11 +9,37 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.30.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.31.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.31 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.29` are kept and never edited.
+  (v1.32 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.30` are kept and never edited.
+- **v1.31 — pre-industrial resource grounding.** Owner supplied
+  `docs/research/settlement-resources.md` and asked for the tool to be updated with it; six of its
+  sections are now built in. Resource vocabulary grew **6 → 15** (append-only), deposit footprints are
+  thinned by **crustal abundance** (§10.1 — rank-based, only ever thins), **iron is gated by charcoal
+  rather than ore** (§10.2/§10.3 — 2 of 3 iron settlements come out fuel-limited at seed 12345, the
+  documented Elba case), trade runs §9's 7-category checklist and §8's composite archetypes, §6 adds
+  the pastoral↔arable manure/competition coupling, §7 gates bulk goods on navigable water, and
+  §10.7 makes population density vary by **subsistence mode** instead of one flat constant.
+  Everything is a new key, a new opt-in `opts.*`, or block-2 derivation — **hash vs v1.30 is ALL
+  IDENTICAL including `icons`**. 1001 / 852 / 326 green.
+  - **Two silent latent bugs surfaced by probing, not by tests** (NaN compares false, so nothing
+    threw): `mkResMap` was a frozen six-key literal indexed with fifteen keys, NaN-poisoning
+    `worldMeanResource` — which the import/export rule and archetype thresholds both divide by; and
+    `channelAtlasGroups` hand-listed six resources across two RGB files, so nine fields would have
+    silently vanished from the channel atlas and manifest. The `.f32` export was hand-listed too and
+    had been missing **tin** since v0.105. Anything indexed by the vocabulary must be built from it.
+  - **Population scale was explicitly held** (owner's call): density redistributes by land use, but
+    `currentAgrarianDensity` normalises per world so the land-integrated total exactly matches v1.30
+    (1,326,919 at seed 12345/256px). The reference's 25–70% realized-vs-theoretical discount is
+    available as a one-line change and is NOT applied. **Do not recalibrate by pinning one band** —
+    doing that collapsed the ceiling 13× in a first cut, because almost no cell is annual cultivation.
+  - Measured: settlements 18 → 29, total population 122,342 → 123,185 (+0.7%).
+  - **Not built**: §5 (soil from parent rock — duplicates `buildSoilFertility`), §10.5/§10.6 (labour
+    budgets, storage losses — need a labour model that does not exist), §10.4's seed-to-yield floor is
+    defined and exposed but only reported, not wired into food surplus.
+
 - **v1.30 — settlement suitability unified, flood wired in, per-settlement trade.** Owner asked whether
   exports could be auto-defined and whether suitability really uses all the underlying layers. The
   audit answered both, and found a correctness bug: there were **two** suitability functions.

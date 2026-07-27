@@ -2848,6 +2848,103 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  /* ---- v1.31: resource vocabulary + crustal-abundance scarcity, charcoal-limited iron, the §9 trade
+     checklist, §8 archetypes, §6 pastoral/arable tension, §7 navigability, §10.7 subsistence density.
+     All civ-layer (block 2) or opts-gated block-1 additions, so this is the smoke suite's job, not the
+     headless one. Runs against the world the earlier blocks already generated and auto-populated. ---- */
+  R.v131 = await page.evaluate(async () => {
+    const o = {};
+    // vocabulary grew, append-only (the original six keep their indices)
+    o.keyCount = RESOURCE_KEYS.length;
+    o.appendOnly = ['copper','tin','iron','gold','salt','timber'].every((k, i) => RESOURCE_KEYS[i] === k);
+    o.namesAligned = RESOURCE_NAMES.length === RESOURCE_KEYS.length && RESOURCE_COLS.length === RESOURCE_KEYS.length;
+    o.civKeysTrack = CIV_RESOURCE_KEYS.length === RESOURCE_KEYS.length;
+    // §10.1 scarcity: the cut is monotonic in crustal abundance, so tin is scarcer than copper than iron
+    o.cutIron = resourceScarcityCut('iron'); o.cutCopper = resourceScarcityCut('copper');
+    o.cutTin = resourceScarcityCut('tin');   o.cutGold = resourceScarcityCut('gold');
+    o.scarcityOrdered = o.cutGold < o.cutTin && o.cutTin < o.cutCopper && o.cutCopper < o.cutIron;
+    o.cutsBounded = [o.cutIron, o.cutGold].every(v => v > 0 && v <= 0.45);
+    // applyResourceScarcity only ever removes, never invents
+    (() => {
+      const W = 8, H = 8, n = W * H, fld = new Float32Array(n).fill(1), a = new Float32Array(n);
+      for (let i = 0; i < n; i++) a[i] = i / n;
+      const before = Array.from(a);
+      applyResourceScarcity(a, fld, W, H, 0.42, 0.25);
+      let invented = 0, kept = 0;
+      for (let i = 0; i < n; i++) { if (a[i] > 0 && before[i] === 0) invented++; if (a[i] > 0) kept++; }
+      o.scarcityNeverInvents = invented === 0;
+      o.scarcityThins = kept < n && kept > 0;
+      o.scarcityKeepsStrongest = a[n - 1] > 0 && a[0] === 0;
+    })();
+    // the new fields exist on a real world and are finite + in range
+    const pots = currentResourcePotentials(), nn = GW * GH;
+    o.allFieldsPresent = RESOURCE_KEYS.every(k => pots[k] && pots[k].length === nn);
+    o.allFinite = RESOURCE_KEYS.every(k => { const a = pots[k]; for (let i = 0; i < nn; i++) if (!isFinite(a[i]) || a[i] < 0 || a[i] > 1) return false; return true; });
+    // scarce resources genuinely occupy less of the map than common ones
+    const share = k => { let c = 0, land = 0; for (let i = 0; i < nn; i++) { if (field[i] < state.seaLevel) continue; land++; if (pots[k][i] > 0.25) c++; } return land ? c / land : 0; };
+    o.shareObsidian = share('obsidian'); o.shareClay = share('clay'); o.shareSilver = share('silver');
+    o.rarityShowsOnMap = o.shareObsidian < o.shareClay && o.shareSilver < o.shareClay;
+    // the channel atlas covers every key (the frozen-literal bug this version fixed)
+    const groups = channelAtlasGroups(); const atlasKeys = new Set();
+    for (const g of groups) for (const c of g.channels) atlasKeys.add(c.key);
+    o.atlasCoversAll = RESOURCE_KEYS.every(k => atlasKeys.has(k));
+    // world means: no NaN (mkResMap was a frozen six-key literal indexed with fifteen keys)
+    const agg = _civFactionAggregates();
+    o.worldMeanNoNaN = RESOURCE_KEYS.every(k => isFinite(agg.worldMeanResource[k]));
+    // §10.7 subsistence density
+    o.modeOrdered = SUBSISTENCE_MODES.every((m, i) => i === 0 || m.lo >= SUBSISTENCE_MODES[i - 1].lo);
+    o.modeOcean = subsistenceModeAt(0.9, 1, 0, 0.9) === 0;
+    o.modeIntensive = subsistenceModeAt(0.9, 0.9, 5, 0.9) === 3;
+    o.modeMarginal = subsistenceModeAt(0.02, 0.05, 5, 0.05) === 0;
+    o.densityMonotonic = agrarianDensityKm2(0.9, 0.9, 5, 0.9) > agrarianDensityKm2(0.2, 0.2, 5, 0.2);
+    // the normalisation holds the world total at the pre-v1.31 K x AGRARIAN_MAX_KM2 basis
+    (() => {
+      const dens = currentAgrarianDensity(), K = currentCarryingCapacity();
+      let a = 0, b = 0; for (let i = 0; i < nn; i++) { if (field[i] < state.seaLevel) continue; a += dens[i]; b += K[i] * AGRARIAN_MAX_KM2; }
+      o.densityTotalPreserved = b > 0 && Math.abs(a - b) / b < 0.001;
+      // but the DISTRIBUTION genuinely changed - density is no longer a fixed multiple of K
+      let ratios = []; for (let i = 0; i < nn; i += 97) { if (field[i] < state.seaLevel || K[i] < 0.05) continue; ratios.push(dens[i] / K[i]); }
+      o.densityVaries = ratios.length > 4 && (Math.max(...ratios) - Math.min(...ratios)) > 1;
+    })();
+    // §10.2/§10.3 charcoal-limited iron
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    o.ratioSane = CHARCOAL_PER_IRON_KG > 5 && CHARCOAL_PER_IRON_KG < 8 && CHARCOAL_KG_PER_HA_YR < CHARCOAL_KG_PER_HA_YR_MAX;
+    if (places.length) {
+      const sm = places.map(p => _civPlaceSmelting(p));
+      o.smeltFinite = sm.every(x => isFinite(x.ironKgYr) && isFinite(x.charcoalKgYr) && x.ironKgYr >= 0);
+      o.smeltIsMin = sm.every(x => x.ironKgYr <= x.oreKgYr * ORE_TO_BLOOM_RECOVERY + 1e-6 && x.ironKgYr <= x.charcoalKgYr / CHARCOAL_PER_IRON_KG + 1e-6);
+      o.smeltLabels = sm.every(x => x.limitedBy === 'ore' || x.limitedBy === 'fuel');
+      o.someFuelLimited = sm.some(x => x.ironKgYr > 0 && x.limitedBy === 'fuel');
+      o.coppiceScales = sm.every(x => x.ironKgYr === 0 || x.coppiceHaNeeded > 0);
+      // §9 checklist + §8 archetype + §6 + §7
+      const tr = places.map(p => _civPlaceTrade(p));
+      o.checklistShape = tr.every(t => t.checklist.length === CIV_TRADE_CATEGORIES.length &&
+        t.checklist.every(c => typeof c.met === 'boolean' && ['critical','important','ordinary'].indexOf(c.severity) >= 0));
+      o.noGoodBothWays = tr.every(t => t.exports.every(g => t.imports.indexOf(g) < 0));
+      o.archetypesValid = tr.every(t => t.archetype === null || CIV_SETTLEMENT_ARCHETYPES.some(a => a.key === t.archetype));
+      o.someArchetype = tr.some(t => t.archetype !== null);
+      // §6: shares are fractions, manure uplift bounded, mode labelled
+      o.pastoralShapes = tr.every(t => !t.pastoral || (t.pastoral.pastureShare >= 0 && t.pastoral.pastureShare <= 1 &&
+        t.pastoral.cropShare >= 0 && t.pastoral.cropShare <= 1 && t.pastoral.manureUplift >= 0 &&
+        t.pastoral.manureUplift <= MANURE_MAX_UPLIFT && ['arable','pastoral','mixed'].indexOf(t.pastoral.mode) >= 0));
+      o.pastoralSharesDisjoint = tr.every(t => !t.pastoral || t.pastoral.pastureShare + t.pastoral.cropShare <= 1.001);
+      // §7: bulk goods without navigable water can only reach 'local'; luxuries always reach far
+      o.navShapes = tr.every(t => t.navigability && ['sea','river','stream','none'].indexOf(t.navigability.kind) >= 0);
+      o.bulkGatedByWater = tr.every(t => t.exports.every(g => {
+        const r = t.reach[g];
+        if (CIV_GOOD_LUXURY[g]) return r === 'long';
+        if (CIV_GOOD_BULK[g] && !t.navigability.navigable) return r === 'local';
+        return ['local','regional','long'].indexOf(r) >= 0;
+      }));
+      o.luxuryAlwaysTravels = _civGoodReach('gems', { navigable: false, kind: 'none' }) === 'long';
+      o.bulkNeedsWater = _civGoodReach('grain', { navigable: false, kind: 'none' }) === 'local' &&
+                         _civGoodReach('grain', { navigable: true, kind: 'sea' }) === 'long';
+    }
+    return o;
+  });
+
+
   await browser.close();
 
   // ---- assertions ----
@@ -3193,6 +3290,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.30: trade genuinely varies between settlements (it is not the faction row copied down)', R.v130.havePlaces ? R.v130.variesBySettlement : true);
   A('v1.30: a specialised settlement exports its primary good', R.v130.havePlaces ? R.v130.specExports : true);
   A('v1.30: the settlement inspector renders the trade rows', R.v130.havePlaces ? R.v130.inspectorRenders : true);
+
+  A('v1.31: RESOURCE_KEYS grew to 15 append-only (original six keep their save-format indices)', R.v131.keyCount === 15 && R.v131.appendOnly && R.v131.namesAligned && R.v131.civKeysTrack);
+  A('v1.31 §10.1: the scarcity cut is ordered by crustal abundance (gold < tin < copper < iron) and bounded', R.v131.scarcityOrdered && R.v131.cutsBounded);
+  A('v1.31 §10.1: applyResourceScarcity only thins, never invents a deposit, and keeps the strongest cells', R.v131.scarcityNeverInvents && R.v131.scarcityThins && R.v131.scarcityKeepsStrongest);
+  A('v1.31: every new potential field is present, finite and in [0,1] on a real world', R.v131.allFieldsPresent && R.v131.allFinite);
+  A('v1.31: rarity is visible on the map — obsidian and silver occupy far less land than clay', R.v131.rarityShowsOnMap);
+  A('v1.31 FIX: the channel atlas covers every RESOURCE_KEY (was a hand-listed six, dropping nine)', R.v131.atlasCoversAll);
+  A('v1.31 FIX: worldMeanResource has no NaN (mkResMap was a frozen six-key literal indexed with fifteen)', R.v131.worldMeanNoNaN);
+  A('v1.31 §10.7: subsistence modes are ordered, ocean/marginal read as foraging, good land as annual cultivation', R.v131.modeOrdered && R.v131.modeOcean && R.v131.modeIntensive && R.v131.modeMarginal && R.v131.densityMonotonic);
+  A('v1.31 §10.7: per-world normalisation preserves the v1.30 land-integrated total while the distribution genuinely varies', R.v131.densityTotalPreserved && R.v131.densityVaries);
+  A('v1.31 §10.2: the charcoal:iron ratio and coppice yields are in the reference\'s range', R.v131.ratioSane);
+  A('v1.31 §10.3: smelting output is the MIN of the ore and fuel budgets, finite, and labelled by which binds', !R.v131.nPlaces || (R.v131.smeltFinite && R.v131.smeltIsMin && R.v131.smeltLabels && R.v131.coppiceScales));
+  A('v1.31 §10.3: at least one settlement is genuinely fuel-limited rather than ore-limited (the Elba case)', !R.v131.nPlaces || R.v131.someFuelLimited);
+  A('v1.31 §9: every settlement gets the full 7-category checklist with a valid severity, and no good is both an import and an export', !R.v131.nPlaces || (R.v131.checklistShape && R.v131.noGoodBothWays));
+  A('v1.31 §8: archetypes are drawn from the declared vocabulary and at least one settlement matches', !R.v131.nPlaces || (R.v131.archetypesValid && R.v131.someArchetype));
+  A('v1.31 §6: pasture/crop shares are disjoint fractions and the manure uplift is capped', !R.v131.nPlaces || (R.v131.pastoralShapes && R.v131.pastoralSharesDisjoint));
+  A('v1.31 §7: bulk goods without navigable water reach only local markets; luxuries travel regardless', !R.v131.nPlaces || (R.v131.navShapes && R.v131.bulkGatedByWater && R.v131.luxuryAlwaysTravels && R.v131.bulkNeedsWater));
+
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
