@@ -9,11 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.36.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.37.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.37 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.35` are kept and never edited.
+  (v1.38 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.36` are kept and never edited.
+- **v1.37 — coastal settlements exist again; salt is not universal.** Hash vs v1.36 ALL IDENTICAL.
+  1001 / 852 / 363 green.
+  - `_umSiteKindFromTerrain` still used the pre-v1.35 near-radius, so the coastal box was one cell and
+    the world had **zero** coastal settlements. With that and the estuary fix: **0 → 6 with sea access**.
+  - `riverthrough` (estuary = sea AND river) now grants SEA access, not river.
+  - `_civSaltAccess`: sea evaporation / rock salt / salt lake. Salt was an unmet critical need for all
+    29 settlements because only the evaporite resource field was consulted.
+  - **The checklist could never mark anything MET** — absolute `>0.25` against a windowed mean, the
+    fourth occurrence of that mistake. Gaps now differentiate (mean 4.0 of 7 categories).
+
 - **v1.36 — water-edge placement + corridors: GROUNDWORK, not delivering yet.** ← **next session
   starts here.** Hash vs v1.35 ALL IDENTICAL. 1001 / 852 / 359 green.
   - `_civSnapToWaterEdge` measurably works (79.3% on water edge vs 65.5%, flood occupancy 6 → 1, mean

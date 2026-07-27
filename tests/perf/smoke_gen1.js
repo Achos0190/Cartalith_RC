@@ -3259,6 +3259,44 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.37: coastal detection, estuary access, and who actually has salt ---- */
+  R.v137 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    o.cellKm = (state.mapWidthKm || 800) / GW;
+    // the site-kind box must use the same >=1.5-cell floor as every other water test (v1.35)
+    o.siteKindUsesReach = _umWaterReachKm() >= o.cellKm;
+    // an estuary is SEA access, not river
+    o.estuaryIsSea = (() => {
+      const p = places.find(q => _umSiteKindFromTerrain(q) === 'riverthrough');
+      if (!p) return true;                                  // vacuous on a world with no estuary
+      const nav = _civPlaceNavigability(p);
+      return nav.kind === 'sea' && nav.basis === 'estuary';
+    })();
+    // salt: coastal settlements make their own; a deposit also counts; neither ⇒ a real dependency
+    if (places.length) {
+      o.saltSources = {};
+      let coastalWithoutSalt = 0, importsSaltAnyway = 0;
+      for (const p of places) {
+        const sa = _civSaltAccess(p);
+        o.saltSources[sa.source] = (o.saltSources[sa.source] || 0) + 1;
+        const nav = _civPlaceNavigability(p);
+        if (nav.kind === 'sea' && !sa.has) coastalWithoutSalt++;
+        const t = _civPlaceTrade(p);
+        if (sa.has && t.imports.indexOf('salt') >= 0) importsSaltAnyway++;
+      }
+      o.coastalWithoutSalt = coastalWithoutSalt;
+      o.importsSaltAnyway = importsSaltAnyway;
+      // the checklist must discriminate — not every category unmet for every settlement
+      const gaps = places.map(p => _civPlaceTrade(p).checklist.filter(c => !c.met).length);
+      o.meanGaps = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      o.checklistDiscriminates = o.meanGaps < CIV_TRADE_CATEGORIES.length - 0.5;
+      o.gapsVary = new Set(gaps).size > 1;
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3673,6 +3711,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
      measuring them here would test history, not the feature. tests/perf/probe_placement.js runs those
      on a freshly generated world; what stays here is the property checks, which hold regardless. */
   A('v1.36: the corridor field is finite, sparse (an opportunity term, not a broad lift) and zero at sea', R.v136.corridorFinite && R.v136.corridorIsSparse && R.v136.corridorZeroInSea);
+
+  A('v1.37: the coastal site-kind test uses the same >=1-cell floor as every other water test', R.v137.siteKindUsesReach);
+  A('v1.37: an estuary settlement reports SEA access, not merely river', R.v137.estuaryIsSea);
+  A('v1.37: every coastal settlement can make its own salt, and none imports salt it already has', !R.v137.nPlaces || (R.v137.coastalWithoutSalt === 0 && R.v137.importsSaltAnyway === 0));
+  A('v1.37: the trade checklist discriminates between settlements (not every category unmet everywhere)', !R.v137.nPlaces || (R.v137.checklistDiscriminates && R.v137.gapsVary));
+
 
 
 

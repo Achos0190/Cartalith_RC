@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.36**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.37**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.36.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.35.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.37.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.36.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -1018,6 +1018,25 @@ attract settlement. **Neither is on by default.** Read CHANGELOG v1.36 before pi
   not the corridor term's — fords are corridors, so moving settlements to water credited the wrong
   mechanism. Measure one change at a time; with the snap off the term reads 0.72×.
 
+
+### Coastal detection + salt sourcing (v1.37)
+
+- **`_umWaterReachKm()` must be used at EVERY water test.** v1.35 introduced it and fixed two of the
+  three sites; `_umSiteKindFromTerrain` kept the old ~2.1 km near-radius, which rounds to one cell, so
+  the coastal box was 3×3 and the world produced **zero** coastal settlements. When you add a water
+  threshold, grep for the others.
+- **`riverthrough` is an ESTUARY — sea AND river — so it grants SEA access.** It was reporting river
+  only, which understates exactly the towns that trade most.
+- **A "does this settlement have X" test against `rc.mean` must be relative to the world mean.** The
+  trade checklist used an absolute `>0.25` against a windowed catchment mean, so nothing was ever met
+  and all 29 settlements showed a critical gap. Fourth occurrence of this exact mistake (v1.31
+  archetypes, v1.33 trade rule, v1.32 faction exports, this).
+- **`_civSaltAccess`**: sea evaporation (any coast), rock salt/brine, or a salt lake. Salt was
+  previously read only off the evaporite resource field, making it a universal unmet need. A
+  settlement never imports salt it can produce.
+- **Categories must test what they name.** "Fibre & dye" listed only `alum` — a dye mordant — so every
+  settlement read as short of fibre. Wool and flax come from livestock and cropland.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -1083,7 +1102,7 @@ node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (359 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (363 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

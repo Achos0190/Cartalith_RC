@@ -12,7 +12,38 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.36 — Water-edge placement + natural corridors: groundwork, NOT yet delivering
+### v1.37 — Coastal settlements exist again; salt is not a universal shortage
+
+Two owner observations, both correct, both with the same root shape as earlier bugs. Hash vs v1.36
+ALL IDENTICAL. 1001 / 852 / 363 green.
+
+- **No coastal settlements at all.** `_umSiteKindFromTerrain` still measured its box with
+  `_umWaterNearKm()` (~2.1 km). v1.35 established that every water test must be floored at ≥1.5 cells
+  because a finer threshold is unsatisfiable on a quantised grid — and fixed the river gate and
+  navigability, **but missed this one site**. At 3.13 km/cell the radius rounded to a single cell, so
+  the coastal test only saw a 3×3 box and a settlement two cells from the shore read landlocked. The
+  reference world produced **zero** `coast`/`bay` settlements. Now on `_umWaterReachKm()`.
+- **An estuary was reporting river access, not sea.** `riverthrough` is the case where a settlement
+  has BOTH sea and river in reach — the London/Hamburg/Bordeaux pattern, which is a *sea*-trading
+  town. Combined with the above, the world went from **0 to 6 settlements with sea access**.
+- **Salt was an unmet critical need for all 29 settlements.** The checklist only ever consulted the
+  salt *resource* field (arid evaporite). Pre-industrial salt has three sources and only one is a
+  deposit: sea evaporation (available to any coast — solar pans want dry summers, but boiling brine
+  works anywhere with fuel, which is how north-western Europe made its salt), rock salt / brine
+  springs, and salt lakes. New `_civSaltAccess(p)` covers all three, and a settlement never imports
+  salt it can make itself.
+- **Deeper cause behind the salt symptom: the checklist could never mark anything as met.** Its test
+  was an absolute `> 0.25` against `rc.mean`, which is a windowed catchment MEAN — the same
+  peak-scale-threshold-against-an-average mistake v1.31 fixed for archetype matching and v1.33 for the
+  trade rule. Every category read as unmet for every settlement, so "critical gaps 29/29" carried no
+  information. Now relative to the world mean. Gaps are differentiated: salt 23, fibre 26, luxury 20,
+  husbandry 15, fuel 14, metals 12, ceramics 7, mean 4.0 of 7 categories.
+- **Fibre was measuring the wrong thing** — the category listed only `alum`, which is a dye MORDANT,
+  not fibre. Wool and flax come from livestock and cropland, both of which the engine models, so it
+  now reads `_civPlacePastoralBalance`. Alum scarcity remains a real dye-trade dependency; it is not
+  the same need as having something to spin.
+
+## v1.36 — Water-edge placement + natural corridors: groundwork, NOT yet delivering
 
 Owner asked for two placement behaviours: settlements near water should sit on the river bank or
 coastline **behind the floodplain**, and crossroads should attract settlement. **Neither is enabled by
