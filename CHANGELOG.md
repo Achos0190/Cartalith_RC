@@ -12,7 +12,44 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.34 — The hinterland surplus is derived, not a free parameter
+### v1.35 — "Water access: none" for harbour towns
+
+Owner report: the settlement information card sets water access to `none` even for a settlement with a
+port, close to water, with sea ways connected. Measured: **all 29 settlements** in the reference world
+reported `none`, including 4 the terrain classifies as `riverthrough`. Hash vs v1.34 ALL IDENTICAL.
+1001 / 852 / 357 green.
+
+Three compounding causes, all in `_civPlaceNavigability`:
+
+- **Thresholds finer than a grid cell are unsatisfiable.** The coast test was a hardcoded
+  `coastDistKm < 3`, but the chamfer distance transform quantises to whole cells, so the smallest
+  non-zero distance for a land cell touching water IS one cell — 3.13 km at the reference resolution
+  (measured minimum: 3.125), and ~7.8 km on a large world. The condition could never be true. New
+  `_umWaterReachKm()` floors every water-adjacency test at 1.5 cells.
+- **`riverOrder` was always 0 — a regression introduced in v1.32.** That version gated order/width on
+  `riverDistKm <= _umWaterNearKm()` (~2.1 km), also below one cell, silently disabling every
+  downstream consumer: the navigable-river branch, the stream fallback, food-shed transport mode and
+  harbour validity. Now floored at the same `_umWaterReachKm()`.
+- **Sea lanes and site kind were never consulted.** A `sea-lane` way attached to a settlement is
+  decisive — the route generator only draws one between places it judged water-reachable — and
+  `_umSiteKindFromTerrain` (coast/bay/riverthrough/river) is the same test the town layout is built
+  from, so a settlement can be having a harbour drawn for it while the card says it has no water.
+  **Fifth instance** of two functions answering one question and drifting.
+
+Also: `river` from the site kind is now authoritative over the traced polylines. The flow raster is
+the hydrology; the traced stems are a thinned derivative that can miss a channel the raster sees, and
+requiring both to agree left one settlement reading `none` on a site the layout engine was building a
+riverbank for.
+
+Each verdict now carries a **basis** ("sea route", "coastal site", "river through town", "on the
+coast", "navigable river", "headwater stream only", "no water in reach") shown in the card — a bare
+`none` gave no way to distinguish a genuinely landlocked site from a broken threshold, which is why
+this went unnoticed.
+
+Measured: settlements disagreeing with the terrain **15 → 0**; settlements with a populated
+`riverOrder` **0 → 14**; water-access kinds now 15 river / 14 none rather than 29 none.
+
+## v1.34 — The hinterland surplus is derived, not a free parameter
 
 Owner asked for the farm/hinterland supply to be computed from range + soil fertility + historical
 farmer-to-urbanite data, with an explicit warning that the logic must not "start to feed itself" or

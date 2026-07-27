@@ -3176,6 +3176,43 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.35: water access must agree with the terrain and with attached sea lanes ---- */
+  R.v135 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    o.cellKm = (state.mapWidthKm || 800) / GW;
+    // every water threshold must be expressible on this grid — below one cell it is unsatisfiable
+    o.reachKm = _umWaterReachKm();
+    o.reachAtLeastOneCell = o.reachKm >= o.cellKm;
+    if (places.length) {
+      let mismatch = 0, kinds = {}, noBasis = 0;
+      for (const p of places) {
+        const nav = _civPlaceNavigability(p), sk = _umSiteKindFromTerrain(p);
+        kinds[nav.kind] = (kinds[nav.kind] || 0) + 1;
+        if (!nav.basis) noBasis++;
+        // a settlement the terrain calls coastal/riverine must never report "no water"
+        if ((sk === 'coast' || sk === 'bay' || sk === 'riverthrough' || sk === 'river') && nav.kind === 'none') mismatch++;
+      }
+      o.kinds = kinds; o.mismatch = mismatch; o.everyKindHasBasis = noBasis === 0;
+      // riverOrder must actually populate — the v1.34 gate was finer than a cell, so it was always 0
+      o.riverOrdersNonZero = places.filter(p => { const sp = _umSiteProfile(p); return sp && sp.riverOrder > 0; }).length;
+      // an attached sea lane is decisive, whatever the distance fields round to
+      const p0 = places[0];
+      const ways = (typeof civWays !== 'undefined' && civWays) ? civWays : (state.ways || []);
+      ways.push({ sea: true, type: 'sea-lane', pts: [{ x: p0.x, y: p0.y }, { x: p0.x + 20, y: p0.y + 20 }], km: 60 });
+      const withLane = _civPlaceNavigability(p0);
+      ways.pop();
+      o.seaLaneWins = withLane.kind === 'sea' && withLane.basis === 'sea route';
+      // and a lane that does NOT touch the settlement must not count
+      ways.push({ sea: true, type: 'sea-lane', pts: [{ x: p0.x + 900, y: p0.y + 900 }, { x: p0.x + 950, y: p0.y + 950 }], km: 60 });
+      const farLane = _civPlaceNavigability(p0);
+      ways.pop();
+      o.farLaneIgnored = farLane.kind !== 'sea' || farLane.basis !== 'sea route';
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3573,6 +3610,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.34 ACYCLIC: growing one settlement never raises another settlement\'s ceiling (no mutual inflation)', !R.v134.nPlaces || R.v134.growthDoesNotInflateNeighbours !== false);
   A('v1.34: the reconciliation pass is monotonically non-increasing — it may only cap, never grow', !R.v134.nPlaces || R.v134.passNeverGrows);
   A('v1.34: the ceiling pass bounds settled population (strict historical band is checked on a clean world by probe_foodshed.js)', !R.v134.nPlaces || (R.v134.urbanShareBounded && R.v134.passReducesOrHolds));
+
+  A('v1.35: every water-adjacency threshold is at least one grid cell (a finer one is unsatisfiable by construction)', R.v135.reachAtLeastOneCell);
+  A('v1.35: no settlement the terrain calls coastal or riverine reports "water access: none"', !R.v135.nPlaces || R.v135.mismatch === 0);
+  A('v1.35: riverOrder actually populates (the v1.34 gate was finer than a cell, so it was always 0)', !R.v135.nPlaces || R.v135.riverOrdersNonZero > 0);
+  A('v1.35: an attached sea lane makes a settlement sea-accessible, and a distant one does not', !R.v135.nPlaces || (R.v135.seaLaneWins && R.v135.farLaneIgnored));
+  A('v1.35: every water-access verdict states its basis, so "none" can be told from a threshold bug', !R.v135.nPlaces || R.v135.everyKindHasBasis);
+
 
 
 

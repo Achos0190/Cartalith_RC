@@ -9,11 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.34.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.35.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.35 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.33` are kept and never edited.
+  (v1.36 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.34` are kept and never edited.
+- **v1.35 — "water access: none" for harbour towns.** All 29 settlements in the reference world
+  reported `none`. Hash vs v1.34 ALL IDENTICAL. 1001 / 852 / 357 green.
+  - **A km threshold below one cell width is unsatisfiable.** `coastDistKm < 3` against a 3.13 km cell
+    could never fire. Use `_umWaterReachKm()` (≥1.5 cells), never a bare km literal.
+  - **v1.32 broke `riverOrder` the same way** (gated at ~2.1 km, below a cell) — it read 0 everywhere,
+    silently disabling navigability, food-shed transport mode and harbour validity.
+  - Attached sea lanes and `_umSiteKindFromTerrain` were never consulted; both are authoritative.
+    **Fifth instance** of two functions answering one question and drifting.
+  - Every verdict now carries a `basis` string, so "none" can be told from a threshold bug.
+
 - **v1.34 — hinterland surplus derived from soil + the 9:1 farmer ratio.** Hash vs v1.33 ALL
   IDENTICAL. 1001 / 852 / 352 green + new `tests/perf/probe_foodshed.js`.
   - v1.33's free `FOOD_MARKETED_FRACTION = 0.30` is replaced by the attested **9 farmers : 1

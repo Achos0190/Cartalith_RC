@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.34**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.35**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.34.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.33.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.35.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.34.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -974,6 +974,29 @@ warning explicitly that it must not "feed itself" or balloon populations. Resear
 - Strict urbanisation-band verification lives in `tests/perf/probe_foodshed.js` on a freshly generated
   world; the smoke suite's world is too mutated by ~340 prior assertions to measure against.
 
+
+### Water access must be expressible on the grid (v1.35)
+
+Owner reported harbour towns with sea lanes reading "water access: none". Every settlement in the
+reference world did. Three causes, one lesson.
+
+- **A distance threshold below one cell width is unsatisfiable, not strict.** The chamfer DT and the
+  river trace both quantise to whole cells, so the smallest non-zero distance is one cell. A
+  hardcoded `coastDistKm < 3` against a 3.13 km cell can never fire. **`_umWaterReachKm()` (≥1.5
+  cells) is now the floor for every water-adjacency test** — use it, never a bare km literal.
+- **v1.32 broke `riverOrder` the same way** by gating it on `_umWaterNearKm()` (~2.1 km). It read 0
+  for every settlement in the world, silently disabling navigability, food-shed mode and harbour
+  validity. Fixing a too-large radius by making it too small is not a fix.
+- **Consult the signals that already exist.** An attached `sea-lane` way is decisive; the route
+  generator only draws one between water-reachable places. `_umSiteKindFromTerrain` is the same test
+  the town layout is built from — if it says coastal, navigability MUST agree, or the engine draws a
+  harbour for a settlement the card calls landlocked. That was the fifth occurrence of two functions
+  answering one question.
+- **`river` from the flow raster beats the traced polylines.** The raster is the hydrology; traced
+  stems are a thinned derivative that can miss a channel.
+- **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
+  that is precisely why this survived several versions.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -1038,7 +1061,7 @@ tests/run_um.sh                     # newest Gen1 file: extract script block 4 �
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (352 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (357 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding
