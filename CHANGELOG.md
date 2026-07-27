@@ -12,7 +12,79 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.32 — Owner bug batch: overlay scroll, faction exports, Explore popup, phantom coastlines
+### v1.33 — Export-reporting audit + the food-shed population ceiling
+
+Owner asked three things: audit every surface that reports exports for agreement, check that city and
+capital populations are computed correctly, and stop a food deficit being treated as an import when no
+trade route could actually sustain the place. Research note: `docs/research/food-logistics.md`.
+Terrain pipeline untouched — **hash vs v1.32 ALL IDENTICAL including `icons`**. 1001 / 852 / 344 green.
+
+### The export audit
+
+Four surfaces report exports: the Economy page, the faction inspector, the City Viewer info panel
+(all three read `_civFactionAggregates`, so they agree by construction) and the settlement inspector
+(`_civPlaceTrade`). **The settlement one disagreed.** v1.32 fixed the faction threshold from an
+absolute `±0.15` margin to a world-mean ratio, but left `_civPlaceTrade`'s copy on the old absolute
+rule — while its comment still claimed it used "the same world mean the faction rule uses". So a
+settlement's inspector and the Economy page could contradict each other about the same world.
+
+This is the **third** occurrence of one shape: v1.30 had two suitability scorers, v1.32 had two
+coastal tests, this had two trade thresholds. The rule now lives in exactly one place
+(`_civResourceTradeBalance`) and both callers use it.
+
+### Population: settlements are now limited by what can actually feed them
+
+The reported bug was real. `_civPlaceFoodSurplus` compared population to the settlement's own
+catchment and, when short, reported "imports food" — with **no check that any food existed within
+reach**. An inland capital could sit at 600,000 on ground supporting a fraction of that and be
+labelled a healthy importer.
+
+The governing constraint (Duncan-Jones, from Diocletian's Price Edict) is that bulk food barely moves
+overland: road carriage cost roughly 40–56× sea and ~5.5× river, grain **doubled in price per ~160 km
+of road**, the observed pre-industrial land supply radius was ~50 km, and cities above ~100,000
+essentially always sat on navigable water. In his own words it was "often impossible to relieve inland
+famines from stocks of grain elsewhere".
+
+- **`_civFoodDeliverable(d, mode) = 2^(−d/D)`** with `D` = 160 km land / 880 km river / 8000 km sea.
+  One formula reproduces the whole pattern: 50 km overland still delivers ~80%, 300 km delivers
+  nothing, 800 km by sea is nearly free.
+- **`_civFoodShed(p)`** = local catchment + **hinterland** (the countryside integrated overland, at
+  `FOOD_MARKETED_FRACTION` — a peasant household ate most of what it grew) + **long-range import**
+  (other settlements' genuine spare, via the cheapest mode both ends share). A first cut counted only
+  other settlements' surplus and **crushed every capital to its own catchment disc**, because the
+  farmland between towns belonged to nobody's catchment and so fed nobody. A city's grain hinterland
+  *is* the countryside; only exceptional cities drew bulk grain from distant producing regions by sea.
+- **Reach requires connection.** Past the 50 km local radius a supplier only counts if it shares
+  navigable water or is road-connected (`_civRoadComponents`, union-find over way endpoints). A
+  village 80 km away across trackless mountains is not a supplier.
+- **`_civApplyFoodShedCeilings()`** caps every settlement at what its shed supports, running after
+  placement and roads (it reads other settlements' populations, so inside placement it would be
+  circular). **Iterates to a fixed point** — capping a supplier removes supply a consumer was counting
+  on, and a two-pass version measurably left settlements still over their sheds.
+- **A deficit is only an import when something can deliver it.** Otherwise `food` is actively
+  *removed* from the import list and the settlement is flagged unsupported — the specialisation branch
+  adds `food` for any mining/fishing/garrison town, so merely not-adding it would have reinstated the
+  exact claim this change exists to stop.
+
+Measured at seed 12345/256px: total settled population 123,185 → 81,873, largest settlement
+52,589 → 25,669, and every settlement ends within its food shed.
+
+### Notes
+
+- `Math.floor`, not `Math.round`, for the cap: rounding up left settlements fractionally above a
+  ceiling the pass had just computed, so it converged on a population it had itself declared
+  unsustainable.
+- `FOOD_SHED_MIN_POP` (50) is a floor the pass will not cut below — a settlement on ground supporting
+  fewer is kept alive rather than deleted, so it legitimately sits above its shed. Callers judging
+  sustainability must allow for it.
+- **Free parameter, disclosed**: `FOOD_MARKETED_FRACTION = 0.30` is the one number with no direct
+  source. It sets how large cities may get; pre-industrial urbanisation rates of 10–15% imply
+  something of this order.
+- **Not modelled**, deliberately: storage/inter-annual buffering, political extraction (Rome's grain
+  dole was state logistics, not a market), return-cargo economics, and roads as a continuous cost
+  discount rather than a reachability gate.
+
+## v1.32 — Owner bug batch: overlay scroll, faction exports, Explore popup, phantom coastlines
 
 Five owner-reported issues. Everything is UI-layer or civ-layer (block 2), so the terrain pipeline is
 untouched — **hash vs v1.31 is ALL IDENTICAL in every scenario including `icons`**. 1001 headless /

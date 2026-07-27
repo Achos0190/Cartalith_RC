@@ -3,19 +3,19 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.32**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.33**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.32.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.31.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.33.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.32.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
 | `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
@@ -908,6 +908,43 @@ in every scenario including `icons`**. Read the reference before touching resour
   is defined and exposed but only reported, not wired into food surplus; archetype coverage is thin on
   any one seed since the rarer profiles need the specific geology they name.
 
+
+### Food-shed population ceiling + one trade rule (v1.33)
+
+Answering an owner audit ("are exports reported the same everywhere; are city populations correct; is
+a food deficit automatically assumed importable"). Research: `docs/research/food-logistics.md`. Read it
+before touching population or trade code.
+
+- **One trade rule.** `_civResourceTradeBalance(mean, worldMean)` is the ONLY resource export/import
+  threshold. The four reporting surfaces (Economy page, faction inspector, City Viewer panel — all via
+  `_civFactionAggregates` — plus the settlement inspector via `_civPlaceTrade`) now agree by
+  construction. v1.32 fixed the faction copy and left the settlement copy stale, whose comment claimed
+  they matched. **Third instance of this shape** (v1.30 two suitability scorers, v1.32 two coastal
+  tests): when two functions answer one question they WILL drift.
+- **Bulk food barely moves overland.** `_civFoodDeliverable(d,mode) = 2^(−d/D)`, `D` = 160 km land /
+  880 river / 8000 sea, from Diocletian's Price Edict ratios (road ≈ 40–56× sea, ≈ 5.5× river) and the
+  grain-doubles-per-100-miles rule. This single curve reproduces the ~50 km land supply radius and the
+  "cities >100k always sit on navigable water" pattern without special-casing either.
+- **`_civFoodShed(p)` = local catchment + HINTERLAND + long-range import.** The hinterland term (the
+  countryside integrated overland × `FOOD_MARKETED_FRACTION`) is the one that matters and the one a
+  first cut omitted — counting only other settlements' spare surplus crushed every capital to its own
+  catchment disc, because farmland between towns belonged to no catchment and fed nobody. A city is fed
+  by its countryside; only exceptional cities import bulk grain from distant regions by sea.
+- **`_civApplyFoodShedCeilings()` must iterate to a fixed point.** Capping a consumer frees surplus but
+  capping a SUPPLIER removes supply someone else counted on; a two-pass version measurably left
+  settlements over their sheds. Use `Math.floor` for the cap — `Math.round` can round up past the
+  ceiling the pass just computed. It runs after placement AND roads (it reads other settlements'
+  populations and needs road connectivity, so inside placement it would be circular).
+- **A deficit is not automatically an import.** When nothing in reach can cover it, `food` is actively
+  REMOVED from the import list and `foodUnsupported` set — the specialisation branch adds `food` for
+  every mining/fishing/garrison town, so merely declining to add it would leave the false claim intact.
+- **`FOOD_MARKETED_FRACTION = 0.30` is the one free parameter** and it governs how large cities may
+  get. `FOOD_SHED_MIN_POP = 50` is a floor the pass won't cut below, so such a place legitimately sits
+  above its shed — sustainability checks must allow for it.
+- **Known scope cuts**: no storage/inter-annual buffering, no political extraction (Rome's grain dole
+  was state logistics, not a market outcome), no return-cargo economics, roads gate reachability rather
+  than discounting cost continuously.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -971,7 +1008,7 @@ tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (335 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (344 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

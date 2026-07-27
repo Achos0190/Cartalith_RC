@@ -9,11 +9,26 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.32.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.33.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.33 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.31` are kept and never edited.
+  (v1.34 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.32` are kept and never edited.
+- **v1.33 — export-reporting audit + the food-shed population ceiling.** Hash vs v1.32 ALL IDENTICAL.
+  1001 / 852 / 344 green. Research: `docs/research/food-logistics.md`.
+  - **The settlement inspector and the Economy page disagreed about exports.** v1.32 fixed the faction
+    threshold and left `_civPlaceTrade`'s copy on the old absolute margin — with a comment claiming they
+    matched. One rule now (`_civResourceTradeBalance`). **Third time this shape has appeared.**
+  - **Populations are now capped by what can actually feed them.** A deficit used to mean "imports
+    food" with no check that food existed in reach. Now `_civFoodShed()` = local catchment + countryside
+    hinterland + long-range import, with delivery decaying as `2^(−d/D)` (160 km land / 880 river /
+    8000 sea, from Diocletian's Price Edict). Seed 12345/256px: total pop 123,185 → 81,873, largest
+    52,589 → 25,669, all settlements within their shed.
+  - **Two traps worth remembering.** Counting only other settlements' surplus (not the countryside)
+    crushes every capital to its own catchment disc. And the ceiling pass must iterate to a FIXED POINT
+    — capping a supplier removes supply a consumer was counting on.
+  - `FOOD_MARKETED_FRACTION = 0.30` is the one free parameter and it governs maximum city size.
+
 - **v1.32 — owner bug batch: overlay scroll, faction exports, Explore popup, phantom coastlines.**
   Five reported issues, all UI/civ-layer — **hash vs v1.31 ALL IDENTICAL**. 1001 / 852 / 335 green.
   - Setup-gate/generating scroll was swallowed because `#onboard` is a `.canvas-wrap` child and that

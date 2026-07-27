@@ -3034,6 +3034,77 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.33: one shared trade rule across every reporting surface, plus the food-shed ceiling ---- */
+  R.v133 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+
+    // AUDIT: the settlement rule and the faction rule must be the SAME rule, not two copies
+    o.sharedRuleExists = typeof _civResourceTradeBalance === 'function';
+    if (o.sharedRuleExists) {
+      const agg = _civFactionAggregates(), wm = agg.worldMeanResource;
+      // a mean well above the world mean exports; well below imports; identical means do neither
+      const hi = {}, lo = {}, same = {};
+      for (const k of CIV_RESOURCE_KEYS) { hi[k] = (wm[k] || 0) * 3 + 0.5; lo[k] = 0; same[k] = wm[k] || 0; }
+      const bHi = _civResourceTradeBalance(hi, wm), bLo = _civResourceTradeBalance(lo, wm), bSame = _civResourceTradeBalance(same, wm);
+      o.ruleExportsWhenRich = bHi.exports.length > 0 && bHi.imports.length === 0;
+      o.ruleImportsWhenPoor = bLo.imports.length > 0 && bLo.exports.length === 0;
+      o.ruleNeutralWhenAverage = bSame.exports.length === 0;
+      // and the settlement path must agree with the shared rule on the same inputs
+      if (places.length) {
+        const p = places[0], rc = _civPlaceResourceContext(p);
+        const direct = _civResourceTradeBalance(rc.mean, wm);
+        const viaTrade = _civPlaceTrade(p);
+        o.settlementUsesSharedRule = direct.exports.every(k => viaTrade.exports.indexOf(k) >= 0);
+      }
+    }
+
+    // FOOD SHED: transport decay must follow the cost model, water must beat land
+    o.decayLand50 = _civFoodDeliverable(50, 'land');
+    o.decayLand300 = _civFoodDeliverable(300, 'land');
+    o.decaySea800 = _civFoodDeliverable(800, 'sea');
+    o.decayLand800 = _civFoodDeliverable(800, 'land');
+    o.decayMonotonic = _civFoodDeliverable(10, 'land') > _civFoodDeliverable(100, 'land');
+    o.waterBeatsLand = o.decaySea800 > o.decayLand800 && _civFoodDeliverable(400, 'river') > _civFoodDeliverable(400, 'land');
+    o.decayHalvesAtDoubleKm = Math.abs(_civFoodDeliverable(FOOD_DOUBLE_KM.land, 'land') - 0.5) < 1e-6;
+    o.modePicksCheapest = _civFoodMode({ kind: 'sea' }, { kind: 'sea' }) === 'sea' &&
+                          _civFoodMode({ kind: 'sea' }, { kind: 'none' }) === 'land' &&
+                          _civFoodMode({ kind: 'river' }, { kind: 'sea' }) === 'river';
+
+    if (places.length) {
+      const sheds = places.map(p => _civFoodShed(p));
+      o.shedsFinite = sheds.every(f => isFinite(f.supported) && f.supported >= 0 &&
+        isFinite(f.localCapacity) && isFinite(f.hinterlandCapacity) && isFinite(f.importCapacity));
+      o.shedSumsCorrectly = sheds.every(f => Math.abs(f.supported - (f.localCapacity + f.hinterlandCapacity + f.importCapacity)) < 1);
+      // the hinterland (countryside) must actually contribute — an earlier cut counted only other
+      // settlements' surplus and crushed every capital to its own catchment disc
+      o.hinterlandContributes = sheds.some(f => f.hinterlandCapacity > 0);
+      // after the reconciliation pass every settlement must be within its shed, and the pass must be
+      // a fixed point (running it again changes nothing)
+      /* Run the pass FIRST: this smoke world's settlements may not have come through the
+         auto-populate path that applies it, so asserting sustainability before running it would be
+         testing the placement, not the reconciliation. Then assert it converged AND is idempotent. */
+      _civApplyFoodShedCeilings();
+      /* A settlement may legitimately sit above its shed if the shed supports fewer than the pass's
+         floor (FOOD_SHED_MIN_POP) — the pass deliberately will not cap a place out of existence, so
+         "sustainable" has to allow for that rather than treating the floor as a failure. */
+      const withinShed = p => { const f = _civFoodShed(p); return f.sustainable || (p.pop || 0) <= FOOD_SHED_MIN_POP; };
+      o.allSustainable = places.every(withinShed);
+      o.flooredCount = places.filter(p => !_civFoodShed(p).sustainable).length;
+      const again = _civApplyFoodShedCeilings();
+      o.passIsFixedPoint = again.length === 0;
+      o.stillSustainable = places.every(withinShed);
+      // a deficit is only reported as an import when something can actually deliver it
+      o.deficitNotAutoImport = places.every(p => {
+        const t = _civPlaceTrade(p);
+        if (t.imports.indexOf('food') < 0) return true;
+        return !t.foodShed || t.foodShed.importCapacity > 0 || t.foodShed.hinterlandCapacity > 0;
+      });
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3412,6 +3483,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.32 E: every Site Profile field stays finite and in range, and the km thresholds are resolution-independent', !R.v132.nPlaces || (R.v132.profileFinite && R.v132.boxKmSane));
   A('v1.32 C: selecting a settlement opens the anchored popup with the city card on top, an Open-city-view button and editable fields', !R.v132.nPlaces || (R.v132.popupOpens && R.v132.popupHasCityCard && R.v132.popupHasCityButton && R.v132.popupHasEditableFields));
   A('v1.32 C: the fullscreen City Viewer is not forced open by selecting a settlement', !R.v132.nPlaces || R.v132.fullscreenNotForced);
+
+  A('v1.33 AUDIT: one shared resource-trade rule exists and behaves (rich exports, poor imports, average neither)', R.v133.sharedRuleExists && R.v133.ruleExportsWhenRich && R.v133.ruleImportsWhenPoor && R.v133.ruleNeutralWhenAverage);
+  A('v1.33 AUDIT: the settlement inspector uses the same rule as the faction/Economy surfaces (was a stale absolute-margin copy)', !R.v133.nPlaces || R.v133.settlementUsesSharedRule);
+  A('v1.33: food transport decay halves at the cost-doubling distance and falls monotonically with distance', R.v133.decayHalvesAtDoubleKm && R.v133.decayMonotonic);
+  A('v1.33: water carriage beats land over the same distance (Diocletian ratios) and mode selection picks the cheapest both ends share', R.v133.waterBeatsLand && R.v133.modePicksCheapest);
+  A('v1.33: a source 800km overland delivers nothing while the same distance by sea is nearly free', R.v133.decayLand800 === 0 && R.v133.decaySea800 > 0.9);
+  A('v1.33: every food shed is finite and sums to local + hinterland + import', !R.v133.nPlaces || (R.v133.shedsFinite && R.v133.shedSumsCorrectly));
+  A('v1.33: the countryside hinterland actually feeds settlements (not only other settlements\' surplus)', !R.v133.nPlaces || R.v133.hinterlandContributes);
+  A('v1.33: after reconciliation every settlement is within its food shed (or at the minimum-population floor), and the pass is a fixed point', !R.v133.nPlaces || (R.v133.allSustainable && R.v133.passIsFixedPoint && R.v133.stillSustainable));
+  A('v1.33: a food deficit is only reported as an import when a supply route can actually deliver it', !R.v133.nPlaces || R.v133.deficitNotAutoImport);
+
 
 
 
