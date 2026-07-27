@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.28**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.29**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.28.html` | **Current** unified tool (~24.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.27.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.29.html` | **Current** unified tool (~24.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.28.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -766,6 +766,67 @@ default render is unchanged (hash vs v1.27 ALL IDENTICAL).
   `biomes`/`terrains`/`structures.trait` via each family's `section`/`sub`. The engine was the only
   missing half.
 
+### Owner bug batch: rivers, zoom focus, LOD seams, 3D lakes (v1.29)
+
+Eight reported bugs. The heightmap/climate pipeline is untouched — hash vs v1.28 is `field`/`temp`/
+`rain`/`flow` **IDENTICAL in every scenario**; `rgba` differs and that delta is *proven* to be only
+the river-way overlay (with `state.viz.riverWays=false` on both sides the canvas is byte-identical,
+FNV `1404487302`). Three of the eight share one cause shape: a per-tile or per-polyline computation
+each neighbour performs on a different, truncated view of the same shared data.
+
+- **`traceRiverPolylines` returns a receiver chain, not a drawable path.** In world mode
+  `buildRiverNetwork` wraps receivers (`nx=((nx%W)+W)%W`), so a river crossing the antimeridian has
+  consecutive points at x≈W−0.5 then x≈0.5 and one `lineTo` strokes back across the whole map; and the
+  walk only stops at ocean (`fld[i]<sea`), so it crosses inland lakes (which pool ABOVE sea level).
+  New pure `splitRiverPolylines(polys,W,skip)` cuts a chain wherever the next point isn't reachable by
+  a straight stroke. Applied at the RENDER and EXPORT sites only (`drawRiverWays`, GeoJSON) —
+  `traceRiverPolylines` itself is deliberately unchanged so `carveRiverValleys` stays bit-identical.
+  The lake predicate is not applied to the GeoJSON export: a lake reach is real hydrology.
+- **A vector overlay's line width must be damped, not zoom-proportional.** `drawRiverWays` is drawn
+  under two camera conventions that carry the zoom factor in opposite places — under LOD coordinates
+  are reprojected into canvas px (no CSS scale), off LOD they are grid units and `.canvas-stack` is
+  then CSS-scaled by `viewT.scale`. A single `baseW*zk` therefore grew the on-screen stroke 1:1 with
+  zoom on BOTH. Now `base·√z` under LOD and `base/√z` off it — one law, on-screen ∝ `base·√z`,
+  exactly `base` at zoom 1. Any future overlay width needs the same two-branch treatment.
+- **`_lodZoomAt(cx,cy,k)` is the LOD camera's `zoomAt`.** The `if(_lodOn)` wheel/pinch branches used
+  to scale `_lodZoom` only, so LOD always zoomed about the camera centre. `_lodCx = gx + regW'·(0.5−fx)`
+  where gx is the world point under the cursor taken from the CURRENT `lodViewRect` (so the edge clamp
+  is accounted for); at fx=0.5 it collapses to centre-zoom, which is why `lodZoomStep` (the buttons)
+  needs no change.
+- **The LOD tile seam was `renderBiomeTileRGBA` blurring the sea floor PER TILE.** Read the CHANGELOG
+  and HANDOFF notes before touching tile rendering — two plausible theories (geometry registration,
+  subpixel compositing) were measured and disproved first. A box blur clamps at the array edge, so
+  neighbours smooth the shared boundary from opposite truncated neighbourhoods: identical height data
+  in (shared-column MAD exactly 0), different colour out (RGB MAD 6.71 vs 0.3–0.5 interior). Now
+  sourced from the world-wide coarse fields the main map already caches — new `sharedSeaFields()` over
+  `_seaHCache`/`_seaShadeCache`, sampled at world coordinates like `tempField`. **Rule of thumb: any
+  per-tile pass with a spatial neighbourhood (blur, SDF, AO) is a seam unless it is sampled from a
+  world-wide field.** The remaining such passes (`aoB`/`crestB`/`coastB`/`riverB`/`biomeBD`) are all
+  opt-in and already documented as per-tile decoration. Alongside: `edgeL/edgeR/edgeU/edgeD` replace
+  the central-difference index CLAMP at every tile border (which rendered that column at half slope),
+  and the tile destination rect is quantised to whole DEVICE pixels. Residue disclosed: the boundary
+  still measures ~2× its local neighbourhood, consistent with the shared world column being drawn
+  twice; closing that needs a one-pixel tile apron, i.e. a `pyramidTile`/atlas format change.
+- **Every LOD camera move must call `scheduleLodRefine()`.** The v1.19 pan joystick and the zoom-reset
+  button were the only two that didn't, which is the "correct resolution only renders when the user
+  zoomed in/out" half of the report. It is debounced (240 ms, previous timer cleared), so calling it
+  every frame of a continuous pan is free and fires once on settle.
+- **3D water flattening is two separate problems.** `h < sea ? sea : h` (the GL shader's `hAt` via
+  `u_flatSea`, and `drawSoft`'s own) can only ever catch the OCEAN. Inland lakes are handled by a CPU
+  pre-pass instead: `_v3dHeightSource()` substitutes `_lakeFill[i]` for `wb[i]===2` cells, so no
+  shader change is needed. It returns `field` ITSELF (no copy, no allocation) when flatten-sea or
+  Show-lakes-as-water is off — the latter because flattening a lake in 3D while the 2D map paints it
+  as terrain would contradict the drape, which takes its colour from that map. Because the flattening
+  is baked into the height texture, both toggles must re-upload it (`V3D.uploadHeight()`), not just
+  mark the frame dirty.
+- **`_civLakeFlooded(x,y,wb)` is the civ layer's "is this really land" test.** The coarse water-body
+  raster classifies whole cells, but v1.05 draws lake shorelines SUB-CELL, so a class-0 cell lower
+  than the lake next door reads dry at map scale and is under water at zoom. Both `_civSnapLand`
+  (placement) and `_civSnapPlacesToLand` (the reconcile pass) apply it.
+- **Known scope cuts**: the seam residue above; base ship/terrain speeds and every other v1.23–v1.28
+  cut are unchanged; all canvas/GPU/touch behaviour here (joystick, pinch, WebGL drape, the seam
+  itself) is under this file's headless carve-out and still wants an on-device pass.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -829,7 +890,7 @@ tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (onboarding/layers/presets/phase)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (300 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

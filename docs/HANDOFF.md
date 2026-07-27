@@ -9,11 +9,59 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.28.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.29.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.29 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.27` are kept and never edited.
+  (v1.30 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.28` are kept and never edited.
+- **v1.29 — eight owner-reported bugs.** Triaged against the code first; three of them (river-ways
+  streaking across the map, the LOD tile seam, river-ways inside lakes) share one shape of cause — a
+  per-tile or per-polyline computation each neighbour performs on a different truncated view of the
+  same shared data. **The heightmap/climate pipeline is untouched:** hash vs v1.28 reports
+  `field`/`temp`/`rain`/`flow` **IDENTICAL in every scenario**; `rgba` differs and that difference is
+  *proven* to be entirely the requested river-way restyle — with `state.viz.riverWays=false` on both
+  sides the rendered canvas is byte-identical (FNV `1404487302` each). **B1** the touch long-press
+  callout suppression was scoped to `.row input[type=range]`; widened to every range input (the
+  Library's v1.26 weight sliders live outside `.row`). **B2/B7a** `traceRiverPolylines` returns a
+  RECEIVER CHAIN, not a drawable path: in world mode it wraps the antimeridian (one `lineTo` back
+  across the map) and it walks straight over inland lakes (which pool above sea level, so the
+  `fld[i]<sea` stop never fires). New pure `splitRiverPolylines(polys,W,skip)` cuts a chain wherever
+  the next point isn't reachable by a straight stroke; applied at render + GeoJSON export only, so
+  `carveRiverValleys` is untouched. **B3** river-way width grew 1:1 with zoom on BOTH camera paths;
+  damped to √zoom (`base·√z` under LOD, `base/√z` off it — the two conventions carry the zoom factor
+  in opposite places), exactly `base` at zoom 1. **B4** the `if(_lodOn)` wheel/pinch branches only
+  scaled `_lodZoom` and never touched `_lodCx/_lodCy`, so LOD always zoomed about the camera centre;
+  new `_lodZoomAt` restores zoom-to-cursor (`_lodCx = gx + regW'·(0.5−fx)`, which collapses to the old
+  behaviour at fx=0.5, so the zoom buttons are unchanged). **B5** — see the seam note below. **B6**
+  both 3D height paths flatten water with `h < sea ? sea : h`, which can only catch the OCEAN; an
+  inland lake pools ABOVE sea level so its pre-flood terrain stayed in the mesh and lit up as relief.
+  New `_v3dHeightSource()` substitutes `_lakeFill` per lake cell — CPU pre-pass, no shader change,
+  returns `field` itself when either toggle is off. **B7b** a class-0 cell sitting lower than the lake
+  next door reads dry at map scale but is under water once zoomed in (v1.05 floods lake shorelines
+  sub-cell); new `_civLakeFlooded` applies the renderer's own predicate in both civ land tests.
+  Verified **992/992**, **852/852**, smoke **300/300** (+12).
+- **v1.29's LOD seam — read this before touching tile rendering.** Root-caused by measurement; the
+  first two theories were both wrong. The tiles' HEIGHT data at a shared column is byte-identical
+  (mean abs diff exactly **0** — `amplifyRegion` samples inclusively, so neighbours share their
+  boundary column), and quantising the destination rect changed nothing. The real cause was
+  `renderBiomeTileRGBA` box-blurring the sea floor **per tile**: a box blur clamps at the array edge,
+  so two adjacent tiles smooth the boundary from opposite truncated neighbourhoods — identical height
+  in, different colour out (shared-column RGB MAD **6.71** vs 0.3–0.5 for ordinary neighbours; in the
+  live composite that column was the single largest colour discontinuity on screen, 22.3 against a 4.4
+  local mean). Most of a map is ocean, so that was the seam. Now sourced from the world-wide coarse
+  fields the main map already caches (`sharedSeaFields()` over `_seaHCache`/`_seaShadeCache`), sampled
+  at world coordinates like `tempField` — which is what v0.092's own stated goal asked for, is what
+  the PNG bake already did, and drops two full-tile blurs per refine. **After: shared-column MAD
+  6.71 → 0.04.** Two smaller fixes alongside: tile colorisers clamped their central-difference index
+  at the border (rendering that column at half slope — now `edgeL/edgeR/edgeU/edgeD` extrapolate), and
+  the destination rect is quantised to whole device pixels. **Residue, disclosed:** the boundary column
+  still measures ~2× its local neighbourhood, consistent with the shared world column being DRAWN
+  TWICE — a one-pixel stutter, not a hairline. Removing it needs tiles rendered with a one-pixel apron
+  and cropped, which changes `pyramidTile`'s output shape and the atlas format. The other per-tile
+  neighbourhood passes (`aoB`/`crestB`/`coastB`/`riverB`/`biomeBD`) share the class of defect but are
+  all opt-in and already documented as per-tile decoration. Separately, the v1.19 pan joystick and the
+  zoom-reset button were the only two camera moves that never scheduled a tile refine — which is the
+  "correct resolution only renders when the user zoomed in/out" half of the report; both now do.
 - **v1.28 — owner: "all the things that aren't live I want you to wire them so they are."** The v1.26
   audit found **35 of the 71** non-custom Asset Library slots had storage, an inspector card and an
   export slot but no consumer — art could be authored and would never appear. All 35 now render, and
@@ -1355,6 +1403,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **The LOD tile seam is reduced, not eliminated (v1.29).** After moving the sea-floor smoothing to
+  the shared world-wide fields, two adjacent tiles now agree at their shared world column to a RGB
+  MAD of 0.04 (interior 0.3–0.6, was 6.71) — the tiles themselves are seamless. In the live composite
+  the boundary column drops from being the single strongest colour discontinuity on screen (5.05× its
+  local neighbourhood) to ~2×, which is consistent with the remaining artifact being the shared world
+  column DRAWN TWICE: `amplifyRegion` samples a tile's box with inclusive endpoints, so tile A's last
+  and tile B's first column are the same world position, and both get a device pixel. That is a
+  one-pixel stutter, not a hairline. Closing it properly means rendering tiles with a one-pixel apron
+  and cropping — which changes `pyramidTile`'s output shape and therefore the atlas format, so it was
+  deliberately left out of a bug batch. Also still open in the same family: the other per-tile
+  neighbourhood passes (`aoB`/`crestB`/`coastB`/`riverB`/`biomeBD`) have the identical
+  truncated-at-the-edge defect, but all are opt-in (default 0) and already documented as per-tile
+  decoration.
+- **v1.29's "villages don't render correctly … terrain/sea alignment" was only partly reproduced.**
+  The mechanism found and fixed is real and specific: a class-0 land cell sitting below the pooled
+  surface of an adjacent lake reads dry at map scale and floods once the LOD renderer draws that
+  lake's shoreline sub-cell, so a pin there ends up standing in water. If the owner's screenshot was
+  showing something else (e.g. a genuinely blocky lake outline, or a pin offset from its terrain
+  rather than submerged by it), that half is NOT fixed — the civ overlay and the terrain canvas are
+  structurally co-registered (both take the same `lodViewRect()` and CSS-fit the same box), so an
+  offset would be a different bug and needs the screenshot re-shared to pin down.
 - **Religion Manager (deferred from the v1.18 request) — NOT started.** The owner's original ask
   paired a fully editable religion system (CRUD/merge/split/holy cities/diffusion via trade/
   migration/conquest/missionaries, per-settlement dominant/minority religion %/tension/conversion/

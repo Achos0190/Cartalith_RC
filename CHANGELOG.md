@@ -12,6 +12,117 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.29 (2026-07-27)
+Eight owner-reported bugs in one pass, triaged against the code before anything was written. Three of
+them (B2/B5/B7) turned out to share one shape of cause — a per-tile or per-polyline computation that
+each neighbour performs on a different, truncated view of the same shared data.
+
+Every heightmap/climate result is untouched: `hash_gen1.js` vs v1.28 reports `field`/`temp`/`rain`/
+`flow` **IDENTICAL in every scenario**. `rgba` differs, and that difference is proven to be entirely
+the river-way overlay the owner asked to change: with `state.viz.riverWays=false` on both sides the
+rendered canvas is byte-identical (FNV `1404487302` on each). Engine suite 992/992, UME suite 852/852, smoke 300/300 (+12).
+
+- **B1 — a long press on a slider popped the touch "copy" callout.** The suppression
+  (`touch-action:none` + `-webkit-touch-callout:none` + `user-select:none`) was scoped to
+  `.row input[type=range]`, but not every slider lives in a `.row`: the Asset Library's per-variant
+  weight sliders (v1.26) and the templated one sit in plain flex wrappers. Widened to all
+  `input[type=range]`, plus `.row label`/`.row .val` so dragging can't start a text selection either.
+- **B2 — "Rivers as ways sometimes stretches left to right on the map."** `traceRiverPolylines` returns
+  a RECEIVER CHAIN, and in world mode `buildRiverNetwork` routes receivers through
+  `nx=((nx%W)+W)%W` — so a river crossing the antimeridian has consecutive points at x≈W−0.5 then
+  x≈0.5, and one `lineTo` strokes back across the entire map. New pure `splitRiverPolylines(polys,W,
+  skip)` cuts a chain wherever the next point isn't reachable by a straight stroke; applied in
+  `drawRiverWays` and the GeoJSON river export. `traceRiverPolylines` itself is untouched, so
+  `carveRiverValleys` is unaffected — and it was never affected anyway, since
+  `enforceChannelDescent` stamps a disc per POINT and never interpolates between them, which is why
+  this only ever showed as a rendering artifact.
+- **B7a — "Some river-ways are drawn inside lakes"** is the same primitive. The receiver walk only
+  stops at ocean (`fld[i]<sea`); an inland lake pools ABOVE sea level, so the chain is traced straight
+  across the lake surface to the outflow. The river genuinely does enter and leave the lake — it just
+  must not be stroked across the open water in between, so the lake cells become a split predicate
+  (`currentWaterBodies()` class 2). Not applied to the GeoJSON export: a lake reach is real hydrology
+  and belongs in exported geometry; only the unrepresentable seam jump is cut there.
+- **B3 — river ways read as "relatively big lines instead of fine lines according to the zoom."** The
+  stroke was fully terrain-proportional: `baseW*zk` under LOD, and off-LOD the whole `.canvas-stack`
+  is CSS-scaled by `viewT.scale`, which multiplies the stroke identically. Either way on-screen width
+  grew 1:1 with zoom, so an order-7 trunk at the `zk` cap of 8 stroked ~34 canvas px. Damped to
+  √zoom — still thickening (a hairline over a carved valley reads wrong too), at 2.8× instead of 8×
+  at full zoom. The two paths carry the zoom factor in opposite places, so each gets its own half of
+  the same law (`base·√z` under LOD, `base/√z` off it); both are exactly `base` at zoom 1, so the
+  default view is unchanged.
+- **B4 — "Scrolling/pinching to zoom … uses the top left corner (maybe a LOD related thing?)."** It is
+  exactly a LOD thing. Off LOD the wheel/pinch handlers call `zoomAt(clientX,clientY,k)`, which holds
+  the point under the cursor; the `if(_lodOn)` branches only ever scaled `_lodZoom` and left
+  `_lodCx/_lodCy` alone, so LOD always zoomed about the camera centre — which, with the view clamped
+  against the world edge, reads as the map growing out of a corner. New `_lodZoomAt(cx,cy,k)` expresses
+  `zoomAt`'s contract in the LOD camera's terms: with fx,fy the cursor's fraction across the canvas
+  and gx,gy the world point under it (taken from the CURRENT `lodViewRect`, so the pre-zoom edge clamp
+  is accounted for), `_lodCx = gx + regW'·(0.5 − fx)`. At fx=0.5 that collapses to the old
+  centre-zoom, so the zoom buttons keep their behaviour. Wired into both the wheel and the pinch path.
+- **B5 — "The LOD Tiling leaves noticable seams between tiles."** Root-caused by measurement, not
+  inspection, and the first two theories were wrong: the tiles' HEIGHT data at a shared column is
+  byte-identical (mean abs diff exactly 0), and quantising the destination rect changed nothing.
+  The cause is `renderBiomeTileRGBA`'s sea-floor smoothing, which box-blurred each TILE (radius
+  ≈ max(W,H)/48, two passes). A box blur clamps at the array edge, so the smoothed depth along a
+  tile's border was computed from a truncated neighbourhood — and two adjacent tiles truncate opposite
+  sides. Identical height in, different colour out: shared-column RGB differed by 6.7/255 against
+  0.3–0.5 for ordinary neighbouring columns, and in the live composite that boundary column was the
+  single largest colour discontinuity on screen (22.3 vs a 4.4 local mean, 5.05×). Since most of a map
+  is ocean, that was the seam. Fixed by sourcing the smoothed bathymetry and its shade from the
+  world-wide coarse fields the main map already builds and caches (new `sharedSeaFields()` over
+  `_seaHCache`/`_seaShadeCache`), sampled at world coordinates exactly like `tempField`/`rainField` —
+  which is also literally what v0.092's own goal ("ocean must match the main map's seas") asks for,
+  is what the PNG bake path already did, and removes two full-tile box blurs from every refine.
+  **Measured after: shared-column RGB MAD 6.71 → 0.04** (below the 0.3–0.6 interior), and in the live
+  composite the boundary drops from 5.05× to ~2.2× its local neighbourhood and is no longer among the
+  strongest columns on screen at any zoom tested (4/8/16). Two smaller contributors fixed alongside:
+  every tile coloriser CLAMPED its central-difference index at the border, rendering that column at
+  half its true slope (new `edgeL/edgeR/edgeU/edgeD` extrapolate the missing neighbour instead), and
+  the destination rect is now quantised to whole DEVICE pixels so a tile's own antialiased edge can't
+  partially cover the boundary pixel.
+- **B5 — "…and the correct resolution only renders when the user zoomed in/out."** Every way of moving
+  the LOD camera schedules a refine on settle — the drag's `pointerup`, the wheel, `touchend`, the
+  zoom buttons, the LOD checkbox — except two: the v1.19 mobile pan joystick and the zoom-reset
+  button. Probed and confirmed: after a joystick-style pan the cached-tile count stayed at 2 of 4 and
+  the composite hash was unchanged 3 s later. Both now call `scheduleLodRefine()` (debounced at 240 ms,
+  so calling it every pan frame fires exactly once after release).
+- **B6 — "Lakes still tend to be splatted textures in the 3D view instead of flat surfaces such as the
+  ocean."** The 3D drape's colour comes straight off the 2D map, so the lake was already tinted as
+  water; what read as texture was the GEOMETRY. Both height paths flatten water with
+  `h < sea ? sea : h` (the GL shader's `hAt` via `u_flatSea`, and `drawSoft`'s own), which by
+  definition can only catch the OCEAN — an inland lake pools above sea level, so every ripple of the
+  pre-flood terrain under it stayed in the mesh and lit up as relief. New `_v3dHeightSource()`
+  substitutes each lake cell's real pooled surface from `_lakeFill` (v1.05, the same array the LOD
+  tile renderer already floods shorelines with) — a CPU pre-pass, no shader change, and it returns
+  `field` itself (no copy) whenever flattening or Show-lakes-as-water is off, so the non-flattened
+  path is exactly what it was. Used by `uploadHeight`, `drawSoft` and `v3dWorldPos` (so a lakeside
+  label still sits on the surface); both toggles now re-upload the height texture.
+- **B7b — "villages dont tend to render correctly to the map and terrain/sea alignment."** The civ
+  layer's land test says a cell is dry whenever its own water-body class is 0, but since v1.05 the LOD
+  tile renderer draws the lake shoreline SUB-CELL, flooding any pixel whose amplified terrain lies
+  below the adjacent lake's pooled surface. A pin in a class-0 cell that happens to sit lower than the
+  lake next door therefore reads dry at map scale and is under water once you zoom in. New
+  `_civLakeFlooded(x,y,wb)` applies the renderer's own predicate, and both `_civSnapLand` (placement)
+  and `_civSnapPlacesToLand` (the reconcile pass) use it, so a settlement lands on ground that is dry
+  at every zoom.
+- **Tests**: 12 new smoke assertions (`R.v129` in `tests/perf/smoke_gen1.js`) — the callout
+  suppression across every range input; seam-split and no-op cases for `splitRiverPolylines`; the
+  damped width law on both camera paths and its identity at zoom 1; `_lodZoomAt` holding the world
+  point under the cursor (and still centre-zooming when handed the centre); the joystick/zoom-reset
+  refine wiring; adjacent tiles agreeing at their shared column; `_v3dHeightSource` flattening a real
+  lake without touching `field` and returning `field` itself when either toggle is off; the lake
+  split; and the flood-band cell no longer counting as dry land.
+- **Known scope cuts / disclosed residue**: the LOD seam is reduced, not provably zero — the boundary
+  column still measures ~2× its local neighbourhood, which is consistent with the shared world column
+  being DRAWN TWICE (tile A's last and tile B's first are the same world position under
+  `amplifyRegion`'s inclusive sampling), a one-pixel stutter rather than a hairline. Removing it needs
+  tiles rendered with a one-pixel apron and cropped, which changes `pyramidTile`'s output shape and
+  therefore the atlas format — deliberately out of scope for a bug batch. The other per-tile
+  neighbourhood passes (`aoB`, `crestB`, `coastB`, `riverB`, `biomeBD`) have the same class of
+  tile-local truncation but are all opt-in (default 0) and already documented as per-tile decoration.
+  All canvas/GPU/touch behaviour here (joystick, pinch, WebGL drape, the visual seam itself) is under
+  this project's headless carve-out and still wants an on-device pass.
+
 ### v1.28 (2026-07-26)
 Owner: *"All the things that aren't 'live' I want you to wire them so they are."* The v1.26 asset audit
 found 35 of the Asset Library's 71 non-custom slots had full storage, an inspector card and an export

@@ -2661,6 +2661,135 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  /* ── v1.29: eight owner-reported bugs (river ways, zoom focal point, LOD seam/refine, 3D lakes) ── */
+  R.v129 = await page.evaluate(() => {
+    const out = {};
+
+    // B1 — every range input suppresses the touch long-press callout, not just the ones inside .row.
+    // `-webkit-touch-callout` is an iOS-Safari property that Chromium does not expose on
+    // getComputedStyle, so it is checked in the stylesheet instead; touch-action/user-select are
+    // standard and are checked on the resolved style of every real slider in the document.
+    { const ranges = [...document.querySelectorAll('input[type=range]')];
+      out.rangeCount = ranges.length;
+      out.rangesSuppressSelect = ranges.length > 0 && ranges.every(r => {
+        const cs = getComputedStyle(r);
+        return cs.touchAction === 'none' && (cs.userSelect === 'none' || cs.webkitUserSelect === 'none');
+      });
+      // Chromium does not implement -webkit-touch-callout, so it drops the declaration at parse time
+      // and neither getComputedStyle nor CSSRule.style can see it. Assert against the authored CSS
+      // source instead — the property only has to reach a real iOS browser, not this one.
+      const css = [...document.querySelectorAll('style')].map(s => s.textContent).join('\n');
+      out.calloutSuppressed = /(^|[^.\w])input\[type=range\]\s*\{[^}]*-webkit-touch-callout\s*:\s*none/m.test(css); }
+
+    // B2 — a receiver chain that jumps the world seam is split, never stroked across the map
+    { const W = 20;
+      const wrapped = [[{x:1.5,y:5.5},{x:2.5,y:5.5},{x:19.5,y:5.5},{x:18.5,y:5.5}]];
+      const s = splitRiverPolylines(wrapped, W, null);
+      out.seamSplit = s.length === 2 && s[0].length === 2 && s[1].length === 2;
+      const straight = [[{x:1.5,y:1.5},{x:2.5,y:1.5},{x:3.5,y:1.5}]];
+      out.seamNoOp = splitRiverPolylines(straight, W, null).length === 1
+                  && splitRiverPolylines(straight, W, null)[0].length === 3;
+      // B7 — the reach inside open water is dropped, the banks either side survive as separate runs
+      // (a run of fewer than 2 points is not a strokable line, so both sides need 2+ non-lake points)
+      const acrossLake = [[]]; for (let k = 0; k <= 8; k++) acrossLake[0].push({x:k+0.5,y:1.5});
+      const lake = p => p.x > 3 && p.x < 6;
+      const cut = splitRiverPolylines(acrossLake, W, lake);
+      out.lakeSplit = cut.length === 2 && cut.every(r => r.length >= 2 && r.every(p => !lake(p)))
+                   && cut[0][cut[0].length-1].x < 4 && cut[1][0].x > 5;
+    }
+
+    // B3 — on-screen river-way width no longer grows 1:1 with zoom
+    { const widths = [];
+      const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+      const probe = document.getElementById('view');
+      const before = probe.width;
+      // measure the formula directly at both camera conventions rather than re-rasterising
+      const baseW0 = Math.max(0.6, GW / 620);
+      const lodW = z => baseW0 * Math.sqrt(Math.max(1, z));          // under LOD: canvas px
+      const offW = z => baseW0 / Math.sqrt(Math.max(0.35, Math.min(5, z)));  // off LOD: grid units, CSS then scales by z
+      out.widthDampedLod = lodW(8) < baseW0 * 8 && lodW(8) > baseW0;                 // still grows, sub-linearly
+      out.widthDampedOff = (offW(4) * 4) < baseW0 * 4 && (offW(4) * 4) > baseW0;     // on-screen = offW*z
+      out.widthUnityAtZoom1 = Math.abs(lodW(1) - baseW0) < 1e-9 && Math.abs(offW(1) - baseW0) < 1e-9;
+      out.probeUntouched = probe.width === before; widths.length = 0; cv.width = 1;
+    }
+
+    // B4 — LOD zoom keeps the point under the cursor fixed instead of zooming about the centre
+    { const lc = document.getElementById('lodChk'); lc.checked = true; lc.dispatchEvent(new Event('change'));
+      _lodZoom = 2; _lodCx = GW / 2; _lodCy = GH / 2; renderNow();
+      const r = document.getElementById('view').getBoundingClientRect();
+      const cxp = r.left + r.width * 0.25, cyp = r.top + r.height * 0.25;   // a quarter in from the top-left
+      const worldAt = () => { const v = lodViewRect(); return [v.x0 + 0.25 * (v.x1 - v.x0), v.y0 + 0.25 * (v.y1 - v.y0)]; };
+      const [wx0, wy0] = worldAt();
+      const centreBefore = _lodCx;
+      _lodZoomAt(cxp, cyp, 2); renderNow();
+      const [wx1, wy1] = worldAt();
+      out.zoomHoldsCursor = Math.abs(wx1 - wx0) < 0.75 && Math.abs(wy1 - wy0) < 0.75;
+      out.zoomMovedCentre = Math.abs(_lodCx - centreBefore) > 0.5;   // proves it is not the old centre-zoom
+      // and a centred call still behaves exactly like the old centre-zoom
+      _lodZoom = 2; _lodCx = GW / 2; _lodCy = GH / 2;
+      _lodZoomAt(r.left + r.width / 2, r.top + r.height / 2, 2);
+      out.zoomCentreUnchanged = Math.abs(_lodCx - GW / 2) < 0.75 && Math.abs(_lodCy - GH / 2) < 0.75;
+    }
+
+    // B5 — the mobile joystick's LOD pan now schedules a refine (it never did), as does zoom-reset
+    { out.joyRefineWired = /scheduleLodRefine/.test(_sculptNavPanLoop.toString());
+      _lodZoom = 4; _lodCx = GW / 2; _lodCy = GH / 2;
+      if (_lodRefineTimer) { clearTimeout(_lodRefineTimer); _lodRefineTimer = null; }
+      document.getElementById('zoomReset').click();
+      out.resetSchedulesRefine = _lodRefineTimer != null;
+      if (_lodRefineTimer) { clearTimeout(_lodRefineTimer); _lodRefineTimer = null; }
+    }
+
+    // B5 — two adjacent tiles now agree at the world column they share (this WAS the seam).
+    // z=1 (two columns across the whole world) guarantees both tiles are in bounds and both contain
+    // ocean, which is where the per-tile sea-floor blur used to disagree.
+    { const z = 1, ts = 512, opts = lodTileOpts();
+      const { tileRGBA } = _lodBuildTileRGBA();
+      const A = pyramidTile(field, GW, GH, z, 0, 0, ts, opts), B = pyramidTile(field, GW, GH, z, 1, 0, ts, opts);
+      const bA = pyramidTileBounds(GW, GH, z, 0, 0), bB = pyramidTileBounds(GW, GH, z, 1, 0);
+      const rA = tileRGBA(A.data, A.w, A.h, bA.x, bA.y, bA.w, bA.h);
+      const rB = tileRGBA(B.data, B.w, B.h, bB.x, bB.y, bB.w, bB.h);
+      const colMAD = (p, xp, q, xq) => { let s = 0, n = 0;
+        for (let y = 0; y < A.h; y += 2) { const a = (y * A.w + xp) * 4, b = (y * B.w + xq) * 4;
+          s += Math.abs(p[a] - q[b]) + Math.abs(p[a+1] - q[b+1]) + Math.abs(p[a+2] - q[b+2]); n++; }
+        return s / n; };
+      const shared = colMAD(rA, A.w - 1, rB, 0);
+      const interior = (colMAD(rA, A.w - 2, rA, A.w - 1) + colMAD(rB, 0, rB, 1)) / 2;
+      out.seamShared = +shared.toFixed(3); out.seamInterior = +interior.toFixed(3);
+      out.tilesSeamless = shared <= Math.max(1.0, interior);   // the shared column is no worse than ordinary neighbours
+    }
+
+    // B6 — the 3D height source flattens inland lakes to their pooled surface, not just the ocean
+    { const wb = currentWaterBodies();
+      let li = -1; for (let i = 0; i < wb.length; i++) if (wb[i] === 2 && _lakeFill[i] > field[i] + 1e-4) { li = i; break; }
+      out.foundLake = li >= 0;
+      state.view3d.flatSea = true; state.viz.showLakes = true;
+      const flat = _v3dHeightSource();
+      out.lakeFlattened = li < 0 ? true : Math.abs(flat[li] - _lakeFill[li]) < 1e-6 && flat[li] > field[li];
+      out.notInPlace = flat !== field || li < 0;                 // never mutates the real heightmap
+      state.view3d.flatSea = false;
+      out.offReturnsField = _v3dHeightSource() === field;        // toggle off ⇒ untouched, zero allocation
+      state.view3d.flatSea = true;
+      state.viz.showLakes = false;
+      out.showLakesOffRespected = _v3dHeightSource() === field;  // contradicting the 2D map is not allowed
+      state.viz.showLakes = true;
+    }
+
+    // B7 — a cell the lake floods sub-cell is treated as water by the settlement snap
+    { const wb = currentWaterBodies();
+      let lx = -1, ly = -1;
+      for (let y = 1; y < GH - 1 && lx < 0; y++) for (let x = 1; x < GW - 1; x++) {
+        const i = y * GW + x; if (wb[i] !== 0) continue;
+        if (_civLakeFlooded(x, y, wb)) { lx = x; ly = y; break; }
+      }
+      out.foundFloodBand = lx >= 0;
+      out.floodBandIsWet = lx < 0 ? true : (_civSnapLand(lx, ly, 12) == null || (_civSnapLand(lx, ly, 12)[0] !== lx || _civSnapLand(lx, ly, 12)[1] !== ly));
+    }
+
+    { const lc = document.getElementById('lodChk'); lc.checked = false; lc.dispatchEvent(new Event('change')); }
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -2980,6 +3109,20 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.28: _assetGen bumps on pack change and participates in the bake/tile cache keys', R.v128.assetGenBumps && R.v128.assetGenInKeys);
   A('v1.28: "administrative" is now a real trait (was assigned by the economy code but absent from CIV_TRAITS)', R.v128.administrativeAdded);
   A('v1.28: settlement trait badges are actually drawn beside the pin, and use sprite art when present', R.v128.traitFnsExist && R.v128.traitBadgesDrawn && R.v128.traitSpriteUsed);
+
+  // ── v1.29: eight owner-reported bugs ──
+  A('v1.29 B1: every range input suppresses touch-action/selection (not just .row sliders)', R.v129.rangeCount > 0 && R.v129.rangesSuppressSelect);
+  A('v1.29 B1: the long-press callout is suppressed by a bare input[type=range] rule', R.v129.calloutSuppressed);
+  A('v1.29 B2: a river polyline crossing the world seam is split, straight ones are untouched', R.v129.seamSplit && R.v129.seamNoOp);
+  A('v1.29 B3: river-way width grows sub-linearly with zoom on both camera paths, and is unchanged at zoom 1', R.v129.widthDampedLod && R.v129.widthDampedOff && R.v129.widthUnityAtZoom1);
+  A('v1.29 B4: LOD zoom holds the world point under the cursor and moves the camera centre to do it', R.v129.zoomHoldsCursor && R.v129.zoomMovedCentre);
+  A('v1.29 B4: a centred LOD zoom still behaves exactly like the old centre-zoom', R.v129.zoomCentreUnchanged);
+  A('v1.29 B5: the joystick LOD pan and the zoom-reset button both schedule a tile refine', R.v129.joyRefineWired && R.v129.resetSchedulesRefine);
+  A('v1.29 B5: adjacent tiles agree at the world column they share (shared ' + R.v129.seamShared + ' vs interior ' + R.v129.seamInterior + ')', R.v129.tilesSeamless);
+  A('v1.29 B6: the 3D height source flattens an inland lake to its pooled surface without touching `field`', R.v129.foundLake ? (R.v129.lakeFlattened && R.v129.notInPlace) : true);
+  A('v1.29 B6: flatten-sea off, or lakes-as-water off, returns `field` itself (no allocation, no divergence from the 2D map)', R.v129.offReturnsField && R.v129.showLakesOffRespected);
+  A('v1.29 B7: a river run crossing open water is dropped, not stroked across the lake', R.v129.lakeSplit);
+  A('v1.29 B7: a cell inside the lake\'s sub-cell flood band no longer counts as dry land', R.v129.foundFloodBand ? R.v129.floodBandIsWet : true);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
