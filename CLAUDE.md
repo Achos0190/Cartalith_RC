@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.35**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.36**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.35.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.34.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.36.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.35.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,27 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Placement: water edge + corridors — UNFINISHED (v1.36)
+
+Owner asked for settlements to sit on the bank/shore behind the floodplain, and for crossroads to
+attract settlement. **Neither is on by default.** Read CHANGELOG v1.36 before picking this up.
+
+- **`_civSnapToWaterEdge` works** (79.3% on the water edge vs 65.5%, flood-zone occupancy 6 → 1, mean
+  river distance 16.3 → 3.6 km, settlement count unchanged) but is **gated behind
+  `state.civ.waterEdgeSnap`** because it runs AFTER routing: moving a settlement leaves its ways
+  stopping short, breaking v1.02 and starving the UME layout of primary streets (v0.97). **The fix is
+  to reorder `_civIterativeAutoWorld` so placement finishes before routing begins** — patching
+  endpoints afterwards was tried and did not fully restore either guarantee.
+- **`buildRouteCorridors` is sound but ineffective at its current weight.** Terrain-derived (passes,
+  fords, isthmuses = cheap ground with expensive flanks on BOTH sides) precisely so placement stays
+  acyclic — roads come after settlements, so reading junctions would be circular. Field is sparse
+  (land mean 0.038; a first cut at 0.233 halved the settlement count). But at `corridor:0.08`
+  settlements sit at **0.72×** the land-average corridor value — it is not steering anything.
+- **A measurement trap worth remembering**: an early 2.45× "corridor preference" was the SNAP's doing,
+  not the corridor term's — fords are corridors, so moving settlements to water credited the wrong
+  mechanism. Measure one change at a time; with the snap off the term reads 0.72×.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -1061,7 +1082,8 @@ tests/run_um.sh                     # newest Gen1 file: extract script block 4 �
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (357 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (359 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

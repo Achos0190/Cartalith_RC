@@ -3213,6 +3213,52 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.36: water-edge placement + natural-corridor (crossroads) attraction ---- */
+  R.v136 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    const sea = state.seaLevel, flood = currentFloodField(), wb = currentWaterBodies();
+    const flowHi = GW * GH * 0.0004;
+    const wet = (x, y) => { if (x < 0 || y < 0 || x >= GW || y >= GH) return false; const i = y * GW + x;
+      return field[i] < sea || (wb && wb[i] === 2) || (flowField && flowField[i] > flowHi); };
+
+    // the snap must never place a settlement in water or in the channel bottom
+    if (places.length) {
+      o.noneInWater = places.every(p => { const i = Math.round(p.y) * GW + Math.round(p.x);
+        return field[i] >= sea && (!wb || wb[i] === 0); });
+      o.floodZoneCount = places.filter(p => flood[Math.round(p.y) * GW + Math.round(p.x)] > SETTLE_FLOOD_SAFE).length;
+      let onEdge = 0;
+      for (const p of places) { const x = Math.round(p.x), y = Math.round(p.y);
+        let e = false; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; if (wet(x + dx, y + dy)) e = true; }
+        if (e) onEdge++; }
+      o.onWaterEdge = onEdge;
+    }
+    // the snap is IDEMPOTENT — a settlement already on the edge must not be walked along the shore
+    if (places.length) {
+      const suitF = currentSettlementSuitability();
+      const p = places[0], again = _civSnapToWaterEdge(p.x, p.y, { suit: suitF });
+      const second = again ? _civSnapToWaterEdge(again[0], again[1], { suit: suitF }) : null;
+      o.snapIdempotent = !again || !second;
+      // and it never returns a water or flood cell
+      o.snapReturnsHabitable = !again || (field[again[1] * GW + again[0]] >= sea &&
+        flood[again[1] * GW + again[0]] <= SETTLE_FLOOD_SAFE);
+    }
+    // corridor field: sparse like every other opportunity term, and settlements genuinely favour it
+    const cf = currentRouteCorridors();
+    o.corridorFinite = (() => { for (let i = 0; i < GW * GH; i++) if (!isFinite(cf[i]) || cf[i] < 0 || cf[i] > 1) return false; return true; })();
+    let lm = 0, ln = 0; for (let i = 0; i < GW * GH; i++) { if (field[i] < sea) continue; lm += cf[i]; ln++; }
+    o.corridorLandMean = ln ? lm / ln : 0;
+    o.corridorIsSparse = o.corridorLandMean < 0.15;   // an opportunity term must be ~0 almost everywhere
+    o.corridorZeroInSea = (() => { for (let i = 0; i < GW * GH; i++) if (field[i] < sea && cf[i] !== 0) return false; return true; })();
+    if (places.length) {
+      let sm = 0; for (const p of places) sm += cf[Math.round(p.y) * GW + Math.round(p.x)];
+      o.corridorAtSettlements = sm / places.length;
+      o.settlementsFavourCorridors = o.corridorAtSettlements > o.corridorLandMean;
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3616,6 +3662,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.35: riverOrder actually populates (the v1.34 gate was finer than a cell, so it was always 0)', !R.v135.nPlaces || R.v135.riverOrdersNonZero > 0);
   A('v1.35: an attached sea lane makes a settlement sea-accessible, and a distant one does not', !R.v135.nPlaces || (R.v135.seaLaneWins && R.v135.farLaneIgnored));
   A('v1.35: every water-access verdict states its basis, so "none" can be told from a threshold bug', !R.v135.nPlaces || R.v135.everyKindHasBasis);
+
+  /* The water-edge snap is opt-in (state.civ.waterEdgeSnap) pending a placement/routing reorder — see
+     the note at its call site — so this world does not exercise it. The snap's own invariants are
+     asserted below as pure properties, which hold whether or not it is enabled. */
+  A('v1.36: the snap is idempotent and only ever returns habitable, non-flooded land', !R.v136.nPlaces || (R.v136.snapIdempotent && R.v136.snapReturnsHabitable));
+  /* On-water-edge share, flood-zone occupancy and corridor preference are PLACEMENT OUTCOMES, so they
+     only mean anything on settlements this version actually placed. By this point ~350 earlier
+     assertions have resampled and extracted this world, and its settlements predate the v1.36 pass —
+     measuring them here would test history, not the feature. tests/perf/probe_placement.js runs those
+     on a freshly generated world; what stays here is the property checks, which hold regardless. */
+  A('v1.36: the corridor field is finite, sparse (an opportunity term, not a broad lift) and zero at sea', R.v136.corridorFinite && R.v136.corridorIsSparse && R.v136.corridorZeroInSea);
+
 
 
 

@@ -12,7 +12,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.35 — "Water access: none" for harbour towns
+### v1.36 — Water-edge placement + natural corridors: groundwork, NOT yet delivering
+
+Owner asked for two placement behaviours: settlements near water should sit on the river bank or
+coastline **behind the floodplain**, and crossroads should attract settlement. **Neither is enabled by
+default in this version.** What ships is the machinery plus the measurements that show where it stands.
+Read this before continuing the work. Hash vs v1.35 ALL IDENTICAL. 1001 / 852 / 359 green.
+
+### What works, and is off
+
+`_civSnapToWaterEdge` nudges a settlement onto the nearest bank or shore that is dry land, outside the
+flood zone, and adjacent to water — bounded to ~12 km, never onto water, never into flood, and never
+onto ground the suitability field rates >20% worse. On a clean world it does exactly what was asked:
+
+| | v1.35 | with snap |
+|---|---|---|
+| on the water edge | 65.5% | **79.3%** |
+| in the channel bottom | 6 | **1** |
+| mean river distance | 16.3 km | **3.6 km** |
+| settlements | 29 | 29 |
+
+**It is gated off (`state.civ.waterEdgeSnap`)** because it runs AFTER route generation, so moving a
+settlement leaves ways that terminated at it stopping short — breaking v1.02's "every way reaches its
+settlement" guarantee and, downstream, leaving the urban-morphology layout with no primary streets to
+build around (v0.97). Carrying the endpoints across did not fully restore either. The correct fix is
+to run the snap **before** routing, which means reordering `_civIterativeAutoWorld`'s placement/routing
+phases — a restructure, not a local change. Shipping it on by default would have traded a placement
+improvement for broken roads.
+
+### What does not work yet, and why the first measurement was misleading
+
+`buildRouteCorridors` derives natural crossroads from terrain alone — passes, fords, isthmuses, all
+sharing one signature: cheap ground with expensive flanks on **both** sides. Terrain-derived
+deliberately, because roads are generated *after* settlements, so reading junctions from `civWays`
+would make placement circular (the trap the food-shed work was built to avoid).
+
+The field itself is sound: finite, zero at sea, land mean 0.038 (properly sparse — a first cut averaged
+0.233, which is a broad lift rather than an opportunity term, and it halved the settlement count from
+29 to 12).
+
+**But at weight 0.08 it does not measurably move placement.** With the snap disabled, settlements sit
+on corridor cells at **0.72× the land average** — slightly *avoiding* them. An earlier reading of
+2.45× was an artifact: the snap was moving settlements to water edges, and fords are corridors, so the
+snap's success was being credited to the corridor term. Raising the weight to 0.10 does shift
+placement, but costs 21% of the settlement count (29 → 23), which is too blunt a trade.
+
+The honest conclusion is that crossroads attraction needs the confounder removed first — get the snap
+running before routing, then re-tune the corridor weight against a clean measurement.
+
+### Also
+
+- `tests/perf/probe_placement.js` — a clean-world placement probe. Placement outcomes can only be
+  measured on settlements the current version actually placed, and the smoke suite's world has been
+  resampled and extracted by ~350 earlier assertions, so its settlements predate the pass.
+- Cross-block ordering bit again: the corridor field was first defined in block 2, but
+  `buildSettlementSuitability` is block 1 and runs earlier. Affordance fields belong with the other
+  `current*` fields.
+
+## v1.35 — "Water access: none" for harbour towns
 
 Owner report: the settlement information card sets water access to `none` even for a settlement with a
 port, close to water, with sea ways connected. Measured: **all 29 settlements** in the reference world

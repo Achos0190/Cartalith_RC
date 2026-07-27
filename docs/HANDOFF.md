@@ -9,11 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.35.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.36.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.36 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.34` are kept and never edited.
+  (v1.37 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.35` are kept and never edited.
+- **v1.36 — water-edge placement + corridors: GROUNDWORK, not delivering yet.** ← **next session
+  starts here.** Hash vs v1.35 ALL IDENTICAL. 1001 / 852 / 359 green.
+  - `_civSnapToWaterEdge` measurably works (79.3% on water edge vs 65.5%, flood occupancy 6 → 1, mean
+    river distance 16.3 → 3.6 km) but is **gated off** (`state.civ.waterEdgeSnap`) because it runs
+    after routing and leaves ways stopping short of moved settlements (breaks v1.02 and v0.97).
+    **THE NEXT TASK: reorder `_civIterativeAutoWorld` so placement completes before routing**, then
+    turn the snap on by default.
+  - `buildRouteCorridors` (terrain-derived passes/fords/isthmuses, deliberately not road-derived so
+    placement stays acyclic) is sound and sparse but **ineffective at `corridor:0.08`** — settlements
+    read 0.72× the land average. Re-tune only after the snap stops confounding the measurement.
+  - **Measurement trap**: an early 2.45× corridor preference was the snap's doing, not the corridor
+    term's. Change one thing at a time.
+
 - **v1.35 — "water access: none" for harbour towns.** All 29 settlements in the reference world
   reported `none`. Hash vs v1.34 ALL IDENTICAL. 1001 / 852 / 357 green.
   - **A km threshold below one cell width is unsatisfiable.** `coastDistKm < 3` against a 3.13 km cell
