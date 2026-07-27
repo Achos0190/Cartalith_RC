@@ -12,7 +12,62 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.31 — Pre-industrial resource grounding (settlement-resources.md)
+### v1.32 — Owner bug batch: overlay scroll, faction exports, Explore popup, phantom coastlines
+
+Five owner-reported issues. Everything is UI-layer or civ-layer (block 2), so the terrain pipeline is
+untouched — **hash vs v1.31 is ALL IDENTICAL in every scenario including `icons`**. 1001 headless /
+852 UME / 335 smoke green.
+
+- **Scrolling dead in the setup gate and while generating.** `#onboard` is a DOM child of
+  `.canvas-wrap`, whose wheel handler calls `e.preventDefault()` unconditionally — so the gate card's
+  own `overflow-y:auto` never received an event it was allowed to act on. Same for two-finger scroll
+  via the pinch `touchmove` handler. New `_overCanvasOverlay(e)` returns early for any overlay layered
+  over the canvas (gate, busy, credits, city viewer, asset modals, popovers), handing the gesture back
+  to native scrolling.
+- **Faction Exports permanently empty.** `_civFactionAggregates` used a fixed absolute margin —
+  export if `territoryMean − worldMean > 0.15`. That was calibrated when every resource was common;
+  after v1.31's crustal-abundance thinning most world means sit at 0.02–0.16, making the margin
+  unreachable upward while it stayed reachable downward. Hence Exports "none" on every faction with
+  Imports fully populated. Now compared as a **ratio** against the world mean (>1.35× exports,
+  <0.65× imports), with a small absolute floor so a resource that is near-zero everywhere cannot
+  divide-by-tiny into a spurious export. Same failure and same fix as v1.31's archetype thresholds.
+- **Explore opened the settlement full-screen.** v1.18 wired Explore's Info tool to bypass the popup
+  and drill straight into the full-viewport City Viewer. Per the owner, a pin hit now opens the SAME
+  map-anchored popup Civilization mode uses — city-layout card on top, then the information pane, with
+  the settlement's parameters editable exactly as under Generate → Civilization. The City Viewer is
+  unchanged and still fully functional, reached on request via the popup's new "⤢ Open city view"
+  button rather than by hijacking a tap.
+- **A settlement 19.5 km inland rendered an attached coastline.** `_umSiteKindFromTerrain` decided
+  coastal/bay/estuary by scanning `max(4, GW/128)` **grid cells** — on a large world a cell is several
+  km, so that box reached tens of km and any settlement near-ish the sea came back `bay`. `buildSite`
+  then faithfully drew a coastline inside a town box only 1.7 km across. The inspector was already
+  contradicting itself on screen (`coast ~19.5 km`), because `_umSiteProfile` derives coast distance
+  from a chamfer DT over the whole field and had the right answer all along. The radius is now derived
+  from real km against the town's own footprint, so the two agree — the same "two functions, one
+  question" shape as v1.30's duplicate suitability scorers.
+- **Site Profile audit.** The same grid-cell-radius bug sat in the river search: a stem was accepted as
+  "this settlement's river" within `GW/8` **cells**, which is how the inspector came to print
+  `river ord 1 ~618.4 km`. Distance is now always reported honestly, but order and width are only
+  filled in when a stem is genuinely within reach, and a river beyond a 25 km context radius is
+  reported as no river at all. `buildableFrac` clamps its samples into the grid before reading slope —
+  at coarse resolutions the whole town box can be sub-cell, so every sample rounded to the same cell
+  and the fraction degenerated to the 0% the owner saw.
+- **Cross-block regression caught during verification.** The first cut of the km thresholds declared
+  `const UM_SITE_BOX_KM = Math.max(UME.SITE_WM, …)` at block-2 top level. `UME` lives in script block
+  4, which executes *after* block 2, so this threw during block-2 evaluation and aborted the rest of
+  the block (surfacing as `Cannot access '_umRevealedSet' before initialization`). Now computed
+  lazily inside functions. This is exactly the cross-block rule CLAUDE.md already documents.
+- **Flaky test fixed.** The bathymetry-variance assertion failed roughly 1 run in 3 on v1.30–v1.32
+  alike, always with the two variances equal to two significant figures. It now guards on the seabed
+  having meaningful relief to flatten and compares with a relative tolerance. Stable across repeated
+  runs.
+- **Known gap, disclosed**: the faction-export fix is verified by reading, not end-to-end. The smoke
+  harness never generates faction territory (`territoryCells` stays 0), so every faction's resource
+  means are 0 and the threshold cannot be exercised there. The assertion is explicitly vacuous in that
+  case rather than passing on the unrelated `food` export — exercising it needs a world with real
+  territory.
+
+## v1.31 — Pre-industrial resource grounding (settlement-resources.md)
 
 Owner supplied a reference document (`docs/research/settlement-resources.md`) on pre-industrial
 settlement resources and asked for Cartalith to be updated with it. Six of its sections are now

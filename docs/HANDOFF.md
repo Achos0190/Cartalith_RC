@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.31.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.32.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.32 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.30` are kept and never edited.
+  (v1.33 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.31` are kept and never edited.
+- **v1.32 — owner bug batch: overlay scroll, faction exports, Explore popup, phantom coastlines.**
+  Five reported issues, all UI/civ-layer — **hash vs v1.31 ALL IDENTICAL**. 1001 / 852 / 335 green.
+  - Setup-gate/generating scroll was swallowed because `#onboard` is a `.canvas-wrap` child and that
+    element's wheel handler `preventDefault()`s unconditionally. New `_overCanvasOverlay` guard.
+  - Faction Exports were permanently empty: a fixed `>0.15` absolute margin against world means that
+    v1.31's scarcity thinning pushed down to 0.02–0.16. Now a ratio test, like the archetype fix.
+  - Explore's Info tool no longer drills into the full-screen City Viewer; it opens the same anchored
+    popup Civilization mode uses (city card on top, editable parameters), with the viewer behind an
+    explicit button.
+  - **The grid-cell-radius bug class bit twice more.** `_umSiteKindFromTerrain` scanned `GW/128` CELLS
+    (tens of km on a big world) so an inland town read as `bay` and drew a coastline inside its 1.7 km
+    box; the profile's river search accepted a stem within `GW/8` CELLS, producing `river ord 1
+    ~618.4 km`. Both are real-km now. **When you see a radius in grid cells, check what it means in
+    km at the largest supported world.**
+  - A first cut put `const UM_SITE_BOX_KM = …UME.SITE_WM…` at block-2 top level; `UME` is block 4, so
+    it threw and aborted block 2. Lazy functions now — the cross-block rule is not optional.
+  - The bathymetry-variance assertion was flaky (~1 in 3) on v1.30–v1.32 alike; now guarded + toleranced.
+  - **Disclosed gap**: the faction-export fix is verified by reading only. The smoke harness never
+    generates territory, so the threshold is never exercised there and that assertion is vacuous.
+
 - **v1.31 — pre-industrial resource grounding.** Owner supplied
   `docs/research/settlement-resources.md` and asked for the tool to be updated with it; six of its
   sections are now built in. Resource vocabulary grew **6 → 15** (append-only), deposit footprints are

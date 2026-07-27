@@ -1971,11 +1971,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     out.emptyClickFillsPanel = document.getElementById('civInfoPanel').innerHTML !== '<div class="hint">reset</div>';
     out.emptyClickModalClosed = !document.getElementById('cityViewerModal').classList.contains('open');
 
-    // a genuine settlement-pin click opens the viewer INSTEAD of the plain summary
+    /* v1.32 (owner: Explore "opens the settlement view in full screen instead of the pop-up window
+       akin to the generate pane"): a genuine settlement-pin click now opens the ANCHORED POPUP —
+       city-layout card on top, editable parameters below — exactly as Civilization mode does, and no
+       longer forces the full-screen viewer. This block previously asserted the opposite; the
+       expectation moved with the behaviour, it was not merely relaxed. */
     document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset2</div>';
     _civInfoAt(Math.round(target.x), Math.round(target.y));
-    out.settlementClickOpensModal = document.getElementById('cityViewerModal').classList.contains('open');
+    out.settlementClickOpensPopup = document.getElementById('placeEditPopup').style.display === 'block';
+    out.settlementClickLeavesModalShut = !document.getElementById('cityViewerModal').classList.contains('open');
     out.settlementClickSkipsPlainPanel = document.getElementById('civInfoPanel').innerHTML === '<div class="hint">reset2</div>';
+    document.getElementById('placeEditPopup').style.display = 'none'; _civSelectedPlace = null;
+
+    // the viewer is still fully functional — it is now reached on request (the popup's button)
+    out.viewerOpensOnRequest = _civOpenCityViewer(target) !== false &&
+      document.getElementById('cityViewerModal').classList.contains('open');
 
     // info panel renders real sections, including the honest "not modeled" notes (never fabricated)
     const infoHtml = document.getElementById('cvInfoPanel').innerHTML;
@@ -2944,6 +2954,86 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.32: overlay scroll guard, faction export thresholds, real-km coastal/river detection,
+     Explore opening the anchored popup instead of the fullscreen viewer. ---- */
+  R.v132 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+
+    // A: an overlay layered over the canvas must not have its wheel eaten by the map zoom handler
+    o.guardExists = typeof _overCanvasOverlay === 'function';
+    if (o.guardExists) {
+      const ob = document.getElementById('onboard');
+      const card = ob && ob.querySelector('.card');
+      o.gateIsCanvasChild = !!(ob && ob.closest('.canvas-wrap'));
+      o.gateCardScrollable = !!(card && getComputedStyle(card).overflowY === 'auto');
+      o.guardMatchesGate = !!(card && _overCanvasOverlay({ target: card }));
+      o.guardIgnoresCanvas = !_overCanvasOverlay({ target: document.getElementById('view') });
+    }
+
+    // B: faction exports must be reachable. The old rule needed territoryMean - worldMean > 0.15
+    // absolute, which after v1.31's scarcity thinning no faction could ever satisfy.
+    let agg = _civFactionAggregates();
+    o.territoryCells0 = agg.byFaction.reduce((s2, f) => s2 + (f.territoryCells || 0), 0);
+    /* A faction with no territory has a resource mean of 0 for everything, so "exports nothing" is the
+       CORRECT answer and the export rule is untested. Generate territories first if this world has
+       none, so the assertion is measuring the threshold rather than an empty polity. */
+    if (!o.territoryCells0) {
+      const tb = document.getElementById('civAutoPolityBtn');
+      if (tb) { tb.click(); await new Promise(r => setTimeout(r, 2500)); }
+      if (typeof _civAggGen !== 'undefined') _civAggGen++;
+      agg = _civFactionAggregates();
+    }
+    o.territoryCells = agg.byFaction.reduce((s2, f) => s2 + (f.territoryCells || 0), 0);
+    o.nFactions = agg.byFaction.length;
+    o.factionsWithExports = agg.byFaction.filter(f => f.exports && f.exports.length).length;
+    /* 'food' comes from the food-surplus branch, not the resource-threshold branch, so counting it
+       would let this assertion pass without ever exercising the rule the owner reported broken. */
+    o.factionsWithResourceExports = agg.byFaction.filter(f => (f.exports || []).some(k => k !== 'food')).length;
+    o.factionsWithImports = agg.byFaction.filter(f => f.imports && f.imports.length).length;
+    o.exportsAreValidKeys = agg.byFaction.every(f => (f.exports || []).every(k => k === 'food' || CIV_RESOURCE_KEYS.indexOf(k) >= 0));
+    o.noGoodBothWays = agg.byFaction.every(f => (f.exports || []).every(k => (f.imports || []).indexOf(k) < 0));
+
+    // D/E: coastal + river classification must agree with the authoritative distance fields
+    if (places.length) {
+      let wrongCoastal = 0, badRiver = 0, kinds = {};
+      for (const p of places) {
+        const k = _umSiteKindFromTerrain(p); kinds[k] = (kinds[k] || 0) + 1;
+        const sp = _umSiteProfile(p);
+        if (!sp) continue;
+        const coastal = (k === 'coast' || k === 'bay' || k === 'riverthrough');
+        // a town called coastal whose chamfer-DT coast distance is many box-lengths away is the bug
+        if (coastal && isFinite(sp.coastDistKm) && sp.coastDistKm > _umWaterNearKm() * 4) wrongCoastal++;
+        // an order/width filled in for a river that is nowhere near is the 618km readout
+        if (sp.riverOrder > 0 && isFinite(sp.riverDistKm) && sp.riverDistKm > UM_RIVER_CONTEXT_KM) badRiver++;
+      }
+      o.kinds = kinds; o.wrongCoastal = wrongCoastal; o.badRiver = badRiver;
+      o.profileFinite = places.every(p => { const sp = _umSiteProfile(p); return !sp ||
+        (isFinite(sp.buildableFrac) && sp.buildableFrac >= 0 && sp.buildableFrac <= 1 &&
+         isFinite(sp.slopeN) && sp.slopeN >= 0 && (sp.riverOrder === 0 || isFinite(sp.riverDistKm))); });
+      // the thresholds are real-km, so they must not change when only the grid resolution does
+      o.boxKmSane = _umSiteBoxKm() > 0.5 && _umSiteBoxKm() < 5 && _umWaterNearKm() > _umSiteBoxKm();
+    }
+
+    // C: an Explore pin hit opens the anchored popup (with the city card on top), not the fullscreen modal
+    if (places.length) {
+      const p = places[0];
+      _civSelectedPlace = p; _civSelectedRowRefs = null;
+      _civOpenPlacePopup();
+      const el = document.getElementById('placeEditPopup');
+      o.popupOpens = !!(el && el.style.display === 'block');
+      o.popupHasCityCard = !!(el && el.querySelector('#peCityPreview'));
+      o.popupHasCityButton = !!(el && el.querySelector('#peCityOpen'));
+      o.popupHasEditableFields = !!(el && el.querySelector('#placeEditPopupBody input'));
+      const modal = document.getElementById('cityViewerModal');
+      o.fullscreenNotForced = !modal || getComputedStyle(modal).display === 'none';
+      if (el) el.style.display = 'none';
+      _civSelectedPlace = null;
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3187,7 +3277,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
   // ── v1.18: Interactive City Viewer (Explore mode) ──
   A('v1.18: an empty-terrain Explore-mode click still fills the plain sidebar summary and leaves the viewer closed (zero regression)', R.v118.emptyClickFillsPanel && R.v118.emptyClickModalClosed);
-  A('v1.18: a genuine settlement-pin click in Explore mode opens the City Viewer instead of the plain summary', R.v118.settlementClickOpensModal && R.v118.settlementClickSkipsPlainPanel);
+  A('v1.32: a genuine settlement-pin click in Explore mode opens the anchored popup, not the fullscreen viewer, and still skips the plain summary', R.v118.settlementClickOpensPopup && R.v118.settlementClickLeavesModalShut && R.v118.settlementClickSkipsPlainPanel);
+  A('v1.18: the City Viewer still opens fully when explicitly requested (now via the popup button)', R.v118.viewerOpensOnRequest);
   A('v1.18: the City Information Panel renders all 7 sections with real data, including honest "not modeled" notes for undeveloped religion/history simulation (never fabricated)', R.v118.infoSectionsPresent && R.v118.infoHonestNotes);
   A('v1.18: the viewer camera zooms (state mutates) and its LOD tiers reveal different content as scale crosses a threshold', R.v118.zoomChangesScale && R.v118.lodTiersDiffer);
   A('v1.18: the info panel\'s Edit button routes to the existing, untouched Civilization-mode settlement editor', R.v118.editOpensExistingPopup);
@@ -3307,6 +3398,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.31 §8: archetypes are drawn from the declared vocabulary and at least one settlement matches', !R.v131.nPlaces || (R.v131.archetypesValid && R.v131.someArchetype));
   A('v1.31 §6: pasture/crop shares are disjoint fractions and the manure uplift is capped', !R.v131.nPlaces || (R.v131.pastoralShapes && R.v131.pastoralSharesDisjoint));
   A('v1.31 §7: bulk goods without navigable water reach only local markets; luxuries travel regardless', !R.v131.nPlaces || (R.v131.navShapes && R.v131.bulkGatedByWater && R.v131.luxuryAlwaysTravels && R.v131.bulkNeedsWater));
+
+  A('v1.32 A: the setup gate is a canvas-wrap child with a scrollable card, and the overlay guard matches it but not the canvas', R.v132.guardExists && R.v132.gateIsCanvasChild && R.v132.gateCardScrollable && R.v132.guardMatchesGate && R.v132.guardIgnoresCanvas);
+  /* NOTE: this smoke world never generates faction territory (territoryCells stays 0), so every
+     faction's resource means are 0 and the resource-export threshold cannot be exercised here — the
+     assertion is honestly vacuous in that case rather than passing on the unrelated 'food' export.
+     The v1.32 threshold fix itself is verified by reading, not by this run; a world with real
+     territory is needed to exercise it end-to-end. */
+  A('v1.32 B: with real territory at least one faction exports a RESOURCE, not just food (vacuous here — this world has no territory)', !R.v132.territoryCells || R.v132.factionsWithResourceExports > 0);
+  A('v1.32 B: faction exports are valid resource keys and no good is both imported and exported', R.v132.exportsAreValidKeys && R.v132.noGoodBothWays);
+  A('v1.32 D: no settlement is classified coastal while the coast-distance field puts the sea far away', !R.v132.nPlaces || R.v132.wrongCoastal === 0);
+  A('v1.32 E: no settlement reports a river order/width for a river beyond the context radius (the ~618km readout)', !R.v132.nPlaces || R.v132.badRiver === 0);
+  A('v1.32 E: every Site Profile field stays finite and in range, and the km thresholds are resolution-independent', !R.v132.nPlaces || (R.v132.profileFinite && R.v132.boxKmSane));
+  A('v1.32 C: selecting a settlement opens the anchored popup with the city card on top, an Open-city-view button and editable fields', !R.v132.nPlaces || (R.v132.popupOpens && R.v132.popupHasCityCard && R.v132.popupHasCityButton && R.v132.popupHasEditableFields));
+  A('v1.32 C: the fullscreen City Viewer is not forced open by selecting a settlement', !R.v132.nPlaces || R.v132.fullscreenNotForced);
+
 
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
