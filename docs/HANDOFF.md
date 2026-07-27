@@ -9,11 +9,26 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.33.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.34.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.34 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.32` are kept and never edited.
+  (v1.35 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.33` are kept and never edited.
+- **v1.34 — hinterland surplus derived from soil + the 9:1 farmer ratio.** Hash vs v1.33 ALL
+  IDENTICAL. 1001 / 852 / 352 green + new `tests/perf/probe_foodshed.js`.
+  - v1.33's free `FOOD_MARKETED_FRACTION = 0.30` is replaced by the attested **9 farmers : 1
+    urbanite** ratio, with per-cell surplus from soil fertility (470–1000 kg/ha). **Marginal soil
+    yields zero surplus** — that is the brake on runaway city size.
+  - **Structural fix**: v1.33 gave a town its whole catchment ceiling, i.e. the entire population of
+    its own catchment with nobody left farming. It now gets only the surplus.
+  - **The chain is acyclic and now asserted**: terrain → carrying capacity → rural pop → surplus →
+    urban ceiling. Three smoke checks prove no feedback. Keep them green.
+  - **Two calibration traps, both measured**: pinning subsistence to the yield-range midpoint assumes
+    median soil = 0.5 and collapsed urban share to 0.86%; using the yield minimum as a floor gave
+    barren ground a surplus. Calibrate to the world's measured median; scale yield from zero.
+  - Clean world, seed 12345/256px: **urbanisation 13.98%**, all settlements within their sheds.
+  - Parameter audit found and unified a **fourth** duplicate-constant pair (two grain yields).
+
 - **v1.33 — export-reporting audit + the food-shed population ceiling.** Hash vs v1.32 ALL IDENTICAL.
   1001 / 852 / 344 green. Research: `docs/research/food-logistics.md`.
   - **The settlement inspector and the Economy page disagreed about exports.** v1.32 fixed the faction

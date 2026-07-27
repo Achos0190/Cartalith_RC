@@ -12,7 +12,50 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.33 — Export-reporting audit + the food-shed population ceiling
+### v1.34 — The hinterland surplus is derived, not a free parameter
+
+Owner asked for the farm/hinterland supply to be computed from range + soil fertility + historical
+farmer-to-urbanite data, with an explicit warning that the logic must not "start to feed itself" or
+balloon populations. Research extended in `docs/research/food-logistics.md` §6. Terrain pipeline
+untouched — **hash vs v1.33 ALL IDENTICAL including `icons`**. 1001 / 852 / 352 smoke green, plus a
+new clean-world probe.
+
+- **`FOOD_MARKETED_FRACTION = 0.30` is gone.** It had no source. The surplus is now anchored on the
+  attested ratio — **~9 medieval farmers to free up enough surplus for 1 non-farming town dweller**,
+  with ~90% of the population farming — which is precisely what caps pre-industrial urbanisation at
+  the observed 10–15%.
+- **Surplus varies with soil.** `foodSurplusRatio(soil, refSoil)` = `(yield − subsistence) / yield`,
+  capped at 0.35, with yield from soil fertility over the observed 470–1000 kg/ha English range.
+  **Marginal soil returns zero** — it feeds its own farmers and no city — which is the main brake on
+  runaway growth.
+- **Structural error corrected.** v1.33 gave a settlement the *whole* of its local catchment ceiling,
+  which let a town be the entire population of its own catchment with nobody left farming. The
+  catchment feeds farmers too, so the town now gets only the surplus. Same correction applied to what
+  a distant supplier can spare.
+- **Acyclicity is now asserted, not assumed.** The chain is terrain → carrying capacity → rural
+  population → surplus → urban ceiling, one way. Three new smoke assertions prove a settlement's own
+  population cannot change its own food supply, that growing one settlement cannot raise another's
+  ceiling, and that the reconciliation pass is monotonically non-increasing.
+- **Two calibration traps hit and measured** (both documented in the research note):
+  - Pinning subsistence to the midpoint of the yield range assumes median soil = 0.5. This engine's
+    soil does not sit there, so the cut-off landed above most of the map: urban share collapsed
+    **13.8% → 0.86%** and a capital was floored at 50 with a food shed of zero. Now calibrated against
+    the world's own measured median soil.
+  - Using the yield minimum as a floor gave barren ground 470 kg/ha and therefore a surplus. 470–1000
+    is the range for land worth cultivating; yield must scale from zero.
+- **Parameter audit.** Every food figure is now asserted against the research note: 9:1 farmers,
+  470–1000 kg/ha, 160 km cost-doubling by land, 5.5× river, 50× sea, 50 km local radius. Two
+  independent grain-yield constants were found and unified (`GRAIN_KG_PER_HA_MEDIEVAL` was a lone 500
+  while the food shed carried its own 470–1000 range) — **the fourth instance** of the duplicate-
+  constant drift pattern in this file. `GRAIN_YIELD_RATIO_TYPICAL` corrected 3.5 → 4.34, the measured
+  Sussex-manor figure.
+- **New `tests/perf/probe_foodshed.js`.** The smoke suite's world has been mutated by ~340 prior
+  assertions, so it is not a clean sample for an urbanisation measurement; the strict historical-band
+  check runs on a freshly generated world instead. At seed 12345/256px: **urbanisation 13.98%**,
+  median soil reproduces 1/9 exactly, marginal soil yields zero, rich soil caps at 0.35, and every
+  settlement ends within its food shed.
+
+## v1.33 — Export-reporting audit + the food-shed population ceiling
 
 Owner asked three things: audit every surface that reports exports for agreement, check that city and
 capital populations are computed correctly, and stop a food deficit being treated as an import when no

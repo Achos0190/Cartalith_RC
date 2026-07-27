@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.33**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.34**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.33.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.32.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.34.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.33.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -945,6 +945,35 @@ before touching population or trade code.
   was state logistics, not a market outcome), no return-cargo economics, roads gate reachability rather
   than discounting cost continuously.
 
+
+### Hinterland surplus from soil + the 9:1 farmer ratio (v1.34)
+
+Owner asked for farm/hinterland supply computed from range + soil fertility + historical farmer data,
+warning explicitly that it must not "feed itself" or balloon populations. Research:
+`docs/research/food-logistics.md` §6.
+
+- **The anchor is `FARMERS_PER_URBANITE = 9`** — roughly nine medieval farmers freed enough surplus
+  for one non-farming town dweller, ~90% of the population farming. That ratio is what pins
+  urbanisation at the observed 10–15%. v1.33's `FOOD_MARKETED_FRACTION = 0.30` had no source and is
+  gone.
+- **`foodSurplusRatio(soil, refSoil)`** = `(yield − subsistence)/yield`, capped 0.35, yield from soil
+  over the observed 470–1000 kg/ha range. **Marginal soil returns zero** — it feeds its own farmers
+  and no city. That zero is the main brake on runaway city size; do not soften it.
+- **THE CHAIN MUST STAY ACYCLIC**: terrain → carrying capacity → rural population → surplus → urban
+  ceiling. Nothing downstream may feed back. Asserted by the three `v1.34 ACYCLIC` smoke checks (own
+  population cannot change own supply; growth cannot inflate a neighbour; the pass only ever caps).
+  Any future change here must keep those green.
+- **Calibrate against the world's MEASURED median soil**, never an assumed 0.5 midpoint. Pinning to
+  the yield-range midpoint collapsed urban share 13.8% → 0.86% and floored a capital at 50 with a
+  zero food shed. Same self-correcting technique as v1.25's sea-level histogram and v1.31's density
+  normalisation — **this is now the third time assuming a distribution has broken a calibration.**
+- **Yield scales FROM ZERO.** Using `GRAIN_YIELD_MIN_KG_HA` as a floor gives barren ground a real
+  surplus; 470–1000 is the range for land worth cultivating, not for all land.
+- **A settlement only gets the SURPLUS of its own catchment**, not the whole ceiling — v1.33 let a
+  town be its entire catchment population with nobody farming.
+- Strict urbanisation-band verification lives in `tests/perf/probe_foodshed.js` on a freshly generated
+  world; the smoke suite's world is too mutated by ~340 prior assertions to measure against.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -1008,7 +1037,8 @@ tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (344 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (352 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

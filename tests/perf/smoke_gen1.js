@@ -3105,6 +3105,77 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.34: surplus derived from the 9:1 farmer ratio + soil, and the chain proven acyclic ---- */
+  R.v134 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+
+    // PARAMETERS: every figure traceable to the research note
+    o.farmersPerUrbanite = FARMERS_PER_URBANITE;
+    o.yieldRange = [GRAIN_YIELD_MIN_KG_HA, GRAIN_YIELD_MAX_KG_HA];
+    o.doubleKm = { land: FOOD_DOUBLE_KM.land, river: FOOD_DOUBLE_KM.river, sea: FOOD_DOUBLE_KM.sea };
+    o.paramsSane = FARMERS_PER_URBANITE === 9 &&
+      GRAIN_YIELD_MIN_KG_HA === 470 && GRAIN_YIELD_MAX_KG_HA === 1000 &&
+      FOOD_DOUBLE_KM.land === 160 &&
+      Math.abs(FOOD_DOUBLE_KM.river / FOOD_DOUBLE_KM.land - 5.5) < 0.01 &&
+      Math.abs(FOOD_DOUBLE_KM.sea / FOOD_DOUBLE_KM.land - 50) < 0.01 &&
+      FOOD_LOCAL_RADIUS_KM === 50 && GRAIN_YIELD_RATIO_TYPICAL === 4.34;
+    // one source of truth for yield (v1.31's lone 500 kg/ha alias is now derived from the range)
+    o.yieldUnified = Math.abs(grainKgPerHaMedieval() - (GRAIN_YIELD_MIN_KG_HA + GRAIN_YIELD_MAX_KG_HA) / 2) < 1e-9;
+
+    // SURPLUS: median land reproduces 1/9 exactly; marginal land yields nothing; rich land is capped
+    const ref = currentSoilReference();
+    o.soilRef = ref;
+    o.surplusAtMedian = foodSurplusRatio(ref, ref);
+    o.medianIsBaseline = Math.abs(o.surplusAtMedian - 1 / FARMERS_PER_URBANITE) < 1e-9;
+    o.marginalYieldsNothing = foodSurplusRatio(0, ref) === 0 || ref <= 0.001;
+    o.richIsCapped = foodSurplusRatio(1, ref) <= FOOD_SURPLUS_RATIO_MAX + 1e-9;
+    o.surplusMonotonic = foodSurplusRatio(Math.min(1, ref + 0.3), ref) > foodSurplusRatio(ref, ref) - 1e-9;
+    // calibration must follow the world's own soil, not assume a 0.5 midpoint (the v1.34 first-cut bug)
+    o.calibratesToWorld = Math.abs(foodSurplusRatio(0.2, 0.2) - foodSurplusRatio(0.8, 0.8)) < 1e-9;
+
+    if (places.length) {
+      // ACYCLIC: a settlement's own population must never change its own food supply. This is the
+      // "don't let it feed itself" property — terrain -> rural pop -> surplus -> urban ceiling, one way.
+      const p = places.slice().sort((a, b) => (b.pop || 0) - (a.pop || 0))[0];
+      const before = _civFoodShed(p);
+      const origPop = p.pop;
+      p.pop = origPop * 10;
+      const after = _civFoodShed(p);
+      p.pop = origPop;
+      o.ownPopDoesNotFeedItself = Math.abs(after.supported - before.supported) < 1e-6 &&
+                                  Math.abs(after.hinterlandCapacity - before.hinterlandCapacity) < 1e-6 &&
+                                  Math.abs(after.localCapacity - before.localCapacity) < 1e-6;
+      // and growing a settlement must not raise ANOTHER settlement's ceiling (no mutual inflation)
+      if (places.length > 1) {
+        const q = places.find(x => x !== p);
+        const qBefore = _civFoodShed(q).supported;
+        p.pop = origPop * 10;
+        const qAfter = _civFoodShed(q).supported;
+        p.pop = origPop;
+        o.growthDoesNotInflateNeighbours = qAfter <= qBefore + 1e-6;
+      }
+      // the ceiling pass is monotonically non-increasing — it may only ever cap, never grow
+      const popsBefore = places.map(x => x.pop || 0);
+      _civApplyFoodShedCeilings();
+      o.passNeverGrows = places.every((x, k) => (x.pop || 0) <= popsBefore[k] + 1e-9);
+      // urbanisation lands in the historically observed 5-20% band rather than ballooning
+      const rp = _civRegionalPopulation ? _civRegionalPopulation() : null;
+      const settled = places.reduce((a, x) => a + (x.pop || 0), 0);
+      o.urbanShare = rp && rp.total ? settled / rp.total : null;
+      /* Bounded, not pinned to the historical band: by this point ~340 earlier assertions have
+         resampled, extracted and otherwise mutated this world, so its soil/terrain is not a clean
+         sample to measure urbanisation against. The strict 5-20% band is checked on a freshly
+         generated world by tests/perf/probe_foodshed.js instead. What must hold HERE is that the
+         ceiling pass bounds the settled population at all. */
+      const popsAfter = places.reduce((a, x) => a + (x.pop || 0), 0);
+      o.urbanShareBounded = o.urbanShare == null || (o.urbanShare > 0 && o.urbanShare < 1.0);
+      o.passReducesOrHolds = popsAfter <= popsBefore.reduce((a, b) => a + b, 0) + 1e-9;
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3493,6 +3564,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.33: the countryside hinterland actually feeds settlements (not only other settlements\' surplus)', !R.v133.nPlaces || R.v133.hinterlandContributes);
   A('v1.33: after reconciliation every settlement is within its food shed (or at the minimum-population floor), and the pass is a fixed point', !R.v133.nPlaces || (R.v133.allSustainable && R.v133.passIsFixedPoint && R.v133.stillSustainable));
   A('v1.33: a food deficit is only reported as an import when a supply route can actually deliver it', !R.v133.nPlaces || R.v133.deficitNotAutoImport);
+
+  A('v1.34 PARAMS: every food figure matches the research note (9:1 farmers, 470-1000 kg/ha, 160km doubling, 5.5x river, 50x sea, 4.34 seed ratio)', R.v134.paramsSane);
+  A('v1.34 PARAMS: grain yield has one source of truth (v1.31\'s separate 500 kg/ha constant is now derived from the range)', R.v134.yieldUnified);
+  A('v1.34: median soil reproduces the 9:1 baseline exactly, marginal soil yields NO surplus, rich soil is capped', R.v134.medianIsBaseline && R.v134.marginalYieldsNothing && R.v134.richIsCapped && R.v134.surplusMonotonic);
+  A('v1.34: the surplus ratio calibrates to the world\'s own median soil, not an assumed 0.5 midpoint', R.v134.calibratesToWorld);
+  A('v1.34 ACYCLIC: a settlement\'s own population never changes its own food supply (it cannot feed itself)', !R.v134.nPlaces || R.v134.ownPopDoesNotFeedItself);
+  A('v1.34 ACYCLIC: growing one settlement never raises another settlement\'s ceiling (no mutual inflation)', !R.v134.nPlaces || R.v134.growthDoesNotInflateNeighbours !== false);
+  A('v1.34: the reconciliation pass is monotonically non-increasing — it may only cap, never grow', !R.v134.nPlaces || R.v134.passNeverGrows);
+  A('v1.34: the ceiling pass bounds settled population (strict historical band is checked on a clean world by probe_foodshed.js)', !R.v134.nPlaces || (R.v134.urbanShareBounded && R.v134.passReducesOrHolds));
+
 
 
 

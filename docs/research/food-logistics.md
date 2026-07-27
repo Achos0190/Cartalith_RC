@@ -96,3 +96,69 @@ distance", as the owner put it. A settlement 40 km away across trackless mountai
   Hinterland*.
 - Bruce Lloyd / *Geography of Transport Systems*, ch. 1.3, on the ~50 km pre-mechanised supply radius
   and the maritime-nexus condition for cities above 100,000.
+
+## 6. How much surplus a hinterland actually yields (v1.34)
+
+v1.33 used a flat `FOOD_MARKETED_FRACTION = 0.30` — a number with no source, and exactly the kind of
+free parameter that lets settlements balloon. It is replaced by the best-attested figure in this
+subject:
+
+> **Roughly nine medieval farmers were needed to free up enough surplus to feed one non-farming town
+> dweller**, with ~90% of the population working the land.
+
+That single ratio is what pins pre-industrial urbanisation at the observed 10–15%, and it is now the
+anchor the whole food shed hangs from (`FARMERS_PER_URBANITE = 9`).
+
+### Supporting figures
+
+| Quantity | Value | Source |
+|---|---|---|
+| English cereal yields 1250–1450 | 470–1000 kg/ha (7–15 bu/acre) | manorial accounts |
+| Seed-to-harvest, Sussex manors 1350–99 | 4.34 : 1 | manorial accounts |
+| Available after seed + ~25% pest/storage loss | ~440 kg/ha/yr | derived |
+| Cereal need per person | ~100–140 kg/yr (900–1200 of 2200–3000 kcal/day) | WHO-based reconstruction |
+
+### The method
+
+Yield scales with soil fertility, and a cell's farmers eat before anything travels:
+
+```
+surplusRatio(soil) = clamp( (yield(soil) − subsistenceYield) / yield(soil), 0, 0.35 )
+```
+
+`subsistenceYield` is pinned so that **the world's own median soil** reproduces the 9:1 baseline
+exactly. That calibration detail is load-bearing — see the warning below. Marginal soil returns
+**zero**: such land supports its own subsistence farmers and contributes nothing to any city. That is
+the historically correct outcome and the main brake on runaway city size.
+
+### Why this cannot feed itself
+
+The dependency chain runs strictly one way:
+
+```
+terrain → carrying capacity → RURAL population → surplus → URBAN population ceiling
+```
+
+Nothing downstream feeds back upstream. A city's population never raises its own supply, never raises
+rural population, and never raises another settlement's ceiling. The reconciliation pass only ever
+caps, so it is monotonically decreasing and cannot oscillate or amplify. All three properties are
+asserted in `tests/perf/smoke_gen1.js` (the `v1.34 ACYCLIC` checks).
+
+### Two calibration traps, both hit and measured
+
+1. **Do not pin subsistence to the midpoint of the yield range.** That assumes median soil = 0.5.
+   Cartalith's soil field does not sit near 0.5, so the cut-off landed above most of the map: every
+   cell below soil 0.345 returned zero surplus, world urban share collapsed from 13.8% to **0.86%**,
+   and a capital was floored at 50 people with a food shed of literally zero. Calibrate against the
+   world's measured median instead — the same self-correcting technique as the v1.25 sea-level
+   histogram and the v1.31 density normalisation.
+2. **Do not use the yield minimum as a floor under every cell.** Mapping soil [0,1] onto [470,1000]
+   gives barren ground a 470 kg/ha yield and therefore a real surplus. 470–1000 is the range for land
+   *worth cultivating*, not for all land. Yield must scale from zero.
+
+### A structural error this also corrected
+
+v1.33 handed a settlement the **whole** of its local catchment ceiling. That let a town be the entire
+population of its own catchment with nobody left working the fields. The catchment ceiling is the
+population the land can *feed*, farmers included — so the town gets only the surplus, on the same 9:1
+basis as everything else.
