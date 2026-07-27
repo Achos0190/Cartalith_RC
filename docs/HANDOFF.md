@@ -9,11 +9,45 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.29.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.30.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.30 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.28` are kept and never edited.
+  (v1.31 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.29` are kept and never edited.
+- **v1.30 — settlement suitability unified, flood wired in, per-settlement trade.** Owner asked whether
+  exports could be auto-defined and whether suitability really uses all the underlying layers. The
+  audit answered both, and found a correctness bug: there were **two** suitability functions.
+  `buildSettlementSuitability` (block 1) backed the debug view, the `.f32` export and the seed list;
+  `_civExtendedSuitability` (block 2) — richer terms AND a different seed threshold, 0.65 vs 0.42 — was
+  what auto-populate actually placed from, so **the advisory gold dots were never the sites you got**.
+  Now one function: the extended terms live in block 1 behind an optional `opts.ctx` (so it stays a
+  pure primitive, still callable with the original 8 args), `_civExtendedSuitability` is deleted, and
+  `SETTLE_SEED_THRESH` gives the view and the placer one threshold. **Flood** was absent from placement
+  entirely and is now a penalty (plus the slope×flood buildability composite the `siteprofile` view
+  already drew — that view is now a preview of a live term, not a post-hoc description). **`soil` was
+  a declared-but-never-read parameter** and now reaches the score via soil × a rainfall optimum
+  (deliberately not a second temperature bell — carryingCap is already soil × temp × water, so
+  rainfall is the one new agronomic signal). **Water was double-counted** (`wW` and `wC` both read
+  `water[i]`); the old "coast/trade" proxy is replaced by a real coast SDF. **`_civPlaceTrade`** gives
+  each settlement its own exports/imports from specialisation + hinterland + food surplus, measured
+  against the same world mean the faction rule uses. Verified **1001/1001** (+9), **852/852**, hash vs
+  v1.29 **ALL IDENTICAL** (suitability never touches the terrain render), smoke **310/310** (+10).
+- **v1.30's calibration lesson — read before touching `SUIT_W_FULL`.** The first cut redistributed all
+  weights so they summed to 1, which is the obvious thing to do and is wrong. Measured, the field
+  collapsed: median 0.314 → **0.124**, max 0.751 → **0.431**, advisory seeds above 0.42 from 102 to
+  **ONE** — because the average cell lost weight that sat on food and water and gained weight on a
+  coastline it does not have. The rule the code now states explicitly: **CORE** terms exist at every
+  land cell (carrying capacity, freshwater, slope, elevation band, soil×rain, buildability) and sum to
+  1.0, fixing where the sigmoid's 0.5 pivot falls; **OPPORTUNITY** terms (coast, river, lake, minerals)
+  are zero for most of the map and are ADDED on top, never carved out. Post-fix: median 0.205, max
+  0.730, 59 seeds at 0.42. **Placement measured** (seed 12345, 256px): mean floodplain exposure of
+  placed settlements **0.617 → 0.437**, share on high-flood ground **58% → 28%**, 9 of 18 sites
+  unchanged. **Disclosed side effect:** count rose 12 → 18 and the tier mix moved toward hamlets
+  (2 villages → 12). Population comes from carrying capacity, not from the score, so this is not the
+  score shrinking towns — sites pushed off floodplains onto drier ground have less fertile catchments
+  and are legitimately smaller. Floodplains being both the best farmland and the worst foundations is a
+  real tension; the flood weight (0.14) is the dial, left untuned pending a call on how hard it should
+  bite.
 - **v1.29 — eight owner-reported bugs.** Triaged against the code first; three of them (river-ways
   streaking across the map, the LOD tile seam, river-ways inside lakes) share one shape of cause — a
   per-tile or per-polyline computation each neighbour performs on a different truncated view of the

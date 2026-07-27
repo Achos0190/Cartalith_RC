@@ -12,6 +12,78 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.30 (2026-07-27)
+Owner: *"can we also auto select/define export sources? And are we using all the underlying layers …
+to define the best places for settlements as stated in Settlement Suitability?"* Audited before
+building, and the audit changed the answer to both.
+
+**Exports already existed** — `_civFactionAggregates` has always derived them by the same rule as
+imports (territory-mean resource potential vs. the world mean, ±0.15, plus food from the surplus), and
+they were already shown on the Economy page, the Faction editor and the City Viewer. The real gap was
+that both were FACTION-level only, which is the right answer for a polity's balance of trade and the
+wrong one for a town.
+
+**The layer audit found three defects**, one of them a correctness problem:
+1. There were **two** suitability functions and they disagreed. `buildSettlementSuitability` (block 1)
+   backed the Settlement-suitability debug view, the `.f32` export and the seed list; a second, richer
+   `_civExtendedSuitability` (block 2) was what auto-populate actually placed from — with different
+   terms AND a different seed threshold (0.65 vs 0.42). **The gold dots you inspected were never the
+   sites you got.**
+2. **Flood was absent from placement entirely.** `currentFloodField()` was a debug view and a Site
+   Profile field; nothing penalised seeding a town onto a floodplain.
+3. `soil` was a declared parameter of `buildSettlementSuitability` that the body never read (fertility
+   reached the score only transitively, through carrying capacity), and water was counted **twice** —
+   `wW` and `wC` both read `water[i]`, so the "coast/trade" term was never a distinct signal.
+
+- **One scoring function.** The extended terms moved into `buildSettlementSuitability` behind an
+  optional `opts.ctx`, so it stays a pure primitive — every input an argument, nothing read from a
+  global, still callable and headless-testable with the original 8 arguments. `_civExtendedSuitability`
+  is deleted, and `currentSettlementSuitability()` (which always supplies the context) is what the view,
+  the export, `findSettlementSeeds` and auto-populate all read. `SETTLE_SEED_THRESH` gives them one
+  advisory threshold too. **Without a ctx the result is byte-identical to v1.29** — asserted directly
+  against a hand-written copy of the old five-term formula — so the fall-through is a guarantee, not a
+  hope.
+- **The calibration is the interesting part, and the first cut of it was wrong.** Weights were
+  initially redistributed across all terms so they summed to 1. Measured, that collapsed the field:
+  median 0.314 → **0.124**, max 0.751 → **0.431**, and advisory seeds above 0.42 fell from 102 to
+  **ONE** — because the average cell had been stripped of weight that used to sit on food and water
+  and given weight on a coastline it does not have. The fix is a split the code now names explicitly:
+  **CORE** terms exist at every land cell (carrying capacity, freshwater, slope, elevation band,
+  soil×rain, buildability) and sum to 1.0, setting where the sigmoid's 0.5 pivot falls; **OPPORTUNITY**
+  terms (coast, river, lake, minerals) are zero for most of the map and are ADDED on top rather than
+  carved out. Post-fix: median 0.205, max 0.730, 59 seeds at 0.42 — the same order as v1.29's placer
+  (85), lower by design because floodplains are now penalised.
+- **Flood wired in as a penalty**, plus the slope×flood buildability composite the `siteprofile` debug
+  view already drew — so that view is now a preview of a term that decides placement, not a
+  description of a site after the fact. Note the term is *not* "avoid water": being near water is
+  rewarded four separate ways. It is "do not build in the channel bottom", which is why real
+  settlements sit at the floodplain edge.
+- **`soil` finally does something.** It reaches the score through a cropland term, soil × a RAINFALL
+  optimum — deliberately not a second temperature bell, since carryingCap is already soil × temp ×
+  water, so rainfall is the one genuinely new agronomic signal.
+- **Per-settlement imports/exports** (`_civPlaceTrade`): a settlement's own balance of trade from three
+  sources in priority order — its v1.17 specialisation (whose primary good is an export outright, and
+  which implies a food dependency for a mining/fishing/garrison town), its hinterland means against the
+  same world mean the faction rule uses (so town and faction are on one scale), and its food surplus.
+  Imports are filtered to goods a settlement actually consumes, so a hamlet is never reported as
+  "importing gold", and a genuine surplus always beats an inferred need. Rendered in the Settlement
+  Inspector next to the existing faction-level rows. Purely additive — feeds nothing.
+- **Measured placement change** (seed 12345, 256px, auto-populate): mean floodplain exposure of placed
+  settlements **0.617 → 0.437**, and the share sitting on high-flood ground (>0.6) **58% → 28%**. 9 of
+  18 sites are unchanged.
+- **Disclosed side effect, not tuned away**: settlement count rose 12 → 18 and the tier mix shifted
+  toward hamlets (2 villages → 12 hamlets). Population is derived from carrying capacity, not from the
+  suitability score, so this is not the score shrinking settlements — it is the model being consistent:
+  sites pushed off floodplains onto drier ground have less fertile catchments and are legitimately
+  smaller. That is a real tension (floodplains are simultaneously the best farmland and the worst
+  foundations) and the flood weight is the dial for it; left at 0.14 pending a call on how hard it
+  should bite.
+- **`VERSION` was still reading `'1.24'`** six versions on. It is export/atlas metadata and is never
+  gated on, so the drift was harmless — bumped to `'1.30'`.
+- **Verification**: engine **1001/1001** (+9, incl. a direct byte-identity check of the no-ctx branch
+  against the v1.29 formula), UME **852/852**, hash vs v1.29 **ALL IDENTICAL** (suitability never
+  touches the terrain render), smoke **310/310** (+10).
+
 ### v1.29 (2026-07-27)
 Eight owner-reported bugs in one pass, triaged against the code before anything was written. Three of
 them (B2/B5/B7) turned out to share one shape of cause — a per-tile or per-polyline computation that

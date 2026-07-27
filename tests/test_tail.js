@@ -2282,6 +2282,70 @@ if (typeof applyTidalSedimentation === 'function') {
   const suit2 = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea);
   check('settleSuitability deterministic', suit.every((v, i) => v === suit2[i]));
 
+  /* ---------- v1.30: one suitability function, with the richer terms behind opts.ctx ---------- */
+  {
+    /* the no-ctx branch must reproduce v1.29's five-term formula EXACTLY — that is what makes the
+       function safe to call with the original 8 arguments (and what every assertion above relies on) */
+    const manual = new Float32Array(n);
+    const denom = Math.max(1e-6, 1 - sea);
+    for (let i = 0; i < n; i++) {
+      if (fld[i] < sea) continue;
+      const K = carry[i], Wa = water[i];
+      const A = Math.max(0, 1 - slopeFlat[i] / 4.0);
+      const r = (fld[i] - sea) / denom;
+      const D = Math.max(0, 1 - 4 * Math.abs(r - 0.35));
+      const Z = 0.35 * K + 0.25 * Wa + 0.15 * A + 0.10 * D + 0.15 * Math.min(1, Wa * 1.2);
+      manual[i] = Math.max(0, Math.min(1, 1 / (1 + Math.exp(-6 * (Z - 0.5)))));
+    }
+    check('v1.30 settleSuitability: no-ctx branch is byte-identical to the v1.29 formula',
+      suit.every((v, i) => v === manual[i]));
+    check('v1.30 SUIT_W_BASE and the core of SUIT_W_FULL each sum to 1',
+      Math.abs(SUIT_W_BASE.K + SUIT_W_BASE.W + SUIT_W_BASE.A + SUIT_W_BASE.D + SUIT_W_BASE.C - 1) < 1e-9 &&
+      Math.abs(SUIT_W_FULL.K + SUIT_W_FULL.W + SUIT_W_FULL.A + SUIT_W_FULL.D + SUIT_W_FULL.agri + SUIT_W_FULL.build - 1) < 1e-9);
+
+    /* a lake surface scores 0 — the old base function happily scored lake cells as land */
+    const wbLake = new Uint8Array(n); wbLake[10 * W + 6] = 2;
+    const sLake = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: { waterBodies: wbLake } });
+    check('v1.30 settleSuitability: a lake cell scores 0', sLake[10 * W + 6] === 0 && sLake[10 * W + 7] > 0);
+
+    /* FLOOD is a penalty and it is the layer that was missing entirely before v1.30 */
+    const noFlood = new Float32Array(n), allFlood = new Float32Array(n).fill(1);
+    const sDry = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: { flood: noFlood } });
+    const sWet = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: { flood: allFlood } });
+    check('v1.30 settleSuitability: a floodplain scores below identical dry ground',
+      sWet[10 * W + 6] < sDry[10 * W + 6]);
+
+    /* MINERALS raise a site that food/water alone would not justify */
+    const ore = {}; for (const k of SUIT_RESOURCE_KEYS) ore[k] = new Float32Array(n);
+    ore.iron.fill(1); ore.copper.fill(1);
+    const sOre = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: { resources: ore } });
+    const sNoOre = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: {} });
+    check('v1.30 settleSuitability: mineral potential raises the score', sOre[10 * W + 6] > sNoOre[10 * W + 6]);
+
+    /* SOIL finally does something: it was a declared-but-never-read parameter until v1.30, and now
+       reaches the score through the rainfall-optimum cropland term */
+    const rainOpt = new Float32Array(n).fill(0.45);   // inside the agronomic optimum band
+    const richSoil = new Float32Array(n).fill(1), poorSoil = new Float32Array(n).fill(0);
+    const sRich = buildSettlementSuitability(richSoil, water, carry, fld, slopeFlat, W, H, sea, { ctx: { rain: rainOpt } });
+    const sPoor = buildSettlementSuitability(poorSoil, water, carry, fld, slopeFlat, W, H, sea, { ctx: { rain: rainOpt } });
+    check('v1.30 settleSuitability: soil now affects the score (it was a dead parameter)',
+      sRich[10 * W + 6] > sPoor[10 * W + 6]);
+    /* …and the same soil difference is invisible without a ctx, proving the fall-through really is v1.29 */
+    const sRichNoCtx = buildSettlementSuitability(richSoil, water, carry, fld, slopeFlat, W, H, sea);
+    const sPoorNoCtx = buildSettlementSuitability(poorSoil, water, carry, fld, slopeFlat, W, H, sea);
+    check('v1.30 settleSuitability: soil is still inert on the no-ctx path (v1.29 behaviour preserved)',
+      sRichNoCtx.every((v, i) => v === sPoorNoCtx[i]));
+
+    /* still finite, still in range, still deterministic with a full context */
+    const fullCtx = { waterBodies: new Uint8Array(n), flood: noFlood, resources: ore, rain: rainOpt,
+                      slope: new Float32Array(n).fill(0.002), flowThresh: n * 0.0004 };
+    const sFull = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: fullCtx });
+    const sFull2 = buildSettlementSuitability(soil, water, carry, fld, slopeFlat, W, H, sea, { ctx: fullCtx });
+    check('v1.30 settleSuitability: full ctx stays finite in [0,1]',
+      allFinite(sFull) && (([mn, mx]) => mn >= 0 && mx <= 1)(minMax(sFull)));
+    check('v1.30 settleSuitability: full ctx deterministic', sFull.every((v, i) => v === sFull2[i]));
+  }
+
   /* findSettlementSeeds */
   /* create a synthetic suitability field with two clear peaks */
   const synthSuit = new Float32Array(W * H);
@@ -2602,7 +2666,10 @@ if (typeof renderAffordanceTileRGBA === 'function') {
 /* ---------- v0.110: debug-layer opacity + clickable settlement seed "why" ---------- */
 if (typeof settlementSeedInfo === 'function') {
   // settlementSeedInfo: structured breakdown at a settlement seed
-  const seeds = findSettlementSeeds(currentSettlementSuitability(), GW, GH);
+  /* v1.30: use the app's own advisory threshold rather than findSettlementSeeds' raw 0.65 default —
+     nothing in the app calls it without one any more (the debug view and auto-populate both pass
+     SETTLE_SEED_THRESH), so testing the bare default was testing a path that no longer ships. */
+  const seeds = findSettlementSeeds(currentSettlementSuitability(), GW, GH, { thresh: SETTLE_SEED_THRESH });
   check('findSettlementSeeds returns advisory seeds', Array.isArray(seeds) && seeds.length > 0);
   /* guard: on a broken/empty world seeds can be empty — record the FAIL above but don't crash the
      suite (an unguarded seeds[0].x TypeError here used to abort ~200 later assertions). */

@@ -2790,6 +2790,64 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  /* ── v1.30: one suitability function (view == placer), flood wired in, per-settlement trade ── */
+  R.v130 = await page.evaluate(async () => {
+    const out = {};
+    // the second, divergent scorer is gone — nothing may reintroduce a private copy
+    out.extendedRetired = (typeof _civExtendedSuitability === 'undefined');
+    out.oneThreshold = typeof SETTLE_SEED_THRESH === 'number';
+
+    // the advisory seeds the debug view draws ARE the candidates auto-populate scores from:
+    // same field object, same threshold
+    const fieldA = currentSettlementSuitability(), fieldB = currentSettlementSuitability();
+    out.sameFieldObject = fieldA === fieldB;                       // cached, so the view and placer cannot drift
+    const seedsView = findSettlementSeeds(fieldA, GW, GH, { thresh: SETTLE_SEED_THRESH });
+    out.seedCount = seedsView.length;
+    out.seedsExist = seedsView.length > 0;
+
+    // flood is now a real term: high-flood cells score below otherwise-identical dry ones
+    { const flood = currentFloodField();
+      let wet = -1, dry = -1;
+      for (let i = 0; i < flood.length && (wet < 0 || dry < 0); i++) {
+        if (field[i] < state.seaLevel) continue;
+        if (flood[i] > 0.75 && wet < 0) wet = i;
+        if (flood[i] < 0.15 && dry < 0) dry = i;
+      }
+      out.foundFloodPair = wet >= 0 && dry >= 0;
+      // measured through the pure function so the comparison isolates the flood term
+      if (wet >= 0) {
+        const n = GW * GH, zero = new Float32Array(n), ones = new Float32Array(n).fill(1);
+        const slopeN = new Float32Array(n).fill(0.5);
+        const K = currentCarryingCapacity(), Wa = currentWaterAccess(), So = currentSoil();
+        const a = buildSettlementSuitability(So, Wa, K, field, slopeN, GW, GH, state.seaLevel, { ctx: { flood: zero } });
+        const b = buildSettlementSuitability(So, Wa, K, field, slopeN, GW, GH, state.seaLevel, { ctx: { flood: ones } });
+        out.floodPenalises = b[wet] < a[wet];
+      }
+    }
+
+    // per-settlement trade: derived from this settlement's own hinterland/specialisation/food,
+    // not copied from its faction
+    { const places = (state.places || []).filter(p => p && p.category === 'settlement');
+      out.havePlaces = places.length > 0;
+      if (places.length) {
+        const trades = places.map(p => _civPlaceTrade(p));
+        out.anyTrade = trades.some(t => t.exports.length || t.imports.length);
+        out.noGoodBothWays = trades.every(t => t.exports.every(k => t.imports.indexOf(k) < 0));
+        out.everyTradeHasBasis = trades.every(t => (!t.exports.length && !t.imports.length) || t.basis.length > 0);
+        // …and it is genuinely per-settlement: at least two settlements disagree, OR there is only one
+        const sigs = new Set(trades.map(t => t.exports.join('|') + '/' + t.imports.join('|')));
+        out.variesBySettlement = places.length < 2 || sigs.size > 1;
+        // a settlement with a specialisation exports its primary good
+        const spec = places.find(p => p.specialisation && p.specialisation !== 'none' && _CIV_SPEC_EXPORT[p.specialisation]);
+        out.specExports = !spec || _civPlaceTrade(spec).exports.indexOf(_CIV_SPEC_EXPORT[spec.specialisation]) >= 0;
+        // the inspector actually renders it
+        const html = _civFormatPlaceInsp(places[0]);
+        out.inspectorRenders = typeof html === 'string' && /Exports|Prosperity/.test(html);
+      }
+    }
+    return out;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -3123,6 +3181,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.29 B6: flatten-sea off, or lakes-as-water off, returns `field` itself (no allocation, no divergence from the 2D map)', R.v129.offReturnsField && R.v129.showLakesOffRespected);
   A('v1.29 B7: a river run crossing open water is dropped, not stroked across the lake', R.v129.lakeSplit);
   A('v1.29 B7: a cell inside the lake\'s sub-cell flood band no longer counts as dry land', R.v129.foundFloodBand ? R.v129.floodBandIsWet : true);
+
+  // ── v1.30: unified suitability + flood + per-settlement trade ──
+  A('v1.30: the second, divergent suitability scorer is gone (no private copy left behind)', R.v130.extendedRetired);
+  A('v1.30: one advisory seed threshold shared by the debug view and auto-populate', R.v130.oneThreshold);
+  A('v1.30: the view and the placer read the same cached field object, so they cannot drift', R.v130.sameFieldObject && R.v130.seedsExist);
+  A('v1.30: flood is a real penalty — a floodplain scores below identical dry ground', R.v130.foundFloodPair ? R.v130.floodPenalises : true);
+  A('v1.30: settlements report their own exports/imports, not only their faction\'s', R.v130.havePlaces ? R.v130.anyTrade : true);
+  A('v1.30: no good is listed as both an export and an import', R.v130.havePlaces ? R.v130.noGoodBothWays : true);
+  A('v1.30: every reported trade states what it was derived from', R.v130.havePlaces ? R.v130.everyTradeHasBasis : true);
+  A('v1.30: trade genuinely varies between settlements (it is not the faction row copied down)', R.v130.havePlaces ? R.v130.variesBySettlement : true);
+  A('v1.30: a specialised settlement exports its primary good', R.v130.havePlaces ? R.v130.specExports : true);
+  A('v1.30: the settlement inspector renders the trade rows', R.v130.havePlaces ? R.v130.inspectorRenders : true);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

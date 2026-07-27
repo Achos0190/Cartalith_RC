@@ -3,20 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.29**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.30**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.29.html` | **Current** unified tool (~24.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.28.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.30.html` | **Current** unified tool (~24.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.29.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports, `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 992-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +28,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (992 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1001 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -827,6 +827,42 @@ each neighbour performs on a different, truncated view of the same shared data.
   cut are unchanged; all canvas/GPU/touch behaviour here (joystick, pinch, WebGL drape, the seam
   itself) is under this file's headless carve-out and still wants an on-device pass.
 
+### Settlement suitability: one function (v1.30)
+
+Answering an owner audit question ("are we using all the underlying layers?"). The answer was no, and
+there were **two** scoring functions that disagreed — `buildSettlementSuitability` for the debug view/
+export/seed list, `_civExtendedSuitability` for what auto-populate actually placed, with different
+terms and different seed thresholds. Now one.
+
+- **`buildSettlementSuitability(soil, water, carryingCap, fld, slopeN, W, H, sea, opts)` is the only
+  scorer.** The richer terms arrive via `opts.ctx` (waterBodies/flow/riverOrder/coastSDF/resources/
+  rain/flood/slope), so it stays a pure primitive — every input an argument — and is still callable
+  with the original 8 arguments. **Without `ctx` it is byte-identical to v1.29** (asserted against a
+  hand-written copy of the old formula); `currentSettlementSuitability()` always supplies one, so the
+  full model is the app default. `SETTLE_SEED_THRESH` is the single advisory threshold.
+- **CORE vs OPPORTUNITY is the calibration rule, and getting it wrong is silent.** Core terms exist at
+  every land cell (carrying capacity, freshwater, slope, elevation band, soil×rain, buildability) and
+  must sum to 1.0 — they set where the sigmoid's 0.5 pivot falls. Opportunity terms (coast, river,
+  lake, minerals) are zero for most of the map and are ADDED on top. A first cut redistributed
+  everything into one budget summing to 1 and the field collapsed — median 0.314→0.124, seeds above
+  0.42 from 102 to ONE — because the average cell was stripped of weight on food and water and given
+  weight on a coastline it does not have. Never spend core weight on a term that is usually zero.
+- **Flood is a penalty, and it is not "avoid water".** Being near water is rewarded four separate ways
+  (freshwater, coast, river, lake). The flood term says "do not build in the channel bottom", which is
+  why real settlements sit at the floodplain EDGE. Measured effect on placement: mean floodplain
+  exposure 0.617→0.437, share on high-flood ground 58%→28%.
+- **`soil` used to be a declared parameter the body never read** — fertility reached the score only
+  through carryingCap. It now drives a cropland term, soil × a RAINFALL optimum: deliberately not a
+  second temperature bell, since carryingCap is already soil × temp × water, so rainfall is the only
+  genuinely new agronomic signal available.
+- **Pop density and Site Profile are deliberately NOT inputs.** `currentPopulationDensity()` is derived
+  *from* carrying capacity, so feeding it back double-counts. `_umSiteProfile` is per-placed-settlement
+  and describes a chosen site; its landform signals reach placement through the shared full-grid
+  rasters (`currentSlopeField`/`currentFloodField`) instead.
+- **`_civPlaceTrade(p)`** gives a settlement its OWN exports/imports (specialisation → hinterland →
+  food surplus), measured against the same world mean `_civFactionAggregates` uses so town and faction
+  are on one scale. Faction-level rows stay, labelled as such. Feeds nothing — display only.
+
 ### Engine (block 1) essentials
 
 One module scope, module-level globals, no classes. Resolution `GW × GH` (world mode = 2:1
@@ -885,12 +921,12 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 992-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1001-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (300 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (310 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding
