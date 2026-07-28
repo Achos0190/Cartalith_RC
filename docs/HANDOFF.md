@@ -9,11 +9,25 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.44.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.45.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.45 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.43` are kept and never edited.
+  (v1.46 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.44` are kept and never edited.
+- **v1.45 — River deep-zoom fade: the second factor.** Closes the item v1.41 left open ("a real
+  but PARTIAL recovery... a second factor is still unidentified"). Hash vs v1.44 ALL IDENTICAL.
+  1001 / 852 / **393** green.
+  - **Root cause: a glyph-sizing cap reused on a stroke-width law that didn't need one.** The
+    river-ways call site in `drawLODView` capped `zk` at 8 (`Math.min(8,GW/span)`), copied from
+    `drawLODDebugOverlays`' SEPARATE glyph-sizing `zk`, before handing it to `drawRiverWays`'s own
+    self-damping `baseW*sqrt(zk)` width law. But `zk` is also the exact `GW/span` factor driving
+    the (uncapped) `px`/`py` geometry reprojection — so past zoom 8 the stroke froze while the line's
+    on-screen coordinates kept stretching apart, reading as a thinning/fading river.
+  - **Fix**: one line, `const zk=GW/span;` (no cap), isolated to that one call site.
+    `drawLODDebugOverlays`' own glyph `zk` is untouched.
+  - Found by ablation (a controlled off-vs-on pixel-diff probe ruled out `riverSinuosity`,
+    `rdpSimplify`, `catmullRomSample` before landing on the real cause). Measured: zoom 8 unaffected
+    (already under the old cap); zoom 32 painted pixels 3,928 → 7,020 (+79%).
 - **v1.44 — Route Editor: journey editing gets a full screen.** Owner: "when clicking a route I
   wish it to open a full screen menu so we can properly make edits" (route visual upper-left, edit
   stops/traveler options/carriage/season/weather, current suggestion system kept). Hash vs v1.43
@@ -62,28 +76,44 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   - Settlement popup no longer overflows: long road/export lists now wrap.
 
 - **OPEN, reported by owner, NOT yet addressed** (top of the queue):
-  1. **Rivers disappear when zooming under LOD tiling** — INVESTIGATED, NOT REPRODUCED (v1.40).
-     Measured by diffing the `#view` canvas with `state.viz.riverWays` off vs on at seed 12345/256px:
-     off-LOD 6,041 changed px; LOD z=1 20,334; z=2 18,272; z=4 25,116; z=8 14,926. Rivers therefore
-     DO draw at every zoom the probe can reach, and the decline from z=4 to z=8 is simply less world
-     on screen, not fading (the v1.29 width law is `base·√z` under LOD, which gets WIDER with zoom).
-     Ruled out along the way: the draw gate (`state.viz.riverWays && dbg==='off' && biome`) is
-     zoom-independent — `biome` is just `state.mode==='biome'`; and the `inView` cull keeps a polyline
-     if ANY point is within pad 4, so it cannot drop them wholesale.
-     **Untested variable, and the most likely culprit: the BAKED ATLAS tile path.** The probe drives
-     `_lodZoom` directly on live tiles; a world with baked LOD tiles renders through a different path,
-     and `_lodZoom` is also capped at 8 here. To reproduce, bake the atlas first and/or zoom past the
-     cap by real wheel interaction. Worth asking the owner whether their world has baked tiles.
+  1. ~~Rivers disappear when zooming under LOD tiling~~ **FIXED v1.45.** v1.40's own probe (below,
+     kept for the record) measured no wholesale disappearance, and v1.41 partially fixed a real
+     de-emphasis effect (356→479 px recovery at zoom 32) but left "a second factor... unidentified."
+     v1.45 found it: `drawLODView`'s river-ways call site capped `zk` at 8
+     (`Math.min(8,GW/span)`, copied from `drawLODDebugOverlays`' separate glyph-sizing `zk`) before
+     handing it to `drawRiverWays`'s own self-damping `baseW*sqrt(zk)` stroke-width law — freezing
+     the stroke width past zoom 8 while the (uncapped) geometry reprojection kept stretching the
+     line apart, so it read relatively thinner the deeper you zoomed. Fix: `const zk=GW/span;`
+     (no cap), isolated to that one call site. Measured: zoom 8 unaffected; zoom 32 painted pixels
+     3,928 → 7,020 (+79%). See CLAUDE.md's "River deep-zoom fade: the second factor (v1.45)".
+     <details><summary>v1.40's original investigation (superseded, kept for the record)</summary>
+
+     INVESTIGATED, NOT REPRODUCED (v1.40). Measured by diffing the `#view` canvas with
+     `state.viz.riverWays` off vs on at seed 12345/256px: off-LOD 6,041 changed px; LOD z=1 20,334;
+     z=2 18,272; z=4 25,116; z=8 14,926. Rivers therefore DO draw at every zoom the probe can reach,
+     and the decline from z=4 to z=8 is simply less world on screen, not fading (the v1.29 width law
+     is `base·√z` under LOD, which gets WIDER with zoom). Ruled out along the way: the draw gate
+     (`state.viz.riverWays && dbg==='off' && biome`) is zoom-independent — `biome` is just
+     `state.mode==='biome'`; and the `inView` cull keeps a polyline if ANY point is within pad 4, so
+     it cannot drop them wholesale. (The baked-atlas path this note flagged as the likely culprit was
+     later ruled out too — v1.29's own CHANGELOG entry: "85 tiles baked, zero difference.")
+     </details>
   2. Settlements with a port still sit inland — v1.37 fixed coastal DETECTION, not PREFERENCE; the
-     suitability coast weight is not strong enough to pull a seed to the shore.
+     suitability coast weight is not strong enough to pull a seed to the shore. **STILL OPEN** —
+     raising the coast weight clusters seeds and the suppression radius culls them net-negative
+     (29 → 12, v1.40); needs a mechanism that doesn't fight the suppression radius (e.g. shrinking
+     the radius specifically near the coast, or a local nudge-toward-coast instead of a global
+     suitability reweight) rather than another attempt at the same lever.
   3. ~~Settlements seeded on tiny islets~~ **FIXED v1.40** (`buildLandmassQuality`; islet occupancy
-     → 0, settlement count unchanged). Coastal PREFERENCE is still open — raising the coast weight
-     clusters seeds and the suppression radius culls them (29 → 12), so it was reverted.
+     → 0, settlement count unchanged). Coastal PREFERENCE is still open — see #2 above.
   4. **PARTLY FIXED v1.42.** Road generation now compares land against sea (`_civPreferSeaRoutes`,
      Diocletian cost ratios, drops a redundant road only when it is not the sole overland link).
      Correction to the earlier diagnosis: journeys are USER-DRAWN, so this was never a journey-planner
-     bug — the screenshot's line is a generated civWay. STILL OPEN: travel-mode re-biasing, which
-     needs the planner to re-path rather than classify an already-drawn route.
+     bug — the screenshot's line is a generated civWay. **STILL OPEN**: travel-mode re-biasing.
+     `_jpRoadCells()` skips sea lanes outright (never a routing candidate) and `_jpDeriveStages`
+     classifies an already-fixed user-drawn path, so mode selection has nothing to act on. Needs a
+     real multi-modal graph (land ways + sea lanes + navigable river reaches, each with a per-km
+     cost) and re-pathing when the Route Editor's (v1.44) transport mode changes — not built.
 
 - **v1.38 — the City Viewer reports the settlement's own trade, not its faction's.** Hash vs v1.37 ALL
   IDENTICAL. 1001 / 852 / 365 green. The popup used `_civPlaceTrade`, the viewer used

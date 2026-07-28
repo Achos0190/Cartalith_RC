@@ -3532,6 +3532,78 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.45 (the v1.41 "second factor"): drawLODView's river-ways call site fed drawRiverWays a zk
+  // hard-capped at 8 (Math.min(8,GW/span)), copied from drawLODDebugOverlays' own SEPARATE glyph-
+  // sizing zk. That froze the sqrt-damped stroke-width law right where geometry reprojection (px/py,
+  // driven by the same real uncapped GW/span) keeps stretching apart, so past zoom 8 the river line
+  // read relatively THINNER the deeper you go — the reported "rivers fade out" symptom. Fix: use the
+  // real uncapped zk at the river-ways call site (glyph sizing elsewhere is untouched).
+  R.v145 = await page.evaluate(async () => {
+    const o = {};
+    const savedLodOn = _lodOn, savedLodZoom = _lodZoom, savedLodCx = _lodCx, savedLodCy = _lodCy,
+      savedLodTile = _lodTile, savedRiverWays = state.viz.riverWays, savedDebug = state.debug, savedMode = state.mode;
+    const origDraw = window.drawRiverWays;
+    try {
+      state.debug = 'off'; state.mode = 'biome';
+      if (!_riverNet) _riverNet = buildRiverNetwork(field, flowField, GW, GH, state.seaLevel, { world: state.world, riverDensity: (state.viz.riverDensity) || 1 });
+      let spotX = GW / 2, spotY = GH / 2, found = false;
+      for (let y = 4; y < GH - 4 && !found; y++) for (let x = 4; x < GW - 4 && !found; x++) {
+        if (_riverNet.order[y * GW + x] >= 2) { spotX = x; spotY = y; found = true; }
+      }
+      o.foundRiverSpot = found;
+
+      _lodOn = true; _lodTile = 64; _lodCx = spotX; _lodCy = spotY; state.viz.riverWays = true;
+
+      // deep zoom: the zk actually handed to drawRiverWays must track the real uncapped GW/span,
+      // not the old Math.min(8,...) clamp
+      _lodZoom = 32; applyView();
+      let capturedZk = null;
+      window.drawRiverWays = function (riverNet, reproj) { capturedZk = reproj && reproj.zk; return origDraw.apply(this, arguments); };
+      renderNow();
+      window.drawRiverWays = origDraw;
+      const v = lodViewRect(), span = v.x1 - v.x0, expectedZk = GW / span;
+      o.zkUncappedAtDeepZoom = capturedZk != null && Math.abs(capturedZk - expectedZk) < 1e-6 && capturedZk > 8;
+
+      // shallow zoom: zk was already <= 8 pre-fix (Math.min(8,zk)===zk there), so this path must
+      // read exactly the same as before — the default/shallow-zoom render cannot change
+      _lodZoom = 6; applyView();
+      let capturedZkShallow = null;
+      window.drawRiverWays = function (riverNet, reproj) { capturedZkShallow = reproj && reproj.zk; return origDraw.apply(this, arguments); };
+      renderNow();
+      window.drawRiverWays = origDraw;
+      o.shallowZoomAlreadyUnderOldCap = capturedZkShallow != null && capturedZkShallow <= 8;
+
+      // exact-pixel-diff, world-agnostic: at deep zoom the uncapped stroke law must paint
+      // meaningfully more river pixels than a monkeypatched reproduction of the old hard-capped-at-8
+      // law paints on the SAME world/view (compares the fix to the old behavior, not to an absolute
+      // pixel count — so this isn't sensitive to which world the smoke suite happens to be running)
+      function paintedDiff(capOld) {
+        window.drawRiverWays = capOld
+          ? function (riverNet, reproj) { const r2 = reproj ? Object.assign({}, reproj, { zk: Math.min(8, reproj.zk) }) : reproj; return origDraw.call(this, riverNet, r2); }
+          : origDraw;
+        const cv = document.getElementById('view'), ctx = cv.getContext('2d');
+        state.viz.riverWays = false; renderNow();
+        const off = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        state.viz.riverWays = true; renderNow();
+        const on = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        let diff = 0;
+        for (let i = 0; i < off.length; i += 4) if (off[i] !== on[i] || off[i + 1] !== on[i + 1] || off[i + 2] !== on[i + 2]) diff++;
+        return diff;
+      }
+      _lodZoom = 32; applyView();
+      const paintedUncapped = paintedDiff(false);
+      const paintedCapped = paintedDiff(true);
+      window.drawRiverWays = origDraw;
+      o.deepZoomPaintsMoreThanOldCap = found && paintedUncapped > paintedCapped * 1.1;
+    } finally {
+      window.drawRiverWays = origDraw;
+      _lodOn = savedLodOn; _lodZoom = savedLodZoom; _lodCx = savedLodCx; _lodCy = savedLodCy; _lodTile = savedLodTile;
+      state.viz.riverWays = savedRiverWays; state.debug = savedDebug; state.mode = savedMode;
+      applyView(); renderNow();
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -3981,6 +4053,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.44: the Route Editor opens on call, sets its guard flag, and populates the party/stops/route-map surfaces', R.v144.opensOnCall && R.v144.modalHasOpenClass && R.v144.reOpenFlagSet && R.v144.routeMapCanvasExists && R.v144.partyFormPopulated && R.v144.stopsListPopulated);
   A('v1.44: the canvas-wheel scroll guard covers the open Route Editor (the v1.32 scroll-fix pattern)', R.v144.scrollGuardCoversModal);
   A('v1.44: the Route Editor closes on call and clears its guard flag', R.v144.closesOnCall && R.v144.reOpenFlagCleared);
+
+  A('v1.45: at deep LOD zoom, drawRiverWays receives the real uncapped GW/span zk, not the old Math.min(8,...) clamp', R.v145.foundRiverSpot && R.v145.zkUncappedAtDeepZoom);
+  A('v1.45: at shallow LOD zoom (already <=8 pre-fix), the river-ways zk is unchanged from before', R.v145.shallowZoomAlreadyUnderOldCap);
+  A('v1.45: at deep zoom the uncapped stroke-width law paints meaningfully more river pixels than the old hard-capped-at-8 law on the same view', R.v145.deepZoomPaintsMoreThanOldCap);
 
 
 

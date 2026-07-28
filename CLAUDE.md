@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.43**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.45**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.44.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.43.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.45.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.44.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,37 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### River deep-zoom fade: the second factor (v1.45)
+
+Closes the "second factor... unidentified" item v1.41 left open (356→479 px recovery at zoom 32 —
+"a real but PARTIAL recovery"). Found by ablation (an off-vs-on exact-pixel-diff probe at zoom
+8/24/32/48, toggling `riverSinuosity`/`rdpSimplify`/`catmullRomSample` one at a time — all three
+negligible) rather than by more staring at the render. Hash vs v1.44 **ALL IDENTICAL** in every
+scenario — the fix sits entirely inside the opt-in deep-LOD-zoom `riverWays`-on branch of
+`drawLODView`.
+
+- **A glyph-sizing cap doesn't belong on a self-damping stroke law.** The river-ways call site
+  computed `const zk=Math.min(8,GW/span)` before handing it to `drawRiverWays`'s `baseW*sqrt(zk)`
+  width law (v1.29's own design, already self-limiting via the square root — never meant to need a
+  ceiling). The cap was copied from `drawLODDebugOverlays`' SEPARATE local `zk`, which correctly
+  caps GLYPH size past ~8×. But `zk` here is also, one line away, the exact same `GW/span` factor
+  driving `px`/`py`'s geometry reprojection — uncapped, and still stretching past zoom 8. Capping
+  only the width while the geometry keeps stretching makes the line read relatively THINNER the
+  deeper you zoom: the reported symptom. v1.41's own de-emphasis fix addressed the alpha term, not
+  this width term — both were independently fighting the same zoom range.
+- **The fix is one line, isolated to the one call site**: `const zk=GW/span;` (no cap).
+  `drawLODDebugOverlays`' own glyph `zk` is untouched — capping glyph size is still correct, it was
+  only ever wrong to reuse that cap for a law that already damps itself.
+- **Measured** (seed 12345/256px): zoom 8 unaffected (`Math.min(8,zk)===zk` already, hence the
+  default/shallow-zoom render provably cannot change); zoom 32 3,928px → 7,020px (+79%).
+- **Tests**: 3 new smoke assertions (`R.v145`) — captured `zk` at deep zoom now equals the real
+  uncapped `GW/span`; captured `zk` at shallow zoom is unchanged; a world-agnostic pixel-diff
+  comparing the live render against a monkeypatched reproduction of the old cap on the identical
+  view (compares the fix to the old behavior, not to an absolute count, so it isn't sensitive to
+  whatever world the smoke suite happens to be running).
+- **Known scope cut**: the v1.29-disclosed per-tile seam residue and any further order-1
+  de-emphasis-curve tuning are separate, still-open items.
+
 ### Route Editor: journey editing gets a full screen (v1.44)
 
 Owner: "when clicking a route I wish it to open a full screen menu so we can properly make edits" —
@@ -1250,7 +1281,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (390 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (393 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

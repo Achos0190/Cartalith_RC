@@ -12,6 +12,54 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.45 — River deep-zoom fade: the second factor
+
+The v1.41 CHANGELOG entry left one open item: a genuine root-cause fix for deep-zoom river
+de-emphasis (356→479 painted px at zoom 32, "a real but PARTIAL recovery... a second factor is
+still unidentified"), with the draw gate, viewport cull, baked-atlas path, and stroke-width law
+itself already ruled out. Found by ablation: a controlled probe (off-vs-on exact-pixel diff at
+seed 12345/256px, zoom 8/24/32/48) toggled `riverSinuosity`, `rdpSimplify`, and `catmullRomSample`
+one at a time — all three showed negligible effect — before landing on the real cause. Hash vs
+v1.44 **ALL IDENTICAL** in every scenario (the fix sits entirely inside the opt-in, deep-LOD-zoom,
+`riverWays`-on vector-overlay branch of `drawLODView`; the default off-LOD render, and even the
+same code path at shallow zoom, cannot change).
+
+- **Root cause: a glyph-sizing cap was copy-pasted onto a stroke-width law that didn't need one.**
+  `drawLODView`'s river-ways call site computed `const zk=Math.min(8,GW/span);` before handing it
+  to `drawRiverWays({px,py,inView,zk})`, which feeds v1.29's own `baseW*sqrt(zk)` stroke-width law
+  — a law v1.29 *designed* to self-limit growth via the square root, never meant to need a hard
+  ceiling on top. The `Math.min(8,...)` was lifted from `drawLODDebugOverlays`' own SEPARATE local
+  `zk`, which caps glyph/marker sizes so they don't clutter the view past ~8×. That's the right
+  call for a fixed-size glyph; it's the wrong call for a stroke law whose own math already damps
+  growth, because `zk` isn't just a size input here — it's *also*, one line away, the exact same
+  `GW/span` factor driving `px`/`py`'s geometry reprojection, which is NOT capped and keeps
+  stretching the polyline's on-screen coordinates apart past zoom 8. Capping only the width while
+  the geometry keeps stretching means the line reads relatively THINNER the deeper you go — exactly
+  the reported "rivers fade out" symptom, and exactly why v1.41's own fix (fading order-1 rivers
+  more gently at depth) only partially recovered it: that fix addressed the *alpha* term, not the
+  *width* term, and both were fighting the same zoom range for different reasons.
+- **The fix is one line**: `const zk=GW/span;` (no cap) at the river-ways call site only.
+  `drawLODDebugOverlays`' own glyph-sizing `zk` is a separate local variable in a separate
+  function and is untouched — capping glyph size at deep zoom is still the right call, it was only
+  ever wrong to reuse that specific cap for a self-damping stroke law.
+- **Measured** (seed 12345/256px, exact pixel diff, `riverWays` on vs off): zoom 8 unaffected
+  (`Math.min(8,zk)===zk` already there, so this is why the default/shallow-zoom render provably
+  cannot change); zoom 32 painted 3,928px capped → 7,020px uncapped (+79%); zoom 48 similarly
+  recovers. This is the width law finally reflecting the same uncapped stretch factor the geometry
+  reprojection was already using — not a new visual style, a consistency fix.
+- **Tests**: 3 new smoke assertions (`R.v145` in `tests/perf/smoke_gen1.js`) — a deep-zoom capture
+  confirming `drawRiverWays` now receives the real uncapped `GW/span` (not the old clamp); a
+  shallow-zoom capture confirming that value is unchanged from before (`Math.min(8,zk)===zk` there
+  already); and a world-agnostic exact-pixel-diff comparing the live uncapped render against a
+  monkeypatched reproduction of the old `Math.min(8,...)` behavior on the identical view, asserting
+  the fix paints meaningfully more river pixels at depth. Compares the fix to the old behavior
+  rather than to an absolute pixel count, so it isn't sensitive to which world the smoke suite
+  happens to be running against.
+- **Known scope cut, disclosed**: this closes the "second factor" v1.41 flagged as unidentified,
+  but per-tile seam residue (v1.29's own disclosed ~2× shared-boundary measurement) and any further
+  legibility tuning of the order-1 de-emphasis curve itself are unrelated, still-open items — not
+  touched here.
+
 ### v1.44 — Route Editor: journey editing gets a full screen
 
 Owner: "when clicking a route I wish it to open a full screen menu so we can properly make edits.
