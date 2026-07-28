@@ -12,7 +12,42 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.41 — Deep-zoom rivers: reproduced, partially fixed
+### v1.42 — Land and sea routes are finally compared
+
+Owner: "land routes are sometimes still preferred where a sea route would be faster/more efficient",
+with a screenshot of a road tracking around a coastline between two coastal towns. Hash vs v1.41
+ALL IDENTICAL. 1001 / 852 / 369 green.
+
+**First, a correction to my own earlier diagnosis.** I originally attributed this to the Journey
+Planner. That was wrong: `_jpDeriveStages` samples *"the drawn route"* — journeys are user-drawn, not
+auto-routed. The orange line in the screenshot is a generated **road** (`civWays`), so the defect is
+in road generation.
+
+**Root cause: the two networks are built independently and never compared.**
+`_civHierarchicalNetwork` lays a land MST over EVERY settlement, then `_civMstRoutes(ports,true)` lays
+a separate sea MST over the ports. Nothing asks whether a land edge is redundant because the same two
+towns are already linked by water. As with the journey planner's surface map, it is not that land wins
+a comparison — no comparison happens.
+
+- **`_civPreferSeaRoutes`** compares them using the cost model already established for the food shed
+  (Diocletian's Price Edict: road ≈ 40–56× sea, ≈ 5.5× river per unit distance). A land way duplicating
+  a sea link is dropped when the water route is decisively cheaper (`SEA_PREFERENCE_MARGIN`).
+- **It cannot orphan anyone.** A road is only dropped when removing it leaves both endpoints still
+  reachable overland — i.e. it is not a bridge in the graph sense. That honours the owner's caveat that
+  "if a sea or river way is still needed it should still do just that": local and inland traffic keeps
+  a continuous road network.
+- **Two silent no-ops found while verifying**, both of which would have shipped as a feature that
+  quietly did nothing:
+  1. Sea-lane endpoints sit **offshore** (the harbour approach, not the town square), so matching them
+     with the tight radius that suits land ways found zero sea links.
+  2. `_civMstRoutes` emits points as **`[x,y]` arrays** while other builders emit `{x,y}` objects —
+     `pts[0].x` was `undefined`, producing NaN coordinates and no matches. The accessor now handles both.
+  Before these, the pass reported 0 links examined; after, it correctly examines and judges them.
+- **Measured** (seed 12345/256px): 1 land way examined as a sea-parallel candidate, 0 dropped — on this
+  seed only 3 sea lanes exist among 29 settlements, so there is almost no redundancy to remove. The
+  mechanism is verified to run and judge; worlds with more coastline are where it will bite.
+
+## v1.41 — Deep-zoom rivers: reproduced, partially fixed
 
 Owner: "rivers seem to disappear when zooming with LOD-tiling." Hash vs v1.40 ALL IDENTICAL (the
 default un-zoomed render is untouched). 1001 / 852 / 369 green.

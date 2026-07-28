@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.41**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.42**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.41.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.40.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.42.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.41.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,20 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Land vs sea routing (v1.42)
+
+The land MST (`_civHierarchicalNetwork`, all settlements) and the sea MST (`_civMstRoutes`, ports) were
+built independently and never compared, so a road could track around a coastline between two towns
+already linked by water. `_civPreferSeaRoutes` compares them on the Diocletian cost ratios and drops a
+redundant road ONLY when it is not the sole overland link between its endpoints.
+
+- **Journeys are USER-DRAWN** (`_jpDeriveStages` samples "the drawn route") — a route on screen that
+  looks badly chosen is a generated `civWay`, not a journey. Diagnose road generation, not the planner.
+- **Way point format is not uniform**: `_civMstRoutes` emits `[x,y]` arrays, other builders `{x,y}`
+  objects. Assuming one silently yields NaN and a pass that does nothing.
+- **Sea-lane endpoints sit offshore**, so they need a far more generous settlement-snap radius than
+  land ways (which terminate exactly on their settlement since v1.02).
 
 ### Vector overlays must be zoom-aware (v1.41)
 

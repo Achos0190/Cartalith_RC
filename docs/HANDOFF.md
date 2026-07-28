@@ -9,11 +9,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.41.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.42.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.42 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.40` are kept and never edited.
+  (v1.43 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.41` are kept and never edited.
 - **v1.39 — water-edge snap ENABLED; placement now runs before routing.** Hash vs v1.38 ALL
   IDENTICAL. 1001 / 852 / 365 green.
   - **The rule: nothing may move a settlement after `_civHierarchicalNetwork` has routed.** v1.36's
@@ -41,21 +41,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   3. ~~Settlements seeded on tiny islets~~ **FIXED v1.40** (`buildLandmassQuality`; islet occupancy
      → 0, settlement count unchanged). Coastal PREFERENCE is still open — raising the coast weight
      clusters seeds and the suppression radius culls them (29 → 12), so it was reverted.
-  4. **Land routes chosen where sea would be faster; travel-mode should re-bias the route.**
-     DIAGNOSED (v1.39, not fixed). Two separate causes, both structural:
-     - **A sea route is never a candidate.** `_jpRoadCells()` (block 2) builds the journey planner's
-       travel-surface map and explicitly skips them:
-       `if(!w.pts||w.sea||w.type==='sea-lane'||w.hidden) continue;`. Sea lanes ARE generated (
-       `_civMstRoutes(ports,true)` links ports) and ARE drawn, but the planner cannot see them as a
-       surface — so it is not that land wins a comparison, it is that no comparison happens.
-     - **Travel mode cannot re-bias anything, by ordering.** `_jpDeriveStages(jn,plan)` CLASSIFIES an
-       existing path into land/water stages; vessel and mount selection (`jpAutoPickVessel`,
-       `_jpAutoStageVessel`) then runs over the stages that already exist. The path is fixed before
-       the mode is known, so switching to a sea mode has nothing to act on.
-     Fixing it properly means giving the planner a real multi-modal graph (land ways + sea lanes +
-     navigable river reaches, each with its own per-km cost) and re-pathing when the mode changes,
-     with the owner's rule that a water leg still gets used when it is genuinely required. That is a
-     routing feature, not a threshold tweak.
+  4. **PARTLY FIXED v1.42.** Road generation now compares land against sea (`_civPreferSeaRoutes`,
+     Diocletian cost ratios, drops a redundant road only when it is not the sole overland link).
+     Correction to the earlier diagnosis: journeys are USER-DRAWN, so this was never a journey-planner
+     bug — the screenshot's line is a generated civWay. STILL OPEN: travel-mode re-biasing, which
+     needs the planner to re-path rather than classify an already-drawn route.
 
 - **v1.38 — the City Viewer reports the settlement's own trade, not its faction's.** Hash vs v1.37 ALL
   IDENTICAL. 1001 / 852 / 365 green. The popup used `_civPlaceTrade`, the viewer used
