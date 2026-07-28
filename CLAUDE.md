@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.47**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.48**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.47.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.46.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.48.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.47.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,41 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Pack-animal count: fodder-feedback divergence, reported honestly (v1.48)
+
+Owner report: "250kg of cargo now necessitates roughly 213 mules." Root-caused with a numerical
+simulation of the exact formula before writing any fix, and cross-checked against an owner-supplied
+independent reference tool whose pack-animal math is line-for-line identical. Hash vs v1.47 ALL
+IDENTICAL (civ-layer only, `jpAutoPickTransport`).
+
+- **A fixed-point iteration that has no fixed point.** The pack-animal count solver iterates
+  against a fodder cost that scales with the count itself (each animal carries its own fodder for
+  the trip). A mule's 110 kg capacity against 5 kg/day fodder breaks even at 22 days with zero
+  grazing — past that, every animal ADDED costs more capacity in its own fodder than it
+  contributes, so the iteration diverges: no N solves the equation. The loop, capped at 6 steps,
+  silently returned whatever the divergent series had reached — a large, plausible-looking number
+  that isn't a real answer.
+- **The reference tool has the identical unguarded loop** — this was never a version-to-version
+  regression to bisect. What it DOES have is a separate "recursive supply collapse" advisory
+  (multi-leg resupply feasibility) — evidence the intent was always to report infeasibility
+  honestly, not to let a number run away.
+- **Fix: detect it analytically, before iterating.** `perAnimalFodder=animalFood*supplyDays*
+  fodderFrac; fodderInfeasible=fodderFrac>0 && perAnimalFodder>=A.cap`. When true, both the main
+  solver and the wagon/cart draft-animal recompute (identical shape, identical risk) skip their
+  divergent loops and fall back to the naive first estimate (cargo + human supplies, no animal
+  fodder) — a bounded, honest floor. Returns `infeasible`/`warn` flags and a hint naming the real
+  fix: fewer supply days, more grazing, or a resupply stop via the existing v1.44 Route Editor
+  Stops feature — not more animals, which cannot solve this by construction.
+- **Verified with the same simulation harness**: `supplyDays=200`/Partial grazing now reports
+  count=18 flagged infeasible, not 191,454. Full grazing (`fodderFrac=0`) never trips the check —
+  correct, since that path has a real fixed point.
+- **Tests**: 5 new smoke assertions (`R.v148`) — a normal trip stays small/unflagged; a very long
+  supply duration on identical cargo is flagged instead of exploding; the count stays bounded
+  (<50); the hint names resupply, not more animals; full grazing never trips the check.
+- **Known scope cut**: `supplyDays` still isn't automatically shortened at a passed Stop — the
+  auto-pick solver treats it as one unbroken carry for the whole route. Threading resupply into the
+  load solver itself is the same boundary v1.44 deliberately drew around Stops; left for later.
+
 ### Journey re-routing: mode-aware pathfinding (v1.47)
 
 HANDOFF's "Sea routes are never chosen; travel mode cannot re-bias a route" — the last of the three
@@ -1345,7 +1380,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (404 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (409 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

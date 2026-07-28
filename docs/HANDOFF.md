@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.47.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.48.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.48 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.46` are kept and never edited.
+  (v1.49 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.47` are kept and never edited.
+- **v1.48 — Pack-animal count: fodder-feedback divergence, reported honestly.** Owner: "250kg
+  of cargo now necessitates roughly 213 mules." Hash vs v1.47 ALL IDENTICAL. 1001 / 852 /
+  **409** green.
+  - **Root cause: a fixed-point iteration with no fixed point.** The pack-animal count solver
+    iterates against a fodder cost that scales with the count (each animal carries its own
+    fodder). Past the breakeven day count for the picked species, adding animals costs more
+    capacity than it gains — the iteration diverges, and the 6-step cap was silently returning
+    whatever the divergent series had reached, a large but meaningless number.
+  - Cross-checked against an owner-supplied independent reference tool with the line-for-line
+    identical formula — confirmed this was never a version regression to bisect, and that the
+    reference's own separate "recursive supply collapse" advisory shows the intent was always
+    honest infeasibility reporting.
+  - Fix: detect the infeasibility analytically (`animalFood*supplyDays*fodderFrac >= A.cap`)
+    before iterating; fall back to a bounded honest floor with `infeasible`/`warn` flags and a
+    hint pointing at the real fix (fewer supply days, more grazing, or a v1.44 Stops resupply) —
+    not more animals. Verified: `supplyDays=200`/default grazing now reports 18, not 191,454.
+  - Scope cut: `supplyDays` still isn't auto-shortened at a passed Stop — see CLAUDE.md's
+    "Pack-animal count: fodder-feedback divergence, reported honestly (v1.48)".
 - **v1.47 — Journey re-routing: mode-aware pathfinding.** HANDOFF's "Sea routes are never
   chosen; travel mode cannot re-bias a route" — the last of the three items open after v1.44.
   Hash vs v1.46 ALL IDENTICAL (civ-layer only). 1001 / 852 / **404** green.

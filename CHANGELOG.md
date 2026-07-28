@@ -12,6 +12,54 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.48 — Pack-animal count: fodder-feedback divergence, reported honestly
+
+Owner: "250kg of cargo now necessitates roughly 213 mules." Confirmed as a real defect, not a
+misreading — root-caused with a numerical simulation of the exact formula before writing any fix,
+and cross-checked against an owner-supplied independent reference tool (`Logistics_Planner_v1.html`,
+not part of this repo) whose pack-animal math is line-for-line identical. Hash vs v1.47 **ALL
+IDENTICAL** — civ-layer only (`jpAutoPickTransport`), no terrain/render path touched. 1001 / 852 /
+**409** green.
+
+- **Root cause: a fixed-point iteration with no fixed point.** `jpAutoPickTransport`'s pack-animal
+  count solver iterates "how many mules do I need" against a fodder cost that itself scales with the
+  count (each animal must carry its own fodder for the trip). A mule's 110 kg capacity against
+  5 kg/day fodder breaks even at 22 days with zero grazing — past that, every animal ADDED costs
+  more capacity in its own fodder than it contributes, so the iteration diverges: there is
+  genuinely no N that solves the equation. The loop was hard-capped at 6 steps and silently
+  returned whatever the divergent series had reached by then — a large, plausible-looking number
+  that is not a real answer. Simulated numerically outside the app first (`sim_mule.js`): the same
+  constants at `supplyDays=200` (default "Partial" grazing) already produced count=191,454;
+  `supplyDays≈40–90` lands squarely in the "few hundred" range the report described.
+- **The reference tool has the identical unguarded loop** (confirmed by direct comparison,
+  line-for-line) — this was never a version-to-version regression to bisect. What the reference
+  tool DOES have that this codebase didn't is a separate "recursive supply collapse" advisory
+  (multi-leg resupply feasibility, a different code path) — evidence the intent was always to
+  report infeasibility honestly, never to let a number run away.
+- **Fix: detect the infeasibility analytically, before iterating, not by watching the loop fail
+  to converge.** `perAnimalFodder=animalFood*supplyDays*fodderFrac; fodderInfeasible=fodderFrac>0
+  && perAnimalFodder>=A.cap`. When true, BOTH the main solver and the wagon/cart draft-animal
+  recompute (the same shape, same risk, one line-of-sight away) skip their divergent loops
+  entirely and fall back to the naive first estimate (cargo + human supplies alone, ignoring
+  animal fodder) — a bounded, honest floor, not a runaway guess. `jpAutoPickTransport` now returns
+  `infeasible`/`warn` flags and a hint naming the actual fix: reduce supply days, allow more
+  grazing, or add a resupply stop via the existing v1.44 Route Editor Stops feature — not more
+  animals, which cannot solve this by construction.
+- **Verified with the fix in place** (same simulation harness): `supplyDays=200`/Partial grazing
+  now reports count=18 with `fodderInfeasible=true`, instead of 191,454. Full grazing
+  (`fodderFrac=0`) never trips the check at any duration, since the animal isn't carrying its own
+  fodder at all in that mode — correct, since that path has a real fixed point.
+- **Tests**: 5 new smoke assertions (`R.v148`) — a normal short trip stays small and unflagged; a
+  very long supply duration on the identical cargo is flagged `infeasible`+`warn` instead of
+  exploding; the reported count stays bounded (<50, not hundreds); the hint text names resupply as
+  the fix, not more animals; full grazing never trips the check however long the trip.
+- **Known scope cut, disclosed**: this reports the infeasibility honestly but does not (yet) make
+  `supplyDays` automatically shrink at a passed settlement — the v1.44 Stops/layover feature already
+  lets a journey rest/resupply, but the auto-pick solver still treats `plan.supplyDays` as one
+  unbroken carry for the whole route. Threading resupply stops into the load solver itself is a
+  larger change (the same boundary v1.44's own CHANGELOG entry drew around Stops, deliberately not
+  entangled with the load/resupply convergence loop) — left for a future pass if requested.
+
 ### v1.47 — Journey re-routing: mode-aware pathfinding for the Route Editor
 
 HANDOFF's "Sea routes are never chosen; travel mode cannot re-bias a route" — the last of the

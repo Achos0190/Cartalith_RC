@@ -3742,6 +3742,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.48 (owner report: "250kg of cargo now necessitates roughly 213 mules"): jpAutoPickTransport's
+  // pack-animal count solver iterates against its OWN fodder cost (more animals need more fodder,
+  // needing more animals to carry it) — a fixed point that stops existing once a single animal's
+  // capacity can no longer cover its own fodder for the whole trip. Past that the 6-step iteration
+  // was silently returning whatever a divergent series reached by its cutoff. Fix: detect the
+  // infeasibility analytically and report it honestly (a bounded floor count + a warning) instead of
+  // returning a runaway number.
+  R.v148 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++) {
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    }
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + 8, y: landPt[1] + 8, category: 'settlement', pop: 1000 }
+      ];
+      const pts = []; for (let k = 0; k <= 10; k++) pts.push([landPt[0] + 8 * k / 10, landPt[1] + 8 * k / 10]);
+      const jn = { pts, km: 40, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const plan = _jpEnsurePlan(jn);
+      plan.transport = 'Baggage Train'; plan.assetMode = 'auto'; plan.cargoKg = 250;
+      plan.grazing = 'Partial — graze at camp';
+
+      // a normal, short-duration trip: no infeasibility flag, a small sane count
+      plan.supplyDays = 7;
+      const rShort = jpAutoPickTransport(jn);
+      o.shortTripOk = rShort.ok === true && !rShort.infeasible;
+      const shortCount = Object.values(plan.animals).reduce((t, v) => t + (v | 0), 0);
+      o.shortTripCountSane = shortCount >= 1 && shortCount <= 20;
+
+      // a very long supply duration on the SAME 250kg cargo: must be flagged infeasible and bounded
+      // (the reported bug: this used to silently return a runaway count in the hundreds)
+      plan.supplyDays = 200;
+      const rLong = jpAutoPickTransport(jn);
+      o.longTripFlaggedInfeasible = rLong.ok === true && rLong.infeasible === true && rLong.warn === true;
+      const longCount = Object.values(plan.animals).reduce((t, v) => t + (v | 0), 0);
+      o.longTripCountBounded = longCount >= 1 && longCount < 50;
+      o.longTripHintExplainsWhy = typeof rLong.hint === 'string' && /not sustainable|resupply/i.test(rLong.hint);
+
+      // full grazing (fodderFrac=0) never trips infeasibility, however long the trip — the animal
+      // isn't carrying its own fodder at all in that mode
+      plan.grazing = 'Full — graze on route';
+      plan.supplyDays = 365;
+      const rGraze = jpAutoPickTransport(jn);
+      o.fullGrazingNeverInfeasible = rGraze.ok === true && !rGraze.infeasible;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4208,6 +4263,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.47: the Re-route button exists in the Route Editor and is labeled with the live transport mode', R.v147.buttonExists && R.v147.buttonLabeledWithMode);
   A('v1.47: declining the confirm leaves the drawn path untouched (never silently discards user work)', R.v147.declineLeavesPtsUntouched);
   A('v1.47: accepting the confirm replaces the path and refreshes the modal', R.v147.acceptReplacesPts);
+
+  A('v1.48: a normal short-duration trip auto-picks a small sane animal count, not flagged infeasible', R.v148.shortTripOk && R.v148.shortTripCountSane);
+  A('v1.48: a very long supply duration on the same cargo is flagged infeasible instead of a runaway count', R.v148.longTripFlaggedInfeasible);
+  A('v1.48: the flagged count stays bounded (the reported bug: 250kg used to require ~213 mules)', R.v148.longTripCountBounded);
+  A('v1.48: the infeasibility hint explains why and points at resupply, not just more animals', R.v148.longTripHintExplainsWhy);
+  A('v1.48: full grazing never trips the fodder-infeasibility check, however long the trip', R.v148.fullGrazingNeverInfeasible);
 
 
 
