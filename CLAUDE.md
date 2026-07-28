@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.46**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.47**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.46.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.45.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.47.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.46.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,38 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Journey re-routing: mode-aware pathfinding (v1.47)
+
+HANDOFF's "Sea routes are never chosen; travel mode cannot re-bias a route" — the last of the three
+items tracked open after v1.44. Hash vs v1.46 ALL IDENTICAL (civ-layer only).
+
+- **Re-reading the code before writing anything found the diagnosis was stated too broadly.** The
+  multi-modal cost graph already existed: `_civDijkstraPath`'s `mode='water'`/`'mixed'` branches
+  (`_civWaterCostGrid`/`_civMixedCostGrid`, both v0.94) already let the Route-drawing tool cross
+  open water when cheaper, with rivers already carrying a real cost floor. The actual gap was
+  narrower: `_jpDeriveStages` only SAMPLES an already-drawn `jn.pts` polyline, so switching
+  Transport re-scored the same fixed line instead of re-pathing it.
+- **`_jpModeForRoute(transport)`** — the one place `JP_TOP_MODES` maps onto `_civDijkstraPath`'s
+  mode: Sea Faring→`'water'`, River Transport→`'mixed'` (no dedicated river-only domain exists;
+  `'mixed'` prefers rivers via their cost floor without requiring them — disclosed, not claimed as a
+  pure river solver), the three land transports→`undefined` (the land-only default branch).
+- **`_jpRerouteForMode(jn)`** re-paths between the journey's own current start/end under that mode,
+  replacing `jn.pts`/`jn.km`/`jn.brks` — no new pathfinding code, a bridge to the existing one.
+- **`_civDijkstraPath` gained a `reachable` field, purely additive.** It always returned SOME path,
+  even a straight line across genuinely impassable terrain, when the target was never actually
+  reached — correct for `'mixed'` (nothing is truly unreachable there) but wrong for a `'water'`
+  re-route between two inland settlements, which must honestly report "no route," not draw a ship
+  through a continent. `reachable=(target===source)||(prev[target]>=0)`.
+- **An explicit "🧭 Re-route for `<mode>`…" button, never silent.** A hand-drawn route is the
+  user's own work — the v1.24 BUG-4 `confirm()` precedent. Decline leaves `jn.pts` untouched; an
+  unreachable target alerts with the mode and reason and likewise leaves it untouched.
+- **Tests**: 7 new smoke assertions (`R.v147`) covering `reachable`, the mode mapping, a successful
+  land re-route, a correctly-failing sea re-route, button presence/labeling, and the confirm
+  decline/accept paths.
+- **Known scope cuts**: River Transport prefers rather than requires water; re-routing is
+  point-to-point, not stop-preserving; no automatic re-route suggestion on mere infeasibility (the
+  existing v1.44 per-stage vessel fallback covers that) — this is reached by explicit action only.
+
 ### Coastal settlement preference (v1.46)
 
 HANDOFF's "Settlements with a port still sit inland" — v1.37 fixed coastal DETECTION, v1.40 tried
@@ -1313,7 +1345,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (397 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (404 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.46.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.47.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.47 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.45` are kept and never edited.
+  (v1.48 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.46` are kept and never edited.
+- **v1.47 — Journey re-routing: mode-aware pathfinding.** HANDOFF's "Sea routes are never
+  chosen; travel mode cannot re-bias a route" — the last of the three items open after v1.44.
+  Hash vs v1.46 ALL IDENTICAL (civ-layer only). 1001 / 852 / **404** green.
+  - **Re-reading the code first found the multi-modal cost graph already existed.**
+    `_civDijkstraPath`'s `mode='water'`/`'mixed'` branches (v0.94) already let the Route tool
+    cross open water when cheaper, rivers included. The real gap: `_jpDeriveStages` only
+    SAMPLES an already-drawn path, so switching Transport never re-paths it.
+  - New `_jpModeForRoute` (Sea Faring→`'water'`, River Transport→`'mixed'`, land modes→land) +
+    `_jpRerouteForMode`, both thin — zero new pathfinding code, a bridge to the existing one.
+  - `_civDijkstraPath` gained a purely-additive `reachable` field, since it always returned SOME
+    path (even a straight line across impassable terrain) when the target was never reached —
+    needed so a failed sea re-route between inland points reports honestly instead of drawing a
+    ship through a continent.
+  - Explicit "🧭 Re-route for `<mode>`…" button, never silent (v1.24 BUG-4 `confirm()`
+    precedent) — a hand-drawn route is the user's own work.
+  - Scope cuts: River Transport prefers rather than requires water; re-routing is point-to-point,
+    not stop-preserving.
 - **v1.46 — Coastal settlement preference.** HANDOFF's "Settlements with a port still sit
   inland" — v1.37 fixed coastal DETECTION, v1.40 tried raising the coast weight and reverted it
   (clusters seeds along the coastline, halves settlement count). Hash vs v1.45 ALL IDENTICAL
@@ -125,14 +142,16 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
      crossroads-count side effect of repositioning a settlement before routing.
   3. ~~Settlements seeded on tiny islets~~ **FIXED v1.40** (`buildLandmassQuality`; islet occupancy
      → 0, settlement count unchanged). Coastal PREFERENCE — see #2 above, **FIXED v1.46**.
-  4. **PARTLY FIXED v1.42.** Road generation now compares land against sea (`_civPreferSeaRoutes`,
-     Diocletian cost ratios, drops a redundant road only when it is not the sole overland link).
-     Correction to the earlier diagnosis: journeys are USER-DRAWN, so this was never a journey-planner
-     bug — the screenshot's line is a generated civWay. **STILL OPEN**: travel-mode re-biasing.
-     `_jpRoadCells()` skips sea lanes outright (never a routing candidate) and `_jpDeriveStages`
-     classifies an already-fixed user-drawn path, so mode selection has nothing to act on. Needs a
-     real multi-modal graph (land ways + sea lanes + navigable river reaches, each with a per-km
-     cost) and re-pathing when the Route Editor's (v1.44) transport mode changes — not built.
+  4. **FIXED v1.42 + v1.47.** Road generation compares land against sea (`_civPreferSeaRoutes`,
+     v1.42, Diocletian cost ratios, drops a redundant road only when it is not the sole overland
+     link). Correction to the earlier diagnosis: journeys are USER-DRAWN, so this was never a
+     journey-planner bug — the screenshot's line is a generated civWay. Travel-mode re-biasing —
+     **FIXED v1.47**: the multi-modal cost graph (`_civDijkstraPath`'s `mode='water'`/`'mixed'`,
+     land ways + sea lanes + navigable rivers with a real per-km cost, v0.94) turned out to
+     already exist; the actual gap was `_jpDeriveStages` only sampling an already-drawn path.
+     `_jpRerouteForMode` + an explicit "Re-route for `<mode>`…" button now re-path the journey's
+     own start/end under the selected mode on request (never silently, per the v1.24 BUG-4
+     precedent). See CLAUDE.md's "Journey re-routing: mode-aware pathfinding (v1.47)".
 
 - **v1.38 — the City Viewer reports the settlement's own trade, not its faction's.** Hash vs v1.37 ALL
   IDENTICAL. 1001 / 852 / 365 green. The popup used `_civPlaceTrade`, the viewer used

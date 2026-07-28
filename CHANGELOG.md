@@ -12,6 +12,59 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.47 — Journey re-routing: mode-aware pathfinding for the Route Editor
+
+HANDOFF's "Sea routes are never chosen; travel mode cannot re-bias a route" — the last of the
+three items tracked as outstanding after v1.44. Hash vs v1.46 **ALL IDENTICAL** — civ-layer only
+(block 2), no terrain/render path touched. 1001 / 852 / **404** green.
+
+- **The multi-modal cost graph already existed — the diagnosis in HANDOFF was stated more broadly
+  than the actual gap.** `_civDijkstraPath`'s `mode='water'`/`'mixed'` branches
+  (`_civWaterCostGrid`/`_civMixedCostGrid`, both v0.94) already let the general Route-drawing tool
+  cross open water when that's genuinely the cheaper option — land ways, sea lanes and navigable
+  river reaches (a genuine cost floor via `_CIV_RIVER_COST_BASE`) were already one graph with one
+  per-km cost model. Re-reading the code before writing anything, per this file's own discipline,
+  found that HANDOFF's "needs a real multi-modal graph… not built" was already false.
+- **The actual gap: `_jpDeriveStages` only ever SAMPLES an already-drawn `jn.pts` polyline.**
+  Switching Transport in the Route Editor's party form re-scored the SAME fixed line instead of
+  re-pathing it — a route hand-drawn as a land march, then switched to "Sea Faring," read as a ship
+  sailing over dry land (reported blocked per land-stage classification) rather than a real sea
+  route. Fixing this needed zero new pathfinding code, only a bridge from "mode changed" to "ask
+  `_civDijkstraPath` for a fresh path" — which is exactly what was genuinely missing.
+- **New `_jpModeForRoute(transport)`** — the one place `JP_TOP_MODES`' label strings map onto
+  `_civDijkstraPath`'s mode parameter: `"Sea Faring"→'water'`, `"River Transport"→'mixed'` (no
+  dedicated river-only domain exists — `'mixed'` gives real river cells a genuine cost floor below
+  land, so it prefers a river without requiring one; disclosed as the closest honest fit, not a
+  claimed pure-river solver), `"Walking"/"Mounted Rider"/"Baggage Train"→undefined` (the land-only
+  default branch).
+- **New `_jpRerouteForMode(jn)`** calls `_civDijkstraPath` between the journey's own current
+  start/end points under the selected mode, replacing `jn.pts`/`jn.km`/`jn.brks` on success.
+- **`_civDijkstraPath` gained a `reachable` field (purely additive — every existing caller,
+  including `_civJoinDijkstraSegs`, is unaffected).** The function always returned SOME path, even
+  a straight line cutting across genuinely impassable terrain, when Dijkstra never actually reached
+  the target (`prev[target]` stays unset) — correct for the manual Route tool's `'mixed'` mode,
+  where nothing is truly unreachable, but wrong for a `'water'` re-route between two inland
+  settlements, which must honestly report "no route" rather than draw a ship sailing through a
+  continent. `reachable=(target===source)||(prev[target]>=0)` distinguishes a genuine path from
+  that fallback.
+- **An explicit "🧭 Re-route for `<mode>`…" button, never a silent auto-reroute on dropdown
+  change.** A hand-drawn route is the user's own work — same precedent as v1.24 BUG-4's `confirm()`
+  additions on other destructive actions. `confirm()` before replacing; on decline, `jn.pts` is
+  untouched; on an unreachable target, an `alert()` states which mode and that no route connects
+  the endpoints, and `jn.pts` is likewise untouched.
+- **Tests**: 7 new smoke assertions (`R.v147`) — `reachable` is `true` for a genuine short land hop;
+  the mode mapping is correct for all five `JP_TOP_MODES`; a land re-route succeeds and genuinely
+  replaces the path; a sea re-route between two inland points reports failure with a reason and
+  never mutates `jn.pts`; the button exists and is labeled with the live transport mode; declining
+  the confirm leaves the path untouched; accepting replaces it and refreshes the modal.
+- **Known scope cuts, disclosed**: "River Transport" prefers rather than requires navigable water —
+  a dedicated river-only cost domain would need a new grid, not built here. Re-routing is
+  point-to-point (the journey's own start and end), not stop-preserving — a multi-stop route with
+  waypoints re-routes end to end, not stop to stop. No automatic re-route suggestion when a mode is
+  merely infeasible on the current path (the existing per-stage vessel fallback in `_jpPlan`, v1.44,
+  already covers the common case of an unsuitable vessel pick); this feature is reached by explicit
+  user action only.
+
 ### v1.46 — Coastal settlement preference
 
 HANDOFF's "Settlements with a port still sit inland" — v1.37 fixed coastal DETECTION, v1.40 tried

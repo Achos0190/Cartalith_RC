@@ -3658,6 +3658,90 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.47 (HANDOFF's "Sea routes are never chosen; travel mode cannot re-bias a route"). The
+  // multi-modal cost graph (_civDijkstraPath's mode='water'/'mixed', v0.94) already existed for the
+  // general Route tool; the actual gap was that _jpDeriveStages only samples an already-drawn
+  // polyline, so switching Transport never re-paths it. Fix: an explicit "Re-route for <mode>"
+  // action (never silent — a hand-drawn route is the user's own work) that calls _civDijkstraPath
+  // between the journey's own start/end under the selected mode's cost domain, using a new
+  // `reachable` field (purely additive to _civDijkstraPath's return) to distinguish a genuine path
+  // from its existing straight-line fallback for an unreachable target.
+  R.v147 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++) {
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    }
+    o.foundLandPt = !!landPt;
+
+    // reachable: true for a genuine short land->land hop, and the field always exists (both
+    // return paths — the smoothed success path and the degenerate-fallback path — carry it)
+    const r1 = _civDijkstraPath(landPt[0], landPt[1], landPt[0] + 2, landPt[1] + 2, undefined);
+    o.landReachableTrue = r1.reachable === true;
+
+    // _jpModeForRoute: the one place the transport-label -> pathfinding-domain mapping is decided
+    o.modeMapCorrect = _jpModeForRoute('Sea Faring') === 'water'
+      && _jpModeForRoute('River Transport') === 'mixed'
+      && _jpModeForRoute('Walking') === undefined
+      && _jpModeForRoute('Mounted Rider') === undefined
+      && _jpModeForRoute('Baggage Train') === undefined;
+
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    const origConfirm = window.confirm, origAlert = window.alert;
+    try {
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + 10, y: landPt[1] + 10, category: 'settlement', pop: 1000 }
+      ];
+      const pts = [[landPt[0], landPt[1]], [landPt[0] + 10, landPt[1] + 10]];
+      const jn = { pts, km: 50, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const plan = _jpEnsurePlan(jn);
+
+      // land mode succeeds and genuinely replaces the drawn path
+      plan.transport = 'Walking';
+      const oldPts = jn.pts;
+      const walkRes = _jpRerouteForMode(jn);
+      o.walkRerouteOk = walkRes.ok === true;
+      o.walkRerouteReplacedPts = jn.pts !== oldPts && jn.pts.length >= 2;
+
+      // sea mode between two land points 10 cells apart correctly reports failure and never
+      // silently accepts a straight line cutting across dry land
+      jn.pts = oldPts;
+      plan.transport = 'Sea Faring';
+      const seaRes = _jpRerouteForMode(jn);
+      o.seaRerouteReportsFailure = seaRes.ok === false && typeof seaRes.reason === 'string' && seaRes.reason.length > 0;
+      o.seaRerouteNeverMutatedOnFailure = jn.pts === oldPts;
+
+      // UI: the button exists in the party form, is labeled with the live transport mode, confirms
+      // before replacing (declined -> untouched), and refreshes the modal on acceptance
+      _civOpenRouteEditor(0);
+      const btn = document.getElementById('reRerouteBtn');
+      o.buttonExists = !!btn;
+      o.buttonLabeledWithMode = !!(btn && btn.textContent.includes(plan.transport));
+
+      plan.transport = 'Walking';
+      _jpRenderPartyForm(jn);
+      const btn2 = document.getElementById('reRerouteBtn');
+      const ptsBeforeDecline = jn.pts;
+      let confirmCalls = 0;
+      window.confirm = () => { confirmCalls++; return false; };
+      btn2.click();
+      o.declineLeavesPtsUntouched = jn.pts === ptsBeforeDecline && confirmCalls === 1;
+
+      window.confirm = () => true;
+      window.alert = () => {};
+      btn2.click();
+      o.acceptReplacesPts = jn.pts !== ptsBeforeDecline;
+      _civCloseRouteEditor();
+    } finally {
+      window.confirm = origConfirm; window.alert = origAlert;
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4116,6 +4200,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.46: the coastal-preference pass never reduces coastal representation vs. the pre-fix baseline, across several seeds', R.v146.neverWorse);
   A('v1.46: the coastal-preference pass demonstrably improves coastal representation on at least one seed (not a dead no-op)', R.v146.anyImproved);
   A('v1.46: the coastal-preference pass never places a settlement in water', R.v146.noneInWaterAnySeed);
+
+  A('v1.47: _civDijkstraPath reports reachable=true for a genuine short land-mode hop', R.v147.foundLandPt && R.v147.landReachableTrue);
+  A('v1.47: _jpModeForRoute maps Sea Faring->water, River Transport->mixed, land transports->undefined (the land branch)', R.v147.modeMapCorrect);
+  A('v1.47: a land-mode re-route succeeds and genuinely replaces the drawn path', R.v147.walkRerouteOk && R.v147.walkRerouteReplacedPts);
+  A('v1.47: a sea-mode re-route between two inland points reports failure with a reason, never a fabricated straight line', R.v147.seaRerouteReportsFailure && R.v147.seaRerouteNeverMutatedOnFailure);
+  A('v1.47: the Re-route button exists in the Route Editor and is labeled with the live transport mode', R.v147.buttonExists && R.v147.buttonLabeledWithMode);
+  A('v1.47: declining the confirm leaves the drawn path untouched (never silently discards user work)', R.v147.declineLeavesPtsUntouched);
+  A('v1.47: accepting the confirm replaces the path and refreshes the modal', R.v147.acceptReplacesPts);
 
 
 
