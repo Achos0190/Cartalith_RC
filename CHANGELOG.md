@@ -12,7 +12,31 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.37 — Coastal settlements exist again; salt is not a universal shortage
+### v1.38 — The City Viewer now reports the settlement's own trade, not its faction's
+
+Owner: "exports and imports in the pop-up view are not the same when you press open city view — that
+window doesn't seem to read from the same information." Correct. Hash vs v1.37 ALL IDENTICAL.
+1001 / 852 / 365 green.
+
+The two panels were measuring **different things**, both correctly:
+
+- the settlement popup showed `_civPlaceTrade(p)` — the settlement's OWN balance of trade;
+- the City Viewer's Economy section showed `_civFactionAggregates()` — its FACTION's.
+
+Each was right for what it measured, but the City Viewer is a *settlement* view, so leading with the
+faction's figures made two surfaces contradict each other about the same town. The v1.33 audit
+unified the trade *rule* across every surface; it did not catch that this one was reporting a
+different *scope*.
+
+The viewer now leads with the settlement's own Exports/Imports — the identical `_civPlaceTrade` call
+the popup makes, so the two cannot drift — plus the derivation basis, the food-deficit warning when
+no route can supply it, and the salt source. The faction rows stay below as clearly labelled
+context, which is what the extra space in that view is actually good for.
+
+A smoke assertion now renders both panels and checks that every good the popup lists appears in the
+viewer, so this specific divergence cannot come back.
+
+## v1.37 — Coastal settlements exist again; salt is not a universal shortage
 
 Two owner observations, both correct, both with the same root shape as earlier bugs. Hash vs v1.36
 ALL IDENTICAL. 1001 / 852 / 363 green.

@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.37**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.38**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.37.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.36.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.38.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.37.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -1019,6 +1019,16 @@ attract settlement. **Neither is on by default.** Read CHANGELOG v1.36 before pi
   mechanism. Measure one change at a time; with the snap off the term reads 0.72×.
 
 
+### Two panels, one settlement (v1.38)
+
+The City Viewer's Economy section showed the FACTION's imports/exports while the settlement popup
+showed the settlement's own — both correct for what they measured, but the viewer is a settlement
+view, so the two contradicted each other about the same town. **A scope mismatch is as damaging as a
+rule mismatch**: v1.33 unified the trade rule everywhere and still missed this, because the rule was
+fine and the *subject* was wrong. The viewer now calls `_civPlaceTrade(p)` — literally the same call
+the popup makes — and keeps the faction rows below, labelled. Asserted by rendering both panels and
+comparing.
+
 ### Coastal detection + salt sourcing (v1.37)
 
 - **`_umWaterReachKm()` must be used at EVERY water test.** v1.35 introduced it and fixed two of the
@@ -1102,7 +1112,7 @@ node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (363 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (365 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

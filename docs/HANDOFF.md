@@ -9,11 +9,18 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.37.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.38.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.38 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.36` are kept and never edited.
+  (v1.39 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.37` are kept and never edited.
+- **v1.38 — the City Viewer reports the settlement's own trade, not its faction's.** Hash vs v1.37 ALL
+  IDENTICAL. 1001 / 852 / 365 green. The popup used `_civPlaceTrade`, the viewer used
+  `_civFactionAggregates` — both correct for what they measured, but a settlement view leading with
+  faction figures made the two contradict each other. **A scope mismatch is as damaging as a rule
+  mismatch**: v1.33 unified the rule and missed this because the rule was fine and the subject was
+  wrong. Viewer now makes the identical call; faction rows remain, labelled.
+
 - **v1.37 — coastal settlements exist again; salt is not universal.** Hash vs v1.36 ALL IDENTICAL.
   1001 / 852 / 363 green.
   - `_umSiteKindFromTerrain` still used the pre-v1.35 near-radius, so the coastal box was one cell and

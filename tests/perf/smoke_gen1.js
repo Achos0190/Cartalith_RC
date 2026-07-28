@@ -3297,6 +3297,38 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.38: the City Viewer and the settlement popup must report the same trade ---- */
+  R.v138 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    if (!places.length) return o;
+    const p = places.find(q => _umModelForNow(q)) || places[0];
+    const tr = _civPlaceTrade(p);
+    o.popupExports = (tr.exports || []).slice().sort().join(',');
+    o.popupImports = (tr.imports || []).slice().sort().join(',');
+    // render the settlement popup and the City Viewer panel, then compare what each actually shows
+    _civSelectedPlace = p; _civSelectedRowRefs = null;
+    _civOpenPlacePopup();
+    const popEl = document.getElementById('placeEditPopup');
+    o.popupHtml = popEl ? popEl.innerHTML : '';
+    if (popEl) popEl.style.display = 'none';
+    _civSelectedPlace = null;
+    const opened = _civOpenCityViewer(p);
+    o.viewerOpened = opened !== false;
+    const cvEl = document.getElementById('cvInfoPanel');
+    o.viewerHtml = cvEl ? cvEl.innerHTML : '';
+    if (typeof _civCloseCityViewer === 'function') _civCloseCityViewer();
+    // every good the popup lists must appear in the viewer's panel too
+    const listed = (html, goods) => goods.every(g => html.indexOf(g) >= 0);
+    o.viewerShowsPopupExports = !tr.exports.length || listed(o.viewerHtml, tr.exports);
+    o.viewerShowsPopupImports = !tr.imports.length || listed(o.viewerHtml, tr.imports);
+    // and the viewer must present them as the settlement's own, with faction rows still labelled
+    o.viewerHasOwnRows = /<[^>]*>\s*Exports\s*</.test(o.viewerHtml) || o.viewerHtml.indexOf('>Exports<') >= 0;
+    o.viewerLabelsFaction = o.viewerHtml.indexOf('faction-level') >= 0;
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3716,6 +3748,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.37: an estuary settlement reports SEA access, not merely river', R.v137.estuaryIsSea);
   A('v1.37: every coastal settlement can make its own salt, and none imports salt it already has', !R.v137.nPlaces || (R.v137.coastalWithoutSalt === 0 && R.v137.importsSaltAnyway === 0));
   A('v1.37: the trade checklist discriminates between settlements (not every category unmet everywhere)', !R.v137.nPlaces || (R.v137.checklistDiscriminates && R.v137.gapsVary));
+
+  A('v1.38: the City Viewer lists the same exports and imports as the settlement popup (one source, not faction-level)', !R.v138.nPlaces || (R.v138.viewerShowsPopupExports && R.v138.viewerShowsPopupImports));
+  A('v1.38: the City Viewer shows the settlement\'s own trade rows and still labels the faction rows as such', !R.v138.nPlaces || (R.v138.viewerHasOwnRows && R.v138.viewerLabelsFaction));
+
 
 
 
