@@ -12,7 +12,49 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.40 — Placement can finally tell an island from a speck
+### v1.41 — Deep-zoom rivers: reproduced, partially fixed
+
+Owner: "rivers seem to disappear when zooming with LOD-tiling." Hash vs v1.40 ALL IDENTICAL (the
+default un-zoomed render is untouched). 1001 / 852 / 369 green.
+
+**Reproduced by measurement**, after two earlier probes failed to. Diffing the `#view` canvas with
+`state.viz.riverWays` off vs on at seed 12345/256px:
+
+| LOD zoom | 1 | 8 | 24 | 32 | 48 |
+|---|---|---|---|---|---|
+| river px (v1.40) | 20,334 | 14,926 | 3,337 | **356** | 238 |
+
+The collapse is between zoom 24 and 32 — a cliff, not the gradual decline you would expect from
+simply having less world on screen. And the geometry is genuinely there: at zoom 32 the view contains
+**15 river polylines with 40 points**, versus 18 / 56 at zoom 24. The rivers are being drawn; they are
+being drawn nearly invisibly.
+
+**Cause: v0.96's anti-barcode de-emphasis.** Order-1 trickles draw at 0.4 alpha and 0.55× width so the
+thousands of them recede into the raster water tint at world scale. That is right when the whole map
+is on screen and wrong once you have zoomed into an 8-cell window, because at that scale the headwater
+stream IS the subject — and under LOD the vector overlay is the **only** river renderer
+(`renderBiomeTileRGBA` never draws the network's water colour), so a faded order-1 line means no
+visible river at all. The de-emphasis now fades out with zoom: full strength at `zk=1`, gone by the
+LOD cap. At `zk=1` the factors are exactly v0.96's, so the default render cannot change.
+
+**Partially fixed, stated honestly.** Zoom 32: 356 → **479**; zoom 48: 238 → **421**; zoom 8:
+14,926 → 15,875. That is roughly a 35% recovery at deep zoom, not a full one. The remaining shortfall
+is not explained by the de-emphasis, and 15 polylines crossing a 512×328 canvas should paint more than
+479 px — so there is a second factor still unidentified. What is now established and recorded: the
+draw gate, the viewport cull, the baked-atlas path (85 tiles baked, zero difference) and the stroke
+width law are all ruled out, and the geometry reaches the renderer.
+
+### Still open
+
+- **Sea routes are never chosen; travel mode cannot re-bias a route.** Diagnosed in full (see HANDOFF):
+  `_jpRoadCells()` skips sea lanes outright so a sea route is never a candidate, and
+  `_jpDeriveStages` classifies an already-fixed path so mode selection has nothing to act on. Fixing
+  it needs a real multi-modal graph (land ways + sea lanes + navigable river reaches, each with a
+  per-km cost) and re-pathing on mode change. Not built.
+- **Coastal preference** — see v1.40: raising the coast weight halves the settlement count, so it was
+  reverted; on seed 12345 settlements sit a median 127 km from the coast and are inland legitimately.
+
+## v1.40 — Placement can finally tell an island from a speck
 
 Owner: "some settlements are on the tiniest landmass instead of preferring the larger (richer)
 island." Hash vs v1.39 ALL IDENTICAL. 1001 / 852 / 369 green.

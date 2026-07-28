@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.40**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.41**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.40.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.39.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.41.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.40.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,19 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Vector overlays must be zoom-aware (v1.41)
+
+v0.96 de-emphasises order-1 rivers (0.4 alpha, 0.55× width) so thousands of trickles recede at world
+scale. Correct there, wrong at deep zoom — under LOD the vector overlay is the ONLY river renderer
+(`renderBiomeTileRGBA` never draws the network's water colour), so a faded headwater is an invisible
+river, and at an 8-cell window the headwater IS the subject. The de-emphasis now fades with `zk`.
+**Any world-scale legibility hack needs the same treatment**: check what it does when the feature it
+de-emphasises is the only thing on screen.
+
+Deep-zoom river pixels went 356 → 479 at zoom 32 — a real but PARTIAL recovery. Ruled out already:
+the draw gate, the viewport cull, the baked-atlas path, the stroke width law; the geometry does reach
+the renderer (15 polylines / 40 points in view at zoom 32). A second factor is still unidentified.
 
 ### Placement sees landmasses (v1.40)
 

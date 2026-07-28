@@ -9,11 +9,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.40.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.41.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.41 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.39` are kept and never edited.
+  (v1.42 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.40` are kept and never edited.
 - **v1.39 — water-edge snap ENABLED; placement now runs before routing.** Hash vs v1.38 ALL
   IDENTICAL. 1001 / 852 / 365 green.
   - **The rule: nothing may move a settlement after `_civHierarchicalNetwork` has routed.** v1.36's
