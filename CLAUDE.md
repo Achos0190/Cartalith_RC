@@ -9,8 +9,8 @@ threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.43.html` | **Current** unified tool (~24.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.42.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.44.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.43.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,46 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Route Editor: journey editing gets a full screen (v1.44)
+
+Owner: "when clicking a route I wish it to open a full screen menu so we can properly make edits" —
+route visual upper-left, stops/traveler options/carriage/season/weather editable, current weather
+suggestion system kept in place. Hash vs v1.43 ALL IDENTICAL (block 2 only). 1001 / 852 / 390 green.
+
+- **A bigger home, not a second implementation.** The party/results forms already existed, crammed
+  into the Explore sidebar behind nested `<details>`. `_jpRenderPartyForm`/`_jpRenderResults`/
+  `_civDrawProfile` were retargeted to ids inside the new `#routeEditorModal`, mirroring v1.18's City
+  Viewer shell contract exactly (`.open` class, own Escape handler, added to `_overCanvasOverlay`'s
+  scroll-fix list and `_sculptNavSync`'s joystick gate). The sidebar collapsed to a one-line summary
+  + "Edit route…" button — no dead-but-harmless duplicate editing surface left behind.
+- **A block-1 function must never assume a block-2 `let` has run** (this file's own recurring
+  lesson): `_sculptNavSync` checks `#routeEditorModal`'s DOM class, not a JS flag, for the same
+  reason it already does that for the City Viewer's `_cvCam`.
+- **The route visual is a new bounded render, not a camera.** `_reDrawRouteMap` paints a static
+  bbox crop from `currentCartBiome()`/`CART_BIOME_COLS` — real painted data, the same table the
+  "bclass" debug view already reads — with the polyline and stop markers over it. No pan/zoom: a
+  route is a path already visible in one crop, unlike a city.
+- **Stops: one computation, not two.** `_jpPlan()` now calls `_civPassedSettlements(jn.pts)` exactly
+  once and attaches a stable `_jpStopKey(s)` + `layoverDays` (`jn.layovers{}`); `_jpRenderResults`'s
+  own duplicate call is gone. A planned rest/resupply day is additive on `totalDays`, deliberately
+  NOT threaded into the load/resupply convergence loop — a stop is where the party resupplies, not
+  a leg it carries extra supplies across.
+- **Weather: the suggestion system is the untouched default, not replaced.** `plan.weatherOverride`
+  defaults to `"auto"` (merged into every plan, including old saves, via `_jpEnsurePlan`'s existing
+  pattern); `jpWeatherFactor` falls straight through to the pre-existing `jpWxWeighted` seasonal
+  average when unset. A forced condition is additive — same convention as v1.30/v1.33/v1.38's
+  "auto stays default, override is opt-in" precedent.
+- **Two bugs only manual browser verification caught.** The modal's header summary and the Weather
+  select's own hint text both went stale after a non-structural field change, because `_jpRefresh`
+  only rebuilds the full party form on `data-structural="1"` fields. Neither is meaningfully
+  assertable headlessly (the defect IS "the on-screen text doesn't update") — caught by screenshotting
+  before/after a Storm override. Fixed by folding the summary into `_jpRenderResults` (runs on every
+  refresh) and marking Weather `data-structural="1"`, the same convention Transport already uses.
+- **Known scope cuts**: clicking a route's line on the map doesn't open the editor (only the sidebar
+  card does — no polyline hit-testing was built); the route-map thumbnail doesn't handle an
+  antimeridian-wrapping route (bbox-only); "stops" is rest days at existing waypoints, not path
+  (re-routing) editing.
+
 ### Travel speed: measure the composition, not the table (v1.43)
 
 Owner supplied `docs/research/travel-speeds.md` and reported the planner running ~37% long. The
@@ -1210,7 +1250,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (381 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (390 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

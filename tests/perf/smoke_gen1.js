@@ -3452,6 +3452,86 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.44: Route Editor — full-screen journey editing (block 2) ──
+  // Owner: "when clicking a route I wish it to open a full screen menu so we can properly make edits.
+  // (Having the route itself as a visual in the upper left corner. and change parameters such as
+  // stops, traveler options, carriage, season and weather (with the current suggestion system kept in
+  // place)." Two synthetic settlements + a journey between them are pushed and restored around this
+  // block so it doesn't depend on (or disturb) an auto-populated world — this file never runs
+  // auto-populate, unlike the probe scripts.
+  R.v144 = await page.evaluate(() => {
+    const o = {};
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      const x0 = Math.round(GW * 0.3), y0 = Math.round(GH * 0.5);
+      const x1 = Math.round(GW * 0.5), y1 = Math.round(GH * 0.5);
+      state.places = [
+        { kind: 'town', name: 'Testford', x: x0, y: y0, category: 'settlement', pop: 4000 },
+        { kind: 'town', name: 'Testbury', x: x1, y: y1, category: 'settlement', pop: 6000 }
+      ];
+      const pts = []; for (let k = 0; k <= 20; k++) pts.push([x0 + (x1 - x0) * k / 20, y0 + (y1 - y0) * k / 20]);
+      const km = Math.hypot(x1 - x0, y1 - y0) * ((state.mapWidthKm || 800) / GW);
+      const jn = { pts, km, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // stable stop keys + layover days feed into total trip time, additive to travel days
+      const plan0 = _jpPlan(jn);
+      o.hasStops = plan0 && plan0.stops.length >= 1;
+      o.noLayoverByDefault = plan0 && plan0.layoverDays === 0 && plan0.totalDays === plan0.days;
+      if (plan0 && plan0.stops.length) {
+        const key = plan0.stops[0].key;
+        o.keyStable = key === _jpStopKey(plan0.stops[0]);
+        _jpLayovers(jn)[key] = 3;
+        const plan1 = _jpPlan(jn);
+        o.layoverAdds = plan1.layoverDays === 3 && Math.abs(plan1.totalDays - (plan1.days + 3)) < 1e-9;
+        o.travelDaysUnaffected = Math.abs(plan1.days - plan0.days) < 1e-9;   // a rest stop must not change the underlying travel-day math
+        delete _jpLayovers(jn)[key];
+      }
+
+      // weatherOverride: "auto" (the default _jpEnsurePlan sets) must be byte-identical to the
+      // pre-v1.44 behavior; a forced condition must diverge and be visibly labeled in the trace
+      const plan = _jpEnsurePlan(jn);
+      const st = { km: 300, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard', infra: 'Stable Settlements', biome: 'Temperate Forest' };
+      const base = { groupSize: 1, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 0, supplyDays: 4,
+        season: 'Spring', grazing: 'None — carry all fodder', foraging: 'None', carryFood: true,
+        desertWater: 'Established Caravan Route', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 },
+        carts: 0, wagons: 0, travois: 0, sleds: 0, weatherOverride: 'auto' };
+      const rAuto = jpCalcLand(Object.assign({}, st), Object.assign({}, base));
+      const rNoField = jpCalcLand(Object.assign({}, st), Object.assign({}, base, { weatherOverride: undefined }));
+      o.autoMatchesUnset = !rAuto.blocked && !rNoField.blocked && Math.abs(rAuto.dailyKm - rNoField.dailyKm) < 1e-9;
+      const rStorm = jpCalcLand(Object.assign({}, st), Object.assign({}, base, { weatherOverride: 'Storm' }));
+      o.stormDivergesFromAuto = !rStorm.blocked && Math.abs(rStorm.dailyKm - rAuto.dailyKm) > 1e-6;
+      o.stormLabeledInTrace = !rStorm.blocked && /forced: Storm/.test(rStorm.formula);
+      o.autoLabeledInTrace = !rAuto.blocked && /weighted/.test(rAuto.formula);
+      const seaSt = { km: 300, cat: 'sea', terrain: 'Coastal Waters', routeCond: 'Neutral', infra: 'Stable Settlements', biome: 'Coastal Lowland' };
+      const seaBase = Object.assign({}, base, { transport: 'Sea Faring', vessel: 'Cog' });
+      const rAutoWater = jpCalcWater(Object.assign({}, seaSt), Object.assign({}, seaBase, { weatherOverride: 'auto' }));
+      const rStormWater = jpCalcWater(Object.assign({}, seaSt), Object.assign({}, seaBase, { weatherOverride: 'Storm' }));
+      o.waterStormBlockedOrSlower = !rAutoWater.blocked && (!!rStormWater.blocked || rStormWater.dailyKm < rAutoWater.dailyKm);
+
+      // the modal itself: open/close toggles .open + the guard flag, and is reachable from the
+      // journey-card click; the two guard lists (scroll fix, joystick hide) both know about it
+      o.opensOnCall = _civOpenRouteEditor(0);
+      const modalEl = document.getElementById('routeEditorModal');
+      o.modalHasOpenClass = !!(modalEl && modalEl.classList.contains('open'));
+      o.reOpenFlagSet = typeof _reOpen !== 'undefined' && _reOpen === true;
+      o.routeMapCanvasExists = !!document.getElementById('reRouteMap');
+      o.partyFormPopulated = !!(document.getElementById('reParty') && document.getElementById('reParty').innerHTML.length > 0);
+      o.stopsListPopulated = !!(document.getElementById('reStops') && document.getElementById('reStops').innerHTML.length > 0);
+      const overlayTest = document.createElement('div'); modalEl.appendChild(overlayTest);
+      o.scrollGuardCoversModal = typeof _overCanvasOverlay === 'function' && _overCanvasOverlay({ target: overlayTest });
+      overlayTest.remove();
+      _civCloseRouteEditor();
+      o.closesOnCall = !modalEl.classList.contains('open');
+      o.reOpenFlagCleared = typeof _reOpen !== 'undefined' && _reOpen === false;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+      const modalEl = document.getElementById('routeEditorModal'); if (modalEl) modalEl.classList.remove('open');
+      _reOpen = false;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -3891,6 +3971,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.43: an open-sea leg is not tiered by land settlement density', R.v143.openSeaNotLandTiered);
   A('v1.43: a short stage is not amplified by its own shortness, yet length still dilutes above the floor', R.v143.shortStageNotAmplified && R.v143.lengthStillDilutesAboveFloor);
   A('v1.43: a party of ≤10 is the reference tier and larger caravans carry the §5 spread (+15-25%)', R.v143.smallCaravanFavoured);
+
+  A('v1.44: a route through settlements produces a Stops list, with no layover by default', R.v144.hasStops && R.v144.noLayoverByDefault);
+  A('v1.44: a stop\'s key is stable (the same settlement re-derives the same key)', R.v144.keyStable);
+  A('v1.44: a planned layover adds to total trip time without changing the underlying travel-day math', R.v144.layoverAdds && R.v144.travelDaysUnaffected);
+  A('v1.44: weatherOverride="auto" is byte-identical to the pre-v1.44 unset field (the suggestion system, unchanged)', R.v144.autoMatchesUnset);
+  A('v1.44: a forced weather condition diverges from the seasonal-average Auto and is labeled "forced:" in the trace', R.v144.stormDivergesFromAuto && R.v144.stormLabeledInTrace && R.v144.autoLabeledInTrace);
+  A('v1.44: a forced Storm also degrades (or blocks) a sea leg, not just land', R.v144.waterStormBlockedOrSlower);
+  A('v1.44: the Route Editor opens on call, sets its guard flag, and populates the party/stops/route-map surfaces', R.v144.opensOnCall && R.v144.modalHasOpenClass && R.v144.reOpenFlagSet && R.v144.routeMapCanvasExists && R.v144.partyFormPopulated && R.v144.stopsListPopulated);
+  A('v1.44: the canvas-wheel scroll guard covers the open Route Editor (the v1.32 scroll-fix pattern)', R.v144.scrollGuardCoversModal);
+  A('v1.44: the Route Editor closes on call and clears its guard flag', R.v144.closesOnCall && R.v144.reOpenFlagCleared);
 
 
 

@@ -12,6 +12,66 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.44 — Route Editor: journey editing gets a full screen
+
+Owner: "when clicking a route I wish it to open a full screen menu so we can properly make edits.
+(Having the route itself as a visual in the upper left corner. and change parameters such as stops,
+traveler options, carriage, season and weather (with the current suggestion system kept in place)."
+Hash vs v1.43 **ALL IDENTICAL** in every scenario (block 2 only — new modal shell + persisted plan
+fields, no terrain/climate change). 1001 / 852 / **390** green.
+
+- **Not a second implementation — a bigger home for the one that already existed.** The Journey
+  Planner's party/results forms (transport, cargo, per-stage overrides, calculation trace) already
+  existed, cramped into the Explore sidebar's `#civPlannerSec` behind nested `<details>`. `_jpRenderPartyForm`/
+  `_jpRenderResults`/`_civDrawProfile` were retargeted from `#jpParty`/`#jpResults`/`#civProfileCv`
+  to `#reParty`/`#reResults`/`#reProfileCv` inside a new `#routeEditorModal`, mirroring the v1.18 City
+  Viewer's shell contract (`.open` class toggle, own Escape-to-close, added to `_overCanvasOverlay`'s
+  scroll-fix list and `_sculptNavSync`'s joystick-hide gate — both via the same DOM-class-check
+  pattern `_sculptNavSync` already uses for the City Viewer, since a block-1 function must never
+  assume a block-2 `let` has run). The sidebar collapses to a `_jpPlan()`-sourced one-line summary
+  (`#jpSummary`) + an "Edit route…" button; clicking a journey card now opens the modal directly
+  instead of toggling an inline reveal.
+- **The route visual (upper-left) is a new, bounded rendering surface** (`_reDrawRouteMap`): a static
+  top-down crop of the route's bounding box, painted from `currentCartBiome()`/`CART_BIOME_COLS` —
+  the same real painted-biome raster the "bclass" debug view already samples, never invented terrain
+  — with the polyline, stop markers, and green/red start/end pins drawn over it. Deliberately static
+  (no `_cvCam`-style pan/zoom): a route is a path already fully visible in one crop, unlike a city.
+- **Stops**: `_jpPlan()` now computes `_civPassedSettlements(jn.pts)` exactly ONCE (previously
+  `_jpRenderResults` had its own second call to the same function — the fifth-plus occurrence of
+  this file's "two call sites answering one question" pattern) and attaches a stable `_jpStopKey(s)`
+  plus `layoverDays` from the new `jn.layovers{}` map. A rest/resupply day count per stop is additive
+  on top of travel time (`plan.totalDays = plan.days + plan.layoverDays`), deliberately NOT folded
+  into the load/resupply convergence loop `jpCalcLand`/`jpCalcWater` run — a planned stop is where
+  the party resupplies, not a leg it must carry extra supplies across.
+- **Traveler options / Carriage**: pure relabeling of the existing "Travelling party" →
+  "Traveler options" and "Animals & vehicles" → "Carriage" sections — zero logic change, matching
+  the owner's own vocabulary.
+- **Weather**: previously derived ONLY from `jpWxWeighted(biome,season)`'s probability-weighted
+  average — no manual control existed. New `plan.weatherOverride` (default `"auto"`, merged into
+  every plan including loaded pre-v1.44 saves via `_jpEnsurePlan`'s existing default-merge pattern)
+  lets Auto stay exactly as before — `jpWeatherFactor` falls straight through to `jpWxWeighted` when
+  unset — while a forced condition ("what if a storm hits") overrides it for every stage, still
+  applying the pace animal's own weather affinity (`JP_ANIMAL_WEATHER_OVERRIDE`) on land. The
+  formula trace labels which mode produced the number (`weighted Summer, ...` vs `forced: Storm`).
+- **Season stays where it was** (a `<select>` next to the new Weather one) — only relocated, not
+  changed.
+- **Two bugs caught by manual browser verification, not the automated suites**: the modal's own
+  header summary line (`#reSummary`) was written once at open time and never refreshed by
+  `_jpRefresh`, so a Weather change silently left a stale "km/day" figure on screen; and the
+  Weather `<select>`'s own explanatory hint ("Auto — weighted..." vs "Forced condition...") went
+  stale the same way, since a non-structural field change doesn't rebuild the party form. Fixed by
+  folding the summary into `_jpRenderResults` (which runs on every refresh) via a new
+  `_reRenderSummary(jn,plan)`, and by marking the Weather `<select>` `data-structural="1"` — the
+  same convention Transport already uses for exactly this reason. Screenshotted before and after to
+  confirm both actually update now, since neither is meaningfully assertable from a headless
+  Playwright `evaluate()` (the value is materially "does the text on screen change").
+- **Known scope cuts**: clicking a route's LINE on the map does not open the editor (only the
+  Journeys sidebar card does) — building zoom-aware polyline hit-testing wasn't part of this ask and
+  the sidebar entry point already exists; the route-map thumbnail does not handle an antimeridian-
+  wrapping route (bounding-box only, a documented edge case, not the common regional-route path);
+  "stops" means rest/layover days at settlements the route already threads through, not waypoint
+  (path) editing — the route's own shape stays whatever the Route tool drew.
+
 ### v1.43 — Journey Planner recalibrated against historical travel rates
 
 Owner supplied `docs/research/travel-speeds.md` (an overland/maritime research report whose §7

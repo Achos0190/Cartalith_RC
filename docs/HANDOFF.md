@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.43.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.44.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.44 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.42` are kept and never edited.
+  (v1.45 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.43` are kept and never edited.
+- **v1.44 — Route Editor: journey editing gets a full screen.** Owner: "when clicking a route I
+  wish it to open a full screen menu so we can properly make edits" (route visual upper-left, edit
+  stops/traveler options/carriage/season/weather, current suggestion system kept). Hash vs v1.43
+  ALL IDENTICAL. 1001 / 852 / **390** green.
+  - **Relocated the existing party/results forms into `#routeEditorModal`, not a second
+    implementation** — same v1.18 City Viewer shell contract (`.open` class, own Escape, added to
+    the scroll-fix and joystick-hide guard lists). Sidebar collapsed to a one-line summary + "Edit
+    route…" button.
+  - New: `_reDrawRouteMap` (static top-down thumbnail from real painted biome data, no camera); a
+    Stops list with per-settlement rest/layover days (`jn.layovers`, additive on `totalDays`, kept
+    out of the load/resupply convergence loop on purpose); a Weather override
+    (`plan.weatherOverride`, default `"auto"` = the pre-existing seasonal-average suggestion,
+    unchanged for every journey that doesn't touch it).
+  - **Two bugs only manual browser screenshots caught** (not assertable headlessly): the modal's
+    header summary and the Weather hint text both went stale after a non-structural edit. Fixed by
+    running the summary render on every refresh and marking Weather `data-structural="1"`.
+  - Scope cuts: no click-to-open from the route's line on the map (sidebar card only); route-map
+    thumbnail doesn't handle antimeridian wrap; "stops" is layover days, not waypoint/path editing.
 - **v1.43 — Journey Planner recalibrated against `docs/research/travel-speeds.md`.** Owner: "the
   current planner seems to roughly take 37% longer than historically recorded." Hash vs v1.42 ALL
   IDENTICAL (block 2 only). 1001 / 852 / **381** green.
