@@ -29,7 +29,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
      suitability coast weight is not strong enough to pull a seed to the shore.
   3. Settlements seeded on tiny islets over the larger richer landmass — **placement has no
      landmass-size or landmass-quality term at all**; it scores cells, never bodies of land.
-  4. Land routes chosen where sea would be faster, and travel-mode should re-bias the route.
+  4. **Land routes chosen where sea would be faster; travel-mode should re-bias the route.**
+     DIAGNOSED (v1.39, not fixed). Two separate causes, both structural:
+     - **A sea route is never a candidate.** `_jpRoadCells()` (block 2) builds the journey planner's
+       travel-surface map and explicitly skips them:
+       `if(!w.pts||w.sea||w.type==='sea-lane'||w.hidden) continue;`. Sea lanes ARE generated (
+       `_civMstRoutes(ports,true)` links ports) and ARE drawn, but the planner cannot see them as a
+       surface — so it is not that land wins a comparison, it is that no comparison happens.
+     - **Travel mode cannot re-bias anything, by ordering.** `_jpDeriveStages(jn,plan)` CLASSIFIES an
+       existing path into land/water stages; vessel and mount selection (`jpAutoPickVessel`,
+       `_jpAutoStageVessel`) then runs over the stages that already exist. The path is fixed before
+       the mode is known, so switching to a sea mode has nothing to act on.
+     Fixing it properly means giving the planner a real multi-modal graph (land ways + sea lanes +
+     navigable river reaches, each with its own per-km cost) and re-pathing when the mode changes,
+     with the owner's rule that a water leg still gets used when it is genuinely required. That is a
+     routing feature, not a threshold tweak.
 
 - **v1.38 — the City Viewer reports the settlement's own trade, not its faction's.** Hash vs v1.37 ALL
   IDENTICAL. 1001 / 852 / 365 green. The popup used `_civPlaceTrade`, the viewer used
