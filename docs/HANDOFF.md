@@ -24,7 +24,18 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   - Settlement popup no longer overflows: long road/export lists now wrap.
 
 - **OPEN, reported by owner, NOT yet addressed** (top of the queue):
-  1. Rivers disappear when zooming under LOD tiling — uninvestigated.
+  1. **Rivers disappear when zooming under LOD tiling** — INVESTIGATED, NOT REPRODUCED (v1.40).
+     Measured by diffing the `#view` canvas with `state.viz.riverWays` off vs on at seed 12345/256px:
+     off-LOD 6,041 changed px; LOD z=1 20,334; z=2 18,272; z=4 25,116; z=8 14,926. Rivers therefore
+     DO draw at every zoom the probe can reach, and the decline from z=4 to z=8 is simply less world
+     on screen, not fading (the v1.29 width law is `base·√z` under LOD, which gets WIDER with zoom).
+     Ruled out along the way: the draw gate (`state.viz.riverWays && dbg==='off' && biome`) is
+     zoom-independent — `biome` is just `state.mode==='biome'`; and the `inView` cull keeps a polyline
+     if ANY point is within pad 4, so it cannot drop them wholesale.
+     **Untested variable, and the most likely culprit: the BAKED ATLAS tile path.** The probe drives
+     `_lodZoom` directly on live tiles; a world with baked LOD tiles renders through a different path,
+     and `_lodZoom` is also capped at 8 here. To reproduce, bake the atlas first and/or zoom past the
+     cap by real wheel interaction. Worth asking the owner whether their world has baked tiles.
   2. Settlements with a port still sit inland — v1.37 fixed coastal DETECTION, not PREFERENCE; the
      suitability coast weight is not strong enough to pull a seed to the shore.
   3. ~~Settlements seeded on tiny islets~~ **FIXED v1.40** (`buildLandmassQuality`; islet occupancy
