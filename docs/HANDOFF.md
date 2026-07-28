@@ -9,11 +9,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.39.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.40.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.40 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.38` are kept and never edited.
+  (v1.41 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.39` are kept and never edited.
 - **v1.39 — water-edge snap ENABLED; placement now runs before routing.** Hash vs v1.38 ALL
   IDENTICAL. 1001 / 852 / 365 green.
   - **The rule: nothing may move a settlement after `_civHierarchicalNetwork` has routed.** v1.36's
@@ -27,8 +27,9 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   1. Rivers disappear when zooming under LOD tiling — uninvestigated.
   2. Settlements with a port still sit inland — v1.37 fixed coastal DETECTION, not PREFERENCE; the
      suitability coast weight is not strong enough to pull a seed to the shore.
-  3. Settlements seeded on tiny islets over the larger richer landmass — **placement has no
-     landmass-size or landmass-quality term at all**; it scores cells, never bodies of land.
+  3. ~~Settlements seeded on tiny islets~~ **FIXED v1.40** (`buildLandmassQuality`; islet occupancy
+     → 0, settlement count unchanged). Coastal PREFERENCE is still open — raising the coast weight
+     clusters seeds and the suppression radius culls them (29 → 12), so it was reverted.
   4. **Land routes chosen where sea would be faster; travel-mode should re-bias the route.**
      DIAGNOSED (v1.39, not fixed). Two separate causes, both structural:
      - **A sea route is never a candidate.** `_jpRoadCells()` (block 2) builds the journey planner's

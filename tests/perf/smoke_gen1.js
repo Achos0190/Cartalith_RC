@@ -3329,6 +3329,39 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  /* ---- v1.40: placement must see LANDMASSES, not just cells ---- */
+  R.v140 = await page.evaluate(async () => {
+    const o = {};
+    const lm = currentLandmassQuality();
+    o.count = lm.count;
+    o.qualityFinite = (() => { for (let i = 0; i < GW * GH; i++) if (!isFinite(lm.quality[i]) || lm.quality[i] < 0 || lm.quality[i] > 1) return false; return true; })();
+    o.zeroAtSea = (() => { for (let i = 0; i < GW * GH; i++) if (field[i] < state.seaLevel && lm.quality[i] !== 0) return false; return true; })();
+    // components must partition the land exactly
+    let land = 0, labelled = 0;
+    for (let i = 0; i < GW * GH; i++) { if (field[i] < state.seaLevel) continue; land++; if (lm.comp[i] >= 0) labelled++; }
+    o.partitionsLand = land === labelled;
+    o.sizesSumToLand = lm.sizes.reduce((a, b) => a + b, 0) === land;
+    // the biggest landmass must score at or near the top; a speck must score far below it
+    const bigIdx = lm.sizes.indexOf(Math.max(...lm.sizes));
+    const smallIdx = lm.sizes.indexOf(Math.min(...lm.sizes));
+    const qOf = id => { for (let i = 0; i < GW * GH; i++) if (lm.comp[i] === id) return lm.quality[i]; return 0; };
+    o.bigBeatsSmall = lm.count < 2 || qOf(bigIdx) > qOf(smallIdx);
+    // the islet penalty must be SPARSE — zero on most land, or it is reweighting the whole map
+    let penalised = 0;
+    for (let i = 0; i < GW * GH; i++) { if (field[i] < state.seaLevel) continue; if (1 - lm.quality[i] / ISLET_KNEE > 0) penalised++; }
+    o.penaltySparse = land === 0 || penalised / land < 0.5;
+    // and no settlement should sit on a speck when real land exists
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    if (places.length && lm.maxSize) {
+      o.onTinyIslet = places.filter(p => {
+        const c = lm.comp[Math.round(p.y) * GW + Math.round(p.x)];
+        return c >= 0 && lm.sizes[c] / lm.maxSize < 0.01;
+      }).length;
+    }
+    return o;
+  });
+
 
   await browser.close();
 
@@ -3751,6 +3784,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
   A('v1.38: the City Viewer lists the same exports and imports as the settlement popup (one source, not faction-level)', !R.v138.nPlaces || (R.v138.viewerShowsPopupExports && R.v138.viewerShowsPopupImports));
   A('v1.38: the City Viewer shows the settlement\'s own trade rows and still labels the faction rows as such', !R.v138.nPlaces || (R.v138.viewerHasOwnRows && R.v138.viewerLabelsFaction));
+
+  A('v1.40: landmass quality is finite, in [0,1], zero at sea, and its components partition the land exactly', R.v140.qualityFinite && R.v140.zeroAtSea && R.v140.partitionsLand && R.v140.sizesSumToLand);
+  A('v1.40: the largest landmass scores above the smallest (placement can tell an island from a speck)', R.v140.bigBeatsSmall);
+  A('v1.40: the islet penalty is sparse — it is an exception, not a reweighting of the whole map', R.v140.penaltySparse);
+  A('v1.40: no settlement is seeded on a speck of land while real landmass exists', !R.v140.nPlaces || R.v140.onTinyIslet === 0);
+
 
 
 

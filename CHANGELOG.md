@@ -12,7 +12,39 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.39 — Water-edge snap enabled (placement now runs before routing) + popup overflow
+### v1.40 — Placement can finally tell an island from a speck
+
+Owner: "some settlements are on the tiniest landmass instead of preferring the larger (richer)
+island." Hash vs v1.39 ALL IDENTICAL. 1001 / 852 / 369 green.
+
+- **Root cause: `buildSettlementSuitability` scored CELLS and had no concept of a body of land.** A
+  one-cell islet whose own cell happened to score well beat a merely-decent cell on a large fertile
+  island, because nothing in the formula knew the islet was an islet.
+- **`buildLandmassQuality`** labels connected land components once (8-way, wrap-aware in world mode)
+  and derives per cell how good the LANDMASS is — log-scaled area against the world's own largest,
+  plus mean carrying capacity. **Relative, not absolute**: an archipelago world is legitimately all
+  small islands, and an absolute area cut-off would depopulate it. Same self-calibrating discipline as
+  the sea-level histogram, the density normalisation and the soil reference.
+- **The penalty needed a knee.** A first cut used `1 − quality` directly, which is non-zero on nearly
+  every cell — a broad reweighting rather than a sparse exception — and halved the settlement count
+  (29 → 12). Anything on a landmass at or above `ISLET_KNEE` of the world's best now pays nothing.
+  This is the third time the v1.30 rule has bitten (v1.36 corridors, v1.40 first cut): **a term that
+  is not ~zero almost everywhere is reweighting the map, not expressing an exception.**
+- **Measured** (seed 12345/256px): settlements on a landmass under 1% of the largest **→ 0**; smallest
+  occupied landmass is now 22.5% of the largest; settlement count unchanged at 29; urbanisation
+  14.29%; every settlement still within its food shed.
+
+### Coastal preference — attempted, and honestly not improved on this seed
+
+Raising the coast weight 0.14 → 0.20 was tried and reverted: it clusters seeds along the coastline,
+the suppression radius then culls them, and the count halved (29 → 12) for a gain of two coastal
+sites. Keying a longer water-edge snap on the `port` trait is a no-op (that trait is assigned later,
+in the crossroads pass). The snap now reaches 2.5× further and tolerates a bigger suitability drop
+when the SEA specifically is within range, which will help worlds where it is — but on seed 12345 the
+coastal share is unchanged at 6 of 29, because settlements there sit a median **127 km** from the
+coast. They are inland because the landmass is large, not because they were misplaced.
+
+## v1.39 — Water-edge snap enabled (placement now runs before routing) + popup overflow
 
 Owner prioritised the water-edge snap. The blocker was ordering, and the fix was to move the pass
 rather than patch its consequences. Hash vs v1.38 ALL IDENTICAL. 1001 / 852 / 365 green.

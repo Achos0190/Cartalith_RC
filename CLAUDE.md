@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.39**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.40**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.39.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.38.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.40.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.39.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,21 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Placement sees landmasses (v1.40)
+
+`buildLandmassQuality` labels connected land components and scores each by log-area (against the
+world's OWN largest) plus mean carrying capacity, feeding an `islet` PENALTY into suitability. Before
+it, placement scored cells and could not tell a one-cell speck from a continent.
+
+- **Relative to the world's largest landmass, never an absolute area** — an archipelago world is
+  legitimately all small islands.
+- **The penalty needs its knee (`ISLET_KNEE`).** A raw `1 − quality` is non-zero nearly everywhere and
+  halved the settlement count. **Third occurrence of the v1.30 rule**: a term that is not ~zero almost
+  everywhere is reweighting the whole map rather than expressing an exception. Check the land-mean of
+  any new term before trusting it.
+- Coastal PREFERENCE remains unsolved: raising the coast weight clusters seeds and the suppression
+  radius culls them (29 → 12 for two extra coastal sites). Left at 0.14.
+
 ### Placement ordering (v1.39) — snap runs BEFORE routing
 
 `_civSnapToWaterEdge` is enabled. **The rule: nothing may move a settlement after
@@ -1122,7 +1137,7 @@ node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (365 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (369 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding
