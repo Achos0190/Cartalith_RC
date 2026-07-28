@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.38**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.39**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.38.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.37.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.39.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.38.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,7 +998,17 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
-### Placement: water edge + corridors — UNFINISHED (v1.36)
+### Placement ordering (v1.39) — snap runs BEFORE routing
+
+`_civSnapToWaterEdge` is enabled. **The rule: nothing may move a settlement after
+`_civHierarchicalNetwork` has routed.** v1.36 snapped at the end of `_civIterativeAutoWorld` and every
+way terminating at a moved settlement stopped short (broke v1.02 and v0.97); patching endpoints
+afterwards did not fully restore either. The snap now runs before the first routing pass, and the
+crossroads settlements are snapped before their own re-route. Measured: channel-bottom occupancy
+6 → 1, no settlement in water, 65.5% on the water edge (lower than the 79.3% v1.36 measured with the
+snap at the end — it nudges 5 settlements rather than 9 because the crossroads pass has not run yet).
+
+### Placement: water edge + corridors — earlier context (v1.36)
 
 Owner asked for settlements to sit on the bank/shore behind the floodplain, and for crossroads to
 attract settlement. **Neither is on by default.** Read CHANGELOG v1.36 before picking this up.

@@ -12,7 +12,47 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
-### v1.38 — The City Viewer now reports the settlement's own trade, not its faction's
+### v1.39 — Water-edge snap enabled (placement now runs before routing) + popup overflow
+
+Owner prioritised the water-edge snap. The blocker was ordering, and the fix was to move the pass
+rather than patch its consequences. Hash vs v1.38 ALL IDENTICAL. 1001 / 852 / 365 green.
+
+- **`_civSnapToWaterEdge` is ON by default.** v1.36 ran it at the END of `_civIterativeAutoWorld`,
+  after `_civHierarchicalNetwork` had already routed between the OLD positions — so moving a
+  settlement left every way that terminated at it stopping short, breaking v1.02's "each way reaches
+  its settlement" guarantee and starving the urban-morphology layout of the primary streets it builds
+  around (v0.97). v1.36 tried to carry the endpoints across and it did not fully restore either.
+  Running the snap **before the first routing pass** makes the problem not exist: routes are built
+  against final positions. Both previously-failing assertions are green with the snap enabled.
+- The crossroads settlements added later are snapped too, but **before their own re-route** — not
+  snapping them left them the only unsnapped settlements in the world. Snapping anything after routing
+  is what must never happen.
+- **Measured** (seed 12345/256px): channel-bottom occupancy **6 → 1**, mean flood exposure 0.295 →
+  0.247, no settlement in water, urbanisation 14.32% (still in band), every settlement within its food
+  shed. **On-water-edge share is 65.5%, not the 79.3% v1.36 measured** with the snap running at the
+  end over all 29 settlements — running earlier, before the crossroads pass exists, nudges 5 rather
+  than 9. The ordering is now correct and the guarantees hold; the edge share is lower than the
+  earlier (unshippable) configuration and is reported as measured rather than as the older figure.
+- **Edit Settlement popup overflowed its own box.** The container was already capped at 82vw/80vh,
+  but its CONTENT was not: the Connected-roads and Exports lines are long comma-separated runs with no
+  break opportunity, so they forced a horizontal scrollbar and pushed height past the cap. Now wraps
+  (`overflow-wrap:anywhere`), clips horizontally, and every child is `box-sizing:border-box` inside a
+  `min(82vw,340px)` / `min(80vh,660px)` box.
+
+### Reported but NOT addressed in this version
+
+Stated plainly so they are not assumed done:
+
+- **Rivers disappear when zooming under LOD tiling.** Not investigated.
+- **Settlements still sit inland even with a port.** The snap improves flood placement but the
+  underlying issue is that placement does not weight coastal sites strongly enough; v1.37 fixed
+  *detection*, not *preference*.
+- **Settlements seeded on tiny islets rather than the larger, richer landmass.** Placement has no
+  landmass-size or landmass-quality term at all — it scores cells, not bodies of land.
+- **Land routes chosen where a sea route would be faster, and travel-mode should re-bias the route.**
+  Journey-planner work, untouched here.
+
+## v1.38 — The City Viewer now reports the settlement's own trade, not its faction's
 
 Owner: "exports and imports in the pop-up view are not the same when you press open city view — that
 window doesn't seem to read from the same information." Correct. Hash vs v1.37 ALL IDENTICAL.

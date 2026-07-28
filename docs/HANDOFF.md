@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.38.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.39.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.39 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.37` are kept and never edited.
+  (v1.40 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.38` are kept and never edited.
+- **v1.39 — water-edge snap ENABLED; placement now runs before routing.** Hash vs v1.38 ALL
+  IDENTICAL. 1001 / 852 / 365 green.
+  - **The rule: nothing may move a settlement after `_civHierarchicalNetwork` has routed.** v1.36's
+    end-of-pass snap broke v1.02 and v0.97; the snap now precedes the first routing pass and the
+    crossroads settlements are snapped before their own re-route.
+  - Measured: channel-bottom occupancy 6 → 1, none in water, 65.5% on the water edge (below v1.36's
+    79.3%, which was measured in the unshippable end-of-pass configuration).
+  - Settlement popup no longer overflows: long road/export lists now wrap.
+
+- **OPEN, reported by owner, NOT yet addressed** (top of the queue):
+  1. Rivers disappear when zooming under LOD tiling — uninvestigated.
+  2. Settlements with a port still sit inland — v1.37 fixed coastal DETECTION, not PREFERENCE; the
+     suitability coast weight is not strong enough to pull a seed to the shore.
+  3. Settlements seeded on tiny islets over the larger richer landmass — **placement has no
+     landmass-size or landmass-quality term at all**; it scores cells, never bodies of land.
+  4. Land routes chosen where sea would be faster, and travel-mode should re-bias the route.
+
 - **v1.38 — the City Viewer reports the settlement's own trade, not its faction's.** Hash vs v1.37 ALL
   IDENTICAL. 1001 / 852 / 365 green. The popup used `_civPlaceTrade`, the viewer used
   `_civFactionAggregates` — both correct for what they measured, but a settlement view leading with
