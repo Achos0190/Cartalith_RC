@@ -3443,6 +3443,145 @@ if (typeof carveRiverValleys === 'function') {
   state.carveRivers = oldCarve; generate();   // restore
 }
 
+
+/* ---------- Sculpt engine (P0): pure stamp-based feature registry ----------
+   docs/SCULPT_EDITOR_INTEGRATION_PLAN.md. Ported 1:1 from the fractal-geology
+   PoC's own 77-assertion corpus (fractal-geology/tests/test_tail.js) onto the
+   engine-native sculptFbm/sculptRidged/sculptBillow/SCULPT_FEATURES/
+   sculptApplyStamp/sculptNearestOnStroke ported above. Same synthetic-grid
+   methodology as the PoC's suite (a fixed local SIZE, not the live GW/GH) —
+   these are pure functions, independent of whatever resolution the rest of
+   this test file has generate()'d at this point. */
+{
+  const SSZ=512, SN=SSZ*SSZ;
+  function sculptMkStamp(type, pts, gOver, fOver){
+    const g=Object.assign({}, SCULPT_GLOBAL_DEF, gOver||{});
+    const f={}; for(const c of SCULPT_FEATURES[type].controls) f[c[0]]=c[5];
+    Object.assign(f, fOver||{});
+    return { id:1, type, seed:12345, g, f, pts, hidden:false };
+  }
+  function sculptBlank(){ const H=new Float32Array(SN).fill(0.45), W=new Float32Array(SN); return {H,W}; }
+  function sculptSum(a){ let s=0; for(let i=0;i<a.length;i++) s+=a[i]; return s; }
+
+  // 1. noise determinism
+  check('sculptFbm deterministic for equal seed', sculptFbm(1.3,2.7,5,0.5,2,777)===sculptFbm(1.3,2.7,5,0.5,2,777));
+  check('sculptFbm differs for different seed', sculptFbm(1.3,2.7,5,0.5,2,777)!==sculptFbm(1.3,2.7,5,0.5,2,778));
+  { let mn=9,mx=-9; for(let i=0;i<4000;i++){ const v=sculptFbm(i*0.13,i*0.07,5,0.5,2,777); if(v<mn)mn=v; if(v>mx)mx=v; }
+    check('sculptFbm stays roughly in [-1,1]', mn>=-1.2 && mx<=1.2); }
+  { let mn=9,mx=-9; for(let i=0;i<4000;i++){ const v=sculptRidged(i*0.13,i*0.07,5,0.5,2,777); if(v<mn)mn=v; if(v>mx)mx=v; }
+    check('sculptRidged in [0,1]', mn>=0 && mx<=1.001); }
+  { let mn=9,mx=-9; for(let i=0;i<4000;i++){ const v=sculptBillow(i*0.13,i*0.07,5,0.5,2,777); if(v<mn)mn=v; if(v>mx)mx=v; }
+    check('sculptBillow in [0,1]', mn>=0 && mx<=1.001); }
+
+  // 2. every feature: finite output, respects mask, is deterministic
+  for(const type of SCULPT_FEATURE_KEYS){
+    const pts = SCULPT_FEATURES[type].radial ? [{x:256,y:256}]
+                                      : [{x:180,y:220},{x:256,y:256},{x:330,y:280}];
+    const {H,W}=sculptBlank();
+    const before=H.slice();
+    sculptApplyStamp(sculptMkStamp(type,pts), H, W, SSZ, SSZ);
+    check(type+': heightmap finite after apply', allFinite(H));
+    check(type+': water layer finite after apply', allFinite(W));
+    { let inRange=true; for(let i=0;i<H.length;i++){ if(H[i]<0||H[i]>1){ inRange=false; break; } }
+      check(type+': height in [0,1]', inRange); }
+    check(type+': leaves far corners untouched (masked)', H[0]===before[0] && H[SN-1]===before[SN-1]);
+    const {H:H2,W:W2}=sculptBlank();
+    sculptApplyStamp(sculptMkStamp(type,pts), H2, W2, SSZ, SSZ);
+    { let same=true; for(let i=0;i<SN;i++){ if(H[i]!==H2[i]){ same=false; break; } }
+      check(type+': identical seed/params reproduce the field bit-for-bit', same); }
+    { let changed=false; for(let i=0;i<SN;i++){ if(H[i]!==before[i]){ changed=true; break; } }
+      check(type+': produces a non-empty modification', changed); }
+  }
+
+  // 3. feature semantics
+  {
+    const raiseTypes=['mountains','hills','plateau','volcano'];
+    const lowerTypes=['canyon','valley','basin'];
+    for(const t of raiseTypes){
+      const pts = SCULPT_FEATURES[t].radial?[{x:256,y:256}]:[{x:200,y:256},{x:312,y:256}];
+      const {H,W}=sculptBlank(); const before=sculptSum(H); sculptApplyStamp(sculptMkStamp(t,pts),H,W,SSZ,SSZ);
+      check(t+': net raises terrain', sculptSum(H)>before+1);
+    }
+    for(const t of lowerTypes){
+      const pts=[{x:200,y:256},{x:312,y:256}];
+      const {H,W}=sculptBlank(); const before=sculptSum(H); sculptApplyStamp(sculptMkStamp(t,pts),H,W,SSZ,SSZ);
+      check(t+': net lowers terrain', sculptSum(H)<before-1);
+    }
+  }
+  {
+    const {H,W}=sculptBlank(); sculptApplyStamp(sculptMkStamp('river',[{x:120,y:256},{x:256,y:256},{x:400,y:256}]),H,W,SSZ,SSZ);
+    check('river writes into the water layer', sculptSum(W)>0);
+    const {H:H2,W:W2}=sculptBlank(); sculptApplyStamp(sculptMkStamp('lake',[{x:256,y:256}]),H2,W2,SSZ,SSZ);
+    check('lake writes into the water layer', sculptSum(W2)>0);
+  }
+  {
+    const {H,W}=sculptBlank();
+    sculptApplyStamp(sculptMkStamp('cliff',[{x:256,y:120},{x:256,y:400}]),H,W,SSZ,SSZ); // vertical stroke, brush r=60
+    const left=H[256*SSZ+226], right=H[256*SSZ+286]; // both within the brush radius
+    check('cliff creates a step between its two sides', Math.abs(left-right)>0.02);
+  }
+  {
+    const soft=sculptBlank(), hard=sculptBlank();
+    sculptApplyStamp(sculptMkStamp('mountains',[{x:256,y:256}],{hardness:0.0}),soft.H,soft.W,SSZ,SSZ);
+    sculptApplyStamp(sculptMkStamp('mountains',[{x:256,y:256}],{hardness:0.95}),hard.H,hard.W,SSZ,SSZ);
+    let ds=0,dh=0; for(let i=0;i<SN;i++){ if(soft.H[i]!==0.45)ds++; if(hard.H[i]!==0.45)dh++; }
+    check('both soft and hard brushes modify some pixels', ds>0 && dh>0);
+  }
+  {
+    const base=sculptBlank();
+    const {H,W}=sculptBlank(); sculptApplyStamp(sculptMkStamp('mountains',[{x:256,y:256}],{intensity:0}),H,W,SSZ,SSZ);
+    let changed=false; for(let i=0;i<SN;i++) if(H[i]!==base.H[i]){changed=true;break;}
+    check('intensity 0 leaves terrain untouched', !changed);
+  }
+  {
+    const {H,W}=sculptBlank();
+    sculptApplyStamp(sculptMkStamp('mountains',[{x:200,y:256},{x:312,y:256}]),H,W,SSZ,SSZ);
+    const midHeight=H.slice();
+    sculptApplyStamp(sculptMkStamp('canyon',[{x:256,y:180},{x:256,y:330}]),H,W,SSZ,SSZ);
+    let diff=false; for(let i=0;i<SN;i++){ if(H[i]!==midHeight[i]){diff=true;break;} }
+    check('a second stamp composites on top of the first', diff);
+  }
+
+  // 4. geometry: signed distance / arclength
+  {
+    const pts=[{x:100,y:100},{x:300,y:100}]; // horizontal segment
+    const above=sculptNearestOnStroke(200,60,pts), below=sculptNearestOnStroke(200,140,pts);
+    check('signed distance flips across the stroke', Math.sign(above.sd)!==Math.sign(below.sd));
+    check('unsigned distance correct', Math.abs(above.dist-40)<1e-6 && Math.abs(below.dist-40)<1e-6);
+    check('arclength ~halfway along segment', sculptNearestOnStroke(200,100,pts).s>90 && sculptNearestOnStroke(200,100,pts).s<110);
+  }
+
+  // 5. per-feature edge character
+  {
+    function boundaryStd(type, extraG){
+      const g=Object.assign({brushSize:70}, extraG||{});
+      const base=sculptBlank();
+      const {H,W}=sculptBlank();
+      sculptApplyStamp(sculptMkStamp(type,[{x:180,y:256},{x:332,y:256}],g), H, W, SSZ, SSZ);
+      const radii=[];
+      for(let x=210;x<=302;x+=2){
+        let boundaryY=-1;
+        for(let y=100;y<256;y++){ if(H[y*SSZ+x]!==base.H[y*SSZ+x]){ boundaryY=y; break; } }
+        if(boundaryY>=0) radii.push(256-boundaryY);
+      }
+      const mean=radii.reduce((a,b)=>a+b,0)/radii.length;
+      return Math.sqrt(radii.reduce((a,b)=>a+(b-mean)*(b-mean),0)/radii.length);
+    }
+    const sMtn = boundaryStd('mountains'), sHill = boundaryStd('hills');
+    check("mountains' higher edgeChar/edgeFreqMul reads more ragged than hills at equal brush size", sMtn > sHill);
+    check('edgeNoise:0 restores a perfectly straight boundary', boundaryStd('mountains',{edgeNoise:0})===0);
+  }
+
+  // 6. world-wrap parity (P0 open item, resolved): the existing plotline brush
+  // (applyFeatureAlongCurve, just above in this file) has no equirectangular
+  // seam-wrap handling either — sculptApplyStamp matches that, not a regression.
+  {
+    const base=sculptBlank();
+    const {H,W}=sculptBlank();
+    sculptApplyStamp(sculptMkStamp('mountains',[{x:2,y:256},{x:40,y:256}]),H,W,SSZ,SSZ);
+    check('no seam-wrap: the opposite edge (x=SSZ-1) is untouched by a stamp painted at x=2..40', H[256*SSZ+(SSZ-1)]===base.H[256*SSZ+(SSZ-1)]);
+  }
+}
 /* ---------- async tests own the summary (gzip + region export, v0.053) ---------- */
 (async () => {
   // gzip round-trip via CompressionStream (Node 18+ has it; skip gracefully otherwise)

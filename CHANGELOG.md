@@ -12,6 +12,759 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.13 (2026-07-19)
+**Owner: "3 fixes: the current label system doesn't provide visual results anymore. And the zoom — I should also be able to zoom out to a point that the full width of the map stays in the viewer, currently the furthest zoom-out uses the map height as max view, forcing a user to drag left and right to see everything. When zooming, the clickable information on the map seems to keep its coord to the original zoom level, it doesn't adapt."** Three post-borrow-list bug fixes, all civ/UI layer — engine block 1 untouched.
+
+**#1 — Region/area name labels stopped drawing.** The occupancy-grid collision system (v0.148) treats settlement auto-labels and user-authored region names as equal citizens of one shared grid, and v1.12's multi-candidate settlement placement added *more* boxes to that grid — enough that, on a busy map, the region label's cell was always already claimed by a settlement label, so `drawCivLayer`'s §4 collision test (`if(!lblTest(...)) continue;`) skipped it entirely (owner-reproduced: 0 of 2 region labels drew). Fix: region names are **deliberate cartography** and now take precedence. A pre-pass before the settlement loop reserves each region label's occupancy box (so settlement auto-labels *yield* to the user's names), and §4 draws the region labels **unconditionally** — no collision skip, which also means the selected/just-placed label can never erase itself. Settlement labels still collision-test against each other and against the (now-reserved) region boxes.
+
+**#2 — Zoom-out floored at COVER, not FIT.** The fill-mode floor (v1.01) was `_viewCoverScale()` = `max(availW/natW, availH/natH)`, i.e. the *larger* ratio — it fills the viewport but the map's other axis overflows, so at maximum zoom-out one dimension (here the width, on the region-mode 1.56:1 map in a wider viewport) ran off-screen and forced left/right dragging. New `_viewFitScale()` = `min(availW/natW, availH/natH)` is the scale at which the **whole** map fits (letterbox on the overflow axis). The zoom-out floor in `zoomAt` and `_viewClampFill` is now the fit scale; when the map fits an axis with slack, that axis is **centred** so the letterbox band is symmetric and the map can't be lost off-edge. The **default/reset** view still *fills* (cover) via the new `_viewFill()` — routed through the zoom-reset button, post-generate/import commits, resize, and load — so the initial look is unchanged (no letterbox bands); only deliberate zoom-out past cover now reveals the full map.
+
+**#3 — Clickable info kept the un-zoomed coordinate under LOD.** Zooming in auto-enters the tiled-LOD viewer (`state.lodAuto`), where the canvas shows only `lodViewRect()`'s sub-window — but the left-click civ-tool handler (`view` `pointerdown`) still mapped clicks with plain `evtToGrid`, which assumes the whole `GW×GH` world fills the canvas, landing every click on the wrong world cell (measured ~260 grid cells off at deep zoom). Switched the handler — and the territory-paint `pointermove` — to the LOD-aware `evtToGridLOD` (the same inverse the v0.91 info/wildlife clicks and the v0.95 right-click menu already use; falls back to `evtToGrid` off LOD). So Info/Inspect/Place/POI/Territory/Route/Way all read the correct cell at any zoom.
+
+All three are civ-layer (`civCtx`) / view-transform / input-mapping changes; none touch `field`/`temp`/`rain`/`flow` or the terrain canvas (`vctx`), so cross-version bit-identity holds by construction.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.12 **ALL IDENTICAL**; `smoke_gen1.js` **203/203** (+3: region label draws through a packed occupancy grid; zoom-out floor fits the whole map width AND height where cover overflowed; a deep-LOD left-click reaches `_civInfoAt` with the correct settlement cell while the plain mapping is far off). Fixed-seed Playwright screenshots confirm region labels rendering at the filled default and the whole map — both edges — visible at maximum zoom-out. Canvas pan/zoom *feel* over a real gesture is browser-only (not headless-testable) and was checked manually.
+
+### v1.12 (2026-07-19)
+**Owner: "implement the top 6 borrow list from the research."** Sixth and last: `docs/research/azgaar-comparative-analysis.md` §4's #6 pick, label placement + per-layer style editors — "FMG's label engine and restyle-everything panels are the editor-maturity bar." Completes the borrow-list.
+
+**Label placement.** Settlement/POI name labels had exactly one candidate slot (fixed above the pin) since v0.148's occupancy-grid collision system shipped — a lower-priority label whose spot was already claimed was silently dropped, never offered anywhere else. `drawCivLayer`'s placement loop now tries **above → below → right → left** (in that priority order — "above" first reproduces the exact pre-v1.12 pixels whenever it's free, the overwhelming common case) before giving up, via new `lblTestBox`/`lblMarkBox` helpers (explicit `[x0,y0,x1,y1]` screen bounds, sharing the same occupancy grid as the existing point-based `lblTest`/`lblMark` the region-name-label system still uses unchanged). `_civDrawSettlementPin`/`_civDrawPoiPin` gain an `opts.labelPos` parameter (default `'above'`, so every pre-v1.12 call site not yet passing it draws identically) selecting which side of the pin the text renders on. Measured on a deliberately brutal test (five same-tier cities, long names, packed 8 grid units apart in a line — far tighter than any of their label widths): the pre-v1.12 system showed **1 of 5** labels; v1.12 shows **2 of 5** (the second rescued via `below`), with the rest correctly still dropped (the packing is tight enough that no side has room left) rather than overlapping.
+
+**Per-layer style editors.** Two new sliders (Settlements panel, "Layer style"): **Territory fill opacity** (`state.viz.territoryOpacity`, default `130/255` — the exact previously-hardcoded alpha) and **Way opacity** (`state.viz.wayOpacity`, default `1`) restyle those two layers independently of each other, alongside the existing settlement-icon/way-width scale sliders. Both fold into the SAME per-pixel render passes those layers already used (the territory raster-blit's cache key, the ways loop's existing per-condition `globalAlpha`) — no new draw passes, defaults reproduce prior pixels exactly.
+
+Neither change touches `field`/`temp`/`rain`/`flow`/the main terrain canvas (`vctx`) — all civ-layer (`civCtx`) rendering, so bit-identity holds by construction regardless of the specific pixel changes at non-default settings.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.11 **ALL IDENTICAL**; `smoke_gen1.js` **200/200** (+2: the packed-cities rescue case, both opacity sliders present and each producing a real pixel diff). Playwright-probed A/B against v1.11 on the identical packed-cities scenario: v1.11 shows 1/5 labels (`positions:[null]`), v1.12 shows 2/5 (`positions:['above','below']`) — the concrete, measured improvement.
+
+**All 6 items from the Azgaar comparative analysis borrow-list are now shipped** (v1.07–v1.12): culture-flavored naming, setup-gate archetype presets, GeoJSON/GIS export, province tier + religions, submap/resample UX, label placement + per-layer style editors.
+
+### v1.11 (2026-07-19)
+**Owner: "implement the top 6 borrow list from the research."** Fifth of six: `docs/research/azgaar-comparative-analysis.md` §4's #5 pick, submap/resample UX — "framing the existing amplification/LOD machinery as an explicit 'carve this region into its own higher-resolution map' tool."
+
+Cartalith already had every piece: `amplifyRegion()` (seamless world-space heightmap upsampling), a region-select drag tool, and a "Region export" tiled-.zip pipeline (Generate → World → Region export) — but it only ever produced *files*, never a live world to keep working in. Added **Extract as new world**, a new button in that same panel: reuses the identical selected region + `amplifyRegion()`, but instead of packing tiles into a download it replaces the live world with the amplified region and hands off to the existing Import-heightmap calibrate→`inferTectonics()` pipeline — no new world-construction path invented. Deliberately skips `normalize()` (unlike the raw-pixel-luminance `loadImage()` path): the amplified data is already real, meaningful elevation in the parent world's `[0,1]` space, and renormalizing would rescale it to fill 0..1 and corrupt the very sea-level/relative-height continuity the whole point of "resample this region" is supposed to preserve. The new world's `mapWidthKm` is computed from the selection's true fraction of the parent width (a smaller region reads as a *higher-resolution close-up*, not a rescaled copy) and prefills the calibrate step. Civilization data (settlements/roads/territory/provinces) is cleared on extraction — it's positioned/scaled for the old extent, and clearing is honest (matches a fresh Import-heightmap world) rather than risking a subtly-wrong coordinate remap; a `confirm()` warns the owner to export first if they want to keep it.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.10 **ALL IDENTICAL**; `smoke_gen1.js` **198/198** (+5: confirm() dialog + correct target resolution, real-world scale preserved in both state and the prefilled calibrate field, amplified field stays finite and un-renormalized, civ data cleared, committing calibrate infers a valid tectonic substrate on the new world). Playwright-probed end-to-end on a real generated+populated world: a quarter-map region (256×164 of 512×328) extracted at 1024px target produced a 1024×656 world at exactly half the parent's km-width (400 of 800), with a fully valid post-inference field.
+
+### v1.10 (2026-07-18)
+**Owner: "implement the top 6 borrow list from the research."** Fourth of six: `docs/research/azgaar-comparative-analysis.md` §4's #4 pick, province tier + religions layer, after FMG's "mid-tier region between faction and settlement" (provinces) and its optional religions spread-model layer.
+
+**Provinces.** New `civProvince` raster (`Uint16Array(GW*GH)`, parallel to `civTerritory`) subdivides each faction's territory one level finer. `_civGenerateProvinces()` (a "Generate provinces" button next to the faction picker, on-demand rather than automatic on every territory edit) seeds one province per city-tier+ settlement (rank ≥3: city/capital/metropolis/university/industrial) belonging to that faction — a settlement-seeded Voronoi partition restricted to cells the seed's OWN faction already owns, so a province can never cross a territory boundary. A faction with only towns/villages falls back to its single biggest settlement, so any faction that owns territory gets ≥1 named province. Rendering (opt-in `state.viz.provinces`, default off) folds a small deterministic per-province lightness jitter into the *same* per-pixel territory-blit pass `drawCivLayer` already had (cheap, no second draw call, reuses the existing scratch-canvas cache keyed now on `_civProvGen` too). `civProvince`/`CIV_PROVINCES` are deliberately **not persisted** — pure-derived from territory+settlements, so saving them would just be redundant bytes that go stale the moment territory changes; a loaded project regenerates them on demand instead.
+
+**Religions.** Scoped down to a per-**faction** categorical "state religion" attribute (`civFactionReligion`, a fixed 8-entry pantheon list `CIV_RELIGIONS`) rather than FMG's full General/Organized/Cult spread simulation — the research doc itself flags this half as "if wanted," and a second full spatial spread system is out of proportion for one item in a 6-item list. Mirrors the v1.07 naming-culture picker exactly: a `<select>` next to each faction pill, persisted through the same `state.civ` sync as `civFactionCulture`.
+
+**GeoJSON export** (extending v1.09): a new `province` layer, sharing the same boundary-tracer/hole-nesting helper (`_geoMaskOutlineCoords`, factored out of `_geoTerritoryFeature`) — verified to exactly tile the parent territory (combined province area == territory area). Territory features also gain a `religion` property.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.09 **ALL IDENTICAL**; `smoke_gen1.js` **193/193** (+5: city+ seeding vs. single-province fallback, no cross-faction leakage, real pixel diff on toggle, exported provinces tile their territory exactly, religion picker + persistence). Playwright-probed on synthetic two-faction worlds: 2 provinces from 2 city-tier seeds + 1 fallback province from a lone village, zero cross-faction leakage, GeoJSON province area ratio to territory = 1.0000 (both the isolated single-faction case and the two-faction combined case).
+
+### v1.09 (2026-07-18)
+**Owner: "implement the top 6 borrow list from the research."** Third of six: `docs/research/azgaar-comparative-analysis.md` §4's #3 pick, GeoJSON/GIS export, after Azgaar's FMG JSON/GeoJSON export "opens the same downstream-pipeline door." Adds **Export GeoJSON** next to Export .zip in the File ▾ menu: settlements, POIs, roads/sea-routes (`civWays`), rivers (Strahler order ≥2, via the existing `traceRiverPolylines`), and faction territory outlines as one `.geojson` FeatureCollection, each feature tagged with a `layer` property (`settlement`/`poi`/`way`/`river`/`territory`) for easy filtering in a GIS tool.
+
+Coordinates are **local planar kilometres** (east, north), not real-world WGS84 longitude/latitude — RFC 7946 assumes WGS84, but a procedurally generated fantasy world has no true georeference (the same pragmatic call Azgaar's FMG makes for its own export). North is up (Y flipped from the grid's row-major Y-down convention) so the export displays right-side-up in a standard viewer; a top-level `properties.note` documents this in the file itself.
+
+Territory outlines are the one genuinely new algorithm: `_geoTraceMaskRings` walks a faction's `civTerritory` cell mask into closed boundary rings via oriented cell-edge tracing (a "staircase" outline, not marching-squares sub-cell interpolation — territory is already a per-cell raster, so that's the honest shape), classifies each ring outer-shell vs. hole by shoelace sign, and nests holes into their smallest enclosing shell by point-in-ring + area to build correct `MultiPolygon` geometry (an enclave/lake inside a faction's territory renders as an actual hole, not a spurious extra polygon). Doesn't disambiguate the rare checkerboard pinch-point (two diagonal cells in the mask, the other two not) — an accepted simplification for a nice-to-have GIS export, not a core rendering path. Lives in script block 1 (engine) rather than beside the civ-layer data it reads, since it's only ever called from a menu click long after script block 2 has run — the same deferred cross-block reference `exportZip` already uses for the Asset Library's `window._alExportEntries`.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.08 **ALL IDENTICAL**; `smoke_gen1.js` **188/188** (+2: exported FeatureCollection has settlements/ways/rivers + the coordinate-system note, territory outline is a `MultiPolygon` whose shoelace area matches the painted cell area within 0.1%). Node-isolated unit tests of the boundary-tracing algorithm (solid square, donut with a hole, two disjoint blobs, empty mask) all pass exact cell-area and shell/hole classification checks. Playwright-probed end-to-end on a real generated+auto-populated+territory-painted world: 225 features (40 settlements, 56 ways, 128 rivers, 1 territory `MultiPolygon`), territory area ratio to painted cells = 1.000.
+
+### v1.08 (2026-07-18)
+**Owner: "implement the top 6 borrow list from the research."** Second of six: `docs/research/azgaar-comparative-analysis.md` §4's #2 pick, setup-gate world archetype presets, after Azgaar's FMG heightmap templates ("one-click parameter bundles on the new-world screen"). Turns out Cartalith already had the underlying system — `ARCHETYPES` (earth/supercontinent/archipelago/volcanic/rift) and `state.world_structure`'s continentality-field steering, exposed post-generate in the sidebar's Generate → World → World Structure panel — it just wasn't reachable until AFTER a world already existed, buried behind an "Enable continental steering" checkbox the owner would have to already know about.
+
+Added a **World shape** preset row to the setup gate's generate form (`#suArchSeg`): Classic (default, selected — `world_structure` disabled, bit-identical to pre-v1.08) plus Earth-like / Pangaea / Archipelago / Volcanic Isles / Rift Valleys, reusing the exact same `ARCHETYPES` data the sidebar panel already had. Picking a preset sets `state.world_structure.archetype`/`.enabled` and calls the existing `deriveFromWorldStructure()` (invariant 5: only from a UI handler, never inside `generate()`) before the upcoming `_suGenCommit` → `generate()` runs. Classic restores true defaults (14 plates, `tectonicGraph` off, etc.) exactly, not just `enabled=false`, so bouncing between presets and landing back on Classic reproduces the untouched default world. `_setupOpen('generate')` reflects the current selection if the gate is reopened.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.07 **ALL IDENTICAL** (the hash harness calls `generate()` directly, never touching the gate DOM — structurally unaffected regardless); `smoke_gen1.js` **186/186** (+3: preset row exists with Classic default-selected, picking Pangaea enables `world_structure` + derives orogeny before commit, picking Classic after an archetype restores true defaults). Playwright-probed end-to-end: the untouched default path (no button clicked) and an explicit Classic click produce an **identical field hash**; Pangaea and Archipelago each produce a materially different world from Classic and from each other.
+
+### v1.07 (2026-07-18)
+**Owner: "implement the top 6 borrow list from the research."** First of six: `docs/research/azgaar-comparative-analysis.md` §4's #1 pick, culture-flavored naming, after Azgaar's FMG per-culture namesbases making "regions feel distinct at zero simulation cost." Cartalith's `_civSettleName` was a single global syllable/suffix generator — every faction's towns sounded the same.
+
+Added seven **naming cultures** (`CIV_CULTURES`): `common` (the original `_SYL`/`_SFX` pool, verbatim), `imperial` (Latinate — Aurelium, Novaica), `highland` (harsh consonant clusters — Kragdunhold), `desert` (guttural — Qirashabad), `riverlands` (soft, watery — Avenmereford), `sylvan` (elvish, apostrophed), `maritime` (Norse-flavored — Bjorvikholm). A new parallel array `civFactionCulture` assigns each faction a culture, deterministically defaulted per faction index (`_civDefaultCulture`) so the six built-in factions read distinctly with zero setup; a naming-culture `<select>` next to each faction pill (`_civBuildFactionPicker`) lets the owner reassign it. `_civSettleName(rng,faction)` now looks up the settlement's own faction's culture before drawing syllables — both auto-populate call sites (`_civIterativeAutoWorld`'s suitability seeding and its crossroads-promotion pass) pass `faction` through. The settlement editor (`_civPopulatePlaceEditor`) gains a 🎲 button next to the Name field that re-rolls a name from the settlement's own faction culture, mirroring FMG's "regenerate burg name." `civFactionCulture` round-trips through the same `state.civ` sync (`_civSyncToState`/`_civSyncFromState`) that already carries `civFactionNames`, with old-save/no-field compatibility (missing ⇒ rebuilt from the deterministic per-index default) and extend/trim in lockstep with `CIV_FACTIONS` growth/shrink.
+
+Settlement naming isn't part of the `hash_gen1.js` bit-identity battery (field/temp/rain/flow/render only) — free to change without touching cross-version neutrality; verified `ALL IDENTICAL` regardless.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B vs v1.06 **ALL IDENTICAL**; `smoke_gen1.js` **183/183** (+4: per-faction culture picker present, a culture-pinned faction's names adhere to that culture's suffix pool >90% of draws, the editor's 🎲 re-rolls from the settlement's own faction culture, `civFactionCulture` round-trips through sync). Playwright-probed end-to-end on a real generated+auto-populated world: six factions pinned to six distinct cultures produce visibly distinct settlement names (Imperial: Novarcica, Auraurium; Highland: Kragandward, Dagrhurnridge; Desert: Ashqirspan, Bahrharmarch).
+
+### v1.06 (2026-07-18)
+**Owner: "maybe we should have the seed box back, and the random option there also."** The setup gate's
+generate form gains a **World seed** row: a Seed number input (`#suSeedN`, prefilled with the current
+boot-random seed when the step opens) + a **🎲 Random** button that rolls a new value into the box
+(applied on Generate). `_suGenCommit` applies the typed seed to `state.tect.seed` before generating
+(blank = roll a fresh random one, the pre-v1.06 behaviour); the sidebar `#seedN` stays in sync via the
+existing `syncUI()`. The same seed + size + extent now reproduces the same world from the very first
+generate — previously the seed was only reachable in the sidebar AFTER a world existed, so the initial
+world was always irreproducible.
+
+Playwright-verified end-to-end: the same typed seed across two fresh boots produces an **identical
+field hash**; the dice rolls a different seed → different world; the sidebar seed matches. Side effect:
+`smoke_gen1.js` now seeds its boot world (31337) through this input, which also de-flakes the suite's
+previously random-world assertions.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B
+vs v1.05 **ALL IDENTICAL** (the harness bypasses the gate; at defaults the gate applies the same
+boot-random seed as before); `smoke_gen1.js` **179/179** (+1: seed box exists, 🎲 rolls, typed seed
+drives `state.tect.seed`).
+
+### v1.05 (2026-07-18)
+**Owner: "the blocky water" — #96, "square lakes when LOD zooming" (deferred since v0.96, now fixed).**
+Above-sea lakes were classified per coarse grid cell (`currentWaterBodies()===2`) and both sub-cell
+renderers — `renderBiomeTileRGBA` (LOD tiles/overview) and `bakePixel` (exports) — stamped whole cells
+via a NEAREST-cell test per pixel, so a lake magnified past the grid resolution read as axis-aligned
+blue squares with razor-straight right-angle edges.
+
+- **`buildWaterBodies` optionally exports its pooled fill level** (`opts.fillOut` — the priority-flood
+  `filled` raster, i.e. the lake's water-surface height per cell). Optional out-param; the return
+  contract and every existing caller are untouched. `currentWaterBodies()` captures it into a new
+  module cache `_lakeFill` with the same lifetime as `_waterBody`.
+- **Sub-cell lake test in both samplers**: deep inside the lake (all 4 surrounding coarse cells lake)
+  a pixel is water outright; on the boundary band a pixel is water where the tile's own (amplified)
+  terrain lies BELOW the pooled lake surface — the tile is flooded to the pool level, so the shore is
+  the curve where the visible terrain rises out of the water — AND inside a bilinear lake-membership
+  band (`fq>0.35`), which cuts a smooth marching-squares-style curve where the shelf is too flat for
+  the terrain test to shape (without it, flat shelves degenerated to straight window-limit edges).
+  Water-brush/flat lakes (nothing pooled: `fill−bed ≤ lakeDepth`) keep their painted cell shape via a
+  nearest-cell fallback, as does any path where `_lakeFill` is absent.
+- **The BASE per-cell map loop is untouched** — at 1 cell = 1 pixel there is nothing to subsample, and
+  this keeps the default render bit-identical (hash battery ALL IDENTICAL, no cross-version-neutrality
+  exception needed; only LOD tiles/overview and bakes change, which is the point).
+
+**Probe note (affects reproducibility of every earlier browser probe):** the setup gate has NO seed
+input — `state.tect.seed` is the real seed and boots randomized, so all earlier "seed 54869" Playwright
+probes were actually random worlds. The lake probe now sets `state.tect.seed` directly; the A/B above is
+a true same-world comparison (identical 710-cell lake in both versions, view on its eastern shore:
+v1.04 = hard right-angle squares → v1.05 = smooth terrain-following shoreline).
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B
+vs v1.04 **ALL IDENTICAL** (base loop untouched); `smoke_gen1.js` **178/178**. Same-world screenshot
+pair confirms the fix at a 6 km LOD span.
+
+### v1.04 (2026-07-18)
+**Owner: "harbour length + needle" (continuing the v1.03 screenshot batch).** Root cause of the extreme
+wall "needles next to lines of water" found and fixed: `buildWall`'s one-bank branch walks `townBank`
+between the two landArc→bank projection points, and on REAL water `site.river`/the shoreline is the real
+polyline spanning the WHOLE ~2.4 km town box — a noisy land classification could project the endpoints
+far apart along the bank, so the water-following wall ran kilometres along the river/shore (measured:
+a 2,210 m water wall on the flood scenario). The v1.03 hull cap can't catch this (the needle is the
+BANK walk, not the hull), and the same structure reads as the "weirdly long harbour" since it hugs the
+waterline. Fix: if the bank walk is disproportionate to the town (arc length > max(1.6 × landArc, 500 m)),
+the classification was degenerate — drop the water-following wall and fall back to the plain smooth
+curtain around the (v1.03 aspect-capped) hull. Guarded on `usesRealWater` ⇒ the synthetic UME suite is
+byte-identical. Flood probe: max water-wall 2,210 m → 0 (degenerate walks culled; proportionate ones
+kept), median ring aspect 1.1.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831**; `hash_gen1.js` A/B
+vs v1.03 **ALL IDENTICAL**; `smoke_gen1.js` **178/178**.
+
+### v1.03 (2026-07-18)
+**Owner (9 screenshots, v1.01): "harbours not placed correctly, layouts off; a place said to be in water
+but zoom reveals an island; weirdly long harbours next to lines of water; square lakes when LOD zooming."**
+Two targeted settlement-layout fixes (the third — square lakes at LOD — is the pre-existing tile-renderer
+resolution limit, still deferred).
+
+- **Island/coastal towns no longer wrongly suppressed** (`_umWaterCtx`). The v1.00 "mostly water" bail
+  keyed on the WHOLE ~1.7 km box's water fraction (>0.72), so a settlement on a small island read as
+  "in open water" and showed **no** town layout, even though it sits on land. Since v1.01 snaps every
+  settlement onto land, the right question is whether there's buildable land RIGHT AROUND the settlement,
+  not how much distant box is sea: the bail now measures the water fraction only in a ~260 m disc centred
+  on the settlement, and fires (bare pin) only if that disc is >90% water (a genuine mid-open-water pin).
+  An island/coast/estuary town has land under and beside it, so it builds a (small) town on that land.
+  Probe: rescued island settlements render a real town (137 buildings on the flooded-island test), no
+  false bails; the disc test spares true mid-water pins.
+- **Coastal/port enceinte no longer stretches into a thin sliver** (`builtMassHull`). On REAL water, if
+  the built-mass hull is pathologically elongated (a needle strung along the shore/river, e.g. the owner's
+  "weirdly long harbours next to lines of water"), it's now compressed along its long axis to a max ~2.4:1
+  aspect (anisotropic scale about the centroid). The common real-water wall is ~1.3:1 and passes through
+  untouched; only extreme cases engage. Guarded on `usesRealWater` ⇒ the synthetic UME suite is
+  byte-identical. Flood-scenario probe: worst wall aspect 2.5 → 2.2 (median 1.5 unchanged). NOTE: the
+  owner's most-extreme needles couldn't be reproduced on local seeds, so this is a general safeguard that
+  bounds any elongation (a hull of aspect 10 becomes ≤2.4) pending on-device confirmation; the long
+  HARBOUR-quay extent along the shore is a separate follow-up.
+
+**Verification:** engine `tests/run.sh` **923/923** (block 1 untouched); `tests/run_um.sh` **831/831**
+(both fixes guarded ⇒ synthetic path byte-identical); `hash_gen1.js` A/B vs v1.02 **ALL IDENTICAL**
+(opt-in layout path only); `smoke_gen1.js` **178/178**.
+
+### v1.02 (2026-07-18)
+**Owner: "sometimes ways don't connect — they stop just short of a location."** The land network
+(`_civHierarchicalNetwork`) consolidates shared corridors by claiming routing-grid cells busiest-first,
+so an edge whose near-settlement cells were already claimed by a THROUGH road starts its visible run a
+routing-cell or two out — at a downsampled cell CENTRE offset from the pin — and the road visibly stops
+short of the settlement. The v0.92 substitution only fixed the run that reached the edge's OWN endpoint
+cell; this adds a post-pass that pulls any way endpoint still landing near its edge's settlement
+(`aIdx`/`bIdx`) exactly onto the pin. The threshold scales with the downsample (offset = routing cells ×
+1/sc) and with the claimed-corridor depth, bounded to ~45% of the ~`GW/30` inter-settlement spacing so
+it can never reach a neighbouring place, and it only ever snaps to the way's own two settlements — so a
+terminal near its settlement is always the right target and interior junction runs (far from any pin)
+never match. Sea routes already anchored their endpoints exactly (`_civMstRoutes`), so they were fine.
+
+**Verification:** engine `tests/run.sh` **923/923** (block 1 untouched); `tests/run_um.sh` **831/831**
+(block 4 untouched); `hash_gen1.js` A/B vs v1.01 **ALL IDENTICAL** (way endpoints aren't part of the
+render buffers); `smoke_gen1.js` **178/178** (+1: every land way reaches its own settlement exactly,
+0 "stops just short" endpoints). Probe across 8 seeds: **20 → 0** stop-short endpoints.
+
+### v1.01 (2026-07-18)
+**Owner: "settlements should not be in water — research the fix and implement; also continue the
+outstanding points [coastal wall over-enclosure, full-display canvas]."** Three items.
+
+- **Settlements never stand in water — root cause fixed (`_civSnapPlacesToLand`).** Research finding:
+  every PLACEMENT path already refuses water (`_civSnapLand` checks sea + `currentWaterBodies()` lakes;
+  `_civDropPlace` refuses wet cells; the crossroads-promotion pass snaps to land), but nothing ever
+  RE-VALIDATED existing pins when the terrain changed underneath them — erosion, a sea-level
+  recalibration, the Water brush, or an imported save could leave a settlement standing in the new
+  water (the owner's "renders inside a lake" screenshot). New reconcile pass: any settlement now on
+  water (sea OR lake) snaps to the nearest dry cell, dragging its connected way endpoints along (the
+  v0.92 "endpoint equals the settlement coordinate" invariant that road-locking depends on). Runs once
+  per terrain generation — keyed on `_fieldGen` + sea level, the same staleness pattern as the UM model
+  cache — from the civ draw path, plus a safety net at the end of auto-populate. POIs are deliberately
+  exempt (a lighthouse/shipwreck on water is legitimate). Probe-verified: 40 settlements placed, 0 wet;
+  raising the sea floods 17; one redraw later 0 wet and the sampled way endpoint followed its settlement.
+- **Coastal wall no longer stretches along the approach roads (`builtMassHull`).** The injected
+  real-road primaries (v0.97, ~55 m resample) carry many bare degree-2 vertices that are polyline
+  geometry, not built town — counting them as "built mass" inflated the enceinte over empty land. On the
+  injected-paths graph (new `g._fromPaths` tag set by `buildPrimariesFromPaths`), a vertex whose live
+  edges are ALL primary must be a real junction (degree ≥3) to count; a vertex where any town street/lane
+  attaches still counts. The synthetic path never sets the tag ⇒ UME suite byte-identical. Browser-
+  verified: the wall now hugs the built fabric (was a kite of empty land).
+- **Fill mode — the map always uses the full display area (owner: portrait phone letterboxed the map
+  with "big unused areas above and below").** The minimum zoom is now the COVER scale instead of the
+  letterbox FIT: the map fills the viewport and you pan to reach the cropped part (standard map-app
+  behaviour). One clamp inside `applyView()` catches every input path (wheel/pinch zoom, drag/two-finger
+  pan, move-to, reset — they all funnel through it); `zoomAt`'s floor is the cover scale so pinch-out
+  stops at "filled"; pan is clamped so no background band can be exposed; re-clamped on window
+  resize/rotation; `_lodFitCanvas` letterbox-fit becomes letterbox-COVER for Tiled-LOD mode. Input
+  mapping is untouched by construction — `evtToGrid` & friends are transform-invariant via
+  `getBoundingClientRect`, and LOD input reads the full element box even when the wrap clips it.
+  (Subtlety worth recording: the clamp must measure the stack rect against the LAST-APPLIED transform
+  (`_viewApplied`), not the pending `viewT` values — using the pending pan made the bounds drift with
+  the very pan being clamped, so it never bound.) Playwright-verified on a portrait 720×1420 viewport:
+  initial view covers (scale floor 4.09), 12× zoom-out holds coverage, a ±4000 px pan clamps back to
+  zero gap, a centre-click maps to an in-bounds grid cell, LOD mode covers, no page errors.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (`_fromPaths` guard
+holds — synthetic path byte-identical); `hash_gen1.js` A/B vs v1.00 **ALL IDENTICAL** (CSS-transform-only
+view changes never touch the render buffers; settlement snap is a no-op at defaults with no places);
+`smoke_gen1.js` **177/177**. Manual browser pass still owed for real-device touch feel (pinch/rotate).
+
+### v1.00 (2026-07-18)
+**Owner: "a harbor sits at a coastline or actual river with the city right next to it on land; no roads
+passing over water that come from it"; "when tapping a city in explore mode I want a popup with the city
+layout — a zoom in that shows it closer"; "[a settlement] renders inside a lake."** Continues the
+seamless region↔settlement work with four settlement-layout fixes plus a new explore-mode feature. All
+of it is on the opt-in (`state.viz.urbanLayouts`, default off) / popup paths, so default render stays
+bit-identical to v0.99 (`hash_gen1.js` ALL IDENTICAL).
+
+- **No town roads over open water** (`removeWaterCrossings`, UME engine). The base pass exempted
+  `primary` edges as presumed bridges — only safe for the synthetic single-channel site. With REAL map
+  water, a primary can run out over the sea or make an extra unbridged river crossing. v1.00 adds a
+  real-water pass that culls any primary/street edge crossing open water away from the ONE designated
+  bridge (`site.bridgePt`); `pruneLargest` then drops fabric this orphans on the far bank (a town that
+  never bridged its water is one-sided on land, not floating). Quay stays exempt. Guarded on
+  `usesRealWater` ⇒ the synthetic path (headless UME suite) is byte-identical. This also removes the
+  far-bank/water junctions that inflated the coastal wall, so the enceinte hugs the built mass tighter.
+- **The town builds on land, not in the water** (`generate()` market nudge). The nudge that moves the
+  market off water when the box centre is wet now searches ring-by-ring across the WHOLE box (was capped
+  at 340 m), so a settlement on the edge of a large water body still lands its centre on the real shore.
+- **A settlement sitting in open water shows no floating town** (`_umWaterCtx` `mostlyWater` + `_umModelFor`
+  bail). If a settlement's town box is mostly water (a lake / mid-sea placement — no shore to build on),
+  `_umModelFor` keeps the bare pin instead of rendering a town in the water. Coastal/estuary towns (water
+  on one side, empirically well under half the box) are unaffected.
+- **Tap a settlement in explore → its city layout, zoomed in** (`_umModelForNow` + `_umDrawLayoutPreview`
+  + `_civOpenPlacePopup`). The settlement editor popup now leads with a fit-to-box render of the town's
+  own generated layout (walls/streets/blocks/buildings/water), fitted to the BUILT MASS so approach roads
+  run off the frame and the town fills the card. The model is fetched/generated synchronously on tap
+  (cached), independent of the map-wide toggle. POIs and in-water settlements show none.
+
+**Test:** the v0.95 deep-zoom crossfade smoke assertion picked the arbitrary FIRST settlement, which under
+v1.00 may legitimately be one that renders no layout (in-water); it now picks the first settlement whose
+model actually renders (via `_umModelForNow`), matching the new contract.
+
+**Still flagged (not blocking):** the coastal wall is tighter but still sized from the street-graph hull,
+so it can over-enclose along an arterial in some cases (a deeper growth/hull change). The map canvas does
+not yet fill a portrait/mobile display (it letterboxes a landscape map — a core view/projection change
+that needs interactive mobile verification; scoped separately).
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (synthetic-water path
+byte-identical); `hash_gen1.js` A/B vs v0.99 **ALL IDENTICAL** (feature default-off); `smoke_gen1.js`
+**177/177** with the robust settlement pick (an unrelated v0.73 routing-gravity assertion flakes on the
+unseeded smoke world, same class as the occasional engine "splat" flake — passes on re-run). Browser-
+verified on seed 54869 (512px): river/estuary/coastal towns build fully on land with no roads over water;
+the settlement popup shows a zoomed town-layout card.
+
+### v0.99 (2026-07-17)
+**Owner: "Continue" (Stage 3 of the seamless refactor — coastal polish).** Two contained, safe
+improvements to the real-water settlement layouts shipped in v0.98, both on the opt-in
+(`state.viz.urbanLayouts`, default off) path so render bit-identity to v0.98 holds at defaults.
+
+- **Smooth local coastline (`_umWaterCtx`, civ adapter).** The town's local water mask classified
+  each 22 m cell by the NEAREST grid cell's height; at a coarse 512 px region ~70 mask cells collapse
+  onto one grid cell, so the whole ~1.7 km box read as a single blocky, axis-aligned land/water value
+  — the owner's "solid block instead of smooth borders according to where it is located on the
+  heightmap." v0.99 samples the height field **bilinearly** at each mask cell, so the sea/below-sea
+  threshold crosses the box smoothly and the local coastline follows the real heightmap gradient with
+  sub-grid-cell detail (a smooth curve, not a rectangle). Discrete labelled lakes
+  (`currentWaterBodies()===2`) aren't interpolable, so they keep the nearest-cell test. Adapter-only
+  (never touches the UME engine block) ⇒ the UME suite and default render are unaffected by construction.
+- **Coast orientation fix (`townBank`, UME engine).** The wall's water-following bank offset hardcoded
+  `y−5` — "the town is landward (north)" — which is only right for the synthetic west→east shoreline.
+  A REAL sea/lake can lie on any side, so on an E/W/S-facing coast the offset pushed the wall the wrong
+  way. Fixed to offset toward the actual land (the market side), exactly as the river branch does.
+  **Guarded on `site.usesRealWater`**, so the synthetic path (the headless UME suite) keeps the
+  byte-identical `y−5` offset.
+
+**Still rough (flagged, carried forward):** on a coastal town the enceinte is sized from the street
+graph's built-mass hull (`builtMassHull`), which folds in bare junctions along the arterial roads that
+enter the town — so the wall can enclose a wedge of empty land beyond the actual built fabric (the
+built mass sits in the seaward corner while the wall stretches inland along a road). This is a
+pre-existing property of sizing the wall from junctions rather than blocks (blocks don't exist yet when
+`buildWall` runs inside `grow()`), present since v0.97's `primaryPaths`; it is NOT introduced here.
+Constraining the wall to the built fabric is a growth/hull redesign, left as the next coastal pass.
+Also unchanged: "river through the town" still reads best at 1K/2K (a 512 px box is ~one grid cell).
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (synthetic-water
+path byte-identical — the `townBank` guard holds); `hash_gen1.js` A/B vs v0.98 **ALL IDENTICAL**
+(feature default-off); `smoke_gen1.js` **177/177**. Browser-verified on seed 54869 (512px): a
+pure-coastal walled town (bay, pop ~5k) now sits on the real headland behind a **smooth curved
+coastline** instead of a blocky block; a river-through estuary town builds entirely on land with the
+map's water running through it.
+
+### v0.98 (2026-07-17)
+**Owner (screenshots, seed 54869): "sea, rivers, lake logic is all but correct" + "refactor them ...
+to get a seamless whole ... same for rivers and lakes."** Stage 2 of the seamless region↔settlement
+refactor (Stage 1, v0.97, was roads): the town's WATER is now the map's water. Where v0.95/v0.96
+gave `buildSite` a synthetic river/coast merely oriented to match, v0.98 feeds it the real map water
+so the town builds around the actual river/sea/lake instead of a wrong synthetic one.
+
+- **`_umWaterCtx(p)`** (civ adapter): packages the real water near a settlement into the layout's
+  local box frame (orient=0, referenced to the box centre C). Two parts: (a) the nearest real river
+  centerline (`traceRiverPolylines`' nearest stem, resolution-aware search radius — at a coarse 512px
+  region the whole ~1.7 km town box is barely one grid cell), giving `buildSite` a real
+  bridge/bank/quay; (b) a coarse local raster of ALL real water over the box (sea + lakes below sea
+  level, with the river band stamped in) plus its distance transform, so `isWater`/`riverDist`
+  reflect the real coastline and the town never builds in the sea. Builds `_riverNet` itself if a
+  render hasn't yet.
+- **`buildSite(seed,Wm,Hm,kind,opts)`**: when `opts.water` is supplied, `isWater`/`riverDist` come
+  from the mask/DT; `river` is the real centerline (bridge/bank/quay derive from it) or, for a purely
+  coastal town, a shoreline extracted from the mask; the synthetic water fill is dropped for coasts
+  (the real sea is already drawn on the map). The whole synthetic path (no `opts.water` — the headless
+  UME suite) is untouched and bit-identical.
+- **`generate()`**: with real water, pins the market onto the box centre C (= the settlement's real
+  position = the town centre, on land near the water), nudging off water if C falls in the
+  channel/sea — so the town's water and roads both land pixel-for-pixel on the map. `orient` is forced
+  to 0 on the real-water path (the v0.96 rotation was only a workaround for the synthetic river).
+- The site-kind classifier still runs, but the ACTUAL water now comes from `_umWaterCtx`: a town
+  whose nearest river is a couple of grid cells away (genuinely not through it at this resolution)
+  correctly gets NO synthetic river, and a coastal town builds on the real headland with the sea
+  around it.
+
+**Known follow-up (flagged, not blocking):** coastal-town wall/harbour AESTHETICS are rough — the
+market-nudge onto a peninsula can give a pointed wall and some warehouse sprawl past it; and at 512px
+the town box being ~one grid cell makes "river running through the town" rare (higher resolutions —
+1K/2K — put multiple cells in the box and read much better). The water LOGIC is correct (matches the
+map); the polish is a next pass.
+
+**Verification:** engine `tests/run.sh` **923/923**; `tests/run_um.sh` **831/831** (no-water path
+bit-identical); `hash_gen1.js` A/B vs v0.97 **ALL IDENTICAL** (feature default-off); `smoke_gen1.js`
+**177/177**. Browser-verified on the owner's seed 54869: a coastal town builds on the real headland
+(sea respected, not overlapped); a town whose river is 2.8 km off correctly draws no wrong river.
+
+### v0.97 (2026-07-17)
+**Owner: "build the city around the roads that connect the settlements instead of connecting the
+roads to the ones generated by the settlements" + "refactor them ... to get a seamless whole."**
+Stage 1 of a staged, owner-approved refactor toward a seamless region↔settlement whole (Stage 2 =
+rivers, Stage 3 = lakes/coast). Where v0.95/v0.96 generated the town's own roads and then *aligned*
+them to the map's roads (close, but two separate parallel lines), v0.97 makes the real
+inter-settlement roads that reach a settlement BE the town's arterial skeleton — the town is grown
+around them, so the through-road literally becomes the high street: it enters at a gate, runs
+through the town, and exits at the far gate, one continuous road at every zoom. Historically true
+(towns accreted along the road that predated them) and seamless by construction.
+
+- **`buildPrimariesFromPaths(seed,site,anchors,g,paths)`** (UME engine): the new primary-road
+  builder. Instead of `buildPrimaries` synthesising least-cost paths from bearings, it takes the
+  real roads (as metre-offset polylines in the layout's local frame), translates them onto the
+  market anchor, clips to the site box, and adds them as primary streets. `grow()`/`buildBlocks`/
+  `buildWall` (gates where primaries cross the wall) read them as the primary network unchanged.
+  `generate()` uses it when `opts.primaryPaths` is supplied, else falls back to `buildPrimaries`
+  (so the headless UME suite path — no primaryPaths — is untouched).
+- **`_umPrimaryPaths(p,orient)`** (civ adapter): builds those paths from the `civWays` reaching the
+  settlement. The one subtlety that took a debugging pass: civWay vertices are **kilometres** apart
+  (a road spans the whole region), so a raw vertex list gave the ~1.7 km town box almost no points
+  — the injected primaries came out as 2-point ~250 m stubs, the built mass landed entirely on the
+  far river bank, and the wall never formed (`builtMassHull` needs ≥8 junctions on the market's
+  bank; it was getting 0). Fixed by **resampling the road by arc length** (~55 m steps) from the
+  settlement outward before transforming — the in-box run is then dense enough to be a real primary.
+  The grid→local transform is the exact inverse of `_umDrawLayout`'s, so an injected road drawn back
+  overlays the map road pixel-for-pixel. Verified: with the fix a walled town builds 476 near-bank
+  junctions (was 0), a wall ring, and primaries reaching ~1.3 km — on par with the synthetic build.
+- Internal streets/lanes/parcels stay the engine's own procedural growth (per the owner's earlier
+  "other roads from the settlement generator can persist"). `primaryPaths` folded into
+  `_umPlaceContext` + the model cache key; falls back to the v0.96 aligned-bearings behaviour when a
+  settlement has no connected roads.
+
+**Verification:** engine `tests/run.sh` **923/923** (block-1 untouched); `tests/run_um.sh`
+**831/831** (fallback path bit-identical); `hash_gen1.js` A/B vs v0.96 **ALL IDENTICAL** (the
+feature is default-off — no impact on the main render); `smoke_gen1.js` **175 → 177** (+2 guards:
+the town built around real roads still forms a wall + full-extent primaries, and the paths are
+densely resampled not raw vertices). Browser-verified with fixed-seed screenshots: the map road runs
+straight through a walled town, entering/exiting at gates, town fabric grown around it.
+
+### v0.96 (2026-07-17)
+**Owner live-QA on v0.95's urban morphology, plus two map-render asks.** A batch of fixes and
+refinements from the owner testing v0.95 in-browser. All urban-morphology changes stay opt-in
+(`state.viz.urbanLayouts` still default off); the two river changes are intentional default-render
+adjustments (like v0.94's rivers-as-ways), so the engine fields stay bit-identical and only `rgba`
+moves in the hash battery.
+
+**Urban morphology fixes:**
+- **Right-click a settlement works again under deep zoom** (owner: "right clicking a settlement
+  doesnt work anymore" — which also made the Age/Fortifications fields unreachable). The viewport
+  context menu used `evtToGrid`, which maps wrong while Tiled LOD is on (the canvas shows only
+  `lodViewRect()`'s sub-rectangle) — exactly the zoom where the layouts appear. Switched to the
+  LOD-aware `evtToGridLOD` (the same fix v0.91 gave click-to-info). The editor (and its Age/Walls
+  rows) is reachable again.
+- **Town roads now lock to the map's roads** (owner: layouts "dont align/connect"). Root cause: a
+  single road edge is split into several runs that ALL inherit the same `aIdx`/`bIdx`, but only the
+  run truly reaching the settlement has its endpoint snapped to the settlement coordinate — the
+  interior runs start at a junction. `_umRouteEnds` matched on `aIdx`/`bIdx`, so it pulled approach
+  bearings from those junctions and the town's primaries pointed the wrong way. It now matches on
+  the way endpoint COORDINATE being at the settlement, and takes a stable bearing over a minimum
+  walk-out distance. Verified: on a fixed seed the town's primary-road bearings (25°, −164°, −179°)
+  match the real connected-road bearings (24°, −162°, −174°) to within a few degrees.
+- **Layout aligned to real terrain** (owner: landlocked towns still drew a river, river towns'
+  rivers didn't meet the map river). New `_umTerrainOrient`: `buildSite` always grows its river
+  west→east in a local frame; this computes the rotation that lines that local frame up with the
+  real terrain — the river axis from a PCA of the nearby high-flow cells, or (coastal) the mean
+  sub-sea direction, or 0 (landlocked). `_umRouteEnds` pre-rotates the road bearings by −orient and
+  `_umDrawLayout` rotates the whole drawing back by +orient, so the town's own river/coast runs the
+  same way as the map's water AND the roads still exit toward the real neighbours. Landlocked towns
+  (classified from terrain) get no water at all.
+- **City wall goes around the town again** (owner: "the city wall is a mess and doesnt go around a
+  city"). The renderer drew `landArc` as an OPEN path — but for a landlocked town `landArc` IS the
+  full ring, so it showed a gap. Now draws the CLOSED containment ring (`wall.ring`), or the closed
+  star-fort trace for bastioned towns, with spurs and gate markers, at a floored line width so it
+  reads at any zoom.
+- **Fortifications / Age toggles now repaint** (owner: "toggling on or off nothing happens"). An
+  Age/Walls edit changes `_umPlaceContext`'s inputs (so the cached model misses and regenerates),
+  but nothing kicked a redraw to run that path — both handlers now call `drawCivLayerAuto()`.
+- **Layouts are opaque at full zoom** (owner: "settlements still look see-trough instead of
+  opaque"). The block/building/water fills were <1 alpha, so terrain showed through even at full
+  crossfade. Fills are now solid colours (crossfade handled solely by the layer `globalAlpha`);
+  streets draw casing-then-fill so the network reads as continuous roads.
+- **Harbour scales with the port's size** (owner: "the bigger a settlement if its port city the
+  bigger its harbor"). New `_umHarbourScale(pop,site)` — quay length, pier count and mole grow with
+  a gentle power (~0.4) of population (waterfront ~ throughput ~ trade, sub-linear), clamped 0.6–3×,
+  threaded into `buildHarbour` (default 1 ⇒ bit-identical to the source PoC, so the UME suite path
+  is unchanged).
+
+**Map-render asks:**
+- **Rivers redrawn in the settlement's water-blue, and de-"barcoded"** (owner: liked the settlement
+  river style, wanted it global; also "river density is very high ... almost a barcode style
+  look"). `drawRiverWays`' old hsl ramp swept cyan→GREEN→orange with order, so mid-order rivers
+  rendered green and read as hatching, not water; and it stroked every one of the ~5,000 order-1
+  trickles → a dense barcode. Now: a straight water-blue that only deepens with order (matching the
+  settlement layout's river), and the vector ways start at order 2 (order-1 stays in the raster
+  water tint underneath), so only real rivers draw as clean blue lines. The "Min stream order"
+  Style slider still raises the floor.
+
+**Deferred / known limitation:** the owner also reported blocky water borders at deep LOD zoom
+("solid block instead of smooth borders according to the heightmap"). This is the coarse working
+field (512px) being magnified past its resolution at the land/water threshold — the same class as
+v0.92's blocky-lakes work, and pre-existing (not introduced by the urban-morphology feature). A
+proper fix needs procedural sub-cell coast detail in the refined tiles (the fragile LOD tile
+renderer), so it's scoped as a focused follow-up rather than risked in this batch.
+
+**Verification:** engine `tests/run.sh` **923/923** (block-1 pipeline unchanged — the only block-1
+edit is `drawRiverWays`, pure canvas render, not in the headless path); `tests/run_um.sh`
+**831/831** (harbour scaling bit-identical at default opts); `smoke_gen1.js` **173/173**;
+`hash_gen1.js` A/B vs v0.95 shows the engine fields (field/temp/rain/flow) identical with `rgba`
+differing at biome configs by design (the river restyle). Browser-verified with fixed-seed
+screenshots: opaque walled towns with roads entering through gates and the river running through
+aligned to the map river; global rivers clean blue, no green barcode.
+
+### v0.95 (2026-07-17)
+**Owner request: "There is an urban Morphology proof of concept in a subfolder. I want you to
+think about how you will refractor the code into cartalith and upgrade the settlement menus with
+the additional information. The main idea is that when the zoom goes deep enough the current
+symbol/circle gets faded out and the settlement lay-out becomes apparent and it's roads lock to
+the route's that the program already generates. (just the main in roads, other roads from the
+settlement generator can persist) I want a separate toggle to start settlement generation. In a
+map wife base but also, in the settlement specific menu toggles for the settlement age and
+fortifications. Base settlement age and size should be inferred by the already made. Population
+size."**
+
+`urban-morphology/Urban Morphology v0.1.html` is a standalone, deliberately-isolated PoC: a pure,
+DOM-free procedural historical-city-layout generator (streets → blocks → parcels → buildings →
+walls/fortifications → districts → detail, ~88 headlessly-testable functions returning one plain
+model object), with its own 801-assertion suite and purpose-written integration docs
+(`docs/06-cartalith-integration-map.md`, `docs/09-refactoring-function-inventory.md`). This
+version ports it in as Gen1's **new 4th `<script>` block** (`UME`, ~2.6k lines, namespaced IIFE —
+CLAUDE.md's "three sequential script blocks" architecture note is now four), and builds the civ-
+layer bridge/renderer requested on top of it — all opt-in, default off, so cross-version
+neutrality holds throughout.
+
+**Port** — the engine's own `mulberry32` was dropped in favor of Gen1's byte-identical copy
+(verified same constant/algorithm; JS scoping resolves it at runtime in the browser without a
+duplicate definition), `generate` was renamed `cityGen` at the export boundary to avoid ambiguity
+with Gen1's own `generate()`, and a single surgical hook (`if(opts.routeEnds&&opts.routeEnds.
+length)site.routeEnds=opts.routeEnds;`, right after `buildSite()`) was added so the host app can
+override the PoC's synthetic map-edge approach-road endpoints with real ones — the one
+integration point the docs flagged as needing a bridge, and the whole mechanism the road-locking
+requirement needed. `UM-ENGINE-START`/`UM-ENGINE-END` comment markers carry over so
+`tests/run_um.sh` can extract the block from the merged file exactly like the PoC's own harness
+extracted it from the standalone one.
+
+**`_umPlaceContext(p)` adapter** (civ layer, script block 2) bridges an existing settlement to
+`UME.cityGen`'s inputs: **pop** clamped to the PoC's domain; **age** (`p.umAge`, else inferred —
+`clamp(round(60+240·log10(max(1,pop)/100)),30,1000)`, pop 100→60y / 1k→~300y / 10k→~540y) with
+`wallGenerations:true` so age genuinely paces successive wall rings; **walls** (`p.umWalls`, else
+inferred true for the `fortified` trait or tier rank ≥2 — town and up); **fortified** (star fort)
+from the `fortified` trait, gated by the PoC's own pop≥2500 anachronism check; **site kind**
+(`_umSiteKindFromTerrain`) classified from real terrain (field/flowField near `p`, sea level) into
+river/riverthrough/bay/coast/landlocked — deliberately scoped to TYPE only, not full site
+geometry: the PoC's `buildSite` derives its river curve/bridge/harbour placement from its own
+synthetic `isWater`/`height` functions, so swapping only some of those out would produce an
+internally-inconsistent site (a bridge on a synthetic river a real `isWater()` disagrees with);
+full terrain-sourced site geometry is deferred, flagged below. **`routeEnds`** — the road-locking
+requirement — built from `civWays` actually connected to `p` (`aIdx`/`bIdx` match against the
+settlement-filtered places array, `_civNetworkMetrics`'s own resolution pattern, plus endpoint-
+snap fallback for manual ways), turned into approach bearings that `buildPrimaries`' A* grows the
+town's main roads from — so a generated town's PRIMARY roads lock onto the region's real route
+network while its internal streets/lanes stay the engine's own procedural growth, exactly the
+split the owner asked for.
+
+**Rendering — pin/layout crossfade at deep zoom.** New §2.5 in `drawCivLayer`, drawn before §3
+Places so pins/labels stay visually on top while both are partially visible. Gated on real km via
+`lodSpanKm()` (not raw `_lodZoom`, whose numeric meaning scales with map size): fade begins at a
+24 km view span, full layout / pin fully faded at 10 km. `_umDrawLayout` maps the generated
+model's meters (relative to `model.anchors.market`, the town's own generated centre) onto the
+settlement's real grid position and draws water/blocks/wall(or bastioned fort)/streets(by class,
+primary widest)/buildings as `civCtx` vector fills/strokes — a simplified pass vs. the PoC's SVG
+layer stack (parcels and fine clutter — trees/wells/crosses — deferred, flagged below). A
+settlement's pin only fades once ITS OWN model is actually ready to draw (`_umRevealedSet`, keyed
+per-frame) — generation is queued/async, so a settlement mid-generation keeps its full pin rather
+than leaving a bare gap. Verified visually via fixed-seed Playwright screenshots at 40/20/14/6 km
+spans: pin only → faint street web bleeding through a faded pin → full walled-town layout with
+blocks/buildings and connected region roads visibly running into the settlement, with no console
+errors at any step.
+
+**Generation, caching, invalidation.** `_umModelFor(p)` builds `_umPlaceContext`, runs
+`UME.cityGen`, and caches the result in a module `Map` keyed on every input that affects the
+layout (seed/pop/age/walls/fortified/site/routeEnds) — an editor change or a road-network rebuild
+simply produces a different key next call, so a stale entry is never touched again rather than
+needing explicit invalidation wiring; cache clears wholesale on world regen (`_fieldGen`). At
+most one settlement's model is generated per frame (`_umScheduleGenStep`, mirrors the
+`_lodScheduleOverviewRebuild` deferred-work precedent) so a zoom-in over a cluster never freezes a
+frame; a cache miss returns `null` immediately (renderer keeps showing the pin, not a stall) and
+triggers a background `renderNow()` once the model lands. Never serialized (transient/
+deterministic from inputs, Invariant 6).
+
+**UI.** Map-wide toggle (`state.viz.urbanLayouts`, **default off**) — "Generate settlement
+layouts (urban morphology)" — in Civilization → Settlements next to the metropolis-tier checkbox;
+`loadZip`'s viz-defaults `Object.assign` carries the `false` default forward for old saves the
+same way every other opt-in viz flag does. Settlement popup (`_civPopulatePlaceEditor`) gains
+**Age (years)** (number input, placeholder shows the live inferred value, blank = auto → `p.
+umAge`) and **Fortifications** (checkbox, `indeterminate` while unset = inferred, a click commits
+an explicit override → `p.umWalls`) — both default `null` via `_civEnsurePlaceDefaults`, both new
+nullable fields round-trip automatically through the existing whole-object `state.places`
+serialization (no whitelist to touch).
+
+**Verification.** Engine (script block 1) untouched ⇒ `tests/run.sh` **923/923** unaffected. New
+`tests/run_um.sh` + `tests/um_test_tail.js` (ported from `urban-morphology/tests/`, `.generate(`
+calls mechanically renamed to `.cityGen(`, extraction script adapted to pull script block 4 from
+the merged file and prepend a standalone `mulberry32` copy so the extracted module has no
+unresolved global) — **831/831** passed. `hash_gen1.js` A/B against v0.94: **ALL IDENTICAL**
+(toggle defaults off). `smoke_gen1.js` **165 → 173** (+8: toggle default-off + wiring, a real
+civ-canvas pixel difference once enabled at deep zoom, pin-fade gating on the model actually being
+ready, popup Age/Fortifications fields exist, editing Age changes the cache key and clearing it
+back to blank restores the auto key, layout generation is deterministic for identical inputs) —
+**173/173** passed. All four batteries green in one pass; docs/CLAUDE.md/README updated for the
+new four-script-block architecture.
+
+**Deferred** (documented, not built this pass): faction→culture/tradition mapping (the PoC ships
+2 culture profiles; culture is fixed to `'medieval'` for now); `estimateCarryingCapacity`'s
+placeholder body, compatible but not swapped for Cartalith's real capacity field; an era signal
+(`civYear`) driving wall-vs-star-fort epochs over time; trimming a region way's visual overlap
+where it enters a revealed layout (v1 just draws the layout on top); full terrain-sourced site
+GEOMETRY (river polyline/height field/bridge-harbour placement) beyond the current real-terrain
+site-TYPE classification; the PoC's parcels layer and fine detail objects (trees/wells/market
+crosses/cranes/bollards) in the canvas renderer, simplified out of the v1 pass for per-frame cost.
+
+### v0.94 (2026-07-16)
+**Owner /goal: "go on with the 4th proposal [colorization loop restructuring], draw rivers as ways
+as in the legacy cartalith app, and make route planning take sea-faring routes into account — at
+the moment ... it opts to only use land based routes [even] when a split or partial [route] by sea
+or river is possible."** Three pieces of work, each independently verified.
+
+**Part 1 — colorization-loop restructuring, revisited with a narrower scope.** v0.93 deferred this
+proposal outright; this pass re-scoped it per the two independent risks identified then. Fresh
+research (full call-site trace) **proved** `renderBiomeTileRGBA`'s RGBA output is never retained
+past its synchronous call anywhere in the codebase (always `putImageData`/`.set()`-copied or
+pixel-read immediately), so pooling its scratch buffers is provably alias-safe — but the same
+research measured tile-buffer allocation at 2-3 orders of magnitude cheaper than the ~651ms
+per-pixel compute loop it sits inside, so pooling was **evaluated and skipped as not worth the
+risk for a sub-1% gain**. Two changes shipped instead: (a) `sampleArr` row-hoisting —
+`sampleArrRowPrep(fy)`/`sampleArrRow(a,fx,prep)` eliminate the row-only part of `sampleArr`'s
+bilinear math (clamp/y0/y1/ty/row-offsets) being recomputed on every one of the 3 unconditional
+per-pixel calls in `renderBiomeTileRGBA`'s hot loop — proven bit-identical (a pure function of `fy`
+alone, no reordering of the actual data-blend arithmetic) and confirmed via the `--full` 35-config
+hash battery, ALL IDENTICAL. (b) Palette-function scratch-ification (`snowCol`/`rockCol`/etc.,
+next on the project's own performance-audit roadmap) was **designed, then also deferred** — it
+surfaced a genuine nested-call aliasing hazard (`grassCol` calls `ramp3` twice before consuming
+either result; a single shared scratch buffer would silently corrupt the second call's color into
+the first), which needs a proper multi-slot design rather than a rushed single-buffer one. Engine
+bit-identical to v0.93 hotfix at defaults; headless **923** unchanged.
+
+**Part 2 — rivers drawn as ways, as in the legacy Cartalith editor.** `Cartalith_V1.915.html` drew
+every travel network (river/road/rail/sea) as one shared stroked-polyline "way" abstraction; Gen1
+instead renders rivers as a per-pixel raster blend (`surfaceColor` sampling `_riverNet.intensity`/
+`depth`), with true vector strokes existing only inside the opt-in Strahler debug view. That
+existing spline pipeline (`traceRiverPolylines`→`rdpSimplify`→`catmullRomSample`→`riverSinuosity`,
+previously duplicated verbatim between the main-canvas and LOD debug-overlay code) is now factored
+into one shared `drawRiverWays(riverNet, reproj)` — `reproj=null` on the main canvas, `{px,py,
+inView,zk}` under Tiled LOD — and exposed as a new **"Draw rivers as ways"** checkbox
+(`state.viz.riverWays`) next to the existing "Show rivers" toggle. **Per owner decision this pass:
+overlays on top of** the existing raster water blend (both render — not a replacement) and **is
+the new default (ON)** for fresh worlds, a deliberate default-render change (`loadZip` back-compat
+guard keeps pre-v0.94 saves on the old raster-only look, same pattern as v0.80's ocean-currents
+flip). Also closes a pre-existing gap as a side effect: the default Tiled-LOD Biome view never
+showed the river network's water color at any zoom (only a decorative bank-tint SDF) — the vector
+overlay reads correctly at any zoom regardless of that raster limitation. Rendering-only (no
+engine/field change) ⇒ headless **923** unchanged, `field`/`temp`/`rain`/`flow` hashes identical in
+every hash-battery config; `rgba` differs at every biome-mode config by design (confirmed via a
+targeted A/B forcing `riverWays:false` on v0.94, which reproduces v0.93's default hash exactly —
+proving nothing else in the render path changed). Smoke **159 → 163** (checkbox reflects the new
+default; toggling it produces a real pixel difference on both the main canvas and under Tiled LOD).
+
+**Part 3 — sea/river-aware route planning.** Root-caused via full code trace (not guessed):
+`_civMixedCostGrid` — the one function deciding both the interactive Route tool's path and every
+journey — had three real defects. (1) `_CIV_WATER_COST=1.5` was tuned *above* typical flat land
+(`buildTravelCost`'s ≈1.0 baseline); the v0.73 comment says so explicitly ("stays above flat-land
+... so land is still the default on comparable distance") — backwards relative to what the journey
+planner's own speed model already believes (a Cog is 2.5× a walker's base speed; `JP_SHIPS`/
+`JP_LAND_TRANSPORTS`). (2) Land cost here was plain slope-only `buildTravelCost`, ignoring the
+biome-friction table `_civEnhancedTravelCost` already uses for the auto-network builder — under-
+costing land on top of over-costing sea. (3) Real flowing rivers carried **no cost information at
+all** in this grid — a river crossed exactly like dry ground. Fixed by rebalancing water to
+`_CIV_SEA_COST=0.6` (now genuinely cheaper than flat land, matching the ~2-2.5× real speed
+advantage), sharing `_civEnhancedTravelCost`'s biome-penalty table for land cells, and adding
+`_CIV_RIVER_COST_BASE=0.85` (order-scaled, taken as a floor against local land cost so a river
+never makes a cell more expensive, only potentially cheaper) for cells with real discharge (same
+`flowThresh` convention used elsewhere). **Scoped to the interactive Route tool / journey planner
+only** (per owner decision) — the auto-generated world road network (`_civHierarchicalNetwork`/
+`_civMstRoutes`) stays two disjoint land-only/water-only passes, flagged as a possible follow-up,
+not touched this pass. Verified via an independent Playwright A/B (not guessed): on a fixed seed/
+resolution, six coastal point-pairs whose land-only route requires a real detour around the
+coastline were run through `_civDijkstraPath(...,'mixed')` on both v0.93 and this build — every
+pair showed equal-or-higher water usage on v0.94, two dramatically so (5–6% water on v0.93,
+committing an essentially all-land route, → 35–50% water on v0.94, a genuine partial sea shortcut,
+on the *identical* start/end points). Civ layer only (block 2), no engine/field change ⇒ headless
+unaffected by construction; two new smoke-suite regression assertions lock in the two most dramatic
+pairs against a fixed threshold. Smoke **163 → 165**.
+
+### v0.93 hotfix (2026-07-16)
+**Owner live-testing report: "On part of lakes, the edges are blocky/pixilated again. Also the
+generated LOD tiles don't seem to be cached."** Root-caused via a headless repro (not guessed):
+optimization #1's progressive overview (stretch + defer, above) has no problem with a single big
+zoom jump — that case is exactly what it's built for and stays fast — but a **real continuous zoom
+gesture** (many rapid ticks with no pause between them, unlike the single-jump-then-wait scenario
+the shipped verification exercised) lets every tick's `_lodScheduleOverviewRebuild` call supersede
+the previous tick's still-pending one before any of them land. `_lodOverviewPrev` then stays pinned
+at whatever view it was last successfully rebuilt at while each subsequent tick stretches it
+further — confirmed visually with an 8-tick, 15ms-spaced headless repro: the overview ended up
+stretched ~5x past its last real capture, a heavily blocky/checkerboarded frame exactly matching
+the report. (Tile refinement itself was never actually broken — `_lodCache` populates correctly the
+moment input pauses, verified separately; "tiles don't seem cached" was the same overview
+staleness making every frame during a fast gesture look unrefined.)
+- **First attempt (rejected before shipping)**: cap the stretch *ratio* of any single frame. This
+  broke the ALREADY-SHIPPED `R.lodProgressiveOverview` regression test — a single big jump (e.g.
+  whole-map to a deep zoom in one tick) legitimately needs a large one-time stretch, and capping
+  ratio blocked exactly the case opt #1 exists to keep fast, not just the runaway-burst case.
+- **Shipped fix**: bound *consecutive un-landed stretches* instead of stretch magnitude.
+  `_lodOverviewStretchStreak` counts stretch-only frames since the last overview actually finished
+  rebuilding (real rebuild, sync or the deferred async one, resets it to 0); once the streak hits
+  `LOD_OV_STRETCH_STREAK_CAP=4`, `drawLODView()` forces a synchronous resync (same ~100-130ms cost
+  the v0.92 512px cap already proved acceptable) instead of stretching further. A lone big jump
+  still takes the fast path (streak 0→1); only a genuine multi-tick burst gets throttled into
+  periodic resyncs. Two new smoke-suite regression guards (streak stays bounded after an 8-tick
+  synchronous burst; the overview genuinely resyncs at least once mid-burst, not stuck on the
+  original capture) alongside the pre-existing single-jump guard — all three green together.
+  `_lodOn`-gated only; render battery **ALL IDENTICAL to v0.92**, headless **923** unchanged, smoke
+  **157 → 159**.
+
+### v0.93 (2026-07-16)
+**Owner /goal: "make the proposed optimisations in a new version, keep a focus on graphic fidelity
+(no pixelated views or blockyness when zooming in on terrain)."** Three LOD-render/tile-pipeline
+performance optimizations, all additive/opt-in on the LOD path — no engine changes; render battery
+**ALL IDENTICAL to v0.92**; headless **923** unchanged; Playwright UI smoke **157/157** (+3 new
+regression assertions on top of v0.92's suite, mirroring the pattern each of the three optimizations
+below already established for its own opt-in fast path).
+
+**#1 — progressive (non-blocking) overview rebuild on zoom.** Every zoom step used to synchronously
+rebuild the LOD overview backdrop from scratch — even when a perfectly good previous overview already
+existed to approximate the new view from — reintroducing the ~940–1200ms stall v0.92 had just fixed
+for the *first* build. `drawLODView()` now branches three ways: an exact-viewport pan reuses the
+cached overview via a translate-blit (unchanged from v0.92); a **zoom/pan change against a matching
+render key** (`_lodRenderKey()` — content/style state, not viewport) stretches the cached overview
+canvas immediately (near-instant, <30ms) and schedules the real rebuild via a new
+`_lodScheduleOverviewRebuild()` on a deferred `setTimeout(...,0)`, re-checking `_fieldGen`/`GW`/`GH`
+before applying results so a regenerate or resize mid-flight can't land stale data; anything else
+(first build, or a style/content change — `_lodRenderKey()` differs) falls through to the original
+synchronous v0.92 rebuild. `_lodBuildTileRGBA()` extracted from `drawLODView()` so both the
+synchronous and deferred paths build the same tile-colorization closures from current state, fixing
+an early `dbg is not defined` regression caught via console-warning capture (a naive timing-only test
+missed it, since `drawLODView()` silently falls back to `_lodOn=false` on error).
+*Fidelity note: the stretched placeholder is a **soft-scaled preview of the same coarse overview**
+used since v0.92's 512px-cap fix — never a blocky/quantized frame — and the deferred rebuild lands the
+correct sharp result well under a second later.*
+
+**#2 — GENPOOL extended to tile refinement (`refineVisibleTiles`).** GENPOOL (the multicore Worker
+pool already used for `generate()`'s heavy row-split fills) gains a second, task-parallel dispatch
+mode: `runTiles(coarse,cW,cH,jobs)`/`_runTiles(...)`, round-robining independent
+`{z,col,row,tileSize,opts}` tile jobs one-per-worker (vs. the existing row-split `run()`, which splits
+one big job across workers). `refineVisibleTiles()` (now `async`) batches pool-eligible tiles through
+`GENPOOL.runTiles` instead of computing every visible tile sequentially on the main thread — measured
+**~3.1× faster** (243ms pool vs. 760ms sync-fallback for 4 tiles), bit-identical output, guarded by
+`_lodGen` so a regenerate mid-flight discards stale results. A **cold-Worker JIT penalty** was found
+during profiling (~20× slower on a fresh Worker's first call, interpreted vs. TurboFan-compiled) and
+fixed with a `GENPOOL.warmup()` step at `init()` that dispatches one throwaway job per worker before
+marking the pool `usable`, so production usage never pays it. (A red herring along the way: an
+apparent 10×+ slowdown under headless/SwiftShader traced to canvas-GPU readback contention delaying
+`onmessage` delivery on the main thread, not a pool defect — confirmed by an isolated no-canvas-
+activity test completing in ~315ms.) The three pre-existing call sites (`lodChk` checkbox, "Refine"
+button, `scheduleLodRefine`'s debounce) now `await` the async function; headless call sites are
+unaffected since `GENPOOL.usable` is permanently `false` there (no `Worker` global), so the function
+always takes its synchronous fallback body with no `await` reached.
+
+**#3 — parallel atlas baking (`bakeVisibleTiles`/`bakeAllTiles`).** Both now batch each pyramid
+level's not-yet-cached, pool-eligible tiles through `GENPOOL.runTiles` before the (unchanged,
+still-sequential) PNG-encode/IndexedDB-write loop, instead of computing every tile's terrain data on
+the main thread first. `bakeAllTiles`'s per-level batching preserves the exact `done`/`onP`/already-
+baked-skip progress-callback order via a two-pass structure (build a level array with `{skip:true}`
+placeholders in the original row-major order, batch-dispatch the `need` subset, then iterate again
+doing the encode/write + progress callback exactly as before). Measured **~25% faster** for a 3-level
+bake (21 tiles) once isolated from a same-page-first-call measurement artifact (an initial single-shot
+test showed the pool *slower* — traced to whichever path ran first in a fresh page paying extra
+per-shape JIT warm-up on the main thread's `tilePngBytes`/`atlasPut` call sites; a fair alternating
+sync/pool/sync/pool measurement showed a stable, repeatable ~12.0–12.2s pool vs. ~15.9–16.1s sync),
+correctness confirmed by identical baked-chunk sets both ways.
+
+**#5 — lazy seasonal field allocation.** `tempJulField`/`tempJanField`/`rainJulField`/`rainJanField`
+(4 × `GW×GH` Float32Arrays) used to be allocated unconditionally in `allocate()` even though seasons
+default off. Now `null` until `computeSeasons()`'s first real call, which allocates them on demand;
+every consumer already gated its reads behind `state.climate.seasons`/`_seasonK`/an explicit
+`computeSeasons()` call (invariant 4's null-check pattern), so this is a pure allocation-timing change
+— confirmed bit-identical (923 headless, hash battery ALL IDENTICAL).
+
+**Evaluated, not shipped:** a 4th proposal (restructuring `renderBiomeTileRGBA`'s per-pixel
+colorization loop — hoisting per-row-constant math, pooling scratch buffers) was scoped and then
+dropped: pooling the tile-render scratch/output buffers risks aliasing with cached tile data (a
+correctness bug that would manifest as exactly the visual corruption this version's fidelity mandate
+exists to prevent), and hoisting math out of `sampleArr`'s per-pixel calls risks floating-point
+reordering that the cross-version bit-identity invariant doesn't tolerate. Left for a future version
+with a narrower, independently-verifiable scope.
+
+**Fidelity verification** (owner's explicit requirement): fixed-seed (424242) Playwright screenshots
+at whole-map overview, immediately after a deep zoom step (stretched placeholder), after settling
+(pooled-refined tiles), and at the LOD zoom cap (~1km scale) — all show smooth, continuously-textured
+terrain with no blocky/quantized artifacts; a canvas pixel-diff between the immediate and settled
+frames confirms real (non-trivial, ~14% of pixels, subtle magnitude) detail improvement from
+refinement rather than a no-op.
+
 ### v0.92 (2026-07-13)
 **Owner /goal: "carry out the reported fixes [from the save-export architecture audit], then analyze
 why the program is so slow when zooming in even when tiles are baked."** Followed same-day by an owner

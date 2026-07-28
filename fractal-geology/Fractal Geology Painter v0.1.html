@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fractal Geology Painter v0.1</title>
+<style>
+  :root{
+    --bg:#12161c; --panel:#1a2029; --panel2:#212a35; --line:#2c3644;
+    --ink:#e7edf5; --dim:#93a1b3; --acc:#4ea1ff; --acc2:#38d39f; --warn:#ff7a59;
+    --chip:#2a3543;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:13px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:14px; padding:8px 14px;
+    background:linear-gradient(180deg,#1c232d,#161b23); border-bottom:1px solid var(--line);
+    flex:0 0 auto;
+  }
+  header h1{font-size:14px; margin:0; font-weight:650; letter-spacing:.2px}
+  header .sub{color:var(--dim); font-size:11px}
+  header .grow{flex:1}
+  header .status{color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums}
+  main{flex:1; display:flex; min-height:0}
+  .col{display:flex; flex-direction:column; min-height:0}
+  .left{width:210px; background:var(--panel); border-right:1px solid var(--line); overflow:auto}
+  .right{width:300px; background:var(--panel); border-left:1px solid var(--line); overflow:auto}
+  .center{flex:1; display:flex; align-items:center; justify-content:center; background:
+     radial-gradient(1200px 600px at 50% -10%, #1b222c, #0e1218); position:relative; padding:16px; overflow:hidden}
+  .canvas-wrap{position:relative; box-shadow:0 8px 40px rgba(0,0,0,.5); border:1px solid var(--line);
+     border-radius:4px; background:#000; line-height:0}
+  canvas{display:block; image-rendering:pixelated; border-radius:3px; touch-action:none}
+  #overlay{position:absolute; left:0; top:0; pointer-events:none}
+  .section{padding:10px 12px; border-bottom:1px solid var(--line)}
+  .section h2{margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); font-weight:600}
+  .features{display:grid; grid-template-columns:1fr 1fr; gap:6px}
+  .feat, .preset, .viewbtn, .btn{
+    background:var(--chip); color:var(--ink); border:1px solid var(--line);
+    border-radius:6px; padding:6px 8px; cursor:pointer; text-align:center; font-size:12px;
+    user-select:none; transition:background .08s,border-color .08s;
+  }
+  .feat:hover,.preset:hover,.viewbtn:hover,.btn:hover{background:#31404f}
+  .feat.on{background:var(--acc); color:#04203f; border-color:var(--acc); font-weight:600}
+  .viewbtn.on{background:var(--acc2); color:#043027; border-color:var(--acc2); font-weight:600}
+  .feat .ico{font-size:15px; display:block; margin-bottom:1px}
+  .presets, .views{display:grid; grid-template-columns:1fr 1fr; gap:6px}
+  .row{display:flex; align-items:center; gap:8px; margin:7px 0}
+  .row label{flex:0 0 96px; color:var(--dim); font-size:11.5px}
+  .row input[type=range]{flex:1; accent-color:var(--acc); min-width:0}
+  .row .val{flex:0 0 46px; text-align:right; font-variant-numeric:tabular-nums; font-size:11.5px}
+  .btnrow{display:flex; gap:6px; flex-wrap:wrap}
+  .btnrow .btn{flex:1; min-width:70px}
+  .btn.wide{width:100%}
+  .btn.acc{background:var(--acc); color:#04203f; border-color:var(--acc); font-weight:600}
+  .btn.warn{background:transparent; color:var(--warn); border-color:#57323a}
+  .seedrow{display:flex; gap:6px; align-items:center}
+  .seedrow input{flex:1; background:#10151c; color:var(--ink); border:1px solid var(--line);
+     border-radius:6px; padding:6px 8px; font-size:12px; min-width:0}
+  .hint{color:var(--dim); font-size:10.5px; margin-top:6px; line-height:1.5}
+  .stamps{display:flex; flex-direction:column; gap:5px}
+  .stamp{display:flex; align-items:center; gap:6px; background:var(--panel2); border:1px solid var(--line);
+     border-radius:6px; padding:5px 7px; cursor:pointer}
+  .stamp.sel{border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset}
+  .stamp .nm{flex:1; font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .stamp .nm .t{color:var(--dim)}
+  .stamp .mini{background:transparent; border:0; color:var(--dim); cursor:pointer; font-size:12px; padding:1px 3px; border-radius:4px}
+  .stamp .mini:hover{color:var(--ink); background:#2f3b49}
+  .stamp.hidden .nm{opacity:.45; text-decoration:line-through}
+  .empty{color:var(--dim); font-size:11px; font-style:italic; padding:6px 2px}
+  .featctl{border-top:1px dashed var(--line); margin-top:8px; padding-top:6px}
+  .kbd{font:11px ui-monospace,Menlo,Consolas,monospace; background:#0e1218; border:1px solid var(--line);
+     border-radius:4px; padding:1px 5px; color:var(--dim)}
+  .badge{display:inline-block; background:var(--chip); border:1px solid var(--line); border-radius:20px;
+     padding:1px 8px; font-size:10.5px; color:var(--dim)}
+  .split{display:flex; gap:6px}
+  .split>*{flex:1}
+  input[type=checkbox]{accent-color:var(--acc)}
+  .toggle{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); cursor:pointer}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Fractal Geology Painter</h1>
+  <span class="sub">v0.1 · stamp-based procedural heightmap sculptor</span>
+  <span class="grow"></span>
+  <span class="status" id="status">ready</span>
+</header>
+
+<main>
+  <!-- LEFT: features + presets -->
+  <div class="col left">
+    <div class="section">
+      <h2>Geological feature</h2>
+      <div class="features" id="featureGrid"></div>
+      <div class="hint" id="featHint"></div>
+    </div>
+    <div class="section">
+      <h2>Presets</h2>
+      <div class="presets" id="presetGrid"></div>
+    </div>
+    <div class="section">
+      <h2>Base terrain</h2>
+      <div class="row"><label>Sea level</label><input type="range" id="g_seaLevel" min="0" max="0.7" step="0.005"><span class="val" id="g_seaLevel_v"></span></div>
+      <div class="row"><label>Base land</label><input type="range" id="g_baseLevel" min="0.05" max="0.9" step="0.005"><span class="val" id="g_baseLevel_v"></span></div>
+      <div class="btnrow"><button class="btn wide" id="flattenBtn">Flatten canvas to base</button></div>
+      <div class="hint">Blank map = flat land at <b>base</b>; anything below <b>sea level</b> renders as water. Paint features to sculpt.</div>
+    </div>
+  </div>
+
+  <!-- CENTER: canvas -->
+  <div class="col center">
+    <div class="canvas-wrap">
+      <canvas id="map" width="512" height="512" style="width:560px;height:560px"></canvas>
+      <canvas id="overlay" width="560" height="560" style="width:560px;height:560px"></canvas>
+    </div>
+  </div>
+
+  <!-- RIGHT: parameters + stamps -->
+  <div class="col right">
+    <div class="section">
+      <h2>View <span class="badge" id="editingBadge">painting new</span></h2>
+      <div class="views" id="viewGrid"></div>
+      <label class="toggle" style="margin-top:8px"><input type="checkbox" id="gridToggle"> Show grid</label>
+    </div>
+
+    <div class="section">
+      <h2>Brush &amp; noise</h2>
+      <div class="row"><label>Brush size</label><input type="range" id="g_brushSize" min="6" max="180" step="1"><span class="val" id="g_brushSize_v"></span></div>
+      <div class="row"><label>Hardness</label><input type="range" id="g_hardness" min="0" max="1" step="0.01"><span class="val" id="g_hardness_v"></span></div>
+      <div class="row"><label>Intensity</label><input type="range" id="g_intensity" min="0" max="1.5" step="0.01"><span class="val" id="g_intensity_v"></span></div>
+      <div class="row"><label>Noise scale</label><input type="range" id="g_noiseScale" min="1" max="20" step="0.5"><span class="val" id="g_noiseScale_v"></span></div>
+      <div class="row"><label>Octaves</label><input type="range" id="g_octaves" min="1" max="8" step="1"><span class="val" id="g_octaves_v"></span></div>
+      <div class="row"><label>Persistence</label><input type="range" id="g_persistence" min="0.2" max="0.9" step="0.01"><span class="val" id="g_persistence_v"></span></div>
+      <div class="row"><label>Lacunarity</label><input type="range" id="g_lacunarity" min="1.4" max="3.2" step="0.05"><span class="val" id="g_lacunarity_v"></span></div>
+      <div class="row"><label>Edge noise</label><input type="range" id="g_edgeNoise" min="0" max="1" step="0.01"><span class="val" id="g_edgeNoise_v"></span></div>
+      <div class="seedrow" style="margin-top:8px">
+        <input type="number" id="seedInput" step="1">
+        <button class="btn" id="randSeed" title="Randomize seed">🎲</button>
+      </div>
+      <div class="featctl" id="featureControls"></div>
+    </div>
+
+    <div class="section">
+      <h2>Stamp stack <span class="badge" id="stampCount">0</span></h2>
+      <div class="stamps" id="stampList"></div>
+      <div class="btnrow" style="margin-top:8px">
+        <button class="btn" id="deselectBtn">Deselect</button>
+        <button class="btn warn" id="deleteBtn">Delete</button>
+      </div>
+      <div class="hint">Each stroke is a live procedural object. Select one to re-tune its parameters — the heightmap rebuilds non-destructively from the whole stack.</div>
+    </div>
+
+    <div class="section">
+      <h2>History &amp; project</h2>
+      <div class="btnrow">
+        <button class="btn" id="undoBtn">↶ Undo</button>
+        <button class="btn" id="redoBtn">↷ Redo</button>
+        <button class="btn warn" id="clearBtn">Clear all</button>
+      </div>
+      <div class="btnrow" style="margin-top:6px">
+        <button class="btn" id="exportPng">Export PNG</button>
+        <button class="btn" id="exportJson">Save .json</button>
+        <button class="btn" id="importJson">Load .json</button>
+      </div>
+      <div class="hint">Shortcuts: <span class="kbd">Ctrl/⌘+Z</span> undo · <span class="kbd">⇧+Z</span> redo · <span class="kbd">[</span> <span class="kbd">]</span> brush size · <span class="kbd">Del</span> remove selected</div>
+    </div>
+  </div>
+</main>
+
+<input type="file" id="fileInput" accept="application/json,.json" style="display:none">
+
+<script>
+"use strict";
+/* =====================================================================
+   FRACTAL GEOLOGY PAINTER — single-file proof of concept
+   Architecture (all in one IIFE, but cleanly separated modules):
+     · Math        — small helpers (clamp / lerp / smoothstep)
+     · Noise       — seedable Perlin + FBM / ridged / billow fractals
+     · Geometry    — stroke distance field (signed dist + arclength)
+     · Features    — per-feature procedural generation rules (registry)
+     · Stamps      — non-destructive stack of procedural feature objects
+     · Compositor  — rebuilds the heightmap + water layer from the stack
+     · Renderer    — grayscale / terrain / water / contour / slope views
+     · History     — snapshot-based undo/redo of the stamp stack
+     · UI          — wiring, brush interaction, presets, import/export
+   The user never paints raw pixels — they paint geological intent; the
+   generator fills the painted mask with feature-specific fractal terrain.
+   ===================================================================== */
+const App = (() => {
+  /* <ENGINE-START>  (pure, DOM-free core — extracted verbatim by tests/run.sh) */
+  const SIZE = 512;                 // heightmap resolution (SIZE x SIZE)
+  const N = SIZE * SIZE;
+
+  /* ---------------------------- Math ------------------------------ */
+  const clamp = (x,a,b) => x<a?a : x>b?b : x;
+  const lerp  = (a,b,t) => a + (b-a)*t;
+  const ss    = t => { t = t<0?0 : t>1?1 : t; return t*t*(3-2*t); };          // smoothstep 0..1
+  const smoothstep = (a,b,x) => ss((x-a)/((b-a)||1e-9));
+  const fade  = t => t*t*t*(t*(t*6-15)+10);
+
+  /* ---------------------------- Noise ----------------------------- */
+  // Deterministic PRNG (mulberry32) — same family Cartalith uses.
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a>>>15), 1 | a);
+      t = (t + Math.imul(t ^ (t>>>7), 61 | t)) ^ t;
+      return ((t ^ (t>>>14)) >>> 0) / 4294967296;
+    };
+  }
+  const GRAD = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+  function makeNoise(seed){
+    const perm = new Uint8Array(512);
+    const t = new Uint8Array(256);
+    for(let i=0;i<256;i++) t[i]=i;
+    const r = mulberry32(seed>>>0);
+    for(let i=255;i>0;i--){ const j=(r()*(i+1))|0; const tmp=t[i]; t[i]=t[j]; t[j]=tmp; }
+    for(let i=0;i<512;i++) perm[i]=t[i&255];
+    function gd(h,x,y){ const g=GRAD[h&7]; return g[0]*x+g[1]*y; }
+    // classic 2D Perlin — output roughly [-1,1]
+    function p2(x,y){
+      const xi=Math.floor(x), yi=Math.floor(y);
+      const X=xi&255, Y=yi&255;
+      const xf=x-xi, yf=y-yi;
+      const u=fade(xf), v=fade(yf);
+      const aa=perm[perm[X]+Y],   ab=perm[perm[X]+Y+1];
+      const ba=perm[perm[X+1]+Y], bb=perm[perm[X+1]+Y+1];
+      const x1=lerp(gd(aa,xf,yf),   gd(ba,xf-1,yf),   u);
+      const x2=lerp(gd(ab,xf,yf-1), gd(bb,xf-1,yf-1), u);
+      return lerp(x1,x2,v);
+    }
+    function fbm(x,y,oct,pers,lac){                 // ~[-1,1]
+      let a=1,f=1,s=0,n=0;
+      for(let o=0;o<oct;o++){ s+=a*p2(x*f,y*f); n+=a; a*=pers; f*=lac; }
+      return s/(n||1);
+    }
+    function ridged(x,y,oct,pers,lac){              // ~[0,1], sharp crests
+      let a=1,f=1,s=0,n=0,prev=1;
+      for(let o=0;o<oct;o++){
+        let v=p2(x*f,y*f); v=1-Math.abs(v); v*=v;
+        s+=a*v*prev; prev=clamp(v*1.6,0,1);
+        n+=a; a*=pers; f*=lac;
+      }
+      return s/(n||1);
+    }
+    function billow(x,y,oct,pers,lac){              // ~[0,1], puffy
+      let a=1,f=1,s=0,n=0;
+      for(let o=0;o<oct;o++){ s+=a*Math.abs(p2(x*f,y*f)); n+=a; a*=pers; f*=lac; }
+      return s/(n||1);
+    }
+    return { p2, fbm, ridged, billow };
+  }
+
+  /* --------------------------- Geometry --------------------------- */
+  // Closest point on a polyline: unsigned dist, signed dist (side),
+  // arclength s at the projection, and unit tangent. Powers meander,
+  // one-sided escarpments, and river channels.
+  function nearestOnStroke(px,py,pts){
+    if(pts.length===1){
+      const dx=px-pts[0].x, dy=py-pts[0].y;
+      return { dist:Math.hypot(dx,dy), sd:Math.hypot(dx,dy), s:0, tx:1, ty:0 };
+    }
+    let best=Infinity, sd=0, sArc=0, tx=1, ty=0, acc=0;
+    for(let i=0;i<pts.length-1;i++){
+      const ax=pts[i].x, ay=pts[i].y, bx=pts[i+1].x, by=pts[i+1].y;
+      const dx=bx-ax, dy=by-ay; const L2=dx*dx+dy*dy || 1e-9;
+      let tt=((px-ax)*dx+(py-ay)*dy)/L2; tt=clamp(tt,0,1);
+      const cx=ax+tt*dx, cy=ay+tt*dy;
+      const ex=px-cx, ey=py-cy; const dist=Math.hypot(ex,ey);
+      if(dist<best){
+        best=dist;
+        const cross = dx*ey - dy*ex;            // >0 left, <0 right of the stroke
+        sd = (cross<0?-1:1)*dist;
+        const segLen=Math.sqrt(L2);
+        sArc = acc + tt*segLen;
+        tx=dx/segLen; ty=dy/segLen;
+      }
+      acc += Math.sqrt(L2);
+    }
+    return { dist:best, sd, s:sArc, tx, ty };
+  }
+
+  /* -------------------- Feature generation registry --------------- */
+  // A shared, mutable context object (no per-pixel allocation). Each
+  // feature sets ctx.mode ('add' | 'set') + ctx.val, and optionally
+  // ctx.waterOut (an explicit water-surface height). Noise helpers read
+  // ctx.px / ctx.py so features stay terse.
+  const ctx = {
+    nz:null, P:null, nb:1, R:60, radius:60, cx:0, cy:0,
+    px:0, py:0, d:0, sd:0, s:0, rC:0, h0:0, w:0, k:0,
+    mode:'add', val:0, waterOut:NaN,
+    fbm(scale){ const b=this.nb*scale, P=this.P; return this.nz.fbm(this.px*b,this.py*b,P.octaves,P.persistence,P.lacunarity); },
+    ridged(scale){ const b=this.nb*scale, P=this.P; return this.nz.ridged(this.px*b,this.py*b,P.octaves,P.persistence,P.lacunarity); },
+    billow(scale){ const b=this.nb*scale, P=this.P; return this.nz.billow(this.px*b,this.py*b,P.octaves,P.persistence,P.lacunarity); },
+    meander(amp){ const s=this.s; return amp*(0.7*Math.sin(s*0.04)+0.3*Math.sin(s*0.11+1.3)); }
+  };
+
+  // controls: [key, label, min, max, step, default]
+  const FEATURES = {
+    hills: {
+      label:'Hills', icon:'⛰️', radial:false, edgeChar:0.55, edgeFreqMul:0.9,
+      hint:'Smooth rolling FBM. Softness blends coarse and fine octaves.',
+      controls:[['amplitude','Amplitude',0.02,0.3,0.005,0.11],
+                ['rollingFrequency','Rolling freq',0.5,4,0.1,1.4],
+                ['softness','Softness',0,1,0.01,0.7]],
+      apply(c,P){
+        const coarse = c.fbm(P.rollingFrequency)*0.5+0.5;
+        const fine   = c.fbm(P.rollingFrequency*2.6)*0.5+0.5;
+        const roll   = lerp(fine, coarse, P.softness);
+        c.mode='add'; c.val = P.amplitude*roll;
+      }
+    },
+    mountains: {
+      label:'Mountains', icon:'🏔️', radial:false, edgeChar:1.4, edgeFreqMul:1.5,
+      hint:'Ridged multifractal. Peak sharpness powers the crests; ruggedness adds billow detail.',
+      controls:[['mtnHeight','Height',0.1,0.55,0.01,0.42],
+                ['peakSharpness','Peak sharpness',0.6,3,0.05,1.5],
+                ['ridgeFrequency','Ridge freq',0.6,5,0.1,1.6],
+                ['ruggedness','Ruggedness',0,1,0.01,0.55]],
+      apply(c,P){
+        const r = c.ridged(P.ridgeFrequency);
+        const peak = Math.pow(r, P.peakSharpness);
+        const rug  = (c.billow(P.ridgeFrequency*3.5)*0.5+0.5)*P.ruggedness*0.3;
+        c.mode='add'; c.val = (peak + rug*peak)*P.mtnHeight;
+      }
+    },
+    plateau: {
+      label:'Plateau', icon:'🟫', radial:false, edgeChar:1.15, edgeFreqMul:0.65,
+      hint:'Terraced FBM mesa. Sets a flat top; terraces quantize the surface.',
+      controls:[['plateauHeight','Rise',0.03,0.45,0.005,0.26],
+                ['terraces','Terraces',1,8,1,4],
+                ['plateauFreq','Detail freq',0.4,3,0.1,1.1]],
+      apply(c,P){
+        let terr = c.fbm(P.plateauFreq)*0.5+0.5;
+        const steps=Math.max(1,P.terraces|0);
+        terr = Math.round(terr*steps)/steps;
+        const level = P.seaLevel + P.plateauHeight + (terr-0.5)*0.03;
+        c.mode='set'; c.val = Math.max(c.h0, level);
+      }
+    },
+    canyon: {
+      label:'Canyon', icon:'🪨', radial:false, edgeChar:0.95, edgeFreqMul:1.2,
+      hint:'Inverted ridged carve with steep walls. Meander offsets the centerline.',
+      controls:[['canyonDepth','Depth',0.03,0.35,0.005,0.18],
+                ['wallSteepness','Wall steepness',0,1,0.01,0.7],
+                ['meander','Meander',0,0.8,0.01,0.35]],
+      apply(c,P){
+        const lat = c.meander(P.meander*c.R);
+        const dd  = Math.abs(c.sd - lat);
+        const t   = clamp(dd/c.R,0,1);
+        const floorFrac=0.22;
+        let wall = t<floorFrac ? 1 : 1 - smoothstep(floorFrac,1,t);
+        wall = Math.pow(wall, 1/(0.35 + P.wallSteepness*1.4));
+        const floorN = (c.fbm(3)*0.5+0.5)*0.03;
+        c.mode='add'; c.val = -(P.canyonDepth*wall) + floorN*wall;
+      }
+    },
+    valley: {
+      label:'Valley', icon:'🏞️', radial:false, edgeChar:0.65, edgeFreqMul:0.85,
+      hint:'Broad U-shaped glacial trough. Gentler and wider than a canyon.',
+      controls:[['valleyDepth','Depth',0.03,0.3,0.005,0.14],
+                ['valleyWidth','Width frac',0.3,1,0.02,0.85],
+                ['meander','Meander',0,0.8,0.01,0.3]],
+      apply(c,P){
+        const lat = c.meander(P.meander*c.R);
+        const dd  = Math.abs(c.sd - lat);
+        const t   = clamp(dd/(c.R*P.valleyWidth),0,1);
+        const uProfile = Math.cos(t*Math.PI*0.5);   // 1 center -> 0 rim, smooth
+        c.mode='add'; c.val = -(P.valleyDepth*uProfile*uProfile);
+      }
+    },
+    river: {
+      label:'River', icon:'🏞', radial:false, edgeChar:0.4, edgeFreqMul:0.8,
+      hint:'Semi-automatic: carves a bed along your stroke, lowers banks, auto-fills water. Width varies with branch noise; meander wanders the channel.',
+      controls:[['riverWidth','Width (px)',2,26,1,7],
+                ['riverDepth','Depth',0.02,0.22,0.005,0.09],
+                ['riverMeander','Meander',0,0.6,0.01,0.28],
+                ['branchNoise','Branch noise',0,1,0.01,0.5]],
+      apply(c,P){
+        const lat = c.meander(P.riverMeander*c.R);
+        const dd  = Math.abs(c.sd - lat);
+        const R   = Math.max(c.R, P.riverWidth+2);
+        const hw  = P.riverWidth*(1 + 0.45*P.branchNoise*(c.fbm(0.7)));
+        const bankF = 1 - smoothstep(hw, R, dd);            // 1 near channel -> 0 at brush edge
+        let target = c.h0 - P.riverDepth*0.45*bankF;
+        if(dd < hw){
+          const chan = 1 - smoothstep(hw*0.5, hw, dd);
+          target -= P.riverDepth*0.55*chan;
+          const finalBank = c.h0 + c.k*((c.h0 - P.riverDepth*0.45*bankF) - c.h0);
+          c.waterOut = finalBank - P.riverDepth*0.12;        // fill the channel with water
+        }
+        c.mode='set'; c.val = target;
+      }
+    },
+    lake: {
+      label:'Lake', icon:'💧', radial:true, edgeChar:1.25, edgeFreqMul:0.75,
+      hint:'Radial basin (brush = radius). Lowers a bowl and fills it with water; shoreline feathers.',
+      controls:[['lakeDepth','Depth',0.03,0.3,0.005,0.13],
+                ['lakeShore','Shore',0.05,0.6,0.01,0.25]],
+      apply(c,P){
+        const r = clamp(c.rC/c.radius,0,1);
+        const bowl = 1 - r*r;
+        const floor = c.h0 - P.lakeDepth*bowl;
+        const surf  = c.h0 - P.lakeDepth*P.lakeShore;
+        c.mode='set'; c.val = floor;
+        const finalH = c.h0 + c.k*(floor - c.h0);
+        if(finalH < surf) c.waterOut = surf;
+      }
+    },
+    basin: {
+      label:'Basin', icon:'🛖', radial:false, edgeChar:0.85, edgeFreqMul:0.9,
+      hint:'Broad shallow depression with an FBM floor — endorheic sinks, playas.',
+      controls:[['basinDepth','Depth',0.02,0.25,0.005,0.1],
+                ['basinRough','Floor rough',0,1,0.01,0.4]],
+      apply(c,P){
+        const t = clamp(c.d/c.R,0,1);
+        const bowl = Math.pow(1-t,1.6);
+        const floorN = (c.fbm(2.2))*0.04*P.basinRough;
+        c.mode='add'; c.val = -(P.basinDepth*bowl) + floorN*bowl;
+      }
+    },
+    coastline: {
+      label:'Coastline', icon:'🌊', radial:false, edgeChar:1.5, edgeFreqMul:0.55,
+      hint:'Pulls terrain down toward sea level with a ragged fractal edge — carves bays and beaches.',
+      controls:[['coastAmount','Amount',0.1,1,0.01,0.85],
+                ['coastRagged','Raggedness',0.4,4,0.1,1.6]],
+      apply(c,P){
+        const rag = c.fbm(P.coastRagged)*0.06;
+        const target = P.seaLevel - 0.05 + rag;
+        c.mode='set'; c.val = lerp(c.h0, target, P.coastAmount);
+      }
+    },
+    cliff: {
+      label:'Cliff', icon:'⛰', radial:false, edgeChar:0.6, edgeFreqMul:0.45,
+      hint:'The ONE hard-edge tool: a one-sided escarpment. Steepness sets the transition width; the high side is the left of your stroke direction.',
+      controls:[['cliffHeight','Rise',0.05,0.45,0.005,0.22],
+                ['cliffSteep','Steepness',0.2,1,0.01,0.75]],
+      apply(c,P){
+        const transW = Math.max(1,(1.02-P.cliffSteep)*c.R*0.5);
+        const step = smoothstep(-transW, transW, c.sd);      // 0 low side -> 1 high side
+        c.mode='add'; c.val = P.cliffHeight*(step-0.5);
+      }
+    },
+    volcano: {
+      label:'Volcano', icon:'🌋', radial:true, edgeChar:1.3, edgeFreqMul:1.1,
+      hint:'Radial cone + crater with ridged flanks. Crater depth carves the summit caldera.',
+      controls:[['volcHeight','Cone height',0.15,0.6,0.01,0.45],
+                ['craterDepth','Crater depth',0,0.9,0.01,0.5],
+                ['volcRadius','Radius (px)',30,200,2,110],
+                ['flankRough','Flank rough',0,1,0.01,0.6]],
+      apply(c,P){
+        const r = clamp(c.rC/c.radius,0,1);
+        const rim=0.55;
+        let profile;
+        if(r>=rim) profile = 1 - smoothstep(rim,1,r);
+        else       profile = lerp(1-P.craterDepth, 1, smoothstep(0,rim,r));
+        const flank = c.ridged(3.5)*0.12*P.flankRough*ss(r/rim);
+        c.mode='add'; c.val = P.volcHeight*profile + flank;
+      }
+    }
+  };
+  const FEATURE_KEYS = Object.keys(FEATURES);
+  const GLOBAL_KEYS = ['brushSize','hardness','intensity','noiseScale','octaves',
+                       'persistence','lacunarity','edgeNoise','seaLevel','baseLevel'];
+  const GLOBAL_DEF = { brushSize:60, hardness:0.5, intensity:1.0, noiseScale:5,
+                       octaves:5, persistence:0.5, lacunarity:2.0, edgeNoise:0.55,
+                       seaLevel:0.30, baseLevel:0.45 };
+  // salt per feature so identical seeds still differ between feature types
+  const SALT = {}; FEATURE_KEYS.forEach((k,i)=> SALT[k]=(i+1)*1013);
+
+  /* --------------------------- Compositor ------------------------- */
+  // Buffers: baked = committed stack; disp = what is shown (baked +
+  // live preview of the in-progress stroke). Water arrays store an
+  // explicit water-surface height (0 = none); the renderer also floods
+  // anything below sea level.
+  const bakedH = new Float32Array(N), bakedW = new Float32Array(N);
+  const dispH  = new Float32Array(N), dispW  = new Float32Array(N);
+
+  function fillBase(H,W,baseLevel){ H.fill(baseLevel); W.fill(0); }
+
+  // radius the stamp reaches (for bbox + radial coverage)
+  function stampRadius(st){
+    if(st.type==='volcano') return st.f.volcRadius;
+    if(st.type==='lake')    return st.g.brushSize; // brush = lake radius
+    return st.g.brushSize;
+  }
+  function stampBBox(st){
+    const rad = stampRadius(st);
+    const feat = FEATURES[st.type];
+    const feather = Math.max(2, rad*(1-st.g.hardness));
+    const edgeChar = feat.edgeChar==null ? 1 : feat.edgeChar;
+    const edgeAmp = (st.g.edgeNoise||0) * rad * 0.34 * edgeChar;   // fractal edge warp reach
+    const m = rad + feather + edgeAmp + 3;
+    let x0,y0,x1,y1;
+    if(feat.radial){
+      let cx=0,cy=0; for(const p of st.pts){ cx+=p.x; cy+=p.y; } cx/=st.pts.length; cy/=st.pts.length;
+      x0=cx-m; y0=cy-m; x1=cx+m; y1=cy+m; st._cx=cx; st._cy=cy;
+    } else {
+      x0=y0=Infinity; x1=y1=-Infinity;
+      for(const p of st.pts){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); }
+      x0-=m; y0-=m; x1+=m; y1+=m;
+    }
+    return { x0:Math.max(0,x0|0), y0:Math.max(0,y0|0), x1:Math.min(SIZE-1,Math.ceil(x1)), y1:Math.min(SIZE-1,Math.ceil(y1)) };
+  }
+
+  // Composite one stamp in place into H/W (reads h0 from H, writes back).
+  function applyStamp(st, H, W){
+    if(st.hidden || st.pts.length===0) return;
+    const feat = FEATURES[st.type];
+    const P = Object.assign({}, st.g, st.f);
+    const R = st.g.brushSize;
+    const rad = stampRadius(st);
+    const bb = stampBBox(st);
+    const feather = feat.radial ? Math.max(2, rad*(1-P.hardness)) : Math.max(1.5, R*(1-P.hardness));
+    const cx = st._cx, cy = st._cy;
+    const nz = makeNoise((st.seed ^ SALT[st.type])>>>0);
+    ctx.nz = nz;
+    ctx.P = P; ctx.nb = P.noiseScale/SIZE; ctx.R = R; ctx.radius = rad; ctx.cx=cx; ctx.cy=cy;
+    // Fractal edge warp: perturb the coordinates used for the coverage mask so
+    // the feature footprint is ragged/organic, not a smooth rounded brush blob.
+    // Feature *interior* noise still samples the true px,py (ctx.px/py below).
+    // edgeChar/edgeFreqMul give each landform its own edge character (e.g. a
+    // coastline's bays are large and ragged; a river's banks stay tight; a
+    // cliff wanders like a fault trace rather than jittering).
+    const edgeChar = feat.edgeChar==null ? 1 : feat.edgeChar;
+    const edgeFreqMul = feat.edgeFreqMul==null ? 1 : feat.edgeFreqMul;
+    const edgeAmp = P.edgeNoise * rad * 0.34 * edgeChar;
+    const warp = edgeAmp > 0.01;
+    const wf = (2.3 / Math.max(8, rad)) * edgeFreqMul;  // ~4-5 lobes across the diameter + octaves
+    const wf2 = wf * 3.4;                               // finer companion octave: mottles the ramp itself
+    const pts = st.pts;
+    for(let py=bb.y0; py<=bb.y1; py++){
+      for(let px=bb.x0; px<=bb.x1; px++){
+        let qx=px, qy=py;
+        if(warp){
+          const wx = nz.fbm(px*wf, py*wf, P.octaves, P.persistence, P.lacunarity);
+          const wy = nz.fbm((px+211.3)*wf, (py+57.7)*wf, P.octaves, P.persistence, P.lacunarity);
+          qx = px + wx*edgeAmp; qy = py + wy*edgeAmp;
+        }
+        let cov, d=0, sd=0, s=0, rC=0;
+        if(feat.radial){
+          rC = Math.hypot(qx-cx, qy-cy);
+          cov = ss((rad - rC)/feather);
+        } else {
+          const g = nearestOnStroke(qx,qy,pts);
+          d=g.dist; sd=g.sd; s=g.s;
+          cov = ss((R - d)/feather);
+        }
+        if(cov<=0) continue;
+        if(warp && cov<1){
+          // Mottle the transition band itself (not just the silhouette) so the
+          // blend ramp reads as textured ground, not a clean airbrushed fade.
+          const detail = nz.fbm(px*wf2+500.7, py*wf2-330.2, Math.max(2,P.octaves-1), P.persistence, P.lacunarity);
+          cov = clamp(cov + detail*0.17*P.edgeNoise*edgeChar, 0, 1);
+          if(cov<=0) continue;
+        }
+        const i = py*SIZE+px;
+        ctx.px=px; ctx.py=py; ctx.d=d; ctx.sd=sd; ctx.s=s; ctx.rC=rC;
+        ctx.h0=H[i]; ctx.w=cov; ctx.k=cov*P.intensity; ctx.waterOut=NaN;
+        feat.apply(ctx,P);
+        const nh = ctx.mode==='add' ? ctx.h0 + ctx.k*ctx.val
+                                    : ctx.h0 + ctx.k*(ctx.val - ctx.h0);
+        H[i] = clamp(nh,0,1);
+        if(ctx.waterOut===ctx.waterOut && ctx.waterOut>W[i]) W[i]=ctx.waterOut;
+      }
+    }
+  }
+  /* <ENGINE-END> */
+
+  // Full rebuild of the committed heightmap from the whole stack.
+  function rebuildAll(){
+    const base = state.stamps.length ? state.stamps[0].g.baseLevel : state.g.baseLevel;
+    fillBase(bakedH, bakedW, base);
+    for(const st of state.stamps) applyStamp(st, bakedH, bakedW);
+    dispH.set(bakedH); dispW.set(bakedW);
+  }
+
+  /* ---------------------------- Renderer -------------------------- */
+  const mapCv = document.getElementById('map');
+  const mctx  = mapCv.getContext('2d');
+  const img   = mctx.createImageData(SIZE,SIZE);
+  const ov    = document.getElementById('overlay');
+  const octx  = ov.getContext('2d');
+  const idx   = (x,y)=> (clamp(y,0,SIZE-1)|0)*SIZE + (clamp(x,0,SIZE-1)|0);
+
+  // land palette stops (scaled around sea level)
+  function landColor(h, sea, shade, out){
+    const a = h - sea;
+    let r,g,b;
+    if(a < 0.03){ r=216;g=204;b=160; }                     // beach
+    else if(a < 0.20){ const t=(a-0.03)/0.17; r=lerp(120,86,t); g=lerp(158,132,t); b=lerp(84,72,t); } // grass
+    else if(a < 0.36){ const t=(a-0.20)/0.16; r=lerp(120,140,t); g=lerp(120,122,t); b=lerp(86,96,t); } // highland
+    else if(a < 0.50){ const t=(a-0.36)/0.14; r=lerp(140,120,t); g=lerp(122,108,t); b=lerp(96,100,t); }// mountain rock
+    else { const t=clamp((a-0.50)/0.14,0,1); r=lerp(150,244,t); g=lerp(140,246,t); b=lerp(135,250,t); }// snow
+    out[0]=clamp(r*shade,0,255); out[1]=clamp(g*shade,0,255); out[2]=clamp(b*shade,0,255);
+  }
+  function waterColor(depth, out){
+    const t = clamp(depth/0.28,0,1);
+    out[0]=lerp(74,20,t); out[1]=lerp(140,54,t); out[2]=lerp(184,92,t);
+  }
+
+  function render(){
+    const H=dispH, W=dispW, d=img.data;
+    const sea = state.g.seaLevel;
+    const view = state.view;
+    const rgb=[0,0,0];
+    for(let y=0;y<SIZE;y++){
+      for(let x=0;x<SIZE;x++){
+        const i=y*SIZE+x, o=i*4;
+        const h=H[i];
+        const wl=W[i];
+        const waterSurf = Math.max(sea, wl);
+        const isWater = h < waterSurf;
+        // hillshade (used by terrain/contour)
+        let shade=1;
+        if(view==='terrain'||view==='contours'){
+          const l=H[idx(x-1,y)], rr=H[idx(x+1,y)], u=H[idx(x,y-1)], dn=H[idx(x,y+1)];
+          const gx=(rr-l)*260, gy=(dn-u)*260;
+          const nz=1/Math.sqrt(gx*gx+gy*gy+1);
+          const nx=-gx*nz, ny=-gy*nz;
+          shade = clamp(0.55 + (nx*(-0.5)+ny*(-0.6)+nz*0.62)*0.75, 0.35, 1.25);
+        }
+        if(view==='gray'){
+          const v = clamp(h,0,1)*255;
+          rgb[0]=rgb[1]=rgb[2]=v;
+        } else if(view==='slope'){
+          const l=H[idx(x-1,y)], rr=H[idx(x+1,y)], u=H[idx(x,y-1)], dn=H[idx(x,y+1)];
+          const gx=(rr-l), gy=(dn-u);
+          const m=clamp(Math.hypot(gx,gy)*7,0,1)*255;
+          rgb[0]=rgb[1]=rgb[2]=m;
+        } else if(view==='water'){
+          if(isWater){ waterColor(waterSurf-h,rgb); }
+          else { const v=90+clamp(h,0,1)*60; rgb[0]=v*0.7; rgb[1]=v*0.75; rgb[2]=v*0.7; }
+        } else { // terrain or contours
+          if(isWater) waterColor(waterSurf-h, rgb);
+          else landColor(h, sea, shade, rgb);
+          if(view==='contours'){
+            const iv=0.04;
+            const band=Math.floor(h/iv);
+            if(band!==Math.floor(H[idx(x+1,y)]/iv) || band!==Math.floor(H[idx(x,y+1)]/iv)){
+              rgb[0]*=0.45; rgb[1]*=0.45; rgb[2]*=0.45;
+            }
+          }
+        }
+        d[o]=rgb[0]; d[o+1]=rgb[1]; d[o+2]=rgb[2]; d[o+3]=255;
+      }
+    }
+    mctx.putImageData(img,0,0);
+    drawOverlay();
+  }
+
+  // Grid + brush cursor live on a separate transparent canvas.
+  let mouse={x:-99,y:-99,inside:false};
+  function drawOverlay(){
+    const w=ov.width, h=ov.height;
+    octx.clearRect(0,0,w,h);
+    const sc = w/SIZE;
+    if(state.grid){
+      octx.strokeStyle='rgba(255,255,255,0.10)'; octx.lineWidth=1;
+      const step=32*sc;
+      octx.beginPath();
+      for(let gx=0; gx<=w+1; gx+=step){ octx.moveTo(gx+.5,0); octx.lineTo(gx+.5,h); }
+      for(let gy=0; gy<=h+1; gy+=step){ octx.moveTo(0,gy+.5); octx.lineTo(w,gy+.5); }
+      octx.stroke();
+    }
+    if(mouse.inside){
+      const feat=FEATURES[state.feature];
+      const rad = (feat.radial && state.feature==='volcano') ? state.f.volcano.volcRadius : state.g.brushSize;
+      octx.strokeStyle='rgba(78,161,255,0.9)'; octx.lineWidth=1.5;
+      octx.beginPath(); octx.arc(mouse.x*sc, mouse.y*sc, rad*sc, 0, Math.PI*2); octx.stroke();
+      const inner = rad*state.g.hardness;
+      if(inner>1){ octx.strokeStyle='rgba(78,161,255,0.35)'; octx.beginPath(); octx.arc(mouse.x*sc,mouse.y*sc,inner*sc,0,Math.PI*2); octx.stroke(); }
+    }
+  }
+
+  /* ---------------------------- History --------------------------- */
+  const history = { stack:[], i:-1, max:120 };
+  function snapshot(){ return JSON.stringify({ stamps:state.stamps, g:state.g }); }
+  function pushHistory(){
+    history.stack = history.stack.slice(0, history.i+1);
+    history.stack.push(snapshot());
+    if(history.stack.length>history.max) history.stack.shift();
+    history.i = history.stack.length-1;
+    updateHistoryButtons();
+  }
+  function restore(json){
+    const s=JSON.parse(json);
+    state.stamps = s.stamps; state.g = Object.assign({}, GLOBAL_DEF, s.g||{});
+    if(state.selected>=state.stamps.length) state.selected=-1;
+    rebuildAll(); render(); renderStampList(); syncSliders(); updateStatus();
+  }
+  function undo(){ if(history.i>0){ history.i--; restore(history.stack[history.i]); updateHistoryButtons(); } }
+  function redo(){ if(history.i<history.stack.length-1){ history.i++; restore(history.stack[history.i]); updateHistoryButtons(); } }
+  function updateHistoryButtons(){
+    document.getElementById('undoBtn').disabled = history.i<=0;
+    document.getElementById('redoBtn').disabled = history.i>=history.stack.length-1;
+  }
+
+  /* ---------------------------- State ----------------------------- */
+  const state = {
+    g: Object.assign({}, GLOBAL_DEF),
+    f: {},                       // per-feature live params for NEW stamps
+    seed: 1337,
+    feature: 'mountains',
+    view: 'terrain',
+    grid: false,
+    stamps: [],
+    selected: -1,
+    nextId: 1
+  };
+  // seed per-feature defaults
+  FEATURE_KEYS.forEach(k=>{
+    state.f[k]={}; for(const c of FEATURES[k].controls) state.f[k][c[0]]=c[5];
+  });
+
+  /* ------------------------------ UI ------------------------------ */
+  const $ = id => document.getElementById(id);
+  const setStatus = t => $('status').textContent = t;
+
+  // --- feature + preset + view grids ---
+  function buildFeatureGrid(){
+    const grid=$('featureGrid'); grid.innerHTML='';
+    for(const k of FEATURE_KEYS){
+      const b=document.createElement('div');
+      b.className='feat'+(k===state.feature?' on':'');
+      b.innerHTML=`<span class="ico">${FEATURES[k].icon}</span>${FEATURES[k].label}`;
+      b.onclick=()=>selectFeature(k);
+      b.dataset.k=k; grid.appendChild(b);
+    }
+  }
+  function selectFeature(k){
+    state.feature=k;
+    if(state.selected>=0){ // change the selected stamp's type
+      const st=state.stamps[state.selected];
+      st.type=k;
+      for(const c of FEATURES[k].controls) if(!(c[0] in st.f)) st.f[c[0]]=c[5];
+      commitEdit();
+    }
+    buildFeatureGrid(); buildFeatureControls(); $('featHint').textContent=FEATURES[k].hint; syncSliders(); drawOverlay();
+  }
+
+  const PRESETS = {
+    'Rolling Hills':{feature:'hills', g:{noiseScale:6}, f:{amplitude:0.1, rollingFrequency:1.5, softness:0.8}},
+    'Alps':{feature:'mountains', g:{noiseScale:5}, f:{mtnHeight:0.52, peakSharpness:1.9, ridgeFrequency:2.2, ruggedness:0.55}},
+    'Rockies':{feature:'mountains', g:{noiseScale:4}, f:{mtnHeight:0.44, peakSharpness:1.15, ridgeFrequency:1.6, ruggedness:0.85}},
+    'Badlands':{feature:'canyon', g:{noiseScale:9}, f:{canyonDepth:0.2, wallSteepness:0.85, meander:0.5}},
+    'Volcanic Isle':{feature:'volcano', g:{noiseScale:5}, f:{volcHeight:0.5, craterDepth:0.55, volcRadius:120, flankRough:0.7}},
+    'Mesa':{feature:'plateau', g:{noiseScale:4}, f:{plateauHeight:0.3, terraces:5, plateauFreq:0.9}},
+    'Karst':{feature:'hills', g:{noiseScale:15}, f:{amplitude:0.13, rollingFrequency:2.4, softness:0.2}},
+    'Glacial Valley':{feature:'valley', g:{noiseScale:4}, f:{valleyDepth:0.17, valleyWidth:0.95, meander:0.2}}
+  };
+  function buildPresetGrid(){
+    const grid=$('presetGrid'); grid.innerHTML='';
+    for(const name of Object.keys(PRESETS)){
+      const b=document.createElement('div'); b.className='preset'; b.textContent=name;
+      b.onclick=()=>applyPreset(name); grid.appendChild(b);
+    }
+  }
+  function applyPreset(name){
+    const p=PRESETS[name];
+    state.selected=-1; updateEditingBadge();
+    state.feature=p.feature;
+    Object.assign(state.g, p.g||{});
+    Object.assign(state.f[p.feature], p.f||{});
+    buildFeatureGrid(); buildFeatureControls(); $('featHint').textContent=FEATURES[p.feature].hint;
+    syncSliders(); renderStampList(); drawOverlay();
+    setStatus('preset · '+name+' — now paint');
+  }
+
+  const VIEWS=[['terrain','Terrain'],['gray','Heightmap'],['water','Water'],['contours','Contours'],['slope','Slope']];
+  function buildViewGrid(){
+    const grid=$('viewGrid'); grid.innerHTML='';
+    for(const [k,lab] of VIEWS){
+      const b=document.createElement('div'); b.className='viewbtn'+(k===state.view?' on':''); b.textContent=lab;
+      b.onclick=()=>{ state.view=k; buildViewGrid(); render(); }; grid.appendChild(b);
+    }
+  }
+
+  // --- dynamic feature-specific controls ---
+  function buildFeatureControls(){
+    const wrap=$('featureControls'); wrap.innerHTML='';
+    const title=document.createElement('div'); title.className='hint';
+    title.style.margin='0 0 4px'; title.innerHTML=`<b style="color:var(--ink)">${FEATURES[state.feature].label}</b> parameters`;
+    wrap.appendChild(title);
+    for(const c of FEATURES[state.feature].controls){
+      const [key,label,min,max,step]=c;
+      const row=document.createElement('div'); row.className='row';
+      row.innerHTML=`<label>${label}</label><input type="range" id="f_${key}" min="${min}" max="${max}" step="${step}"><span class="val" id="f_${key}_v"></span>`;
+      wrap.appendChild(row);
+      const inp=row.querySelector('input');
+      inp.addEventListener('input', ()=>{
+        const v=parseFloat(inp.value);
+        target().f[key]=v; row.querySelector('.val').textContent=fmt(v);
+        scheduleEdit();
+      });
+    }
+    syncSliders();
+  }
+
+  // editing target: selected stamp, else the live "new stamp" params
+  function target(){
+    if(state.selected>=0){ const st=state.stamps[state.selected]; return {g:st.g, f:st.f, seed:st.seed, _stamp:st}; }
+    return {g:state.g, f:state.f[state.feature], seed:state.seed};
+  }
+  function fmt(v){ return (Math.abs(v)>=10||Number.isInteger(v))? String(v) : v.toFixed(v<0.1?3:2); }
+
+  function syncSliders(){
+    const t=target();
+    for(const key of GLOBAL_KEYS){
+      const inp=$('g_'+key); if(!inp) continue;
+      inp.value=t.g[key]; const vv=$('g_'+key+'_v'); if(vv) vv.textContent=fmt(t.g[key]);
+    }
+    const fp = state.selected>=0 ? state.stamps[state.selected].f : state.f[state.feature];
+    for(const c of FEATURES[state.selected>=0?state.stamps[state.selected].type:state.feature].controls){
+      const inp=$('f_'+c[0]); if(!inp) continue;
+      const val = (c[0] in fp)? fp[c[0]] : c[5];
+      inp.value=val; const vv=$('f_'+c[0]+'_v'); if(vv) vv.textContent=fmt(val);
+    }
+    $('seedInput').value=t.seed;
+  }
+
+  // wire global sliders
+  function wireGlobals(){
+    for(const key of GLOBAL_KEYS){
+      const inp=$('g_'+key); if(!inp) continue;
+      inp.addEventListener('input', ()=>{
+        const v=parseFloat(inp.value);
+        target().g[key]=v; $('g_'+key+'_v').textContent=fmt(v);
+        if(key==='baseLevel' && state.selected<0 && state.stamps.length===0){ rebuildAll(); }
+        if(state.selected>=0) scheduleEdit();
+        else if(key==='seaLevel'||key==='baseLevel'){ if(key==='baseLevel') rebuildAll(); render(); }
+        drawOverlay();
+      });
+    }
+    $('seedInput').addEventListener('input', ()=>{
+      const v=parseInt($('seedInput').value)||0;
+      if(state.selected>=0){ state.stamps[state.selected].seed=v; scheduleEdit(); }
+      else state.seed=v;
+    });
+    $('randSeed').onclick=()=>{
+      const v=(Math.random()*1e9)|0;
+      $('seedInput').value=v;
+      if(state.selected>=0){ state.stamps[state.selected].seed=v; commitEdit(); }
+      else state.seed=v;
+    };
+  }
+
+  // debounce re-tuning of a selected stamp so dragging a slider stays fluid
+  let editTimer=null;
+  function scheduleEdit(){ setStatus('tuning…'); if(editTimer) clearTimeout(editTimer); editTimer=setTimeout(commitEdit,90); }
+  function commitEdit(){
+    if(editTimer){ clearTimeout(editTimer); editTimer=null; }
+    rebuildAll(); render(); renderStampList();
+    pushHistory(); updateStatus();
+  }
+
+  /* ------------------------- Stamp list --------------------------- */
+  function renderStampList(){
+    const list=$('stampList'); list.innerHTML='';
+    $('stampCount').textContent=state.stamps.length;
+    if(state.stamps.length===0){ list.innerHTML='<div class="empty">No features yet — pick a tool and paint on the map.</div>'; return; }
+    state.stamps.forEach((st,i)=>{
+      const row=document.createElement('div');
+      row.className='stamp'+(i===state.selected?' sel':'')+(st.hidden?' hidden':'');
+      row.innerHTML=`<span class="mini vis" title="Show/hide">${st.hidden?'🙈':'👁'}</span>`+
+        `<span class="nm">${FEATURES[st.type].icon} ${FEATURES[st.type].label} <span class="t">#${st.id}</span></span>`+
+        `<span class="mini up" title="Move up">▲</span><span class="mini dn" title="Move down">▼</span><span class="mini del" title="Delete">✕</span>`;
+      row.onclick=(e)=>{ if(e.target.classList.contains('mini')) return; selectStamp(i); };
+      row.querySelector('.vis').onclick=()=>{ st.hidden=!st.hidden; commitEdit(); };
+      row.querySelector('.up').onclick=()=>moveStamp(i,-1);
+      row.querySelector('.dn').onclick=()=>moveStamp(i,1);
+      row.querySelector('.del').onclick=()=>deleteStamp(i);
+      list.appendChild(row);
+    });
+  }
+  function selectStamp(i){
+    state.selected=i; state.feature=state.stamps[i].type;
+    buildFeatureGrid(); buildFeatureControls(); $('featHint').textContent=FEATURES[state.feature].hint;
+    renderStampList(); syncSliders(); updateEditingBadge();
+    setStatus('editing '+FEATURES[state.stamps[i].type].label+' #'+state.stamps[i].id);
+  }
+  function deselect(){ state.selected=-1; renderStampList(); syncSliders(); updateEditingBadge(); setStatus('painting new features'); }
+  function updateEditingBadge(){
+    const b=$('editingBadge');
+    if(state.selected>=0){ b.textContent='editing #'+state.stamps[state.selected].id; b.style.color='var(--acc)'; }
+    else { b.textContent='painting new'; b.style.color=''; }
+  }
+  function moveStamp(i,dir){
+    const j=i+dir; if(j<0||j>=state.stamps.length) return;
+    const [s]=state.stamps.splice(i,1); state.stamps.splice(j,0,s);
+    if(state.selected===i) state.selected=j; else if(state.selected===j) state.selected=i;
+    commitEdit();
+  }
+  function deleteStamp(i){
+    state.stamps.splice(i,1);
+    if(state.selected===i) state.selected=-1; else if(state.selected>i) state.selected--;
+    updateEditingBadge(); commitEdit();
+  }
+
+  /* ---------------------- Brush interaction ----------------------- */
+  let drawing=false, cur=null, previewPending=false;
+  function canvasPos(e){
+    const r=mapCv.getBoundingClientRect();
+    const x=(e.clientX-r.left)/r.width*SIZE;
+    const y=(e.clientY-r.top)/r.height*SIZE;
+    return {x,y};
+  }
+  function newStamp(){
+    const feat=state.feature;
+    return {
+      id: state.nextId++, type: feat,
+      seed: (state.seed>>>0),
+      g: Object.assign({}, state.g),
+      f: Object.assign({}, state.f[feat]),
+      pts: [], hidden:false
+    };
+  }
+  function startStroke(e){
+    if(e.button!==undefined && e.button!==0) return;
+    mapCv.setPointerCapture && mapCv.setPointerCapture(e.pointerId);
+    drawing=true; state.selected=-1; updateEditingBadge();
+    cur=newStamp();
+    const p=canvasPos(e); cur.pts.push({x:p.x,y:p.y});
+    setStatus('painting '+FEATURES[cur.type].label+'…');
+    requestPreview();
+  }
+  function moveStroke(e){
+    const p=canvasPos(e); mouse.x=p.x; mouse.y=p.y; mouse.inside=true;
+    if(!drawing){ drawOverlay(); return; }
+    const last=cur.pts[cur.pts.length-1];
+    const minSpace=Math.max(2, cur.g.brushSize*0.28);
+    if(Math.hypot(p.x-last.x,p.y-last.y) >= minSpace) cur.pts.push({x:p.x,y:p.y});
+    requestPreview();
+  }
+  function endStroke(){
+    if(!drawing) return;
+    drawing=false;
+    if(cur && cur.pts.length){
+      applyStamp(cur, bakedH, bakedW);           // bake in place
+      state.stamps.push(cur);
+      state.selected=-1;
+      renderStampList(); pushHistory(); updateStatus();
+      setStatus(FEATURES[cur.type].label+' #'+cur.id+' placed');
+    }
+    cur=null; render();
+  }
+  function requestPreview(){
+    if(previewPending) return; previewPending=true;
+    requestAnimationFrame(()=>{
+      previewPending=false;
+      if(drawing && cur){
+        dispH.set(bakedH); dispW.set(bakedW);
+        applyStamp(cur, dispH, dispW);
+      }
+      render();
+    });
+  }
+
+  mapCv.addEventListener('pointerdown', startStroke);
+  window.addEventListener('pointermove', moveStroke);
+  window.addEventListener('pointerup', endStroke);
+  mapCv.addEventListener('pointerleave', ()=>{ mouse.inside=false; if(!drawing) drawOverlay(); });
+  mapCv.addEventListener('pointerenter', ()=>{ mouse.inside=true; });
+
+  /* -------------------------- Buttons ----------------------------- */
+  function updateStatus(){ setStatus(state.stamps.length+' feature'+(state.stamps.length!==1?'s':'')+' · '+FEATURES[state.feature].label+' tool'); }
+  $('deselectBtn').onclick=deselect;
+  $('deleteBtn').onclick=()=>{ if(state.selected>=0) deleteStamp(state.selected); };
+  $('undoBtn').onclick=undo;
+  $('redoBtn').onclick=redo;
+  $('clearBtn').onclick=()=>{ if(!state.stamps.length) return; if(confirm('Clear all painted features?')){ state.stamps=[]; state.selected=-1; updateEditingBadge(); commitEdit(); } };
+  $('flattenBtn').onclick=()=>{ if(state.stamps.length && !confirm('Flatten removes all features. Continue?')) return; state.stamps=[]; state.selected=-1; updateEditingBadge(); commitEdit(); };
+  $('gridToggle').onchange=(e)=>{ state.grid=e.target.checked; drawOverlay(); };
+
+  $('exportPng').onclick=()=>{
+    const a=document.createElement('a'); a.download='heightmap.png'; a.href=mapCv.toDataURL('image/png'); a.click();
+  };
+  $('exportJson').onclick=()=>{
+    const blob=new Blob([JSON.stringify({version:'0.1', g:state.g, seed:state.seed, stamps:state.stamps}, null, 1)], {type:'application/json'});
+    const a=document.createElement('a'); a.download='geology-project.json'; a.href=URL.createObjectURL(blob); a.click();
+  };
+  $('importJson').onclick=()=>$('fileInput').click();
+  $('fileInput').onchange=(e)=>{
+    const file=e.target.files[0]; if(!file) return;
+    const rd=new FileReader();
+    rd.onload=()=>{
+      try{
+        const j=JSON.parse(rd.result);
+        state.g=Object.assign({}, GLOBAL_DEF, j.g||{});
+        state.seed=j.seed||1337; state.stamps=j.stamps||[]; state.selected=-1;
+        state.nextId=1+state.stamps.reduce((m,s)=>Math.max(m,s.id||0),0);
+        updateEditingBadge(); rebuildAll(); render(); renderStampList(); syncSliders(); pushHistory(); updateStatus();
+        setStatus('loaded '+state.stamps.length+' features');
+      }catch(err){ alert('Could not load project: '+err.message); }
+    };
+    rd.readAsText(file); e.target.value='';
+  };
+
+  // keyboard shortcuts
+  window.addEventListener('keydown',(e)=>{
+    if(e.target.tagName==='INPUT') return;
+    const mod=e.ctrlKey||e.metaKey;
+    if(mod && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
+    if(mod && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
+    if(e.key==='['){ state.g.brushSize=clamp(state.g.brushSize-6,6,180); $('g_brushSize').value=state.g.brushSize; $('g_brushSize_v').textContent=fmt(state.g.brushSize); drawOverlay(); }
+    if(e.key===']'){ state.g.brushSize=clamp(state.g.brushSize+6,6,180); $('g_brushSize').value=state.g.brushSize; $('g_brushSize_v').textContent=fmt(state.g.brushSize); drawOverlay(); }
+    if(e.key==='Delete'||e.key==='Backspace'){ if(state.selected>=0){ e.preventDefault(); deleteStamp(state.selected); } }
+    if(e.key==='g'||e.key==='G'){ state.grid=!state.grid; $('gridToggle').checked=state.grid; drawOverlay(); }
+  });
+
+  /* ---------------------------- Boot ------------------------------ */
+  function init(){
+    buildFeatureGrid(); buildPresetGrid(); buildViewGrid(); buildFeatureControls();
+    wireGlobals(); syncSliders();
+    $('featHint').textContent=FEATURES[state.feature].hint;
+    fillBase(bakedH,bakedW,state.g.baseLevel); dispH.set(bakedH); dispW.set(bakedW);
+    render(); renderStampList(); pushHistory(); updateHistoryButtons(); updateStatus();
+  }
+  init();
+
+  // expose a tiny surface for the headless self-test (see tests/)
+  return { makeNoise, FEATURES, applyStamp, rebuildAll, state, bakedH, bakedW, SIZE, nearestOnStroke };
+})();
+</script>
+</body>
+</html>
