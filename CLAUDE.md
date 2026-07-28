@@ -3,19 +3,19 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.42**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.43**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.42.html` | **Current** unified tool (~24.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.41.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.43.html` | **Current** unified tool (~24.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.42.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
 | `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
@@ -998,6 +998,51 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Travel speed: measure the composition, not the table (v1.43)
+
+Owner supplied `docs/research/travel-speeds.md` and reported the planner running ~37% long. The
+report's §7 critiques the speed TABLES; measuring first moved the diagnosis somewhere it never
+looked. Read the research before touching any `JP_*` constant.
+
+- **The biggest error was the auto-derived INFRASTRUCTURE tier.** On a real world, 61% of a route's
+  km tiered as **"Hostile / Dead Zone" (×0.50)** and no km ever reached "Stable Settlements" — mean
+  **4.0 km/day**. `JP_INFRA_TIERS` wanted 8 settlements per 100 km as an ABSOLUTE count while the
+  generator places ~30 towns for a whole world and never the villages that line a road. **Any
+  threshold compared against generated `state.places` counts is a scale mismatch waiting to happen**
+  — tiers are now multiples of the world's own measured density (`_jpInfraContext`), the fourth use
+  of the v1.25/v1.31/v1.34 measure-don't-assume technique. Claimed territory floors a stage at
+  Sparse; the bottom tier needs a real hostile signal; open sea is not tiered by LAND density.
+  Measured 4.0 → **10.5 km/day**.
+- **A rate needs a minimum sample.** One settlement beside a 40 km stage read 2.5 per 100 km and
+  jumped the whole route to the top tier. `JP_INFRA_MIN_SAMPLE_KM` floors the denominator — the same
+  class of bug as v1.35's sub-cell distance thresholds, one dimension up.
+- **A single bucket cannot hold three modes.** "Baggage Train" was one 3.0 km/h constant for ox
+  wagons (16-20 km/day), pack trains (40-56) and porters (15-22). `jpTrainPace` resolves the base
+  from the slowest CARRIER — the report's §5.1 rule, using data the plan already had.
+- **Check that a lookup table is actually reachable.** `JP_ANIMAL_TERRAIN_OVERRIDE` /
+  `JP_ANIMAL_WEATHER_OVERRIDE` were gated on `mountKey`, resolved only for "Mounted Rider" — so a
+  camel CARAVAN, the historically dominant desert configuration, got none of the camel affinities
+  while a lone camel rider got all of them. Dead-by-gating, not dead-by-absence, so nothing threw.
+- **A control must not apply where it has no meaning.** Sea distance was driven by the LAND hours/day
+  slider, so a 14 h plan put a sheltered bay 3× over its band while an 8 h plan put open sea under
+  its floor — one journey, opposite errors. `JP_WATER_WINDOW` (§3.3: a coastal hull anchors at
+  nightfall, an open-water passage sails through it) owns the water axis; `JP_TERRAIN.sea` became the
+  realised fraction of cruise speed. **v1.23 fixed the ORDERING of that row and left the magnitudes;
+  fixing a rank order is not fixing a calibration.**
+- **Assert the composed output, not the constant.** Two v1.23 smoke assertions tested raw
+  `JP_TERRAIN.sea` values and would now fail a correct model, because the ordering moved into the
+  window. They assert km/day now — which is what the owner's original report measured.
+- **A bonus is not symmetric with a penalty.** `jpSurfaceGain` damps terrain modifiers ABOVE 1.0 for
+  animal-paced modes (pavement barely speeds an ox — its gait is the ceiling) but never damps those
+  below 1.0 (bad ground costs an animal at least as much as a walker).
+- All 20 reference cases now sit inside their §8 bands (was 9/20); the report's own §9 sample journey
+  reproduces at **242 days against its 244** (was 366).
+- **Known scope cuts**: no rest-day / travel-day-vs-calendar tier split (§10's two-system split) — the
+  planner reports one day count, calibrated to read as the calendar tier the historical records are;
+  no seasonal gate (monsoon lock, closed passes are threshold effects with no state here); no
+  political-toll or tropical-attrition term; no relay-courier mode. `JP_SHIPS` cruise speeds and
+  `JP_ROUTE` wind/current rows are untouched.
+
 ### Land vs sea routing (v1.42)
 
 The land MST (`_civHierarchicalNetwork`, all settlements) and the sea MST (`_civMstRoutes`, ports) were
@@ -1164,7 +1209,8 @@ node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery
 node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (369 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (381 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

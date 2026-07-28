@@ -2250,18 +2250,30 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   }
 
   // ── v1.23: Journey Planner travel fixes + settlement pick-radius zoom scaling (block 2) ──
-  // BUG 1 (owner: "Coastal Waters faster than Open Sea — historically backwards"): the sea water-type
-  // modifier (JP_TERRAIN.sea) must rank Open Sea above Coastal Waters (wind/current is a SEPARATE axis
-  // in JP_ROUTE.sea). BUG 2 (owner: "autoselect assigns a vessel to a leg it isn't fit for, only caught
+  // BUG 1 (owner: "Coastal Waters faster than Open Sea — historically backwards"): a sea leg's daily
+  // distance must rank Open Sea above Coastal Waters (wind/current is a SEPARATE axis in JP_ROUTE.sea).
+  // BUG 2 (owner: "autoselect assigns a vessel to a leg it isn't fit for, only caught
   // downstream"): the selector (_jpVesselFits) and validator (_jpVesselWaterBlock, which jpCalcWater now
   // calls) share ONE source of truth, so an autoselected vessel can never be flagged invalid. All pure
   // JP data/functions — no world/DOM needed beyond GW being defined (generated earlier in this run).
   R.v123 = await page.evaluate(() => {
     const out = {};
-    out.sea = { sheltered: JP_TERRAIN.sea['Sheltered Bay'], coastal: JP_TERRAIN.sea['Coastal Waters'],
-                open: JP_TERRAIN.sea['Open Sea'], rough: JP_TERRAIN.sea['Rough Open Sea'] };
-    out.openFasterThanCoastal = JP_TERRAIN.sea['Open Sea'] > JP_TERRAIN.sea['Coastal Waters'];
-    out.shelteredNotFastest = JP_TERRAIN.sea['Sheltered Bay'] < JP_TERRAIN.sea['Open Sea'];
+    // v1.43 re-expressed these two: v1.23 asserted the raw JP_TERRAIN.sea multipliers, but that row no
+    // longer carries the whole ordering — the daily sailing window (JP_WATER_WINDOW) does, because
+    // §3.3's finding is that the zones differ in hours under way as much as in speed. Comparing the
+    // multipliers alone would now read Coastal 0.60 > Open 0.55 and "fail" a model that is correct.
+    // The owner's original report was about km/day (97 vs 82), so assert the COMPOSED km/day, which
+    // is what these tests should have measured in the first place — and is invariant to where in the
+    // composition the physics lives.
+    const seaKmDay = (terrain, vessel) => {
+      const st = { km: 500, cat: 'sea', terrain, routeCond: 'Neutral', infra: 'Stable Settlements', biome: 'Coastal Lowland' };
+      const pl = { vessel: vessel || 'Cog', pace: 'Standard Pace', season: 'Summer', groupSize: 4, cargoKg: 0, hours: 10, carryFood: false };
+      const r = jpCalcWater(st, pl); return r.blocked ? 0 : r.dailyKm;
+    };
+    out.sea = { sheltered: seaKmDay('Sheltered Bay'), coastal: seaKmDay('Coastal Waters'),
+                open: seaKmDay('Open Sea'), rough: seaKmDay('Rough Open Sea') };
+    out.openFasterThanCoastal = out.sea.open > out.sea.coastal;
+    out.shelteredNotFastest = out.sea.sheltered < out.sea.open;
 
     const seaT = Object.keys(JP_TERRAIN.sea), rivT = Object.keys(JP_TERRAIN.river);
     const stages = [...seaT.map(t => ({ cat: 'sea', terrain: t })), ...rivT.map(t => ({ cat: 'river', terrain: t }))];
@@ -3362,6 +3374,83 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.43: Journey Planner recalibrated to docs/research/travel-speeds.md (block 2) ──
+  // Owner: "the planner seems to roughly take 37% longer than historically recorded". These pin the
+  // composed km/day inside the report's §8 bands, so a future edit to any one modifier that pushes a
+  // mode out of its historical band fails here rather than silently reappearing as a slow journey.
+  R.v143 = await page.evaluate(() => {
+    const o = {};
+    const S = x => Object.assign({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest' }, x);
+    const P = x => Object.assign({ groupSize: 1, transport: 'Walking', pace: 'Standard Pace', hours: 8,
+      cargoKg: 10, supplyDays: 4, season: 'Spring', grazing: 'None — carry all fodder', foraging: 'None',
+      carryFood: true, desertWater: 'Established Caravan Route',
+      animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 },
+      x, { animals: Object.assign({ donkey: 0, mule: 0, camel: 0, horse: 0 }, (x && x.animals) || {}) });
+    const L = (st, pl) => { const r = jpCalcLand(S(st), P(pl || {})); return r.blocked ? 0 : r.dailyKm; };
+    const W = (st, pl) => { const r = jpCalcWater(S(st), P(pl || {})); return r.blocked ? 0 : r.dailyKm; };
+
+    o.footPaved = L({ terrain: 'Paved Road' });
+    o.footDirt = L({ terrain: 'Dirt Track' });
+    o.footRocky = L({ terrain: 'Rocky Terrain', biome: 'Mountain Highland' });
+    // §8: an ox-wagon train (16-20 travel-day) must be far slower than a pack-animal train (40-56) —
+    // v1.42 gave both the SAME 3.0 km/h "Baggage Train" bucket, which is the core overland error.
+    const tr = a => ({ groupSize: 8, transport: 'Baggage Train', cargoKg: 800, supplyDays: 6,
+      grazing: 'Partial — graze at camp', animals: { mule: 10 }, wagons: 0, carts: 0, ...a });
+    o.wagonTrain = L({}, tr({ wagons: 4 }));
+    o.packTrain = L({}, tr({}));
+    o.wagonSlowerThanPack = o.wagonTrain < o.packTrain * 0.75;
+    // the pace-setting animal's terrain/weather affinity must reach a TRAIN, not only a lone rider
+    const desert = { terrain: 'Deep Sand', biome: 'Hot Desert' };
+    o.camelTrainSand = L(desert, tr({ animals: { camel: 12 }, groupSize: 8 }));
+    o.mixedTrainSand = L(desert, tr({ animals: { mule: 12 }, groupSize: 8 }));
+    o.camelBeatsMuleOnSand = o.camelTrainSand > o.mixedTrainSand;
+    // a surface bonus lifts a walker much more than an ox — the animal's gait is the ceiling
+    o.pavedGainFoot = L({ terrain: 'Paved Road' }) / L({ terrain: 'Dirt Track' });
+    o.pavedGainWagon = L({ terrain: 'Paved Road' }, tr({ wagons: 4 })) / L({ terrain: 'Dirt Track' }, tr({ wagons: 4 }));
+    o.surfaceGainDamped = o.pavedGainWagon < o.pavedGainFoot && o.pavedGainWagon >= 1;
+
+    const sea = (t, hours) => W({ cat: 'sea', terrain: t, routeCond: 'Neutral', biome: 'Coastal Lowland' },
+      { transport: 'Sea Faring', vessel: 'Cog', groupSize: 6, cargoKg: 40000, hours: hours || 14 });
+    o.bay = sea('Sheltered Bay'); o.coastal = sea('Coastal Waters'); o.open = sea('Open Sea');
+    o.seaOrdered = o.bay < o.coastal && o.coastal < o.open;
+    // the LAND hours slider must no longer move a sea leg at all (the window is the water's property)
+    o.seaHoursIndependent = Math.abs(sea('Open Sea', 6) - sea('Open Sea', 16)) < 1e-9;
+
+    // every band below is docs/research/travel-speeds.md §8, widened to span travel-day..calendar
+    const inBand = (v, lo, hi) => v >= lo && v <= hi;
+    o.bands = {
+      footPaved: inBand(o.footPaved, 30, 50), footDirt: inBand(o.footDirt, 20, 35),
+      footRocky: inBand(o.footRocky, 8, 18), wagon: inBand(o.wagonTrain, 12, 21),
+      bay: inBand(o.bay, 25, 50), coastal: inBand(o.coastal, 45, 90), open: inBand(o.open, 100, 220)
+    };
+    o.allInBand = Object.keys(o.bands).every(k => o.bands[k]);
+
+    // infrastructure tiers must be MULTIPLES of the world's own density, and the punitive bottom tier
+    // must require a real signal — v1.42 auto-tiered 61% of a real route as "Hostile / Dead Zone"
+    o.tiersRelative = JP_INFRA_TIERS[0][0] < 8;
+    const ctx = { expectedPer100: 0.25, landKm2: 1e6, count: 30 };
+    o.emptyWildIsNotHostile = _jpStageInfra({ cat: 'land', km: 400, settlements: 0, claimedFrac: 0,
+      terrain: 'Hills', biome: 'Temperate Forest' }, ctx) !== 'Hostile / Dead Zone';
+    o.ruinsStillHostile = _jpStageInfra({ cat: 'land', km: 400, settlements: 0, claimedFrac: 0,
+      terrain: 'Ruins / Debris', biome: 'Ruined Wastes' }, ctx) === 'Hostile / Dead Zone';
+    o.claimedFloorsTier = _jpStageInfra({ cat: 'land', km: 400, settlements: 0, claimedFrac: 1,
+      terrain: 'Hills', biome: 'Temperate Forest' }, ctx) === 'Sparse Settlements';
+    o.openSeaNotLandTiered = _jpStageInfra({ cat: 'sea', km: 900, settlements: 0, claimedFrac: 0,
+      terrain: 'Open Sea', biome: 'Coastal Lowland' }, ctx) === 'Stable Settlements';
+    // A short stage must not be AMPLIFIED by its own shortness. One settlement beside 40 km of route
+    // is the same observation as one beside 150 km — you cannot measure a rate finer than the sample —
+    // so both must land on the same tier, while above the floor extra length must still dilute.
+    const tier = (km, n) => _jpStageInfra({ cat: 'land', km, settlements: n, claimedFrac: 0,
+      terrain: 'Hills', biome: 'Temperate Forest' }, ctx);
+    const rank = t => JP_INFRA_TIERS.findIndex(x => x[1] === t);
+    o.shortStageNotAmplified = tier(40, 1) === tier(150, 1);
+    o.lengthStillDilutesAboveFloor = rank(tier(600, 1)) > rank(tier(150, 1));
+    // §5: a party of ≤10 is the reference; larger caravans carry the whole coordination spread
+    o.small = jpGroupClass(6).coordMod; o.large = jpGroupClass(60).coordMod;
+    o.smallCaravanFavoured = o.small === 1 && o.large < 1 && (o.small / o.large) >= 1.15 && (o.small / o.large) <= 1.30;
+    return o;
+  });
 
   await browser.close();
 
@@ -3633,7 +3722,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.21: cell click-to-select still hits the right cell at a non-fit zoom (evToSrc needed no changes)', R.v121.selectAtZoom.selBefore === '0 selected' && R.v121.selectAtZoom.selAfter === '1 selected' && R.v121.selectAtZoom.pct !== '100%');
   A('v1.21: wheel-zoom actually zooms in', parseInt(R.v121.wheelZoom.pctAfter) > parseInt(R.v121.wheelZoom.pctBefore));
 
-  A('v1.23 BUG1: Open Sea base speed > Coastal Waters (systemic sea ordering fixed)', R.v123.openFasterThanCoastal);
+  A('v1.23 BUG1: Open Sea km/day > Coastal Waters (systemic sea ordering fixed)', R.v123.openFasterThanCoastal);
   A('v1.23 BUG1: Sheltered Bay is not the fastest sea terrain (no residual pair-ordering bug)', R.v123.shelteredNotFastest);
   A('v1.23 BUG2: selector and validator agree for every vessel × water terrain (single source of truth)', R.v123.selValidatorMismatches === 0 && R.v123.checks > 0);
   A('v1.23 BUG2: autoselect never picks a vessel the compat rule flags invalid', R.v123.autoInvalid === 0 && R.v123.autoPicks > 0);
@@ -3789,6 +3878,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.40: the largest landmass scores above the smallest (placement can tell an island from a speck)', R.v140.bigBeatsSmall);
   A('v1.40: the islet penalty is sparse — it is an exception, not a reweighting of the whole map', R.v140.penaltySparse);
   A('v1.40: no settlement is seeded on a speck of land while real landmass exists', !R.v140.nPlaces || R.v140.onTinyIslet === 0);
+
+  A('v1.43: every calibrated mode lands inside its travel-speeds.md §8 band', R.v143.allInBand);
+  A('v1.43: an ox-wagon train is far slower than a pack-animal train (one "Baggage Train" bucket no longer covers both)', R.v143.wagonSlowerThanPack);
+  A('v1.43: the pace-setting animal\'s terrain affinity reaches a TRAIN, not only a lone rider (camels beat mules on sand)', R.v143.camelBeatsMuleOnSand);
+  A('v1.43: a paved surface lifts a walker more than an ox — the animal\'s gait is the ceiling', R.v143.surfaceGainDamped);
+  A('v1.43: sea daily distance rises bay < coastal < open sea', R.v143.seaOrdered);
+  A('v1.43: the land hours/day slider no longer moves a sea leg (the sailing window is the water\'s property)', R.v143.seaHoursIndependent);
+  A('v1.43: infrastructure tiers are multiples of the world\'s own settlement density, not absolute counts', R.v143.tiersRelative);
+  A('v1.43: empty countryside is not a "Hostile / Dead Zone" — the bottom tier needs a real signal', R.v143.emptyWildIsNotHostile && R.v143.ruinsStillHostile);
+  A('v1.43: claimed faction territory floors a stage at Sparse Settlements (inhabited land is not wilderness)', R.v143.claimedFloorsTier);
+  A('v1.43: an open-sea leg is not tiered by land settlement density', R.v143.openSeaNotLandTiered);
+  A('v1.43: a short stage is not amplified by its own shortness, yet length still dilutes above the floor', R.v143.shortStageNotAmplified && R.v143.lengthStillDilutesAboveFloor);
+  A('v1.43: a party of ≤10 is the reference tier and larger caravans carry the §5 spread (+15-25%)', R.v143.smallCaravanFavoured);
 
 
 

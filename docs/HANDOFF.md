@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.42.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.43.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.43 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.41` are kept and never edited.
+  (v1.44 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.42` are kept and never edited.
+- **v1.43 — Journey Planner recalibrated against `docs/research/travel-speeds.md`.** Owner: "the
+  current planner seems to roughly take 37% longer than historically recorded." Hash vs v1.42 ALL
+  IDENTICAL (block 2 only). 1001 / 852 / **381** green.
+  - **Measured before fixing, and the measurement moved the diagnosis.** The report's §7 critiques
+    the speed tables; the largest single error was the auto-derived INFRASTRUCTURE tier, which §7
+    never looks at. On a generated world at seed 12345/512px, 61% of an 830 km route's km auto-tiered
+    as "Hostile / Dead Zone" (×0.50) and NO km ever reached "Stable Settlements" — mean 4.0 km/day.
+    `JP_INFRA_TIERS` demanded 8 settlements per 100 km as an absolute count; the generator places ~30
+    towns for a whole world. Now multiples of the world's own measured density. **After: 10.5 km/day.**
+  - Four more structural faults, each with its own note in CLAUDE.md's v1.43 section: one 3.0 km/h
+    "Baggage Train" bucket covering ox wagons, pack trains and porters alike; the per-animal terrain
+    and weather tables unreachable for anything but a lone rider; sea distance driven by the LAND
+    hours/day slider; and §5's small-caravan rule inverted into a penalty.
+  - **Result: all 20 reference cases inside their §8 bands (was 9/20); the report's own §9 sample
+    journey reproduces at 242 days against its 244 (was 366, +50%).**
+  - Reproduce with `/tmp/.../probe_travel.js` — or re-derive it: the probe calls `jpCalcLand` /
+    `jpCalcWater` directly over synthetic stages, no world needed, since both are pure over their
+    (stage, plan) arguments. The infra half DOES need a generated world.
+  - Scope cuts (unchanged from the report's §10 architecture): no rest-day tier split, no seasonal
+    gate (monsoon lock / closed passes), no toll or tropical-attrition term, no relay-courier mode.
 - **v1.39 — water-edge snap ENABLED; placement now runs before routing.** Hash vs v1.38 ALL
   IDENTICAL. 1001 / 852 / 365 green.
   - **The rule: nothing may move a settlement after `_civHierarchicalNetwork` has routed.** v1.36's

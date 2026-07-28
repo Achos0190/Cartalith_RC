@@ -12,6 +12,89 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.43 — Journey Planner recalibrated against historical travel rates
+
+Owner supplied `docs/research/travel-speeds.md` (an overland/maritime research report whose §7
+evaluates this tool's own numbers) with: *"the current planner seems to roughly take 37% longer than
+historically recorded. And compose a fix."* Measured before changing anything, per this file's own
+discipline — and the measurement moved the diagnosis: the report's §7 critique is about the speed
+TABLES, but the largest single error turned out to be somewhere it never looked. Hash vs v1.42
+**ALL IDENTICAL** in every scenario (the whole change is block 2 planner code and data). 1001 / 852 /
+381 green.
+
+**What was measured first.** A probe calling `jpCalcLand`/`jpCalcWater` directly over 20 reference
+cases against §8's bands, plus a second probe running the report's own §9 sample journey (8,423 km,
+45% sea by dhow, 6-person merchant party) through the real calculators, plus a third generating a
+world at seed 12345/512px and deriving stages along a real 830 km inter-settlement route.
+
+- **The dominant defect was the auto-derived INFRASTRUCTURE tier, not a speed table.** On that real
+  world, 61% of the route's km auto-tiered as **"Hostile / Dead Zone" (×0.50)**, 8% "Ruined Region",
+  31% "Sparse", and **zero km ever reached "Stable Settlements"** — mean **4.0 km/day**. `JP_INFRA_TIERS`
+  demanded 8 settlements per 100 km (one every 12.5 km) for its top tier, an ABSOLUTE count, while the
+  generator places towns and cities — about 30 for an entire world — and never the villages and
+  waystations that actually line a road. A scale mismatch, not a tuning error. Tiers are now
+  **multiples of the world's own measured route density** (`_jpInfraContext`), the same self-correcting
+  technique v1.25 used for sea level, v1.31 for density and v1.34 for soil. Three further rules:
+  claimed faction territory floors a stage at "Sparse Settlements" (inhabited country is not
+  wilderness); "Hostile / Dead Zone" now needs a real signal (ruins terrain / Ruined Wastes biome),
+  never merely "no town within the pick radius"; and an open-sea leg is not tiered by LAND settlement
+  density at all. A length floor (`JP_INFRA_MIN_SAMPLE_KM`) stops a 40 km stage beside one settlement
+  reading as 2.5 per 100 km — you cannot measure a rate finer than the sample you have. Measured
+  after: **4.0 → 10.5 km/day** on the same route, 61% "Stable Settlements" / 39% "Ruined Region", no
+  spurious tier at either end.
+- **"Baggage Train" was one 3.0 km/h bucket for three historically distinct configurations.** 3.0 × an
+  8 h day is 24 km/day *before any modifier*, i.e. the unmodified best case already sat at the bottom
+  of §8's 20-30 calendar band for a trade-road caravan, so every modifier below 1.0 pushed it under.
+  New `jpTrainPace()` resolves the base from the train's slowest CARRIER — the report's own §5.1 rule
+  — giving ox wagon 2.2, cart 3.6, travois 3.4, pack animal 4.8, porter 2.6 km/h.
+- **The per-animal terrain and weather affinity tables were dead for anything but a lone rider.**
+  `JP_ANIMAL_TERRAIN_OVERRIDE` / `JP_ANIMAL_WEATHER_OVERRIDE` were reachable only through `mountKey`,
+  which is only resolved for "Mounted Rider" — so a single camel rider got the desert affinity while a
+  ten-camel CARAVAN, the historically dominant desert configuration, got none: Deep Sand at the generic
+  0.50 instead of camel's 0.85, a sandstorm at 0.40 instead of 0.70. `jpResolveMount` already means
+  "the slowest animal present sets the column's pace", which is the right rule for a train too, so the
+  pace-setter is now resolved whenever the party has animals. Not a one-sided buff — the same lookup
+  gives a camel train 0.20 in marsh against the generic 0.40.
+- **Sea distance was driven by the LAND hours/day slider.** §3.3's finding is that the three sea zones
+  differ in daily sailing WINDOW as much as in speed (a coastal hull anchors at nightfall, an
+  open-water passage sails through it), and the model had no window axis — so a 14 h plan put a
+  sheltered bay at 120 km/day against its 25-40 band while an 8 h plan put open sea below its own
+  floor: the same journey, opposite errors, from one control that should never have applied. New
+  `JP_WATER_WINDOW` (bay 9 h, coastal 11 h, open sea 22 h, rivers 11-12 h) replaces `hours` for water
+  stages, and `JP_TERRAIN.sea` becomes the fraction of the vessel's cruise speed actually realised
+  (0.38 / 0.60 / 0.55 / 0.20). v1.23 fixed the ORDERING of these three and explicitly left the
+  magnitudes alone; §7 measured the residue.
+- **Land terrain ratios re-anchored to §8** ÷ the dirt-road midpoint: paved road 1.20 → **1.50** (§7:
+  "too slow for a genuine Roman-equivalent paved road, by a wide margin"), rocky 0.60 → **0.50**,
+  desert hardpack 0.65 → **0.80** (flat hard ground is no obstacle on foot, and the camel case is now
+  carried by the override table). Mountain pass, forest trail and marsh already matched.
+- **A surface bonus is damped for animal-paced modes** (`jpSurfaceGain`): pavement speeds a walker up a
+  great deal but barely speeds an ox, whose gait is the ceiling — which is why §8's ox-wagon row is its
+  tightest, highest-confidence band and does not rise on paved road, and why 66-103 km/day belongs to
+  the relay courier (fresh horses), not to the pavement. Penalties below 1.0 are deliberately NOT
+  damped: bad ground costs an animal at least as much as a walker.
+- **§5's small-caravan rule was inverted.** The report recommends +15-25% travel-day for an unescorted
+  party of ≤10; the old ladder gave a 6-person party a 0.97 *penalty*. Re-tiered so ≤10 is the
+  reference (1.00) and the larger tiers carry the whole spread (1/0.88 ≈ +14% to 1/0.82 ≈ +22%), which
+  inflates no base speed. §5's large-escorted-caravan case still reaches its ~41 km/day Hajj figure by
+  BUYING infrastructure — the "Operational Waystations" tier.
+- **Result.** All 20 reference cases land inside their §8 bands (was 9 of 20), and the report's own §9
+  sample journey now reproduces at **242 days against its 244** (was 366, +50%). The owner's reported
+  ~37% overshoot is resolved with room to spare on both sides.
+- **Tests**: 12 new smoke assertions (`R.v143`) pinning composed km/day inside the §8 bands plus each
+  structural rule. Two v1.23 assertions were re-expressed: they tested the raw `JP_TERRAIN.sea`
+  multipliers, which no longer carry the ordering on their own (the window does), so they would have
+  read Coastal 0.60 > Open 0.55 and failed a correct model. They now assert the composed km/day —
+  which is what the owner's original 97-vs-82 report was about, and is invariant to where in the
+  composition the physics lives.
+- **Known scope cuts**: no rest-day / calendar-vs-travel-day tier split (§10's two-system architecture)
+  — the planner reports one day count, now calibrated so it reads as the calendar-average tier the
+  historical records themselves are; no seasonal gate (monsoon lock, closed mountain passes are a
+  threshold effect §4 describes and this model has no state for); no political/toll friction or
+  tropical attrition term; the relay-courier tier (cursus publicus, the Yam) is still not a separate
+  mode. `JP_SHIPS` cruise speeds and `JP_ROUTE` wind/current rows are unchanged — the calibration
+  moved the window, the surface ratios and the base land pace, not the vessels.
+
 ### v1.42 — Land and sea routes are finally compared
 
 Owner: "land routes are sometimes still preferred where a sea route would be faster/more efficient",
