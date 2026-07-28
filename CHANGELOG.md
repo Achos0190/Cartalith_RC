@@ -12,6 +12,77 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.49 — Route Editor: the answer comes first, and says how sure it is
+
+Owner asked for an audit of the travel planner's layout and of where more information would be
+welcome. The audit found a well-calibrated physical model (v1.43 speeds, v1.33/34 food logistics,
+v1.48 load solver) presenting itself as bare numbers, below the fold, beside a column of empty
+space. Hash vs v1.48 **ALL IDENTICAL** — script blocks 3 and 4 are byte-identical, and blocks 1/2
+change only in the version string and the civ-layer planner UI. 1001 / 852 / **418** green.
+
+**The layout finding, measured rather than eyeballed** (1600×1000 viewport, a real 369 km caravan):
+`#reResults` had its top edge at **y=1295 in a 1000px viewport — 295px below the fold** — because
+Results was a full-width block placed AFTER the two-column row, whose height is set by the 909px
+party form. Meanwhile the Stops column beside that form held 90px of content in a 967px row, i.e.
+**~875px of dead space directly opposite the inputs**, and the Results block that belonged there was
+only 262px tall. You scrolled past every input to reach any answer.
+
+- **Results (and Stops) moved into that column** as a new `.re-col-out`, which is `position:sticky`
+  so the answer stays on screen while the taller form scrolls past — the panel's actual working
+  loop is "change a control, watch the number move", which the old order made impossible.
+  Re-measured: **Results top 1295px → 314px**, body scroll height 1602 → 1226, left-column content
+  90px → 670px. `align-self:flex-start` is required for the stick (a stretched flex item can't).
+  On the ≤900px stacked layout the sticky is disabled — pinning a block over the form it sits above
+  is worse than not sticking.
+- **The party column is capped at 820px** so a number input doesn't stretch a metre wide once the
+  output column stopped absorbing the width, with the output column taking the slack instead.
+
+**The information findings — three pure readers over the finished plan.** No new modelling, no new
+persisted state, no engine changes; they only say out loud what the existing numbers already imply.
+Kept as separate pure functions (not inlined into the renderer) so they stay smoke-testable, the
+same shape `_jpVesselWaterBlock` already has.
+
+- **`_jpVerdict(plan)`** — the synthesis the panel previously left entirely to the reader. The whole
+  prior interpretive layer was one hardcoded ternary on day count. Levels favourable → moderate →
+  strained → severe (blocked short-circuits), each driven by a signal the plan ALREADY carries:
+  the v1.48 solver's worst-stage load ratio and draft shortfall, v1.31's per-stage resupply
+  feasibility, and desert/mountain/storm shares counted only when they're a real fraction of the
+  route rather than a token kilometre. **Every contributing signal is returned by name in
+  `reasons`** — a verdict that can't say why it said that is worse than no verdict, because the user
+  can't tell a real problem from a threshold quirk (v1.35's `basis` lesson, one level up).
+- **`_jpConfidence(plan)`** — an honesty band on the day count, rendered directly under the figure
+  it qualifies. The per-stage model is a best case: every day a travel day at the stage's own pace,
+  no sick animal, no washed-out ford, no waiting on weather. The historical logistics literature is
+  consistent that this optimism GROWS with duration, so the band is **asymmetric (downside always
+  larger than upside) and widens with days** — ±3/+10% under a week out to −15/+60% at season scale,
+  with the season-scale note stating plainly that the figure above is the optimistic bound, not the
+  expected outcome. Deliberately NOT a simulated distribution, and says so in its tooltip.
+- **`_jpPackRange(plan)`** — the wagon-equation ceiling, stated BEFORE the user configures past it.
+  v1.48 catches the divergence but only after the fact; the threshold is knowable in advance and
+  belongs beside the control that crosses it. Shown under "Supplies carried" as e.g. *"A mule can
+  carry at most ~37 days of its own fodder at this grazing setting"*, escalating in colour as the
+  setting approaches and then passes it. **Computed from exactly the inputs v1.48's own
+  `fodderInfeasible` guard tests**, so the number displayed IS the threshold that guard fires at —
+  one source of truth, not a second estimate of the same quantity (asserted by a smoke test that
+  reproduces the guard's arithmetic independently and compares).
+- **Day-tick thinning** (`_civDrawProfile`): ticks now thin to a ≥7px target spacing, and — the part
+  that was initially wrong and got fixed during verification — the density is judged against the
+  canvas's **displayed** width, not its internal 640px backing. Using the internal width let ticks
+  crowd on screen while the arithmetic said they were comfortably apart. Labels itself `tick = N
+  days` whenever N > 1; the exact per-day list stays in "Daily stages".
+- **Tests**: 9 new smoke assertions (`R.v149`) — verdict shape/vocabulary/named-reasons; a
+  deliberately overloaded party escalating AND citing the overload by name; the confidence band
+  bracketing the estimate, being asymmetric, widening with duration, and null when blocked; the
+  pack-range ceiling matching the v1.48 guard within 2%; full grazing reporting no ceiling; Results
+  and Stops living in the sticky output column; Results rendering above the fold and no longer
+  trailing the party form; and the verdict/band actually reaching the DOM.
+- **Known scope cuts, disclosed** (from the same audit, deliberately not attempted here): there is
+  still no cost/price/wage/toll model, so a trade route reports time and cargo but never profit;
+  `plan.season` remains uniform for the whole journey, so a 242-day trip is computed in one season;
+  spoilage is barely modelled; there is no return-leg/round-trip and no side-by-side plan
+  comparison (the v1.47 re-route replaces rather than compares). These are the audit's Tier-2/3
+  items and are larger than a UI pass.
+
 ### v1.48 — Pack-animal count: fodder-feedback divergence, reported honestly
 
 Owner: "250kg of cargo now necessitates roughly 213 mules." Confirmed as a real defect, not a

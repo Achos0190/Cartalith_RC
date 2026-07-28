@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.48**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.49**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.48.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.47.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.49.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.48.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,43 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Route Editor: the answer comes first, and says how sure it is (v1.49)
+
+Owner-requested audit of the planner's layout and information density. Hash vs v1.48 ALL IDENTICAL
+(blocks 3/4 byte-identical; 1/2 differ only in the version string and the civ-layer planner UI).
+
+- **Measure the layout, don't eyeball it.** `#reResults` sat at **y=1295 in a 1000px viewport** —
+  295px below the fold — because Results was a full-width block AFTER the 2-column row, whose height
+  is set by the 909px party form; the Stops column opposite that form held 90px of content in a
+  967px row, i.e. **~875px of dead space** with a 262px Results block that belonged in it.
+- **`.re-col-out` is the output column and it STICKS.** Results + Stops moved into that gap;
+  `position:sticky` keeps the answer on screen while the taller form scrolls, because the panel's
+  real loop is "change a control, watch the number move". `align-self:flex-start` is mandatory — a
+  stretched flex item cannot stick. Sticky is disabled on the ≤900px stacked layout. Re-measured:
+  Results top **1295 → 314**, scroll height 1602 → 1226. Party column capped at 820px so inputs
+  don't stretch on ultrawide.
+- **Three pure readers over a finished plan** — no new modelling, no new state, separate functions
+  (not inlined into the renderer) so they stay smoke-testable like `_jpVesselWaterBlock`:
+  - **`_jpVerdict`** — favourable/moderate/strained/severe from signals the plan already carries
+    (v1.48 load ratio + draft shortfall, v1.31 resupply feasibility, terrain/weather shares counted
+    only when a real fraction of the route). **Always returns its `reasons` by name** — a verdict
+    that can't say why is worse than none (v1.35's `basis` lesson one level up). It replaced a
+    single hardcoded ternary on day count, which was the entire prior interpretive layer.
+  - **`_jpConfidence`** — asymmetric band that WIDENS with duration (±3/+10% under a week →
+    −15/+60% at season scale), because the per-stage model is a best case and its optimism grows
+    with trip length. An honesty band on a point estimate, not a simulated distribution; says so.
+  - **`_jpPackRange`** — the wagon-equation ceiling shown BEFORE the user crosses it (v1.48 only
+    caught it after). **Computed from exactly the inputs v1.48's `fodderInfeasible` guard tests**,
+    so the displayed number IS that guard's threshold — one source of truth, asserted by a smoke
+    test that reproduces the guard arithmetic independently.
+- **Canvas density must be judged against DISPLAYED width, not the internal backing.** The day-tick
+  thinning first used `cv.width` (640) while the element renders at ~430px, so ticks could crowd on
+  screen while the arithmetic said they were fine. Caught during verification.
+- **Known scope cuts** (same audit, not attempted): no cost/price/wage/toll model at all, so a trade
+  route never reports profit; `plan.season` is uniform for the whole journey (a 242-day trip is
+  computed in one season); spoilage barely modelled; no return leg and no side-by-side plan
+  comparison (v1.47's re-route replaces rather than compares).
+
 ### Pack-animal count: fodder-feedback divergence, reported honestly (v1.48)
 
 Owner report: "250kg of cargo now necessitates roughly 213 mules." Root-caused with a numerical
@@ -1380,7 +1417,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (409 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (418 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.48.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.49.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.49 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.47` are kept and never edited.
+  (v1.50 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.48` are kept and never edited.
+- **v1.49 — Route Editor: the answer comes first, and says how sure it is.** Owner-requested audit
+  of the travel planner's layout + information density. Hash vs v1.48 ALL IDENTICAL. 1001 / 852 /
+  **418** green.
+  - **Layout, measured**: `#reResults` sat 295px BELOW the fold (top y=1295 in a 1000px viewport)
+    while ~875px of dead space sat opposite the party form. Results + Stops moved into that gap as
+    a **sticky** output column (`.re-col-out`) — Results top **1295 → 314**. `align-self:flex-start`
+    is mandatory for the stick; sticky is off on the ≤900px stacked layout.
+  - **Three pure readers, no new modelling**: `_jpVerdict` (levelled verdict that always names its
+    reasons), `_jpConfidence` (asymmetric band that widens with duration — the model is a best case
+    and its optimism grows with trip length), `_jpPackRange` (the wagon-equation carry ceiling shown
+    *before* you cross it, computed from the same inputs as v1.48's guard so it's one source of
+    truth).
+  - Lesson worth keeping: **canvas tick density must be judged against DISPLAYED width**, not the
+    internal backing resolution — the first cut used `cv.width` (640) for an element rendering at
+    ~430px.
+  - **Still open from that audit** (bigger than a UI pass): no cost/price/toll model, so a trade
+    route never reports profit; `plan.season` is uniform for the whole journey; spoilage barely
+    modelled; no return leg; no side-by-side plan comparison.
 - **v1.48 — Pack-animal count: fodder-feedback divergence, reported honestly.** Owner: "250kg
   of cargo now necessitates roughly 213 mules." Hash vs v1.47 ALL IDENTICAL. 1001 / 852 /
   **409** green.

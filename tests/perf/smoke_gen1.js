@@ -3797,6 +3797,97 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.49: the interpretive layer + the layout fix. The audit measured #reResults' top edge at
+  // y=1295 in a 1000px viewport (295px below the fold) while the Stops column left ~875px of dead
+  // space opposite the party form; Results now lives in that column. _jpVerdict/_jpConfidence/
+  // _jpPackRange are pure readers over a finished plan — no new modelling, no new state.
+  R.v149 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++) {
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    }
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + 8, y: landPt[1] + 8, category: 'settlement', pop: 1000 }
+      ];
+      const pts = []; for (let k = 0; k <= 10; k++) pts.push([landPt[0] + 8 * k / 10, landPt[1] + 8 * k / 10]);
+      const jn = { pts, km: 40, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const p = _jpEnsurePlan(jn);
+      p.transport = 'Baggage Train'; p.assetMode = 'auto'; p.cargoKg = 250; p.supplyDays = 7;
+      p.grazing = 'Partial — graze at camp';
+
+      // ── verdict: shape, vocabulary, and that it NAMES its reasons (a verdict that can't say why
+      //    is worse than none — the v1.35 `basis` lesson)
+      const plan = _jpPlan(jn);
+      const v = _jpVerdict(plan);
+      o.verdictShape = !!(v && typeof v.level === 'string' && typeof v.label === 'string'
+        && typeof v.text === 'string' && Array.isArray(v.reasons));
+      o.verdictLevelValid = ['favourable', 'moderate', 'strained', 'severe', 'blocked'].includes(v.level);
+      o.verdictReasonsAreStrings = v.reasons.every(r => typeof r === 'string' && r.length > 0);
+
+      // a deliberately overloaded party must escalate the verdict AND cite the overload by name
+      p.assetMode = 'manual'; p.cargoKg = 40000;
+      ['donkey','mule','camel','horse'].forEach(k => p.animals[k] = 0); p.carts = 0; p.wagons = 0;
+      const vBad = _jpVerdict(_jpPlan(jn));
+      o.overloadEscalates = vBad.level === 'severe' || vBad.level === 'strained';
+      o.overloadNamed = vBad.reasons.some(r => /overload|capacit|resuppl/i.test(r));
+      p.cargoKg = 250; p.assetMode = 'auto';
+
+      // ── confidence: asymmetric (downside always larger), widens with duration, brackets the estimate
+      const c = _jpConfidence(_jpPlan(jn));
+      o.confBrackets = !!(c && c.loDays <= (_jpPlan(jn).totalDays ?? _jpPlan(jn).days) && c.hiDays >= (_jpPlan(jn).totalDays ?? _jpPlan(jn).days));
+      o.confAsymmetric = !!(c && (c.hi - 1) > (1 - c.lo));
+      const bands = [3, 10, 17, 40, 120].map(d => _jpConfidence({ days: d, totalDays: d, blocked: false }));
+      o.confWidensWithDuration = bands.every((b, i) => i === 0 || (b.hi - b.lo) >= (bands[i - 1].hi - bands[i - 1].lo));
+      o.confBlockedIsNull = _jpConfidence({ days: 10, blocked: true }) === null;
+
+      // ── pack range: matches the v1.48 guard's own threshold, and full grazing has no ceiling
+      p.grazing = 'None — carry all fodder';
+      _jpRefresh(true);
+      const pr = _jpPackRange(_jpPlan(jn));
+      o.packRangeExists = !!(pr && pr.maxDays > 0 && isFinite(pr.maxDays));
+      if (pr) {
+        // reproduce the v1.48 guard arithmetic independently: cap / (food * fodderFrac)
+        const A = JP_ANIMALS[pr.key];
+        const expected = A.cap / (A.food * (JP_GRAZING[p.grazing].fodderFrac));
+        o.packRangeMatchesGuard = Math.abs(pr.maxDays - expected) / expected < 0.02;
+      }
+      p.grazing = 'Full — graze on route'; _jpRefresh(true);
+      const prFull = _jpPackRange(_jpPlan(jn));
+      o.fullGrazingNoCeiling = !!(prFull && prFull.unlimited);
+      p.grazing = 'Partial — graze at camp'; _jpRefresh(true);
+
+      // ── layout: Results is above the fold and inside the sticky output column, not a
+      //    full-width block below the party form
+      _civOpenRouteEditor(0);
+      await new Promise(r => setTimeout(r, 300));
+      const res = document.getElementById('reResults'), party = document.getElementById('reParty');
+      const outCol = document.querySelector('.re-col-out');
+      o.resultsInOutputColumn = !!(outCol && res && outCol.contains(res));
+      o.stopsInOutputColumn = !!(outCol && outCol.contains(document.getElementById('reStops')));
+      o.outColIsSticky = !!(outCol && getComputedStyle(outCol).position === 'sticky');
+      const rBody = document.querySelector('.re-body').getBoundingClientRect();
+      const rRes = res.getBoundingClientRect();
+      o.resultsAboveFold = (rRes.top - rBody.top) < window.innerHeight;
+      // and it now precedes the (taller) party form rather than following it
+      o.resultsBeforeParty = res.getBoundingClientRect().top <= party.getBoundingClientRect().top + 200;
+      // the verdict actually renders into the panel
+      o.verdictRendered = /Favourable|Moderate|Strained|Severe/.test(res.textContent);
+      o.confidenceRendered = /Likely range/.test(res.textContent);
+      _civCloseRouteEditor();
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+      const m = document.getElementById('routeEditorModal'); if (m) m.classList.remove('open');
+      _reOpen = false;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4269,6 +4360,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.48: the flagged count stays bounded (the reported bug: 250kg used to require ~213 mules)', R.v148.longTripCountBounded);
   A('v1.48: the infeasibility hint explains why and points at resupply, not just more animals', R.v148.longTripHintExplainsWhy);
   A('v1.48: full grazing never trips the fodder-infeasibility check, however long the trip', R.v148.fullGrazingNeverInfeasible);
+
+  A('v1.49: the verdict has a valid level, text and NAMED reasons (never an unexplained judgement)', R.v149.verdictShape && R.v149.verdictLevelValid && R.v149.verdictReasonsAreStrings);
+  A('v1.49: a deliberately overloaded party escalates the verdict and cites the overload by name', R.v149.overloadEscalates && R.v149.overloadNamed);
+  A('v1.49: the confidence band brackets the point estimate and is asymmetric (downside > upside)', R.v149.confBrackets && R.v149.confAsymmetric);
+  A('v1.49: the confidence band widens with trip duration, and is null for a blocked route', R.v149.confWidensWithDuration && R.v149.confBlockedIsNull);
+  A('v1.49: the pack-range ceiling reproduces the v1.48 guard threshold exactly (one source of truth)', R.v149.packRangeExists && R.v149.packRangeMatchesGuard);
+  A('v1.49: full grazing reports no carry-duration ceiling (none exists when fodder is not carried)', R.v149.fullGrazingNoCeiling);
+  A('v1.49: Results + Stops moved into the sticky output column (was a full-width block below the form)', R.v149.resultsInOutputColumn && R.v149.stopsInOutputColumn && R.v149.outColIsSticky);
+  A('v1.49: Results renders above the fold and no longer trails the taller party form', R.v149.resultsAboveFold && R.v149.resultsBeforeParty);
+  A('v1.49: the verdict and confidence band actually render into the panel', R.v149.verdictRendered && R.v149.confidenceRendered);
 
 
 
