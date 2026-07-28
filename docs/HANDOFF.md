@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.45.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.46.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.46 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.44` are kept and never edited.
+  (v1.47 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.45` are kept and never edited.
+- **v1.46 — Coastal settlement preference.** HANDOFF's "Settlements with a port still sit
+  inland" — v1.37 fixed coastal DETECTION, v1.40 tried raising the coast weight and reverted it
+  (clusters seeds along the coastline, halves settlement count). Hash vs v1.45 ALL IDENTICAL
+  (civ-layer placement only). 1001 / 852 / **397** green.
+  - **A first cut ("swap in one coastal settlement per landmass if it has none") measured a
+    no-op** — both landmasses in the reference world already had ≥1 port. Shipped version instead
+    targets each landmass's coastal SHARE OF SETTLEMENTS to exceed its coastal SHARE OF LAND by
+    `PORT_PREFERENCE_MULT` (3×) — scales with the landmass's own geometry rather than a flat count.
+  - Candidates come from re-running the SAME `findSettlementSeeds` primitive (same threshold, same
+    suppression radius) over the SAME `suit` field, masked to ocean-shore range — genuine local
+    maxima, bounded and landmass-scoped so it can't repeat v1.40's clustering failure.
+  - New `_civOceanDistField()` — the OCEAN-only twin of `_civCoastDistField()`, which wrongly
+    sources from lakes too.
+  - **Disclosed side effect**: moving a settlement before routing (the v1.39 ordering rule) can
+    cascade into the crossroads pass — on the one tested seed where a swap fired with a large
+    displacement, final settlement count moved 19→27. Real, not a bug (the water-edge snap has the
+    same property, usually smaller). `PORT_PREFERENCE_MULT=3` is un-tuned, disclosed as a scope cut.
 - **v1.45 — River deep-zoom fade: the second factor.** Closes the item v1.41 left open ("a real
   but PARTIAL recovery... a second factor is still unidentified"). Hash vs v1.44 ALL IDENTICAL.
   1001 / 852 / **393** green.
@@ -98,14 +115,16 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
      it cannot drop them wholesale. (The baked-atlas path this note flagged as the likely culprit was
      later ruled out too — v1.29's own CHANGELOG entry: "85 tiles baked, zero difference.")
      </details>
-  2. Settlements with a port still sit inland — v1.37 fixed coastal DETECTION, not PREFERENCE; the
-     suitability coast weight is not strong enough to pull a seed to the shore. **STILL OPEN** —
-     raising the coast weight clusters seeds and the suppression radius culls them net-negative
-     (29 → 12, v1.40); needs a mechanism that doesn't fight the suppression radius (e.g. shrinking
-     the radius specifically near the coast, or a local nudge-toward-coast instead of a global
-     suitability reweight) rather than another attempt at the same lever.
+  2. ~~Settlements with a port still sit inland~~ **FIXED v1.46.** v1.37 fixed coastal DETECTION,
+     not PREFERENCE; raising the global coast weight (v1.40) clustered seeds and the suppression
+     radius culled them net-negative (29 → 12). v1.46 instead does a bounded, landmass-scoped swap —
+     each landmass's coastal share of settlements must exceed its coastal share of land by 3×,
+     filled from genuine local-suitability maxima along the shore, never touching `suit` or the
+     suppression radius. See CLAUDE.md's "Coastal settlement preference (v1.46)" for the measured
+     effect (seed-dependent — correctly a no-op on an already-saturated landmass) and the disclosed
+     crossroads-count side effect of repositioning a settlement before routing.
   3. ~~Settlements seeded on tiny islets~~ **FIXED v1.40** (`buildLandmassQuality`; islet occupancy
-     → 0, settlement count unchanged). Coastal PREFERENCE is still open — see #2 above.
+     → 0, settlement count unchanged). Coastal PREFERENCE — see #2 above, **FIXED v1.46**.
   4. **PARTLY FIXED v1.42.** Road generation now compares land against sea (`_civPreferSeaRoutes`,
      Diocletian cost ratios, drops a redundant road only when it is not the sole overland link).
      Correction to the earlier diagnosis: journeys are USER-DRAWN, so this was never a journey-planner

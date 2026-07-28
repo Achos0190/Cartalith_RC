@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.45**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.46**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.45.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.44.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.46.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.45.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,38 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Coastal settlement preference (v1.46)
+
+HANDOFF's "Settlements with a port still sit inland" — v1.37 fixed coastal DETECTION, v1.40 tried
+raising the coast weight in `buildSettlementSuitability` and reverted it (clusters seeds along the
+coastline, the suppression radius then culls the excess, halving the settlement count for two extra
+coastal sites — the v1.30 rule: a term that isn't ~zero almost everywhere is reweighting the whole
+map, not expressing an exception). Hash vs v1.45 ALL IDENTICAL — civ-layer placement only.
+
+- **A first cut ("swap in one coastal settlement per landmass if it has none") measured as a no-op**
+  on the reference seed — both landmasses hosting settlements already had ≥1 port. "At least one" was
+  never what the report meant; the gap is under-representation, not zero representation.
+- **Shipped version: each landmass's coastal SHARE OF SETTLEMENTS must exceed its coastal SHARE OF
+  LAND by `PORT_PREFERENCE_MULT` (3×)** — scales with the landmass's own geometry (a small island
+  asks for little extra, a large continent proportionally more) rather than a flat count. Candidates
+  come from re-running the SAME `findSettlementSeeds` primitive (same threshold, same suppression
+  radius) over the SAME `suit` field, masked to ocean-shore range — genuine local maxima.
+- **Bounded and landmass-scoped**: `suit`, the main suppression-radius picker, and every settlement
+  outside the landmass being adjusted are untouched; each swap still needs `SETTLE_SEED_THRESH` and
+  costs no more than the water-edge snap's own 0.60 tolerance — a mediocre coast stays unsettled.
+- **`_civOceanDistField()`** — the OCEAN-only twin of `_civCoastDistField()` (which sources from ANY
+  sub-sea-level cell, including lakes — wrong for a sea-lane-port test, per `_civIsCoastal`'s own
+  `oceanOnly` convention).
+- **A large repositioning runs before routing (the v1.39 ordering rule) and can cascade into the
+  crossroads pass**, which reads final positions to decide trade-junction emergence — on the one
+  tested seed where a swap fired with a big displacement, final settlement count moved 19→27. A real,
+  disclosed side effect of moving a settlement before the road network exists (the water-edge snap
+  already has this property, just usually smaller), not a bug.
+- **Known scope cut**: `PORT_PREFERENCE_MULT=3` is a reasonable, un-tuned constant, not calibrated
+  against a historical reference the way v1.34's 9:1 ratio was. Crossroads settlements are
+  deliberately NOT re-biased coastward — they exist because a route junction is there (often inland
+  at a ford/pass), and pulling them to the shore would defeat the reason they were placed.
+
 ### River deep-zoom fade: the second factor (v1.45)
 
 Closes the "second factor... unidentified" item v1.41 left open (356→479 px recovery at zoom 32 —
@@ -1281,7 +1313,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (393 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (397 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

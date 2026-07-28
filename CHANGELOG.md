@@ -12,6 +12,62 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.46 — Coastal settlement preference
+
+HANDOFF's "Settlements with a port still sit inland" — v1.37 fixed coastal DETECTION, v1.40 tried
+raising `buildSettlementSuitability`'s coast weight and reverted it (clusters seeds along the
+coastline, the suppression radius culls the excess, settlement count halved for two extra coastal
+sites). Hash vs v1.45 **ALL IDENTICAL** in every scenario — this is civ-layer (block 2) placement
+logic only, never touching `field`/`temp`/`rain`/render. 1001 / 852 / **397** green.
+
+- **A first cut swapped in at most one coastal settlement per landmass, gated on the landmass having
+  NONE at all — measured a no-op on the reference seed**, because both landmasses hosting settlements
+  already cleared that bar. One port per landmass is not what "preference" means; the report is about
+  under-representation, not zero representation. Diagnosed by instrumenting the pass directly rather
+  than guessing — the debug counters showed `have>=target` immediately, not a thrown error.
+- **The shipped version targets each landmass's own coastal SHARE OF SETTLEMENTS to exceed its
+  coastal SHARE OF LAND by `PORT_PREFERENCE_MULT` (3×)** — a real preference (over-representation)
+  that scales with the landmass's own geometry: a small island (already mostly coastal) asks for
+  little extra, a large continent (mostly interior) asks for proportionally more, without demanding
+  every settlement move to the shore. Candidate coastal sites are found by re-running the SAME
+  `findSettlementSeeds` primitive the main pass already uses (same threshold, same suppression
+  radius) over the SAME `suit` field, masked to land within ocean-shore range — genuine local maxima,
+  not an invented "nearest shore" pick.
+- **Bounded and landmass-scoped, so it cannot repeat v1.40's failure**: `suit`, the main greedy
+  suppression-radius picker, and every settlement outside the landmass being adjusted are untouched;
+  the settlement count AT THE POINT THIS PASS RUNS never changes (it only swaps WHERE existing
+  settlements sit). Each swap still needs the candidate to clear `SETTLE_SEED_THRESH` like any other
+  settlement site, and to cost no more than the SAME 0.60 suitability tolerance the existing
+  water-edge snap already accepts for a "sea is genuinely near" nudge — a mediocre coast stays
+  unsettled exactly like the rest of placement already works.
+- **`_civOceanDistField()`** (new) — the OCEAN-only twin of the pre-existing `_civCoastDistField()`,
+  which sources from ANY sub-sea-level cell including inland lakes (wrong for a "sea-lane port" test,
+  matching `_civIsCoastal`'s own `oceanOnly` convention). Same cached chamfer-DT shape.
+- **Measured** (5 seeds, seed 12345/256px resolution): 3 of 5 seeds unchanged (already saturated
+  relative to the 3× target — a correct no-op, not a failure to fire); 1 seed +1 coastal settlement
+  (35%→40%); 1 seed 0→1 coastal (a landmass with zero coastal representation before). No settlement
+  ever placed in water; no duplicate positions.
+- **A large repositioning runs BEFORE routing (same ordering rule v1.39 established) and therefore
+  cascades into the crossroads pass**, which reads final settlement positions to decide where trade
+  junctions emerge. On the one seed where the swap actually fired with a large displacement, final
+  settlement count (after crossroads) moved from 19 to 27 — a real, disclosed side effect of moving a
+  settlement's position before the road network exists, not a bug: the water-edge snap already has
+  this property, just with smaller typical displacements. Count stayed identical on the other 4
+  seeds, where either no swap fired or the swap distance was small.
+- **Tests**: 4 new smoke assertions (`R.v146`) — `_civOceanDistField` matches `currentWaterBodies`'
+  class-1 cells exactly; the pass never reduces coastal representation vs. a monkeypatched pre-fix
+  baseline (`_civOceanDistField` forced to return null, which is exactly its own null guard) across
+  several seeds; it demonstrably improves representation on at least one seed (not a dead no-op); it
+  never places a settlement in water. Runs against the SAME seeds pattern used to develop the fix, in
+  the browser rather than trusting the manual probe alone.
+- **Known scope cut, disclosed**: `PORT_PREFERENCE_MULT=3` is a reasonable, un-tuned constant, not
+  calibrated against a historical coastal-settlement-density reference (unlike e.g. v1.34's 9:1
+  farmer ratio or v1.31's crustal abundance) — a future pass could ground it the same way if the
+  current strength reads wrong on more worlds. Crossroads (trade-junction) settlements are
+  deliberately NOT re-biased toward the coast — they exist because a route junction is there, and
+  historically Christaller market towns are often inland at river fords/mountain passes; pulling them
+  coastward would defeat the reason they were placed.
+
 ### v1.45 — River deep-zoom fade: the second factor
 
 The v1.41 CHANGELOG entry left one open item: a genuine root-cause fix for deep-zoom river

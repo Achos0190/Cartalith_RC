@@ -3604,6 +3604,60 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.46 (HANDOFF's "Settlements with a port still sit inland" — v1.37 fixed coastal DETECTION, not
+  // PREFERENCE; v1.40's global suitability-reweight lever clustered seeds and the suppression radius
+  // culled them, halving the settlement count). Fix: a bounded, landmass-scoped swap in
+  // _civIterativeAutoWorld — never touches suit/the suppression radius/settlement count at the point
+  // it runs, so it cannot repeat v1.40's failure. Effect is real but seed-dependent (a landmass that's
+  // already well-represented is correctly left alone), so this tries several seeds and asserts the
+  // pass never makes coastal representation WORSE, and that it demonstrably helps on at least one.
+  R.v146 = await page.evaluate(async () => {
+    const o = {};
+    const wb = currentWaterBodies(), oceanDT = _civOceanDistField();
+    o.oceanDTExists = !!oceanDT;
+    if (oceanDT) {
+      let zeroAtOcean = true;
+      for (let i = 0; i < GW * GH; i += 37) if (wb[i] === 1 && oceanDT[i] !== 0) { zeroAtOcean = false; break; }
+      o.oceanDTZeroAtOcean = zeroAtOcean;
+    }
+
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW;
+    const origOceanFn = window._civOceanDistField;
+    try {
+      state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+      let neverWorse = true, anyImproved = false, noneInWaterAnySeed = true;
+      for (const seed of [20260726, 20260727, 20260728]) {
+        state.tect.seed = seed; await generate();
+        state.places = []; _civIterativeAutoWorld(3);
+        const withFix = state.places.filter(p => p.category === 'settlement');
+        const withCoastal = withFix.filter(p => p.traits && p.traits.includes('port')).length;
+        const sea = state.seaLevel || 0.42;
+        if (withFix.some(p => {
+          const xi = Math.max(0, Math.min(GW - 1, Math.round(p.x))), yi = Math.max(0, Math.min(GH - 1, Math.round(p.y)));
+          return field[yi * GW + xi] < sea;
+        })) noneInWaterAnySeed = false;
+
+        window._civOceanDistField = () => null;   // disables the pass (matches its own null guard) — the pre-fix baseline
+        state.places = []; _civIterativeAutoWorld(3);
+        window._civOceanDistField = origOceanFn;
+        const withoutFix = state.places.filter(p => p.category === 'settlement');
+        const withoutCoastal = withoutFix.filter(p => p.traits && p.traits.includes('port')).length;
+
+        if (withCoastal < withoutCoastal) neverWorse = false;
+        if (withCoastal > withoutCoastal) anyImproved = true;
+      }
+      o.neverWorse = neverWorse;
+      o.anyImproved = anyImproved;
+      o.noneInWaterAnySeed = noneInWaterAnySeed;
+    } finally {
+      window._civOceanDistField = origOceanFn;
+      state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4057,6 +4111,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.45: at deep LOD zoom, drawRiverWays receives the real uncapped GW/span zk, not the old Math.min(8,...) clamp', R.v145.foundRiverSpot && R.v145.zkUncappedAtDeepZoom);
   A('v1.45: at shallow LOD zoom (already <=8 pre-fix), the river-ways zk is unchanged from before', R.v145.shallowZoomAlreadyUnderOldCap);
   A('v1.45: at deep zoom the uncapped stroke-width law paints meaningfully more river pixels than the old hard-capped-at-8 law on the same view', R.v145.deepZoomPaintsMoreThanOldCap);
+
+  A('v1.46: _civOceanDistField is ocean-only (matches currentWaterBodies\' class-1 cells, zero there)', R.v146.oceanDTExists && R.v146.oceanDTZeroAtOcean);
+  A('v1.46: the coastal-preference pass never reduces coastal representation vs. the pre-fix baseline, across several seeds', R.v146.neverWorse);
+  A('v1.46: the coastal-preference pass demonstrably improves coastal representation on at least one seed (not a dead no-op)', R.v146.anyImproved);
+  A('v1.46: the coastal-preference pass never places a settlement in water', R.v146.noneInWaterAnySeed);
 
 
 
