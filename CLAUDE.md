@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.49**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.50**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.49.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.48.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.50.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.49.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,42 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Auto-selection audit + the bottleneck veto (v1.50)
+
+Owner asked whether auto-selection/promotion actually fit each biome/terrain/weight. Audited in-page
+across all 13 terrains × 12 biomes × 4 animals with every table cross-checked against the vocabulary
+it indexes — not by reading. Hash vs v1.49 ALL IDENTICAL (civ-layer only).
+
+- **Cleared**: zero dead table keys anywhere; full animal coverage in the desert/seasonal tables;
+  both blocking sets genuinely consumed; all five promotion paths correct (notably: overloaded with
+  auto-promote OFF *warns and stays Walking* rather than silently promoting).
+- **A rule table and a data table that disagree is a bug unless the disagreement is written down.**
+  `jpBestAnimalForContext` had rules for 8 of 13 terrains. Three of the five gaps are terrains where
+  all four animals score identically (biome fallback is right there). The other two — **`Hills` and
+  `Mountain Pass`** — rate mule 0.85 (joint best) and camel 0.50, so biome overrode terrain exactly
+  where terrain discriminates most: a mountain pass in an arid biome picked a **camel, the worst of
+  four, a 70% penalty**. Not a corner case — those two terrains are **29.8% of land route-km** on a
+  real world (Hills alone 26.8%). Fixed; non-argmax combos 20 → 12.
+- **`Forest Path` is the remaining 12 and disagrees with its table ON PURPOSE** (donkey is faster,
+  mule carries 110 vs 80 kg ⇒ ~27% fewer animals, which is what the v1.48 fodder ceiling turns on).
+  Now commented, so it reads as intent instead of being re-found as a bug every audit.
+- **Bottleneck veto — a pack train is a WHOLE-JOURNEY commitment.** You cannot swap species halfway
+  up a pass, so the binding constraint is the worst ground crossed, not the km-weighted average the
+  old plurality vote used. When a stage is ≥20% off the best animal AND ≥10% of the route, the whole
+  route switches to the total-time minimiser, and **says so by name** (terrain, km, penalty).
+  Deliberately a veto, not a global re-optimisation: pure speed-optimisation would have silently
+  flipped Forest Path mule→donkey. The thresholds separate real bottlenecks (camel on a pass, 41%)
+  from mild preferences (mule on forest path, 11.8%). Symmetric — sand switches toward the camel.
+- **Per-stage pack-animal override**: plumbing already existed (`_jpEffectiveStagePlan` merges
+  `ov.animals`); only the control was missing. The handler translates a species pick into the
+  head-count shape the effective plan already reads rather than adding a parallel field.
+- **`jpAnimalTerrainMod` is now the one resolver** for "how fast is this animal here", called by both
+  `jpCalcLand` and the route-fit comparison — the sixth time this file has had to collapse two
+  functions answering one question.
+- **Known scope cuts**: thresholds are reasoned against the shipped table, not historically
+  calibrated; the veto picks ONE animal for the whole route (a genuine mixed train is what the
+  per-stage override is for); species choice ignores capacity except via the Forest Path rule.
+
 ### Route Editor: the answer comes first, and says how sure it is (v1.49)
 
 Owner-requested audit of the planner's layout and information density. Hash vs v1.48 ALL IDENTICAL
@@ -1417,7 +1453,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (418 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (427 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

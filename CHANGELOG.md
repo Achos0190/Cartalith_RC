@@ -12,6 +12,88 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.50 — Auto-selection audit + the bottleneck veto
+
+Owner asked whether auto-selection and promotion actually fit each biome/terrain/weight. Audited
+systematically in-page (all 13 terrains × 12 biomes × 4 animals, every lookup table cross-checked
+against the vocabulary it indexes) rather than by reading, because this file's recurring failure
+mode is a table key that silently doesn't match (v1.31's frozen six-key literals, v1.43's
+dead-by-gating overrides). Hash vs v1.49 **ALL IDENTICAL** — civ-layer only. 1001 / 852 / **427**
+green.
+
+**What the audit cleared.** Zero dead keys: every key in `JP_WHEEL_BLOCKED`, `JP_MOUNT_BLOCKED`,
+both animal override tables, `JP_DESERT_ANIMAL_MOD`, `JP_SEASONAL_ANIMAL` and all 12 biomes'
+`bestAnimals` resolves against the real vocabulary, all four animals have full desert + 4-season
+coverage, and both blocking sets are genuinely consumed. All five promotion paths behave: a light
+load stays Walking with no animals; overloaded with auto-promote OFF warns and stays Walking rather
+than silently promoting; with it ON becomes a Baggage Train and actually assigns animals; Mounted
+Rider sets a valid mount; a water transport handed to the land picker is refused. Wheels correctly
+require EVERY land stage to permit them.
+
+- **The defect: `Hills` and `Mountain Pass` had per-animal ratings but no selection rule.**
+  `jpBestAnimalForContext` carried explicit rules for 8 of 13 terrains. Three of the five without
+  one (`Paved Road`, `Dirt Track`, `Ruins / Debris`) score identically for all four animals, so
+  falling through to the biome branch is correct there. The other two do not: mule is rated 0.85 on
+  both — the joint best — while camel sits at 0.50 on Mountain Pass. So biome overrode terrain
+  exactly where terrain discriminates most, and **a mountain pass inside an arid biome picked a
+  CAMEL: the worst of the four animals there, a 70% speed penalty, chosen because the surrounding
+  land was dry.** It reads as an oversight, not a decision — the two neighbouring mountain terrains
+  both got rules, and mule's Mountain Pass rating was clearly set deliberately. Measured on a real
+  world (28 settlement-to-settlement routes, seed 12345): **29.8% of all land route-km** falls on
+  these two terrains, Hills being the single commonest land terrain at 26.8%. Fixed by giving both
+  the same mule rule the neighbouring mountain terrains already had; non-argmax (terrain × biome)
+  combinations fell 20 → 12.
+- **`Forest Path` is the remaining 12, and it disagrees with its table ON PURPOSE.** The terrain
+  row rates donkey higher (0.85 vs mule's 0.75), but a mule carries 110 kg to a donkey's 80, so a
+  mule train moves the same cargo with ~27% fewer animals — which on a long carry is exactly what
+  the v1.48 fodder ceiling turns on. Left as-is and now commented, because a rule contradicting its
+  own data should be legible as intent rather than re-discovered as a bug every audit.
+- **Bottleneck veto (owner request): one demanding stage now switches the WHOLE route's animal.**
+  A pack train is a whole-journey commitment — you cannot swap species halfway up a pass — so the
+  binding constraint is the worst ground crossed, not the average. The old km-weighted plurality
+  vote missed that by construction: a route 80% plains / 20% mountain pass elected the plains
+  animal, which then crawled the pass. Now, when a stage is both genuinely punishing for the
+  elected animal (`JP_BOTTLENECK_PENALTY` = 20% off the best available) **and** a real share of the
+  route (`JP_BOTTLENECK_MIN_SHARE` = 10%), the whole route switches to whichever animal minimises
+  total route travel time.
+  - **Chosen as a veto rather than a global re-optimisation on purpose.** Pure speed-optimisation
+    would have silently flipped Forest Path mule→donkey, overturning the deliberate capacity call
+    above. The two thresholds cleanly separate a real bottleneck from a mild preference on the
+    shipped table: a camel on a mountain pass is 41% off the best (fires); a mule on a forest path
+    is 11.8% off (does not).
+  - **Never silent.** The switch is reported in the auto-pick hint naming both animals, the driving
+    terrain, its km and the penalty — e.g. *"⛰ Route-wide switch: Camel → Mule for the Mountain Pass
+    stretch"*, with the reason line *"mules are chosen for the whole route because of 100 km of
+    Mountain Pass — a camel loses 41% of its pace there."* Verified symmetric: 150 km of Deep Sand
+    switches a temperate route mule→camel the same way.
+- **Per-stage pack-animal override.** The owner's requirement was that the new default stay
+  overridable. The plumbing already existed — `_jpEffectiveStagePlan` has always merged
+  `ov.animals` over `plan.animals` — only the control was missing, so Results → Per-stage overrides
+  gains a Pack animal picker on land stages. The handler translates the species choice into the
+  `animals{}` head-count shape the effective plan already reads (carrying the shared plan's
+  head-count over, so a swap doesn't quietly drop the train's capacity to zero) rather than
+  inventing a parallel override field.
+- **`jpAnimalTerrainMod` extracted as the single resolver.** "How fast is this animal on this
+  terrain?" was inline in `jpCalcLand`; the new route-fit comparison needed the same answer. Two
+  functions answering one question have now drifted five separate times in this file (v1.30
+  suitability, v1.33 trade rule, v1.35 water access, v1.38 trade scope, v1.48's own guard), so it is
+  one function that both call — asserted by a smoke test reproducing the table independently.
+- **Reason attribution fixed.** `reasonOf[key]` was overwritten by every stage voting for that key,
+  so the hint showed whichever stage happened to be scored LAST, not the one that carried the vote —
+  wrong on 8 of 28 sampled real routes. It now tracks the km-dominant contributing stage.
+- **Tests**: 9 new smoke assertions (`R.v150`) — the extracted resolver matching the table exactly;
+  Hills and Mountain Pass selecting mule; Forest Path being the *only* non-argmax terrain; the veto
+  firing and naming its terrain; the veto being symmetric (sand switches toward the camel); a token
+  stretch below the share floor NOT hijacking the route; a bottleneck-free route reporting no
+  switch; Forest Path keeping its capacity-chosen mule through the new machinery; reason attribution
+  following the km-dominant stage; and an empty land-stage list still answering.
+- **Known scope cuts**: the two thresholds are reasoned against the shipped table, not calibrated
+  against a historical reference the way v1.34's 9:1 ratio was; the veto picks one animal for the
+  whole route (a genuine multi-species train, e.g. camels to the foothills then mules over the pass,
+  is what the per-stage override is for, not something auto-selection composes); and species choice
+  still ignores capacity except through the Forest Path rule — the count solver handles capacity
+  afterwards.
+
 ### v1.49 — Route Editor: the answer comes first, and says how sure it is
 
 Owner asked for an audit of the travel planner's layout and of where more information would be

@@ -9,11 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.49.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.50.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.50 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.48` are kept and never edited.
+  (v1.51 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.49` are kept and never edited.
+- **v1.50 — auto-selection audit + the bottleneck veto.** Owner asked whether auto-selection and
+  promotion fit each biome/terrain/weight. Hash vs v1.49 ALL IDENTICAL. 1001 / 852 / **427** green.
+  - **Audit cleared**: no dead table keys anywhere, full animal coverage, all 5 promotion paths
+    correct. **Found**: `Hills` and `Mountain Pass` carried per-animal ratings but NO selection
+    rule, so biome beat terrain where terrain matters most — a pass in an arid biome picked a camel
+    (0.50) over a mule (0.85). Those two terrains are **29.8% of land route-km** on a real world.
+    Fixed. `Forest Path` still disagrees with its own table but **on purpose** (capacity, not speed)
+    and is now commented so it isn't re-found as a bug.
+  - **Bottleneck veto**: a pack train is a whole-journey commitment, so one demanding stage
+    (≥20% off the best animal, ≥10% of the route) switches the WHOLE route's animal to the
+    total-time minimiser — flagged by name, and overridable via the new per-stage Pack animal
+    control. Deliberately a veto rather than a global re-optimisation, which would have silently
+    flipped the Forest Path capacity choice.
+  - Reusable lesson: **a rule table disagreeing with its data table is a bug unless the
+    disagreement is written down.** Two of three such cases here were oversights; the third was
+    intent, and only a comment could tell them apart.
 - **v1.49 — Route Editor: the answer comes first, and says how sure it is.** Owner-requested audit
   of the travel planner's layout + information density. Hash vs v1.48 ALL IDENTICAL. 1001 / 852 /
   **418** green.

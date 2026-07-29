@@ -3888,6 +3888,64 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.50: auto-selection audit fixes + the bottleneck veto. The audit found "Hills" and
+  // "Mountain Pass" carried per-animal ratings but no selection rule, so biome overrode terrain
+  // exactly where terrain is most differentiated (a camel picked for a mountain pass at 0.50 vs
+  // mule's 0.85). Plus: a pack train is a whole-journey commitment, so one demanding stage now
+  // switches the WHOLE route's animal — flagged, and overridable per stage.
+  R.v150 = await page.evaluate(() => {
+    const o = {};
+    const S = (terrain, biome, km) => ({ cat: 'land', terrain, biome, km });
+    const ANIMALS = Object.keys(JP_ANIMALS);
+
+    // one source of truth for "how fast is this animal here" — the extracted resolver must
+    // reproduce the table exactly (jpCalcLand now calls it too)
+    o.modResolverMatchesTable = ANIMALS.every(a => Object.keys(JP_TERRAIN.land).every(t => {
+      const ov = JP_ANIMAL_TERRAIN_OVERRIDE[a];
+      const expect = (ov && ov[t] !== undefined) ? ov[t] : JP_TERRAIN.land[t];
+      return jpAnimalTerrainMod(a, t) === expect;
+    }));
+    o.modResolverDefaults = jpAnimalTerrainMod(null, 'Open Plains') === JP_TERRAIN.land['Open Plains'];
+
+    // AUDIT FIX: wherever terrain genuinely discriminates between animals, the per-stage pick must
+    // be the argmax. Forest Path is the one documented exception (a deliberate capacity choice).
+    const nonArgmax = [];
+    for (const t of Object.keys(JP_TERRAIN.land)) for (const b of Object.keys(JP_BIOMES)) {
+      const best = Math.max(...ANIMALS.map(a => jpAnimalTerrainMod(a, t)));
+      const picked = jpAnimalTerrainMod(jpBestAnimalForContext(t, b).key, t);
+      if (picked < best - 1e-9) nonArgmax.push(t);
+    }
+    o.onlyForestPathIsNonArgmax = nonArgmax.every(t => t === 'Forest Path');
+    o.hillsPicksMule = jpBestAnimalForContext('Hills', 'Steppe / Grassland').key === 'mule';
+    o.mountainPassPicksMule = jpBestAnimalForContext('Mountain Pass', 'Hot Desert').key === 'mule';
+
+    // BOTTLENECK VETO: a real mountain share switches the whole route and reports the switch
+    const mtn = jpPickSpeciesForRoute([S('Open Plains', 'Hot Desert', 400), S('Mountain Pass', 'Hot Desert', 100)]);
+    o.bottleneckSwitches = mtn.key === 'mule' && !!mtn.switched && mtn.switched.from === 'camel' && mtn.switched.to === 'mule';
+    o.bottleneckNamesTerrain = !!(mtn.switched && mtn.switched.terrain === 'Mountain Pass' && mtn.reason.includes('Mountain Pass'));
+    // ...and a sand crossing switches the other way (not a mule-only rule)
+    const sand = jpPickSpeciesForRoute([S('Open Plains', 'Temperate Forest', 350), S('Deep Sand', 'Hot Desert', 150)]);
+    o.bottleneckSymmetric = sand.key === 'camel' && !!sand.switched && sand.switched.to === 'camel';
+
+    // ...but a token stretch below the share floor must NOT hijack the route
+    const tiny = jpPickSpeciesForRoute([S('Open Plains', 'Hot Desert', 950), S('Mountain Pass', 'Hot Desert', 50)]);
+    o.smallStretchDoesNotSwitch = tiny.key === 'camel' && !tiny.switched;
+    // ...and a route with no bottleneck reports no switch at all
+    const plain = jpPickSpeciesForRoute([S('Open Plains', 'Hot Desert', 500)]);
+    o.noBottleneckNoSwitch = plain.key === 'camel' && !plain.switched;
+    // ...and the deliberate Forest Path capacity choice survives the new machinery
+    const forest = jpPickSpeciesForRoute([S('Forest Path', 'Temperate Forest', 300)]);
+    o.forestKeepsMule = forest.key === 'mule' && !forest.switched;
+
+    // reason attribution follows the km-DOMINANT stage, not whichever was scored last
+    const attr = jpPickSpeciesForRoute([S('Forest Path', 'Temperate Forest', 40), S('Rocky Terrain', 'Temperate Forest', 400)]);
+    o.reasonFromDominantStage = attr.key === 'mule' && /rough\/upland/.test(attr.reason);
+
+    // empty land-stage list still answers
+    o.emptyRouteSafe = jpPickSpeciesForRoute([]).key === 'mule';
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4370,6 +4428,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.49: Results + Stops moved into the sticky output column (was a full-width block below the form)', R.v149.resultsInOutputColumn && R.v149.stopsInOutputColumn && R.v149.outColIsSticky);
   A('v1.49: Results renders above the fold and no longer trails the taller party form', R.v149.resultsAboveFold && R.v149.resultsBeforeParty);
   A('v1.49: the verdict and confidence band actually render into the panel', R.v149.verdictRendered && R.v149.confidenceRendered);
+
+  A('v1.50: jpAnimalTerrainMod reproduces the override/base table exactly (one source of truth with jpCalcLand)', R.v150.modResolverMatchesTable && R.v150.modResolverDefaults);
+  A('v1.50 AUDIT: Hills and Mountain Pass now select the mule their own ratings call best', R.v150.hillsPicksMule && R.v150.mountainPassPicksMule);
+  A('v1.50 AUDIT: Forest Path is the ONLY terrain whose pick is not the argmax (a documented capacity choice)', R.v150.onlyForestPathIsNonArgmax);
+  A('v1.50: a real mountain share switches the whole route\'s animal and reports the switch by name', R.v150.bottleneckSwitches && R.v150.bottleneckNamesTerrain);
+  A('v1.50: the veto is symmetric — a sand crossing switches toward the camel, not only toward the mule', R.v150.bottleneckSymmetric);
+  A('v1.50: a token stretch below the share floor never hijacks the route animal', R.v150.smallStretchDoesNotSwitch);
+  A('v1.50: a route with no bottleneck reports no switch, and Forest Path keeps its capacity-chosen mule', R.v150.noBottleneckNoSwitch && R.v150.forestKeepsMule);
+  A('v1.50: the reason shown comes from the km-dominant stage, not whichever was scored last', R.v150.reasonFromDominantStage);
+  A('v1.50: an empty land-stage list still returns the versatile default', R.v150.emptyRouteSafe);
 
 
 
