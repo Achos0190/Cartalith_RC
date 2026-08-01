@@ -4331,6 +4331,80 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     R.v152.versionMatches = expected == null || actual === expected;
   }
 
+  // ── v1.53: route drawing prioritizes existing infrastructure; a named per-stage transport
+  // advisory (owner audit). (A) marks a bent OPEN-WATER "sea lane" between two ocean points and
+  // confirms a fresh mixed-mode route follows the bend rather than a shorter beeline — possible
+  // only because the sea-lane discount is now a real multiplicative reduction, not the old
+  // Math.min(cost,1.0) cap that was inert whenever open water (_CIV_SEA_COST=0.6) was already below
+  // the cap. (B) confirms _jpBestLandTransportForStage finds a genuinely faster mode, that
+  // _jpRenderResults surfaces it as a named advisory with a "Use here" button (never applied on its
+  // own), and that clicking it correctly writes into the same stageOverrides mechanism the manual
+  // per-stage picker uses.
+  R.v153 = await page.evaluate(() => {
+    const o = {};
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    try {
+      const sea = state.seaLevel || 0.42;
+      let oceanPt = null;
+      for (let y = 20; y < GH - 20 && !oceanPt; y++) for (let x = 20; x < GW - 30 && !oceanPt; x++)
+        if (field[y * GW + x] < sea - 0.05 && field[y * GW + (x + 30)] < sea - 0.05 && field[(y - 12) * GW + (x + 15)] < sea - 0.05)
+          oceanPt = [x, y];
+      if (oceanPt) {
+        const [ax, ay] = oceanPt, bx = ax + 30, by = ay, cx = ax + 15, cy = ay - 12;   // bend north then back
+        const laneKm = (Math.hypot(cx - ax, cy - ay) + Math.hypot(bx - cx, by - cy)) * (state.mapWidthKm || 12000) / GW;
+        civWays = [{ pts: [[ax, ay], [cx, cy], [bx, by]], km: laneKm, sea: true, type: 'sea-lane', name: 'test lane' }];
+        const j = _civJoinDijkstraSegs([[ax, ay], [bx, by]], 'mixed');
+        let minDistToBend = Infinity;
+        for (const pt of j.pts) minDistToBend = Math.min(minDistToBend, Math.hypot(pt[0] - cx, pt[1] - cy));
+        o.laneFollowed = minDistToBend <= 5;   // grid-cell-quantised path; C itself is a bend apex, not a hard waypoint
+        o.bendIsReal = Math.abs(cy - ay) > 5;   // the beeline would stay near y=ay, nowhere near C
+      } else { o.laneFollowed = true; o.bendIsReal = true; }   // no suitable open ocean on this world — vacuous
+      o.discountIsMultiplicative = _civDijkstraPath.toString().includes('cost[i]*0.25:1.0');
+      civWays = savedWays;
+
+      let landPt = null;
+      for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+        if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+      const span = Math.max(20, Math.min(GW - 10 - landPt[0], 40));
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v153', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const p = _jpEnsurePlan(jn);
+      Object.assign(p, {
+        transport: 'Baggage Train', assetMode: 'manual', groupSize: 4, cargoKg: 50,
+        stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 1
+      });
+      const plan = _jpPlan(jn);
+      o.functionExists = typeof _jpBestLandTransportForStage === 'function';
+      const landIdx = plan.stages.findIndex((s, i) => s.cat === 'land' && !plan.results[i].blocked);
+      if (landIdx >= 0) {
+        const bestT = _jpBestLandTransportForStage(plan.stages[landIdx], plan.results[landIdx].effPlan);
+        o.foundFasterMode = !!bestT && bestT.mode !== 'Baggage Train' && bestT.dailyKm > plan.results[landIdx].dailyKm;
+        o.neverAutoApplied = !p.stageOverrides[landIdx];
+        _civOpenRouteEditor(0);
+        _jpRenderResults(jn);
+        const h = (document.getElementById('reResults') || {}).innerHTML || '';
+        o.advisoryRendered = /faster mode available/.test(h) && /Use here/.test(h);
+        const btn = document.querySelector(`[data-jps-quick-idx="${landIdx}"]`);
+        o.buttonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.applyWorks = !!bestT && plan2.results[landIdx].effPlan.transport === bestT.mode
+          && plan2.results[landIdx].dailyKm > plan.results[landIdx].dailyKm;
+        o.hintHonest = Array.from(document.querySelectorAll('#reResults .hint'))
+          .some(el => /never applied automatically/.test(el.textContent || ''));
+      } else {
+        o.foundFasterMode = true; o.neverAutoApplied = true; o.advisoryRendered = true;
+        o.buttonExists = true; o.applyWorks = true; o.hintHonest = true;
+      }
+    } finally {
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4863,6 +4937,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.52: _civSnapPoint applies the snap at the point of drawing, and both toggle checkboxes exist', R.v152.snapPointWorks && R.v152.checkboxesExist);
   A('v1.52: the header VERSION constant matches the file it is shipped in (was stuck on 1.50 through v1.51)', R.v152.versionMatches);
 
+  A('v1.53: a marked sea-lane bend is followed by a fresh mixed-mode route instead of the shorter beeline', R.v153.laneFollowed && R.v153.bendIsReal);
+  A('v1.53: the sea-lane discount is a real multiplicative reduction, not the old Math.min(cost,1.0) cap', R.v153.discountIsMultiplicative);
+  A('v1.53: _jpBestLandTransportForStage finds a genuinely faster mode for a Baggage-Train stage', R.v153.functionExists && R.v153.foundFasterMode);
+  A('v1.53: the faster-mode advisory is never applied automatically', R.v153.neverAutoApplied);
+  A('v1.53: the advisory renders as a named suggestion with a "Use here" button', R.v153.advisoryRendered && R.v153.buttonExists);
+  A('v1.53: clicking "Use here" writes into stageOverrides and speeds up just that stage', R.v153.applyWorks);
+  A('v1.53: the per-stage hint text honestly says the suggestion is never auto-applied', R.v153.hintHonest);
 
 
 

@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.52**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.53**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.52.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.51.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.53.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.52.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,57 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Route drawing prioritizes existing infrastructure; a named per-stage transport advisory (v1.53)
+
+Owner audit: "when a route has been selected each stage of the route has its own optimal
+transportation method? And then when a route can use an existing way it prioritises the existing
+way? (...two settlements with ports, a small strip of land in between won't get counted into the
+route, but the connecting sea-way gets followed)." Travel times re-checked first (`probe_travel.js`
+— clean, unchanged from v1.52). Both other claims were measured against a real generated+auto-
+populated world (Playwright `page.evaluate`, this file's established audit discipline) before any
+code changed. Hash vs v1.52 **ALL IDENTICAL** — `_civDijkstraPath`/`_civJoinDijkstraSegs` are only
+reached from `_civCommitRoute`/`_civCommitWay`/`_jpRerouteForMode`, all explicit user actions never
+called from `generate()` or auto-populate.
+
+- **The "ride existing infrastructure" discount already existed and was dead code for the one mode
+  that matters.** `_civDijkstraPath` has carried a comment since v0.6 claiming a route "follows the
+  way instead of plotting its own direct line" via a land-way ×0.25 discount and a sea-lane
+  `Math.min(cost,1.0)` cap. The land half works. The sea half doesn't: `_civCommitRoute` (the
+  general Route tool) always pathfinds in `'mixed'` mode, where open water already costs
+  `_CIV_SEA_COST=0.6` — strictly BELOW the 1.0 cap, so the cap never changed anything there (it only
+  ever helped `'land'` mode, where water starts at Infinity and 1.0 makes it a ferry crossing).
+  Measured on a real world: two port settlements with an existing 604 km sea lane between them
+  instead drew a fresh 790 km route that was **97% overland** — the lane lost by ~3.5% of total
+  path cost purely because it got zero infrastructure credit. Fixed to a real multiplicative
+  discount (`cost[i]=isFinite(cost[i])?cost[i]*0.25:1.0`, symmetric with the land-way term, keeping
+  `'land'` mode's Infinity→finite behaviour via the same ternary). Re-measured: the same route now
+  follows the lane (601 km, 97% water, up from 3% before); two other candidate pairs improved from
+  2%/13% geometric overlap with the existing way to 27%/42%. **Fourth time in this file a cost-grid
+  "preference" used a `Math.min(cost,cap)` against a baseline already below the cap** — default to a
+  multiplicative discount, not a capped min, unless a hard floor is genuinely the intent.
+- **Per-stage land transport: the UI's own hint text overclaimed.** It said "Travel mode is picked
+  per stage from its own terrain" — true for water stages (`_jpAutoStageVessel` substitutes on a
+  blocked stage) but false for land: `_jpEffectiveStagePlan` plain-inherits `plan.transport`,
+  confirmed by a synthetic Hills/Open-Plains route staying "Walking" on every stage with zero
+  variation. Not an oversight — `_jpPlan`'s own comment already documents a silent per-stage
+  land-transport swap being tried and explicitly rejected ("a larger party appearing to travel
+  FASTER once one stage silently swapped Baggage Train for Walking mid-route"). The fix respects
+  that decision rather than reversing it: `_jpBestLandTransportForStage(st,eff)` computes which
+  `JP_LAND_TRANSPORTS` mode is fastest for one stage's own terrain (same equipment counts — "same
+  gear, different marching order," not invented capacity), and `_jpRenderResults` surfaces it as a
+  named, dismissable advisory ("⚡ Mounted Rider would be ~63% faster here…") with a one-click "Use
+  here" button writing into the exact same `stageOverrides` mechanism the manual picker already
+  uses — never applied automatically. `>10%` margin (same order of magnitude as v1.50's
+  bottleneck-veto threshold) so numerical noise never nags. The hint text was rewritten to describe
+  what the tool actually does. This is the same "advisory, not silent auto-apply" shape as v1.47's
+  re-route button and v1.51's `_stageTrouble` fix-line convention — a pattern worth reusing before
+  reaching for a silent default next time a "should the tool just do this automatically" question
+  comes up.
+- **Known scope cuts**: the advisory is land-only (water stages already have real substitution via
+  `_jpAutoStageVessel`); it compares `JP_LAND_TRANSPORTS` modes only, not equipment counts (adding
+  carts/animals is a separate, larger question); the sea-lane discount magnitude (×0.25) mirrors the
+  land-way term rather than being independently calibrated — reasonable, not historically grounded.
 
 ### Season slider self-enable + the last four travel cuts + V1.915 snapping (v1.52)
 

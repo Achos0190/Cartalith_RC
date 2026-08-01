@@ -9,11 +9,38 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.52.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.53.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.53 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.51` are kept and never edited.
+  (v1.54 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.52` are kept and never edited.
+- **v1.53 — route drawing prioritizes existing infrastructure; a named per-stage transport
+  advisory.** Owner audit: does each stage of a route get its own optimal transport, and does
+  drawing a route between two settlements with an existing connecting way (e.g. a sea lane)
+  actually follow it, rather than cutting across an intervening land strip? Travel times
+  re-checked first (`probe_travel.js` — clean, unchanged from v1.52, not touched this pass).
+  Both other claims were measured against a real generated+auto-populated world before any code
+  changed. Hash vs v1.52 ALL IDENTICAL (civ-layer, interactive-only). 1001 / 852 green.
+  - **Existing-infrastructure discount was dead code for `'mixed'` mode.** `_civDijkstraPath` has
+    carried an "existing ways get discounted" comment since v0.6, but the sea-lane half was a
+    `Math.min(cost,1.0)` cap — a no-op whenever the baseline was already ≤1.0, which is exactly
+    `_civCommitRoute`'s `'mixed'`-mode open-water cost (`_CIV_SEA_COST=0.6`). Measured: two ports
+    604 km apart by an existing sea lane instead drew a fresh 790 km, 97%-overland route — the
+    lane lost by ~3.5% of path cost purely from getting zero infrastructure credit. Fixed to a
+    real multiplicative ×0.25 discount (matching the land-way term); re-measured, the same route
+    now follows the lane (601 km, 97% water). **Fourth time this file's `Math.min(cost,cap)`
+    pattern was a no-op against an already-lower baseline** — default to a multiplicative discount
+    next time unless a hard floor is genuinely the intent.
+  - **Per-stage land transport: the UI's own hint text overclaimed "picked per stage from its own
+    terrain."** True for water (vessel auto-substitutes on a blocked stage) but false for land —
+    `_jpEffectiveStagePlan` plain-inherits `plan.transport`, confirmed by a synthetic Hills/Open-
+    Plains route that stayed "Walking" on every stage. Not an oversight: `_jpPlan`'s own comment
+    documents a silent per-stage auto-swap being tried and rejected (a party appearing to travel
+    faster once one stage silently swapped Baggage Train for Walking). Fix respects that decision:
+    `_jpBestLandTransportForStage` computes the fastest mode for one stage's own terrain (same
+    equipment counts), surfaced as a named, dismissable "⚡ Mounted Rider would be ~63% faster
+    here" advisory with a one-click "Use here" into the existing `stageOverrides` mechanism —
+    never applied automatically. >10% margin to avoid noise. Hint text rewritten to match reality.
 - **v1.52 — season slider self-enable + the last four travel cuts + V1.915 snapping.** Three owner
   requests. Hash vs v1.51 ALL IDENTICAL. 1001 / 852 / **464** green.
   - **The Cartography "Season (render)" slider "did nothing to change the map."** Root cause: not

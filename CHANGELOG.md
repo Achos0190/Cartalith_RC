@@ -12,6 +12,57 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.53 — Route drawing actually prefers existing infrastructure; a named per-stage transport advisory
+
+Owner audit: "when a route has been selected each stage of the route has its own optimal
+transportation method? And then when a route can use an existing way it prioritises the existing
+way? (...two settlements with ports, a small strip of land in between won't get counted into the
+route, but the connecting sea-way gets followed)." Travel times re-checked first (`probe_travel.js`
+unchanged from v1.52 — still clean, not touched this pass). The other two claims were measured, not
+assumed, against a real generated+auto-populated world before any fix. Hash vs v1.52 **ALL
+IDENTICAL** (civ-layer, interactive-only — `_civDijkstraPath`/`_civJoinDijkstraSegs` are reached
+only from `_civCommitRoute`/`_civCommitWay`/`_jpRerouteForMode`, none of which `generate()` or
+auto-populate ever call). 1001 / 852 green.
+
+**The "ride existing infrastructure" discount already existed and was dead code for the one mode
+that matters.** `_civDijkstraPath` has carried a comment since v0.6 claiming a route "follows the
+way instead of plotting its own direct line" via a land-way ×0.25 discount and a sea-lane
+`Math.min(cost,1.0)` cap. The land half works. The sea half doesn't: `_civCommitRoute` (the general
+Route tool) always pathfinds in `'mixed'` mode, where open water already costs `_CIV_SEA_COST=0.6`
+— strictly BELOW the 1.0 cap, so `Math.min(cost,1.0)` never changed anything there. It only ever
+helped `'land'` mode (where water starts at Infinity and 1.0 makes it a ferry crossing). Measured on
+a real world: two port settlements with an existing 604 km sea lane between them instead drew a
+fresh 790 km route that was **97% overland** — the lane lost by ~3.5% of total path cost purely
+because it got zero infrastructure credit. Fix: the sea-lane branch is now a real multiplicative
+discount (`cost[i]=isFinite(cost[i])?cost[i]*0.25:1.0`), symmetric with the land-way discount and
+keeping `'land'` mode's Infinity→finite behaviour via the same ternary. Re-measured on the same
+three sea-lane-connected settlement pairs: the worst case's fresh route went from 790 km/97% land to
+601 km/97% water (now matching the lane's own composition); the other two improved from 2%/13%
+geometric overlap with the existing lane to 27%/42%. **Fourth time in this file a cost-grid
+"preference" discount used a `Math.min` cap against a baseline that was already below the cap** —
+the next one written should default to a multiplicative discount unless a hard floor is genuinely
+what's needed.
+
+**Per-stage transport mode: the UI's own hint text overclaimed, and the honest fix is an advisory,
+not a silent swap.** The Route Editor's per-stage panel said "Travel mode is picked per stage from
+its own terrain" — true for water stages (vessel auto-substitutes on a blocked stage, `_jpAutoStageVessel`)
+but false for land: `_jpEffectiveStagePlan` plain-inherits `plan.transport` for every land stage
+unless the user sets a manual override. This is not an oversight — `_jpPlan`'s own comment already
+documents why a silent per-stage land swap was tried and rejected ("a larger party appearing to
+travel FASTER once one stage silently swapped Baggage Train for Walking mid-route"). Measured: a
+synthetic route crossing Hills/Open Plains stayed "Walking" on every stage with zero variation,
+confirming the hint text described behaviour the code didn't have. Fix keeps the no-silent-swap
+decision intact and closes the gap the honest way: `_jpBestLandTransportForStage(st,eff)` computes
+which `JP_LAND_TRANSPORTS` mode is fastest for one stage's own terrain (same equipment counts — it's
+"same gear, different marching order," not invented capacity), and `_jpRenderResults` surfaces it as
+a named, dismissable advisory ("⚡ Mounted Rider would be ~63% faster here…") with a "Use here"
+button that writes into the exact same `stageOverrides` mechanism the manual picker already uses —
+never applied automatically. Threshold >10% (same order of magnitude as v1.50's bottleneck-veto
+margin) so a rounding-noise difference never nags. The hint text was rewritten to say what the tool
+actually does. Verified: a Hills/Open-Plains Baggage-Train route surfaced "Mounted Rider ~63%/173%
+faster" on both land stages; simulating the button click correctly set that stage's effective
+transport and speed without touching the rest of the route.
+
 ### v1.52 — The Cartography season slider, the last four travel-planner cuts, and V1.915 snapping
 
 Three owner requests: (1) "the climate slider currently does nothing to change the map", (2) the
