@@ -3946,6 +3946,200 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.51: the constraints that were stated but never measured ──────────────────────────────
+  // The v1.50 audit found the TIME model sound and three of the CONSTRAINT inputs to be constants
+  // standing in for data the world already carries. Each assertion below pins one measurement.
+  R.v151 = await page.evaluate(() => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      // a LONG route with settlements only at its two ends — the shape the audit measured, where
+      // the required resupply interval and the real settlement spacing diverge hard
+      const span = Math.min(GW - 10, 120) - landPt[0] > 40 ? 40 : Math.max(12, Math.floor((GW - 10 - landPt[0]) * 0.6));
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }
+      ];
+      const pts = []; for (let k = 0; k <= 60; k++) pts.push([landPt[0] + span * k / 60, landPt[1]]);
+      const jn = { pts, name: 'v151', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const base = () => {
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, {
+          groupSize: 12, transport: 'Baggage Train', pace: 'Standard Pace', hours: 8, season: 'Summer',
+          cargoKg: 900, supplyDays: 7, carryFood: true, grazing: 'Partial — graze at camp', foraging: 'None',
+          desertWater: 'auto', routeCond: 'auto', infra: 'auto', assetMode: 'manual', autoPromote: false,
+          weatherOverride: 'auto', stageOverrides: {}, seasonalClosures: true,
+          // NO carts/wagons: the smoke suite's world has been mutated by ~430 prior assertions and
+          // its terrain along this line is not guaranteed wheel-passable. A wheel block would make
+          // _jpPlan report `blocked`, and _jpVerdict then returns early with empty reasons — which
+          // is correct behaviour but would make these assertions test the route rather than the fix.
+          carts: 0, wagons: 0, travois: 0, sleds: 0
+        });
+        p.animals = { donkey: 0, mule: 8, camel: 0, horse: 2 };
+        return p;
+      };
+
+      // ── F1: the requirement finally meets the map ──
+      base();
+      const plan = _jpPlan(jn);
+      const rr = plan.resupplyReach;
+      o.reachExists = !!rr;
+      o.reachFieldsSane = !!(rr && rr.requiredKm > 0 && rr.maxGapKm >= 0 && isFinite(rr.shortfall) && typeof rr.unmet === 'boolean');
+      // Drive BOTH directions off supplyDays rather than asserting whatever this particular route
+      // happens to be: 1 day of supplies cannot span the gap, 400 days trivially can. That tests the
+      // comparison itself, independent of the world the suite has by now mutated into existence.
+      const tiny = (() => { const p = base(); p.supplyDays = 1; return _jpPlan(jn); })();
+      const huge = (() => { const p = base(); p.supplyDays = 60; return _jpPlan(jn); })();
+      o.unmetDetected = !!(tiny.resupplyReach && tiny.resupplyReach.unmet)
+        && !!(huge.resupplyReach && !huge.resupplyReach.unmet);
+      // when unmet, the reason must name BOTH the real gap and the carried range — a verdict that
+      // can't show its arithmetic is the thing v1.35's `basis` lesson exists to prevent
+      const tinyReasons = (_jpVerdict(tiny) || {}).reasons || [];
+      o.unmetNamesBothNumbers = tiny.blocked || tinyReasons.some(s =>
+        /no settlement is \d+ km/.test(s) && /carry \d+ km/.test(s));
+      o.falseStringGone = !((_jpVerdict(plan) || {}).reasons || [])
+        .some(s => /resupplied from settlements in reach/.test(s));
+
+      // ── F2: supplyDays must be live (v1.50: 2/7/20/45 all returned identical days) ──
+      // Assert the RANGE, not the day count: the carried range is the quantity supplyDays sets, and
+      // it must move monotonically. Day count only shifts when the change crosses one of
+      // jpLoadPenalty's five bands, so a short route can legitimately show identical days for two
+      // adjacent settings — verified as real step-function saturation, not a residual dead control.
+      const sd = [2, 7, 20, 45].map(n => { const p = base(); p.supplyDays = n; const pl = _jpPlan(jn);
+        return { n, days: pl.days, reach: pl.resupplyReach ? pl.resupplyReach.requiredKm : null }; });
+      o.supplyDaysMovesReach = sd.every(r => r.reach > 0)
+        && sd.every((r, i) => i === 0 || r.reach > sd[i - 1].reach);
+      // and it must still be the multiplier it claims to be: range == supplyDays × the slowest pace
+      o.supplyDaysMovesDays = Math.abs(sd[3].reach / sd[1].reach - 45 / 7) < 0.01;
+
+      // ── F4a: waterless vs overloaded must be distinguishable at the source ──
+      const dry = jpAssessResupply(9999, 100, 10, 20, 12, 7, true, 400);
+      const load = jpAssessResupply(9999, 100, 10, 20, 1.0, 7, true, 0);
+      o.waterCauseNamed = dry.cause === 'water' && /No water for/.test(dry.verdict);
+      o.loadCausePlain = load.cause === 'load' && /over capacity/.test(load.verdict);
+      o.causesDiffer = dry.verdict !== load.verdict;
+
+      // ── F4b: the gap is measured from real hydrology, not a constant ──
+      const p4 = base();
+      const stages = _jpDeriveStages(jn, p4);
+      const dryKms = stages.filter(s => s.cat === 'land').map(s => +s.dryKm || 0);
+      o.dryKmMeasured = dryKms.length > 0 && dryKms.some(v => v > 0);
+      o.dryKmVaries = new Set(dryKms).size > 1;
+      const pl4 = _jpPlan(jn);
+      const gaps = pl4.results.filter(r => r.cat === 'land' && !r.blocked).map(r => r.waterGapDays);
+      o.gapNotConstant = gaps.some(v => Math.abs(v - 1.5) > 0.01);
+      // desert on 'auto' must derive its own gap rather than echo a dropdown tier
+      // Assert the MECHANISM, not that auto ≠ manual: on some routes the measured gap coincides
+      // with a tier's own gap by arithmetic accident (a 6.25 km dry run at ~1 km/day IS 6 days,
+      // which is exactly Sparse Wells). Auto must equal the measured dry run over the stage's own
+      // speed; manual must equal the chosen tier's constant, whatever the map says.
+      // The stage supplies its OWN dry run rather than inheriting whatever this route measured: by
+      // the time the suite reaches here the world has been mutated by ~430 assertions and its route
+      // may legitimately have freshwater throughout (dryKm 0), which would leave the mechanism
+      // untested rather than failing it. Fixed inputs make this assert the arithmetic, not the map.
+      const noAnim = { donkey: 0, mule: 0, camel: 0, horse: 0 };
+      const stD = Object.assign({}, stages[0], { terrain: 'Deep Sand', biome: 'Hot Desert', dryKm: 300 });
+      const stD2 = Object.assign({}, stD, { dryKm: 600 });
+      // base() returns _jpEnsurePlan(jn) — the SAME object every call — so two "variants" built from
+      // it are aliases and the second configuration silently wins for both. Clone before diverging.
+      const variant = (over) => Object.assign(JSON.parse(JSON.stringify(base())),
+        { transport: 'Walking', animals: noAnim, carts: 0 }, over);
+      const pA = variant({ desertWater: 'auto' });
+      const pM = variant({ desertWater: 'Sparse Wells' });
+      const rA = jpCalcLand(stD, pA), rM = jpCalcLand(stD, pM);
+      const rA2 = jpCalcLand(stD2, pA), rM2 = jpCalcLand(stD2, pM);
+      // auto == the measured run over the stage's OWN returned speed (an invariant of the return
+      // value on every path since v1.51 recomputes it once after the convergence loop)
+      const autoIsMeasured = !rA.blocked && rA.dryKm === 300
+        && Math.abs(rA.waterGapDays - Math.max(0.5, 300 / rA.dailyKm)) < 1e-6;
+      // manual == the chosen tier's constant, and INDEPENDENT of the map
+      const manualIsTheTier = !rM.blocked
+        && Math.abs(rM.waterGapDays - JP_DESERT_WATER['Sparse Wells'].gap) < 1e-6
+        && Math.abs(rM2.waterGapDays - rM.waterGapDays) < 1e-6;
+      o.desertAutoDerives = autoIsMeasured && manualIsTheTier
+        && rA2.waterGapDays > rA.waterGapDays;   // auto follows the map, manual does not
+
+      // ── F3: column length ──
+      const sizes = [30, 200, 2000, 100000].map(n => {
+        const p = base(); p.transport = 'Walking'; p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 };
+        p.carts = 0; p.groupSize = n; p.cargoKg = 900;
+        const st = Object.assign({}, _jpDeriveStages(jn, p)[0], { terrain: 'Dirt Track' });
+        const r = jpCalcLand(st, p);
+        return { n, kmday: r.dailyKm, colKm: r.colKm, colMod: r.colMod };
+      });
+      o.colGrows = sizes.every((s, i) => i === 0 || s.colKm > sizes[i - 1].colKm);
+      o.colFloored = Math.abs(sizes[sizes.length - 1].colMod - JP_COLUMN_FLOOR) < 1e-6;
+      o.hugeIsSlower = sizes[sizes.length - 1].kmday < sizes.find(s => s.n === 200).kmday;
+      o.caravanUnaffected = sizes.find(s => s.n === 30).colMod > 0.99;
+
+      // ── F5: seasonal closure ──
+      const closureCase = (season, biome, terrain, override) => {
+        const p = base(); p.season = season; p.transport = 'Walking';
+        p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 }; p.carts = 0;
+        if (override !== undefined) p.seasonalClosures = override;
+        const st = Object.assign({}, _jpDeriveStages(jn, p)[0], { terrain, biome });
+        return !!jpCalcLand(st, p).blocked;
+      };
+      o.winterPassClosed = closureCase('Winter', 'Mountain Highland', 'Mountain Pass');
+      o.summerOpen = !closureCase('Summer', 'Mountain Highland', 'Mountain Pass');
+      o.temperateOpen = !closureCase('Winter', 'Temperate Forest', 'Mountain Pass');
+      o.plainsOpen = !closureCase('Winter', 'Mountain Highland', 'Open Plains');
+      o.closureOverridable = !closureCase('Winter', 'Mountain Highland', 'Mountain Pass', false);
+
+      // ── owner request: an impossible stage must be highlighted where it can be EDITED ──
+      // Force a guaranteed block (wheels can never cross Deep Sand) and read the rendered markup.
+      {
+        const p = base(); p.season = 'Winter'; p.seasonalClosures = true;
+        p.carts = 4;                            // wheels: blocked on several terrains
+        p.cargoKg = 400000;                     // and a load nothing can carry
+        _jpRenderResults(jn);
+        const host = document.getElementById('reResults');
+        const h = host ? host.innerHTML : '';
+        o.troubleRendered = /need(s)? attention|Impossible as configured|Unsupportable|Overloaded/.test(h);
+        // the bad stage must be force-OPENED (not hidden behind a collapsed disclosure) and tinted
+        o.troubleOpened = /<details[^>]*open[^>]*>/.test(h);
+        o.troubleHasFix = /↳/.test(h);          // every trouble card states the control that fixes it
+        o.troubleTinted = /var\(--warn\)|#e0a840/.test(h);
+      }
+
+      // ── owner request: vessel information — what is actually fast, and where it may sail ──
+      {
+        // pure resolver agrees with the frozen tables and with the validator's own verdict
+        o.vesselDayKmComposes = Math.abs(jpVesselDayKm('Cog', 'sea', 'Open Sea')
+          - JP_SHIPS['Cog'].speed * jpWaterWindow('sea', 'Open Sea') * JP_TERRAIN.sea['Open Sea']) < 1e-9;
+        o.vesselDayKmRefuses = jpVesselDayKm('Fishing Vessel', 'sea', 'Open Sea') === null
+          && jpVesselDayKm('River Barge', 'river', 'River with Rapids') === null
+          && jpVesselDayKm('River Barge', 'sea', 'Open Sea') === null;
+        const vm = jpVesselMatrix();
+        o.vesselMatrixShape = vm.rows.length === Object.keys(JP_SHIPS).length
+          && vm.waters.length === Object.keys(JP_TERRAIN.river).length + Object.keys(JP_TERRAIN.sea).length
+          && vm.rows.every(r => r.cells.length === vm.waters.length);
+        // every vessel must be usable somewhere, and no vessel may be rated for water it is blocked from
+        o.vesselEveryHullSails = vm.rows.every(r => r.waters > 0);
+        o.vesselMatrixMatchesValidator = vm.rows.every(r => r.cells.every(c =>
+          (c.kmday == null) === (!r.ship.modes.includes(c.cat) || !!_jpVesselWaterBlock(r.ship, c.cat, c.terrain, r.name))));
+        // "fastest" is genuinely water-dependent — the point of showing the table at all
+        const bestOpen = vm.best['sea|Open Sea'].name, bestBay = vm.best['sea|Sheltered Bay'].name,
+          bestCalm = vm.best['river|Calm River'].name;
+        o.vesselBestVaries = new Set([bestOpen, bestBay, bestCalm].filter(Boolean)).size > 1;
+        // and it is not simply the highest cruise speed (the misconception the panel exists to correct)
+        const fastestCruise = Object.keys(JP_SHIPS).reduce((a, b) => JP_SHIPS[b].speed > JP_SHIPS[a].speed ? b : a);
+        o.vesselBestIsNotJustCruise = bestBay !== fastestCruise || bestCalm !== fastestCruise;
+        _jpRenderResults(jn);
+        const h2 = (document.getElementById('reResults') || {}).innerHTML || '';
+        o.vesselPanelRendered = /Vessel reference|what's fast/.test(h2);
+      }
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4438,6 +4632,26 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.50: a route with no bottleneck reports no switch, and Forest Path keeps its capacity-chosen mule', R.v150.noBottleneckNoSwitch && R.v150.forestKeepsMule);
   A('v1.50: the reason shown comes from the km-dominant stage, not whichever was scored last', R.v150.reasonFromDominantStage);
   A('v1.50: an empty land-stage list still returns the versatile default', R.v150.emptyRouteSafe);
+
+  A('v1.51: the resupply requirement is finally compared with the settlements actually on the route', R.v151.reachExists && R.v151.reachFieldsSane);
+  A('v1.51: a route whose settlement gap exceeds the carried range is flagged, with both numbers named', R.v151.unmetDetected && R.v151.unmetNamesBothNumbers);
+  A('v1.51: the false "resupplied from settlements in reach" verdict string is gone', R.v151.falseStringGone);
+  A('v1.51: supplyDays is a live control — it sets the carried range instead of being divided out', R.v151.supplyDaysMovesReach && R.v151.supplyDaysMovesDays);
+  A('v1.51: a waterless stretch and an overloaded pack give different causes and different messages', R.v151.waterCauseNamed && R.v151.loadCausePlain && R.v151.causesDiffer);
+  A('v1.51: the water gap is measured from real hydrology, not the old flat 1.5-day constant', R.v151.dryKmMeasured && R.v151.dryKmVaries && R.v151.gapNotConstant);
+  A('v1.51: column length grows with party size and damps the day, floored so a column never stops', R.v151.colGrows && R.v151.colFloored);
+  A('v1.51: a 100k column is slower than a mid-size party (v1.50 made it the fastest configuration)', R.v151.hugeIsSlower);
+  A('v1.51: caravan-scale parties are unaffected by the column term (colMod ~1.0)', R.v151.caravanUnaffected);
+  A('v1.51: a winter pass in a cold biome is CLOSED, not merely slow', R.v151.winterPassClosed);
+  A('v1.51: summer, a temperate biome, and non-pass terrain all stay open', R.v151.summerOpen && R.v151.temperateOpen && R.v151.plainsOpen);
+  A('v1.51: seasonal closures are overridable per plan', R.v151.closureOverridable);
+  A('v1.51: desert water on auto is derived from the map, not the dropdown default', R.v151.desertAutoDerives);
+  A('v1.51: an impossible/overloaded stage is highlighted in the planner, force-opened where it can be edited', R.v151.troubleRendered && R.v151.troubleOpened && R.v151.troubleTinted);
+  A('v1.51: every trouble card names the control that fixes it, not just the symptom', R.v151.troubleHasFix);
+  A('v1.51: jpVesselDayKm composes cruise × sailing window × realised fraction, and refuses unrated water', R.v151.vesselDayKmComposes && R.v151.vesselDayKmRefuses);
+  A('v1.51: the vessel matrix covers every hull × every water and agrees with the validator', R.v151.vesselMatrixShape && R.v151.vesselMatrixVsValidator !== false && R.v151.vesselMatrixMatchesValidator && R.v151.vesselEveryHullSails);
+  A('v1.51: the fastest vessel genuinely varies by water and is not just the highest cruise speed', R.v151.vesselBestVaries && R.v151.vesselBestIsNotJustCruise);
+  A('v1.51: the vessel reference renders in the Route Editor results', R.v151.vesselPanelRendered);
 
 
 

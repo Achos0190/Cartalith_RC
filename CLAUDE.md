@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.50**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.51**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.50.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.49.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.51.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.50.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,72 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Constraints that were stated but never measured (v1.51)
+
+Owner audit: "are max travel distances, travel-time calculations, dependencies and constraints
+properly factored in and adjustable?" Answered by measurement — a sensitivity sweep over every
+exposed control, plus a constraint census — not by reading. Hash vs v1.50 ALL IDENTICAL (civ-layer
+only). Read this before touching any `JP_*` constraint.
+
+- **The TIME model was already sound and is untouched.** Σ stage-days equals `plan.days` exactly;
+  15 of 17 controls provably move the answer. The defects were all in the CONSTRAINT layer.
+- **A requirement that is never compared against the thing it describes is a caption, not a
+  constraint.** `jpAssessResupply` demanded a stop every 27 km on a 908 km route whose 4 settlements
+  averaged 303 km apart, and nothing checked. Worse, the verdict said *"cannot be resupplied from
+  settlements in reach"* while reading `resupply.feasible`, which is set **solely** by
+  `totalMass > capacity` — it named settlements while measuring an overloaded pack. **Seventh
+  occurrence of this shape** (v1.30/v1.33/v1.35/v1.38/v1.48/v1.50). `_jpResupplyReach` now walks the
+  route's arc length and compares the worst settlement gap against `supplyDays × km/day`; the data
+  had been in `plan.stops` since v1.44. It measures the FOOD range only — water is no longer a
+  settlement question, and merging them would re-blur exactly what was wrong.
+- **`supplyDays` was inert.** 2/7/20/45 all returned 16.17 d. The convergence loop divides the
+  supplyDays-derived load back out (`next = baseDaily/lMod*pen`) and recomputed from a hardcoded
+  `settlementDays = 7`. **When a control has a warning attached to it, check that it moves the
+  number the warning is about.** Now the food interval IS `supplyDays`.
+- **Water bound the range, and it was a constant.** Hardcoded 1.5 d for every non-desert stage while
+  the world carries rivers, lakes and flow. `_jpStageDryKm` measures the longest waterless run;
+  `jpCalcLand` converts it to days **at the stage's own speed inside the convergence loop**, so load
+  correctly lengthens the gap. Reach radius floored at 1.5 cells (v1.35: sub-cell thresholds are
+  unsatisfiable, not strict). Sea is not freshwater. `desertWater` defaults to `auto`.
+- **"Over capacity" is a symptom, not a cause.** It means either too much cargo or a waterless
+  stretch no party can carry water for — only the second is fixed by rerouting, so
+  `jpAssessResupply` returns a `cause` and two different messages.
+- **A term that only ever helps will run away.** Every extra person added `JP_HUMAN_PORTER`
+  capacity and erased load penalty while `coordMod` floored at 0.76, so **100,000 people on a dirt
+  track was the fastest configuration in the model** (18.07 km/day, same as 200 people, vs 10.70 for
+  one). `jpColumnLengthKm`/`jpColumnFactor` add road capacity as a **damping term on the finished
+  daily distance, never another speed multiplier** — passage time is subtracted from the day, it
+  does not slow the pace, and Haste does not exempt it. 100k → 40 km column → floored → 6.33 km/day.
+  Caravan scale is deliberately unaffected (30 people ⇒ 0.999); a 200-person party still beats a
+  lone traveller carrying the same cargo, which is the carrying-capacity term working correctly.
+- **Some constraints are binary and modelling them as "slow" is wrong.** A winter pass in a cold
+  biome is closed (`jpSeasonalClosure`), gated on BOTH terrain and biome so a low temperate pass is
+  unaffected, and overridable via `plan.seasonalClosures`.
+- **A problem must be reported where it can be FIXED** (owner follow-up). A blocked stage used to be
+  one line in the roll-up, nowhere near the controls that resolve it. `_stageTrouble(r)` classifies
+  each stage (blocked / unsupportable / overloaded) and the per-stage override cards sort problems to
+  the top, force-open, tint, print the engine's own reason, and **name the control that fixes it**.
+  The fix line must not restate the reason — point at the control instead.
+- **Cruise speed is the wrong number for a boat** (owner follow-up). What matters is cruise × the
+  water's own sailing window × the fraction of cruise that water realises. `jpVesselDayKm` composes
+  it and returns null exactly when `_jpVesselWaterBlock` refuses — one source of truth with the
+  validator. Measured: Longship is fastest on every river (132 km/day on Calm River), Caravel at sea
+  (157 on Open Sea); a Keelboat is river+sea but not open-sea rated; the fastest hull is **not** the
+  highest cruise speed, which is the misconception the panel exists to correct.
+- **Two bugs found only by verification, both introduced in this same version**: the auto desert tier
+  was resolved AFTER `rawDaily`, so its speed penalty was dropped while its water reserve applied
+  (the two halves of one setting disagreeing — this version's own defect class); and `waterGapDays`
+  was recomputed at the TOP of the convergence loop, so a non-converging run returned a gap the
+  displayed km/day could not reproduce. Both fixed; `waterGapDays === waterDaysAt(dailyKm)` is now an
+  invariant of the return value.
+- **Test trap worth remembering**: `_jpEnsurePlan(jn)` returns the SAME object every call, so two
+  "plan variants" built from it are aliases and the second configuration silently wins for both.
+  Clone before diverging — this cost three smoke re-runs.
+- **Known scope cuts**: no rest-day/calendar tier split, uniform `plan.season` for a whole journey,
+  no sea-closure (*Mare Clausum*/monsoon) analogue, no cost model — all pre-existing. New: per-terrain
+  file counts are a fixed table, not a road-width field, and `JP_COLUMN_FLOOR = 0.35` is reasoned,
+  not historically calibrated.
+
 ### Auto-selection audit + the bottleneck veto (v1.50)
 
 Owner asked whether auto-selection/promotion actually fit each biome/terrain/weight. Audited in-page
@@ -1453,7 +1519,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (427 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (446 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

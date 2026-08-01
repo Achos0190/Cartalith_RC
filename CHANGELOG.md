@@ -12,6 +12,134 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.51 — Constraints that were stated but never measured
+
+Owner asked whether max travel distances, travel-time calculations, dependencies and constraints
+are all properly factored in and adjustable. Audited by measurement — a sensitivity sweep over
+every exposed control plus a constraint census — rather than by reading. Hash vs v1.50
+**ALL IDENTICAL** (civ-layer only, blocks 1/3/4 untouched). 1001 / 852 / **446** green.
+
+**What the audit cleared.** The TIME model is sound: Σ stage-days equals `plan.days` exactly
+(53.8229 = 53.8229), and 15 of 17 exposed controls provably move the answer — pace 30.2–89.7 d,
+weather 49.6–124.1 d, infrastructure 33.2–76.4 d, road quality 38.8–81.9 d, hours/day 39.1–105.3 d,
+species camel 45.7 – horse 69.7 d. The existing hard blocks (wheels, mounts, vessel ratings, hold
+overload) all fire correctly. What was NOT sound was the constraint layer: three of its inputs were
+constants standing in for data the world already carries, and one control was inert.
+
+- **THE finding — the resupply requirement was never compared with the map.** `jpAssessResupply`
+  states "N resupply stops, every ~X km" from what the party can carry, and nothing checked it
+  against the settlements the route passes. Measured on seed 12345: a **908 km route demanded a
+  stop every 27 km while its 4 settlements averaged 303 km apart** — reported as a clean plan.
+  Worse, `_jpVerdict`'s only line on the subject read *"N stage(s) cannot be resupplied from
+  settlements in reach"* while being driven by `resupply.feasible`, set **solely** by
+  `totalMass > capacity` — it named settlements while measuring an overloaded pack. New
+  `_jpResupplyReach` walks the route's arc length, places every stop on it (endpoints included, a
+  party leaves provisioned and arrives), and compares the worst gap against `supplyDays × the
+  slowest land stage's km/day`. Now reports **longest gap 545 km vs 29 km carried, 18.9× short**.
+  Seventh occurrence of this file's recurring shape: a threshold never compared against the thing
+  it describes. The data had been sitting in `plan.stops` since v1.44.
+  - Deliberately the FOOD/restock range only. Water stopped being a settlement question in this
+    same version (below), and folding the two together would re-blur exactly what was wrong.
+
+- **`supplyDays` was a dead control.** 2 / 7 / 20 / 45 days all returned 16.17 d, identical to
+  three decimals. The convergence loop computes `next = baseDaily/lMod*pen`, dividing the
+  `supplyDays`-derived load back out and recomputing from a hardcoded `settlementDays = 7`. So the
+  field labelled "Supplies carried (days)" — with v1.49's wagon-equation warning attached to it —
+  could not change the answer. The food interval is now `supplyDays` itself, so the label is true:
+  what you carry is how far you can go between stops. (7 d and 20 d still coincide on some routes
+  because `jpLoadPenalty` is a 5-step function, not a continuum — verified as real saturation, not
+  a residual bug; the derived range still moves, 29 → 82 km.)
+
+- **Water was a constant while the world carries full hydrology.** `waterGapDays` was hardcoded
+  1.5 for every non-desert land stage, and the desert gap came from a manual dropdown that
+  `_jpDeriveStages` never auto-derived. Engels' reconstruction of Alexander's logistics makes water,
+  not food, the binding term on a pre-industrial column's range, so a constant here disabled the
+  single most important constraint in the model. New `_jpStageDryKm` measures the longest run of
+  route with no river or lake within a real watering detour (floored at 1.5 cells — v1.35's lesson:
+  a threshold below one cell width is unsatisfiable, not strict; sea is not freshwater), and
+  `jpCalcLand` converts it to days **at the stage's own speed, inside the existing convergence
+  loop**, so a heavily-laden party correctly faces a longer gap in days than a fast one over
+  identical ground. Measured 0–61 km dry runs → 0.5–4.9 d gaps across one route's stages.
+  `desertWater` gains an `auto` default that picks its tier from that measurement.
+  - `jpAssessResupply` now names the CAUSE. "Over capacity" is the symptom of two different
+    problems — too much cargo, or a waterless stretch no party size can carry water for — and only
+    the second is fixed by a route change, so they must be distinguishable.
+
+- **Party size had no road-capacity term, and bigger parties were monotonically faster.** Measured
+  on v1.50 at fixed cargo: 1 person 10.70 km/day, 200 people 18.07, and **100,000 people on a single
+  dirt track also 18.07 — the fastest configuration in the model**, because porter capacity grows
+  linearly with headcount and erases the load penalty while `coordMod` floors at 0.76. The missing
+  physics is that a column can be no wider than the narrowest ground ahead of it and its tail cannot
+  start until its head has cleared. New `jpColumnLengthKm` (people in ranks `files` abreast by
+  terrain, animals and vehicles near single file) + `jpColumnFactor`, a **damping term on the
+  finished daily distance, not another speed multiplier** — passage time is subtracted from the day,
+  it does not slow the marching pace. Haste does not exempt it: a forced march does not widen a
+  defile. Now 100k → 40 km of column → floored at 0.35 → **6.33 km/day**, against the Roman-army
+  figure that a ~30-mile column cannot manage more than 6–8 miles a day. Caravan scale is untouched
+  (30 people ⇒ colMod 0.999).
+  - Note what was deliberately NOT changed: a 200-person party still beats a lone traveller carrying
+    the same 900 kg. That is the carrying-capacity term and it is correct — the cargo genuinely needs
+    carriers. The column term bounds the top end, it does not invert the middle.
+
+- **A high pass in winter is now closed, not slow.** v1.50 modelled it as a 33% slowdown (2.78 vs
+  4.14 km/day) and let the party through; `travel-speeds.md` §8 writes the mountain-pass
+  expedition-average as "effectively 0 in closed season", and the Great St Bernard is shut from
+  roughly late September to early June under up to 10 m of snow. `jpSeasonalClosure` blocks
+  Mountain Pass / Mountain Trails in Mountain Highland / Tundra / Boreal Taiga in Winter — gated on
+  BOTH terrain and a genuinely cold biome, so a low temperate pass is unaffected — and is
+  overridable via a new `plan.seasonalClosures`, because a worldbuilder is entitled to a world whose
+  passes stay open.
+
+**Surfaced, not just computed.** Three new Results rows — Supply reach (longest settlement gap vs
+carried range), Water (longest dry run and the gap in days), Column (road occupied and the share of
+each day lost) — each carrying the measurement a user can check against the map rather than take on
+trust, plus the column and water lines in the calculation trace.
+
+**Owner follow-up, same version — a broken stage is shown where it can be FIXED.** Owner: *"when a
+stage is impossible because it's overloaded or any other reason highlight the stage in the planner
+view so a user can edit it."* A blocked stage previously produced one line in the roll-up, nowhere
+near the controls that resolve it. `_stageTrouble(r)` classifies each stage as blocked /
+unsupportable / overloaded from signals the plan already carries, and the per-stage override cards
+now: sort problem stages to the top, force-open both the section and the bad card, tint them, print
+the engine's own reason, and — the part that matters — **name the specific control that fixes it**
+("Set Carts and Wagons to 0", "Override this stage's vessel below", "Change Season or turn off
+seasonal closures"). The summary carries a "⛔ N need attention" badge so it is visible while
+collapsed.
+
+**Owner follow-up — vessel information.** Owner: *"for the boats/sea/river I'd like more information
+on what is actually fast and sails where."* Cruise speed alone is actively misleading and the tables
+say so: the number that matters is cruise × the water's own sailing window (v1.43's
+`JP_WATER_WINDOW`) × the fraction of cruise that water realises, and nothing in the UI ever showed
+it. New pure `jpVesselDayKm(ship,cat,terrain)` (returns null exactly when `_jpVesselWaterBlock`
+refuses — one source of truth with the validator, the v1.23 rule) and `jpVesselMatrix()`. Two
+panels: **"Vessels on this route"** ranks every hull on the route's own water legs with km/day, days
+and hold, and prints the blocking reason for the ones that cannot make it; **"Vessel reference"** is
+the full hull × water-type grid with the fastest hull per water highlighted. The fastest vessel is
+genuinely not the same everywhere and is not the highest cruise speed — asserted, since that is the
+misconception the panel exists to correct.
+
+**Two bugs found by verification, not by reading** (both mine, introduced earlier in this same
+version):
+- The auto desert tier was resolved **after** `rawDaily`, so its speed penalty was silently dropped
+  while its water reserve was applied — the two halves of one setting disagreeing, which is the exact
+  defect class this version exists to fix. The circle (gap needs speed, speed needs the tier) is now
+  broken with one pre-pass at the un-modified speed; one pass suffices because the tier is a 4-step
+  ladder, not a continuum.
+- `waterGapDays` was recomputed at the *top* of the convergence loop, so a run that exhausted its 12
+  iterations returned a gap derived from the second-to-last speed — a number the displayed km/day
+  could not reproduce. Recomputed once after the loop, making
+  `waterGapDays === waterDaysAt(dailyKm)` an invariant of the return value on every path.
+- A third was in the test rather than the code, and is worth recording because it cost three
+  re-runs: `_jpEnsurePlan(jn)` returns the **same object** every call, so two "plan variants" built
+  from it are aliases and the second configuration silently wins for both. Clone before diverging.
+
+**Known scope cuts** (unchanged from v1.43/v1.49, still open): no rest-day / travel-day-vs-calendar
+tier split; `plan.season` is uniform for a whole journey, so a 242-day trip is computed in one
+season; no *Mare Clausum* / monsoon sea-closure analogue (the biome vocabulary has no
+"Mediterranean sea" to gate on); no cost/price/toll model. New to this version: the column model
+uses fixed per-terrain file counts rather than a real road-width field, and `JP_COLUMN_FLOOR = 0.35`
+is a reasoned bound, not a historically calibrated constant.
+
 ### v1.50 — Auto-selection audit + the bottleneck veto
 
 Owner asked whether auto-selection and promotion actually fit each biome/terrain/weight. Audited

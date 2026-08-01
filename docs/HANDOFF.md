@@ -9,11 +9,53 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.50.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.51.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.51 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.49` are kept and never edited.
+  (v1.52 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.50` are kept and never edited.
+- **v1.51 — constraints that were stated but never measured.** Owner asked whether max travel
+  distances, travel-time calculations, dependencies and constraints are all properly factored in
+  and adjustable. Audited by MEASUREMENT (a sensitivity sweep over every control + a constraint
+  census), not by reading. Hash vs v1.50 ALL IDENTICAL. 1001 / 852 / **446** green.
+  - **The time model was already sound** — Σ stage-days == `plan.days` exactly, 15 of 17 controls
+    provably move the answer. Every defect was in the CONSTRAINT layer, where three inputs were
+    constants standing in for data the world already carries.
+  - **Headline**: the resupply requirement was never compared with the map. A 908 km route demanded
+    a stop every 27 km while its 4 settlements averaged **303 km** apart — reported as a clean plan.
+    And the verdict line *"cannot be resupplied from settlements in reach"* was driven by
+    `totalMass > capacity` — it named settlements while measuring an overloaded pack. New
+    `_jpResupplyReach` now reports "longest gap 545 km vs 29 km carried, 18.9× short". **Seventh
+    occurrence** of a threshold never compared against the thing it describes.
+  - **`supplyDays` was inert** (2/7/20/45 → identical days): the convergence loop divided its own
+    load back out and used a hardcoded 7. Now the food interval IS `supplyDays`.
+  - **Water was hardcoded at 1.5 days** while the world has rivers and lakes. `_jpStageDryKm`
+    measures the longest waterless run; the gap is derived at the stage's own speed inside the
+    convergence loop, so load lengthens it. `desertWater` defaults to `auto`.
+  - **Party size had no road-capacity term** and bigger was monotonically faster — 100,000 people on
+    a dirt track was the model's *fastest* configuration. `jpColumnFactor` damps the finished daily
+    distance by the column's own passage time (never a speed multiplier; Haste doesn't exempt it):
+    100k → 6.33 km/day. Caravan scale unaffected.
+  - **Winter mountain passes now close** (`jpSeasonalClosure`, gated on terrain AND a cold biome,
+    overridable via `plan.seasonalClosures`).
+  - **Owner follow-ups, same version**: (a) a blocked/overloaded stage is now highlighted **where it
+    can be edited** — `_stageTrouble` sorts problem stages to the top of the per-stage overrides,
+    force-opens and tints them, and names the control that fixes it (not just the symptom);
+    (b) **vessel information** — new pure `jpVesselDayKm`/`jpVesselMatrix` plus two panels ("Vessels
+    on this route" ranked with blocking reasons, and the full hull × water-type reference). Cruise
+    speed is the wrong number: Longship is fastest on every river (132 km/day), Caravel at sea (157),
+    and the fastest hull is never simply the highest cruise speed.
+  - Reusable lessons: **when a control has a warning attached to it, check that it moves the number
+    the warning is about**; **a term that only ever helps will run away** (porter capacity);
+    **"over capacity" is a symptom, not a cause** — name which constraint bound; **report a problem
+    where it can be fixed**, and have the fix line name a control rather than restate the reason.
+  - Two self-inflicted bugs caught only by verification (auto desert tier resolved after the speed it
+    modifies; `waterGapDays` read from the wrong loop iteration) and one test trap:
+    **`_jpEnsurePlan(jn)` returns the SAME object every call** — clone before building variants.
+  - **Still open**: no rest-day/calendar tier split; `plan.season` uniform for a whole journey; no
+    sea-closure (*Mare Clausum*/monsoon) analogue; no cost/toll model. New cuts: per-terrain file
+    counts are a fixed table, not a road-width field; `JP_COLUMN_FLOOR = 0.35` is reasoned, not
+    historically calibrated.
 - **v1.50 — auto-selection audit + the bottleneck veto.** Owner asked whether auto-selection and
   promotion fit each biome/terrain/weight. Hash vs v1.49 ALL IDENTICAL. 1001 / 852 / **427** green.
   - **Audit cleared**: no dead table keys anywhere, full animal coverage, all 5 promotion paths
