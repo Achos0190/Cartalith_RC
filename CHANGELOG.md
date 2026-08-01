@@ -12,6 +12,91 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.52 — The Cartography season slider, the last four travel-planner cuts, and V1.915 snapping
+
+Three owner requests: (1) "the climate slider currently does nothing to change the map", (2) the
+four scope cuts v1.43/v1.49/v1.51 each deferred (rest days, season drift, sea closure, a cost
+model), (3) "check travel times again vs. realistic sources" and "reintroduce snapping to
+settlements/POI logic as in Cartalith V1.915". Hash vs v1.51 **ALL IDENTICAL**
+(civ-layer only). 1001 / 852 / **464** green.
+
+**The season slider was never broken — it was inert, and its prerequisite lived on a different
+tab.** Measured before fixing: at shipped defaults, dragging "Season (render)" from −100 to +100
+produced **one distinct render across all five positions**. `_seasonK` (the value the renderer
+actually reads) is gated on `state.mode==='biome' && state.climate.seasons` — the second flag is
+the "Seasons & Köppen climate" checkbox, which lives on Generate → **World**, defaults off, and is
+mentioned only in a dense hint paragraph the slider's own row never referenced. Fixed by making the
+slider self-enabling: dragging it to a non-zero value turns `state.climate.seasons` on (never off,
+so it can't undo a choice), runs the one-off `refreshClimate()` seasonal-field computation, and
+syncs the World-tab checkbox so the two surfaces can't disagree — the same two-places-one-answer
+shape this file keeps having to close. A new status line (`_seasonSliderNote`) states in words
+whether the current drag is live or, if the map view isn't Biome, genuinely inert and why — a
+control that can fail silently is worse than one that says so. Verified via the real `input` event
+(not `change` — `bind()` only listens for the former, which is what actually broke the first
+attempt at this smoke test): 5/5 distinct renders post-fix.
+
+**The four cuts.** All built from data the plan/world already carries, none of them touching the
+speed composition v1.43 calibrated — `probe_travel.js` re-run clean: all 20 reference cases still
+land inside their §8 bands, the §9 sample journey still reproduces at 242 vs 244 days.
+- **Rest days**: the travel-day/calendar-day split (§10, §5's Andean caravan ethnoarchaeology — one
+  rest day per three to five travel days on routes over ~6 days). `jpRestDays` returns the count
+  and its own basis string; `plan.days` (Travel time) and `plan.restDays` are now reported
+  separately and summed into `plan.totalDays` alongside layovers — never blurred into one number,
+  since that blur was what made v1.43's own calibration hard to check in the first place.
+- **Season drift**: `plan.season` was one value for the whole trip, so a year-long expedition was
+  computed entirely in its departure season. `jpSeasonAt` walks the calendar in 91-day steps; each
+  stage is assigned the season at its own **midpoint**, not its start — a first cut used start-day
+  and a 17-day final stage beginning on day 90.8 kept the whole of Spring, so a 108-day journey
+  never crossed into Summer at all. One pre-pass at uniform-season durations breaks the circle
+  (season depends on elapsed days, elapsed days depend on speed, speed depends on season).
+- **Sea closure**: the *Mare Clausum*/monsoon analogue v1.51 explicitly left open because the biome
+  vocabulary has no "Mediterranean sea" to gate on. The gate that already exists is the water TYPE:
+  `jpSeaClosure` shuts Open Sea/Rough Open Sea in Winter (unless `plan.seasonalClosures===false`,
+  shared with v1.51's pass-closure control) while Sheltered Bay/Coastal Waters stay open — the same
+  distinction the historical record draws between year-round cabotage and a shut open-water season.
+- **Cost**: the planner never reported whether a trip was worth making. `jpJourneyCost` prices
+  carriage/wages/crew/animal-and-vehicle upkeep/tolls/transshipment in **day-wages** (one day of
+  unskilled labour) rather than an invented currency — the ratios between land/river/sea carriage
+  (`JP_COST_PER_TKM`, 0.055/0.011/0.002) follow Diocletian's Price Edict, already this file's source
+  for food-logistics ratios (v1.33); the absolute price level is left to the world's own owner. A
+  cargo trip reports a break-even day-wages/tonne; a party-only trip still prices at a real total
+  with `breakEvenPerTonne:null` rather than a fabricated number.
+- **Two bugs found only by verification**, both introduced earlier in this same pass: the
+  desert-tier auto path resolved before `waterDaysAt` existed to be called (a plain ordering bug,
+  caught immediately by syntax); and a smoke test's `mk()` helper called `_jpEnsurePlan(jn)` —
+  which returns the SAME object every time — so two cargo "variants" built from it were aliases and
+  the second silently overwrote the first. v1.51's own HANDOFF entry names this exact trap; it cost
+  a second re-run here for not re-reading it closely enough the first time.
+
+**Found only by taking the verification screenshot**: `const VERSION='1.50'` (block 1, ~line 1978)
+had drifted stale AGAIN — two versions after v1.30's own comment on that line warned about exactly
+this ("was still reading 1.24 six versions later"). It is display/export metadata only, never
+gated on anything hashed or tested, which is exactly why nothing in the suite ever catches it — the
+header chip (`#verTag`) reads FROM this constant at load, silently overwriting the HTML span's own
+correct hardcoded text, so the v1.51/v1.52 screenshots below were showing "v1.50" until this was
+fixed. New smoke assertion derives the expected value from the target filename rather than a
+hardcoded literal, so it stays a real check on every future version instead of becoming the next
+thing that drifts unnoticed.
+
+**V1.915 snapping, reintroduced.** Gen1's manual `draw_way`/`route` tools (`_civWayWaypoints`/
+`_civWaypoints`) pushed the raw grid cell under the cursor with no attraction to anything — a
+regression against V1.915's own Route Editor, which snapped a click within radius onto a place pin
+or another way. New `_civFindSnapTarget`/`_civSnapPoint` (grid-space, zoom-compensated via v1.23's
+own `_civZoomPickR` rather than V1.915's screen-pixel math, since Gen1's tools already work in grid
+cells): checks every place (settlement or POI — either plausibly anchors a road) and the nearest
+point on every existing way's polyline (civWays' flat `pts` arrays, not V1.915's node-object ways),
+nearest-wins with no place-vs-way preference — the same semantics V1.915's own `findWaySnap` uses.
+Opt-out via one `state.viz.snapWays` flag surfaced as two checkboxes (Way tool lives in
+Generate→Civilization, Route tool in Explore — kept in sync on change, the fifth or sixth instance
+of this file needing two UI surfaces to agree on one flag) rather than opt-in: a drawn way SHOULD
+terminate on the settlement it serves by default, matching what v1.02's post-hoc endpoint-snap
+already assumes for auto-generated roads. A live hover ring (`_civSnapHover`, redrawn only when the
+target cell changes) previews where the next click will land, mirroring V1.915's `--pin-snap`
+highlight. Verified against a real settlement-terminated road (isolated per-case, since a road
+genuinely ending at a settlement can legitimately sit closer than the pin itself — that's "nearest
+wins" working correctly, not a bug to route around) and via a real `draw_way` click through
+`_civSetTool`.
+
 ### v1.51 — Constraints that were stated but never measured
 
 Owner asked whether max travel distances, travel-time calculations, dependencies and constraints

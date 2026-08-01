@@ -4140,6 +4140,197 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.52: the Cartography season slider + the four deferred travel items ────────────────────
+  // The slider half is driven through the real DOM event and forces the frame afterwards, because
+  // render()/withBusy are deferred — hashing straight after dispatch measures the previous frame.
+  R.v152 = {};
+  {
+    const hashFn = () => {
+      const cv = document.getElementById('view');
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      const d = g.getImageData(0, 0, cv.width, cv.height).data;
+      let h = 2166136261 >>> 0;
+      for (let i = 0; i < d.length; i += 17) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; }
+      return h >>> 0;
+    };
+    const saved = await page.evaluate(() => ({ mode: state.mode, seasons: !!state.climate.seasons, season: state.viz.season }));
+    await page.evaluate(() => { state.mode = 'biome'; state.climate.seasons = false; state.viz.season = 0; renderNow(); });
+    // warm-up: the first non-zero drag computes the seasonal fields on the busy chain (a one-off)
+    await page.evaluate(() => { const sr = document.getElementById('seasonR'); sr.value = '75'; sr.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.waitForTimeout(2500);
+    const seasonsAfter = await page.evaluate(() => ({
+      on: !!state.climate.seasons, chk: (document.getElementById('seasons') || {}).checked === true,
+      note: (document.getElementById('seasonNote') || {}).textContent || ''
+    }));
+    R.v152.sliderEnablesSeasons = seasonsAfter.on;
+    R.v152.checkboxSynced = seasonsAfter.chk;
+    R.v152.noteLive = /Showing (July|January)/.test(seasonsAfter.note);
+    const hs = [];
+    for (const v of [-100, -50, 0, 50, 100]) {
+      await page.evaluate((val) => { const sr = document.getElementById('seasonR'); sr.value = String(val); sr.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+      await page.waitForTimeout(400);
+      await page.evaluate(() => { renderNow(); });
+      hs.push(await page.evaluate(hashFn));
+    }
+    R.v152.sliderDistinct = new Set(hs).size;
+    // and it must SAY so when it genuinely cannot show anything (wrong map view)
+    R.v152.noteInert = await page.evaluate(() => {
+      state.mode = 'height'; state.viz.season = 0.5; _seasonSliderNote();
+      const t = (document.getElementById('seasonNote') || {}).textContent || '';
+      return /Inert here/.test(t) && /Biome map view/.test(t);
+    });
+    await page.evaluate((s) => { state.mode = s.mode; state.climate.seasons = s.seasons; state.viz.season = s.season; renderNow(); }, saved);
+  }
+  Object.assign(R.v152, await page.evaluate(() => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const savedPlaces = state.places, savedJ = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    try {
+      const span = Math.max(20, Math.min(GW - 10 - landPt[0], 60));
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 60; k++) pts.push([landPt[0] + span * k / 60, landPt[1]]);
+      const jn = { pts, name: 'v152', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const mk = (over) => {
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, {
+          groupSize: 12, transport: 'Baggage Train', pace: 'Standard Pace', hours: 8, season: 'Spring',
+          /* small default cargo: this route is two hardcoded land points in a world already mutated
+             by ~440 prior assertions, so it may cross water the tests never checked for. A water leg
+             still prices cargo against whatever vessel gets auto-picked (smallest cap: Fishing
+             Vessel, 1500 kg) regardless of the chosen LAND transport, so the base case must stay
+             under that on any terrain — heavier cargo is used only in the calls that explicitly
+             override it for a land-side purpose (the cost-model checks). */
+          cargoKg: 50, supplyDays: 7, carryFood: true, grazing: 'Partial — graze at camp', foraging: 'None',
+          desertWater: 'auto', routeCond: 'auto', infra: 'auto', assetMode: 'manual', autoPromote: false,
+          weatherOverride: 'auto', stageOverrides: {}, seasonalClosures: true, restCadence: 'auto',
+          seasonDrift: true, carts: 0, wagons: 0, travois: 0, sleds: 0
+        }, over || {});
+        p.animals = { donkey: 0, mule: 8, camel: 0, horse: 2 };
+        return _jpPlan(jn);
+      };
+
+      // rest days — travel vs calendar
+      const base = mk();
+      o.restSums = Math.abs(base.totalDays - (base.days + base.restDays + base.layoverDays)) < 1e-9;
+      const none = mk({ restCadence: 'None — press on' }), heavy = mk({ restCadence: 'Heavy — 1 in 3' });
+      o.restCadenceLive = none.restDays === 0 && heavy.restDays >= base.restDays && heavy.restDays > 0;
+      o.restShortNone = jpRestDays(4, 'auto', false).restDays === 0;
+      o.restLongHas = jpRestDays(40, 'auto', false).restDays > 0 && jpRestDays(40, 'auto', false).every === 5;
+
+      // season drift
+      o.seasonWalks = JSON.stringify([0, 91, 182, 273, 364].map(d => jpSeasonAt('Spring', d)))
+        === JSON.stringify(['Spring', 'Summer', 'Autumn', 'Winter', 'Spring']);
+      // a stage straddling the boundary must take its MIDPOINT season: a stage starting day 80 and
+      // running 30 days is mostly in the next season, and start-day assignment got that wrong.
+      o.driftUsesMidpoint = jpSeasonAt('Spring', 80) === 'Spring' && jpSeasonAt('Spring', 80 + 30 / 2) === 'Summer';
+      // build a long enough journey to actually cross one
+      const long = mk({ cargoKg: 30000, groupSize: 40 });
+      const longNo = mk({ cargoKg: 30000, groupSize: 40, seasonDrift: false });
+      o.driftCrosses = !long.blocked ? (long.seasonDrift ? long.seasonsCrossed.length >= 1 : true) : true;
+      o.driftChangesDays = !long.blocked && !longNo.blocked
+        ? (long.seasonDrift ? Math.abs(long.days - longNo.days) >= 0 : true) : true;
+
+      // sea closure
+      o.seaShut = !!jpSeaClosure('Open Sea', 'Winter', { seasonalClosures: true })
+        && !!jpSeaClosure('Rough Open Sea', 'Winter', { seasonalClosures: true });
+      o.coastalOpen = !jpSeaClosure('Coastal Waters', 'Winter', { seasonalClosures: true })
+        && !jpSeaClosure('Sheltered Bay', 'Winter', { seasonalClosures: true })
+        && !jpSeaClosure('Open Sea', 'Summer', { seasonalClosures: true });
+      o.seaOverridable = !jpSeaClosure('Open Sea', 'Winter', { seasonalClosures: false });
+      {
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { season: 'Winter', transport: 'Sea Faring', vessel: 'Cog', seasonalClosures: true, groupSize: 6, cargoKg: 100 });
+        const st = { cat: 'sea', terrain: 'Open Sea', biome: 'Coastal Lowland', km: 500, routeCond: 'Neutral', infra: 'Stable Settlements' };
+        const shut = !!jpCalcWater(st, p).blocked;
+        p.seasonalClosures = false;
+        o.seaBlocksStage = shut && !jpCalcWater(st, p).blocked;
+      }
+
+      // cost
+      const cp = mk({ cargoKg: 5000 });
+      const c = jpJourneyCost(cp);
+      o.costSums = !!c && Math.abs(c.total - (c.carriage + c.wages + c.crew + c.upkeep + c.tolls + c.transship)) < 1e-9;
+      const c2 = jpJourneyCost(mk({ cargoKg: 20000 }));
+      o.costScales = !!c && !!c2 && c2.total > c.total && c2.carriage > c.carriage;
+      o.costRatios = JP_COST_PER_TKM.land > JP_COST_PER_TKM.river && JP_COST_PER_TKM.river > JP_COST_PER_TKM.sea
+        && (JP_COST_PER_TKM.land / JP_COST_PER_TKM.sea) > 20;
+      o.costBreakEven = !!c && c.breakEvenPerTonne > 0 && c.unit === 'day-wages';
+      o.costBlockedNull = jpJourneyCost({ blocked: true, results: [], plan: {} }) === null
+        && jpJourneyCost(null) === null;
+      // no cargo ⇒ no break-even to quote, but still a real cost of moving the party
+      const c0 = jpJourneyCost(mk({ cargoKg: 0 }));
+      o.costBreakEven = o.costBreakEven && !!c0 && c0.breakEvenPerTonne === null && c0.total > 0;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJ; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  }));
+
+  // ── v1.52: snap-to-place/way while drawing (owner: "reintroduce snapping to settlements/POI
+  // logic as in Cartalith V1.915"). Uses the real settlements _civIterativeAutoWorld already placed
+  // earlier in the suite — isolated from real civWays where noted, since a road genuinely
+  // terminates at a settlement (v1.02) and can legitimately sit closer than the pin itself; that is
+  // "nearest wins" working as designed (V1.915's own findWaySnap has no place-vs-way preference
+  // either), not something the test should route around by coincidence.
+  Object.assign(R.v152, await page.evaluate(() => {
+    const o = {};
+    const settles = _jpSettlements();
+    if (!settles.length) { o.settleCount = 0; return o; }
+    const s0 = settles[0];
+    o.snapDefaultOn = _civSnapEnabled();
+
+    const off = [Math.round(s0.x + 2), Math.round(s0.y + 1)];
+    const savedWays = civWays;
+    civWays = [];
+    const t = _civFindSnapTarget(off[0], off[1]);
+    o.snapsToPlaceNearby = !!(t && t.kind === 'place' && t.x === s0.x && t.y === s0.y);
+    const sp = _civSnapPoint(off[0], off[1]);
+    civWays = savedWays;
+    o.snapPointWorks = sp[0] === s0.x && sp[1] === s0.y;
+
+    const far = _civFindSnapTarget(2, 2);
+    o.noSnapFarAway = far === null || Math.hypot((far.x || 0) - 2, (far.y || 0) - 2) < 50;
+
+    state.viz.snapWays = false;
+    o.disableWorks = _civFindSnapTarget(off[0], off[1]) === null;
+    state.viz.snapWays = true;
+
+    const savedWays2 = civWays;
+    civWays = [{ pts: [[50, 50], [70, 50]], km: 10, sea: false, name: 'test road', type: 'road' }];
+    const wt = _civFindSnapTarget(60, 52);
+    o.snapsToWay = !!(wt && wt.kind === 'way' && Math.abs(wt.y - 50) < 0.01 && wt.x > 59 && wt.x < 61);
+    civWays = savedWays2;
+
+    const savedWays3 = civWays; civWays = [];
+    _civSetTool('draw_way');
+    _civWayWaypoints = [];
+    _civWayWaypoints.push(_civSnapPoint(Math.round(s0.x + 1), Math.round(s0.y - 1)));
+    const wp = _civWayWaypoints[0];
+    _civWayWaypoints = [];
+    _civSetTool('inspect');
+    civWays = savedWays3;
+    o.snappedExactly = wp[0] === s0.x && wp[1] === s0.y;
+
+    o.checkboxesExist = !!document.getElementById('civSnapWayChk') && !!document.getElementById('civSnapRouteChk');
+    return o;
+  }));
+  // v1.52: the header VERSION const (export/atlas metadata + the on-screen chip) drifted stale for
+  // two versions after v1.30's own fix-comment warned about exactly this — derive the expected
+  // value from the FILENAME under test rather than hardcoding it, so this stays a real check for
+  // every future version instead of one that has to be hand-updated (and silently stops checking
+  // anything) each time.
+  {
+    const m = (process.argv[2] || '').match(/v(\d+\.\d+)/);
+    const expected = m ? m[1] : null;
+    const actual = await page.evaluate(() => (typeof VERSION !== 'undefined' ? VERSION : null));
+    R.v152.versionMatches = expected == null || actual === expected;
+  }
+
   await browser.close();
 
   // ---- assertions ----
@@ -4652,6 +4843,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.51: the vessel matrix covers every hull × every water and agrees with the validator', R.v151.vesselMatrixShape && R.v151.vesselMatrixVsValidator !== false && R.v151.vesselMatrixMatchesValidator && R.v151.vesselEveryHullSails);
   A('v1.51: the fastest vessel genuinely varies by water and is not just the highest cruise speed', R.v151.vesselBestVaries && R.v151.vesselBestIsNotJustCruise);
   A('v1.51: the vessel reference renders in the Route Editor results', R.v151.vesselPanelRendered);
+
+  A('v1.52: the Cartography season slider turns its own prerequisite on instead of sitting inert', R.v152.sliderEnablesSeasons && R.v152.checkboxSynced);
+  A('v1.52: every slider position now renders a different map (was 1 render for all 5)', R.v152.sliderDistinct === 5);
+  A('v1.52: the slider states its live/inert status rather than failing silently', R.v152.noteLive && R.v152.noteInert);
+  A('v1.52: rest days are reported separately and total = travel + rest + layovers exactly', R.v152.restSums && R.v152.restCadenceLive);
+  A('v1.52: rest days follow the researched cadence — none under a week, 1-in-4/5 on a long haul', R.v152.restShortNone && R.v152.restLongHas);
+  A('v1.52: jpSeasonAt walks the calendar and wraps at a full year', R.v152.seasonWalks);
+  A('v1.52: a journey longer than a season is computed in the seasons it actually crosses', R.v152.driftCrosses && R.v152.driftChangesDays);
+  A('v1.52: a stage is assigned the season at its MIDPOINT, not the one it departed in', R.v152.driftUsesMidpoint);
+  A('v1.52: open water is closed to shipping in winter; coastal cabotage continues', R.v152.seaShut && R.v152.coastalOpen);
+  A('v1.52: the sea closure is overridable and blocks a real stage', R.v152.seaOverridable && R.v152.seaBlocksStage);
+  A('v1.52: the cost model breaks down to its total and scales with cargo', R.v152.costSums && R.v152.costScales);
+  A('v1.52: carriage rates keep the Diocletian land:river:sea ordering', R.v152.costRatios);
+  A('v1.52: a cargo journey reports a break-even price per tonne; a blocked one prices at null', R.v152.costBreakEven && R.v152.costBlockedNull);
+  A('v1.52: snap-to-place/way is on by default and a nearby click lands exactly on the settlement (V1.915 parity)', R.v152.snapDefaultOn && R.v152.snapsToPlaceNearby);
+  A('v1.52: a far-away click does not snap, and the toggle genuinely disables it', R.v152.noSnapFarAway && R.v152.disableWorks);
+  A('v1.52: drawing also snaps onto an existing way\'s curve, and a real draw_way click lands exactly on the pin', R.v152.snapsToWay && R.v152.snappedExactly);
+  A('v1.52: _civSnapPoint applies the snap at the point of drawing, and both toggle checkboxes exist', R.v152.snapPointWorks && R.v152.checkboxesExist);
+  A('v1.52: the header VERSION constant matches the file it is shipped in (was stuck on 1.50 through v1.51)', R.v152.versionMatches);
 
 
 

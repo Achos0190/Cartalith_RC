@@ -9,11 +9,41 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.51.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.52.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.52 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.50` are kept and never edited.
+  (v1.53 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.51` are kept and never edited.
+- **v1.52 — season slider self-enable + the last four travel cuts + V1.915 snapping.** Three owner
+  requests. Hash vs v1.51 ALL IDENTICAL. 1001 / 852 / **464** green.
+  - **The Cartography "Season (render)" slider "did nothing to change the map."** Root cause: not
+    broken, INERT — `_seasonK` gates on Biome map view AND the "Seasons & Köppen climate" checkbox,
+    which lives on a DIFFERENT tab (Generate→World) and defaults off. Measured pre-fix: 1 distinct
+    render across all 5 slider positions. Fixed by making the slider self-enabling (turns its own
+    prerequisite on, never off) plus a status note stating live/inert in words. Post-fix: 5/5.
+  - **The four scope cuts v1.43/v1.49/v1.51 each deferred, all built from data already on hand**:
+    rest days (§5's 1-in-3-to-5 cadence, reported SEPARATELY from travel days — never blurred, that
+    blur is what made v1.43 hard to verify); season drift over a long journey (`jpSeasonAt`, each
+    stage assigned its own **midpoint** season — start-day assignment let a 108-day trip never
+    leave Spring); sea closure (*Mare Clausum* — Open Sea/Rough shut in Winter, Coastal/Bay stay
+    open, sharing v1.51's `seasonalClosures` control); a cost model in **day-wages** (not an
+    invented currency), with land:river:sea carriage ratios (0.055:0.011:0.002) from Diocletian's
+    Price Edict — the same source v1.33 already uses for food logistics. `probe_travel.js` re-run
+    clean: all 20 reference bands and the §9 242-day sample journey unaffected.
+  - **V1.915 snap-to-place/way, reintroduced for the manual Way/Route tools.** They pushed the raw
+    grid cell with zero attraction — confirmed regression against V1.915's own Route Editor. New
+    `_civFindSnapTarget`/`_civSnapPoint`, grid-space via v1.23's `_civZoomPickR` (not V1.915's
+    screen-pixel math), nearest-wins across places AND way curves with no place preference — same
+    semantics V1.915's `findWaySnap` uses. Opt-out (`state.viz.snapWays`, default true), two synced
+    checkboxes (Way tool in Civilization, Route tool in Explore), live hover ring on the canvas.
+  - **Two bugs found only by verification, both self-inflicted in this same pass**: the desert-tier
+    ordering bug (caught by syntax check) and a smoke test's `mk()` reusing `_jpEnsurePlan(jn)`'s
+    SAME returned object across "variants" — v1.51's own HANDOFF entry names this exact trap.
+  - **A third bug found only by taking the verification SCREENSHOT**: `const VERSION='1.50'`
+    (block 1) had drifted stale again — two versions after v1.30's own comment on that exact line
+    warned about this. Display/export metadata only (never gated on, so no test ever caught it),
+    but the header chip reads from it, so the v1.51/v1.52 screenshots were showing "v1.50" until
+    fixed. New smoke check derives the expected version from the target filename, not a literal.
 - **v1.51 — constraints that were stated but never measured.** Owner asked whether max travel
   distances, travel-time calculations, dependencies and constraints are all properly factored in
   and adjustable. Audited by MEASUREMENT (a sensitivity sweep over every control + a constraint

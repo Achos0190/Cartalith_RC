@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.51**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.52**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.51.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.50.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.52.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.51.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -998,6 +998,46 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Season slider self-enable + the last four travel cuts + V1.915 snapping (v1.52)
+
+Three owner requests in one pass: the Cartography "Season (render)" slider did nothing, the four
+scope cuts v1.43/v1.49/v1.51 each deferred, and reintroducing V1.915's snap-to-place/way while
+drawing. Hash vs v1.51 ALL IDENTICAL. Read this before touching `state.viz.season`,
+`_jpPlan`'s rest/drift math, or `_civWayWaypoints`/`_civWaypoints`.
+
+- **A slider that changes nothing is not "broken", it's INERT, and the difference matters for the
+  fix.** `_seasonK` gates on `state.mode==='biome' && state.climate.seasons` — the second flag
+  lives on a DIFFERENT tab (Generate→World) and defaults off. `bind()` listens for `'input'`, not
+  `'change'` — the first smoke-test attempt at this dispatched the wrong event and silently
+  measured the pre-fix frame. Fixed by making the slider self-enabling (turns its prerequisite on,
+  never off) plus a status line (`_seasonSliderNote`) that says live/inert in words.
+- **Rest days and calendar days are different quantities; report both, never blur them into one.**
+  `jpRestDays` (§5's 1-in-3-to-5 cadence, `plan.days` unchanged) — this file's own past self blurred
+  exactly this in v1.43 and it made that calibration hard to verify.
+- **A stage's season is its MIDPOINT, not its start.** A first cut used start-day and a 17-day final
+  stage beginning on day 90.8 kept the whole of Spring — a 108-day trip never crossed a season.
+  `jpSeasonAt` + one pre-pass at uniform-season durations (the same circle-breaking bootstrap v1.51
+  used for the desert tier).
+- **The gate that already exists is the right gate.** No "Mediterranean sea" biome to key *Mare
+  Clausum* on — but the water TYPE (Open Sea vs Coastal/Bay) is already the exact distinction the
+  history draws. `jpSeaClosure`, sharing v1.51's `plan.seasonalClosures` control.
+- **A cost model needs a unit this tool can actually claim.** `jpJourneyCost` prices in DAY-WAGES,
+  not an invented currency — the land:river:sea RATIOS (0.055:0.011:0.002) follow Diocletian's
+  Price Edict, this file's existing source for food-logistics ratios (v1.33); only the ratio is
+  historically grounded, the absolute price level is the world owner's to set.
+- **`_jpEnsurePlan(jn)` returns the SAME object every call — again.** v1.51's HANDOFF entry names
+  this exact trap and it still cost a second smoke re-run here. Clone before diverging, every time.
+- **V1.915 snapping reintroduced, not ported verbatim.** Gen1's `draw_way`/`route` tools pushed the
+  raw grid cell with zero attraction — a real regression against V1.915's Route Editor. New
+  `_civFindSnapTarget`/`_civSnapPoint` work in GRID space via `_civZoomPickR` (v1.23's own zoom
+  compensation), not V1.915's screen-pixel math, because Gen1's tools already live in grid cells.
+  Nearest-wins across places AND way curves, no place-vs-way preference — matching V1.915's own
+  `findWaySnap` semantics. **A settlement-terminated road can legitimately sit closer to a test
+  point than the settlement pin itself** (the road's own v1.02 endpoint snap put it there) — that's
+  the mechanism working, not a bug; isolate `civWays` when testing place-snapping specifically, or
+  the test will flap on which target happened to be nearer. Opt-out (`state.viz.snapWays`, default
+  true) via two checkboxes that must stay in sync — the umpteenth two-surfaces-one-flag case.
+
 ### Constraints that were stated but never measured (v1.51)
 
 Owner audit: "are max travel distances, travel-time calculations, dependencies and constraints
@@ -1519,7 +1559,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (446 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (464 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding
