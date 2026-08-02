@@ -4025,14 +4025,37 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       o.causesDiffer = dry.verdict !== load.verdict;
 
       // ── F4b: the gap is measured from real hydrology, not a constant ──
-      const p4 = base();
-      const stages = _jpDeriveStages(jn, p4);
-      const dryKms = stages.filter(s => s.cat === 'land').map(s => +s.dryKm || 0);
-      o.dryKmMeasured = dryKms.length > 0 && dryKms.some(v => v > 0);
-      o.dryKmVaries = new Set(dryKms).size > 1;
-      const pl4 = _jpPlan(jn);
-      const gaps = pl4.results.filter(r => r.cat === 'land' && !r.blocked).map(r => r.waterGapDays);
-      o.gapNotConstant = gaps.some(v => Math.abs(v - 1.5) > 0.01);
+      // v1.56 lowered the drinking-water threshold specifically so most short routes now find SOME
+      // nearby water (see JP_DRINKING_FLOW_DIVISOR) — which made this test's original reliance on
+      // the ambient, ~500-assertions-mutated smoke-suite world's by-chance hydrology fragile: this
+      // exact route may now legitimately read freshwater-throughout under the new, looser test. A
+      // controlled synthetic flowField proves the SAME underlying claim (dryKm/waterGapDays respond
+      // to real per-cell hydrology, not a hardcoded 1.5) with certainty instead of by chance: one
+      // pass with no water anywhere near the route (genuinely, unambiguously dry) and one pass with
+      // abundant water right along it (never dry) — the SAME route measuring differently under
+      // different real hydrology IS the claim, and is a more direct proof of it than hoping this
+      // particular stage-chunking happens to vary.
+      const savedFlow4b = flowField;
+      let dryKmsDry, gapsDry, stagesDry;
+      try {
+        const n4b = GW * GH, flowThreshReal = GW * GH * 0.0004, midY2 = landPt[1];
+        flowField = new Float32Array(n4b);   // no water anywhere ⇒ genuinely dry
+        const p4 = base();
+        stagesDry = _jpDeriveStages(jn, p4);
+        dryKmsDry = stagesDry.filter(s => s.cat === 'land').map(s => +s.dryKm || 0);
+        const plDry = _jpPlan(jn);
+        gapsDry = plDry.results.filter(r => r.cat === 'land' && !r.blocked).map(r => r.waterGapDays);
+
+        const wetField = new Float32Array(n4b);
+        for (let x = 0; x < GW; x++) wetField[midY2 * GW + x] = flowThreshReal * 4;   // abundant water along the whole route
+        flowField = wetField;
+        const stagesWet = _jpDeriveStages(jn, p4);
+        const dryKmsWet = stagesWet.filter(s => s.cat === 'land').map(s => +s.dryKm || 0);
+
+        o.dryKmMeasured = dryKmsDry.length > 0 && dryKmsDry.every(v => v > 0);
+        o.dryKmVaries = dryKmsDry.some(v => v > 0) && dryKmsWet.length > 0 && dryKmsWet.every(v => v === 0);
+        o.gapNotConstant = gapsDry.some(v => Math.abs(v - 1.5) > 0.01);
+      } finally { flowField = savedFlow4b; }
       // desert on 'auto' must derive its own gap rather than echo a dropdown tier
       // Assert the MECHANISM, not that auto ≠ manual: on some routes the measured gap coincides
       // with a tier's own gap by arithmetic accident (a 6.25 km dry run at ~1 km/day IS 6 days,
@@ -4043,7 +4066,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       // may legitimately have freshwater throughout (dryKm 0), which would leave the mechanism
       // untested rather than failing it. Fixed inputs make this assert the arithmetic, not the map.
       const noAnim = { donkey: 0, mule: 0, camel: 0, horse: 0 };
-      const stD = Object.assign({}, stages[0], { terrain: 'Deep Sand', biome: 'Hot Desert', dryKm: 300 });
+      const stD = Object.assign({}, stagesDry[0], { terrain: 'Deep Sand', biome: 'Hot Desert', dryKm: 300 });
       const stD2 = Object.assign({}, stD, { dryKm: 600 });
       // base() returns _jpEnsurePlan(jn) — the SAME object every call — so two "variants" built from
       // it are aliases and the second configuration silently wins for both. Clone before diverging.
@@ -4547,6 +4570,67 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     } finally {
       plates = savedPlates; _civAgg = savedAgg; _civAggKey = savedAggKey;
     }
+
+    return o;
+  });
+
+  // ── v1.56: water-constraint softening (owner: "people often drank from streams/rivers/other
+  // smaller stops along a route... aside from literally carrying their own water sources" — build
+  // the two-part fix already presented and approved). Confirms (a) JP_DRINKING_FLOW_DIVISOR exists,
+  // is wired into _jpStageDryKm, and a synthetic "minor stream" cell — one whose flow clears the new
+  // drinking threshold but NOT the old mapped-river flowThresh — now reads as freshwater; (b) the
+  // auto water-crossing tier (previously isDesert-gated) now resolves for a non-desert biome too,
+  // giving a real graduated reserve/speed response instead of a flat, ungraduated 1.1×; (c) the
+  // explicit desert-override dropdown still stays desert-only (deliberately not generalized — its
+  // labels are desert-narrative and the UI only ever exposes it on a desert stage); (d) a genuine
+  // desert stage's own behavior (explicit override honored, auto tier resolves) is unchanged.
+  R.v156 = await page.evaluate(() => {
+    const o = {};
+    o.divisorExists = typeof JP_DRINKING_FLOW_DIVISOR === 'number' && JP_DRINKING_FLOW_DIVISOR > 1;
+    o.wiredIntoDryKm = _jpStageDryKm.toString().includes('JP_DRINKING_FLOW_DIVISOR');
+
+    // (a) a synthetic "minor stream" — flow clears the NEW drinking threshold but not the OLD
+    // mapped-river flowThresh — now reads as freshwater when it didn't before.
+    const savedFlow = flowField;
+    try {
+      const n = GW * GH, synth = new Float32Array(n);
+      const flowThresh = GW * GH * 0.0004;
+      const minorStreamFlow = flowThresh / (JP_DRINKING_FLOW_DIVISOR / 2);   // clears new thresh (÷16), fails old (>flowThresh required)
+      o.minorStreamFailsOldTest = !(minorStreamFlow > flowThresh);
+      const midY = (GH / 2) | 0;
+      for (let x = 0; x < GW; x++) synth[midY * GW + x] = minorStreamFlow;
+      flowField = synth;
+      const pts = []; for (let x = 5; x <= 15; x++) pts.push([x, midY]);   // path crossing the stream at its own row
+      const dryKm = _jpStageDryKm(pts, 0, pts.length - 1, (state.mapWidthKm || 12000) / GW, null, flowThresh);
+      o.minorStreamNowFound = (dryKm === 0);
+    } finally { flowField = savedFlow; }
+
+    // (b) the auto tier now applies to a non-desert biome — a severe synthetic dry gap gets a real
+    // graduated reserve (not the old flat 1.1×) and the formula names it "water crossing".
+    const basePlan = { groupSize: 4, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 20,
+      supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true,
+      desertWater: 'auto', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 };
+    const stForest = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm });
+    const rNoGap = jpCalcLand(stForest(0), basePlan);
+    const rSevereGap = jpCalcLand(stForest(3000), basePlan);   // a huge synthetic waterless run
+    o.nonDesertGetsWaterCrossingLabel = !rNoGap.blocked && /water crossing/.test(rNoGap.formula);
+    o.severeNonDesertGapSlowerThanNoGap = !rSevereGap.blocked && !rNoGap.blocked && rSevereGap.dailyKm < rNoGap.dailyKm;
+    o.severeNonDesertGapNamesDeepTier = !rSevereGap.blocked && /Deep Desert Crossing/.test(rSevereGap.formula);
+
+    // (c) the explicit override dropdown stays desert-only: a non-desert stage ignores an explicit
+    // override and still resolves the auto (measured) tier instead.
+    const overridePlan = Object.assign({}, basePlan, { desertWater: 'Sparse Wells' });
+    const rOverrideNonDesert = jpCalcLand(stForest(3000), overridePlan);
+    o.explicitOverrideIgnoredOnNonDesert = !rOverrideNonDesert.blocked && !/Sparse Wells/.test(rOverrideNonDesert.formula);
+
+    // (d) a genuine desert stage: explicit override still honored (unchanged regression check).
+    const stDesert = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Hot Desert', dryKm });
+    const rDesertOverride = jpCalcLand(stDesert(50), overridePlan);
+    o.desertExplicitOverrideStillHonored = !rDesertOverride.blocked && /Sparse Wells/.test(rDesertOverride.formula);
+    const rDesertAuto = jpCalcLand(stDesert(50), basePlan);
+    o.desertAutoStillResolvesAndLabels = !rDesertAuto.blocked && /water crossing/.test(rDesertAuto.formula) && /auto — from map/.test(rDesertAuto.formula);
 
     return o;
   });
@@ -5109,6 +5193,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.55: Territory Fit gives no fabricated verdict for identity-flavored cultures (common/imperial)', R.v155.commonGetsNoVerdict && R.v155.imperialGetsNoVerdict);
   A('v1.55: Territory Fit gives a real match/typical/mismatch verdict for a terrain-themed culture (riverlands)', R.v155.riverlandsGetsAVerdict);
   A('v1.55: _civFactionAggregates()\'s pre-world guard never throws and returns a safe zeroed shape (needed once Factions became the default tab)', R.v155.preWorldGuardNoThrow && R.v155.preWorldGuardSafeShape);
+
+  A('v1.56: JP_DRINKING_FLOW_DIVISOR exists and is wired into _jpStageDryKm', R.v156.divisorExists && R.v156.wiredIntoDryKm);
+  A('v1.56: a minor stream that fails the old mapped-river flowThresh test now reads as freshwater', R.v156.minorStreamFailsOldTest && R.v156.minorStreamNowFound);
+  A('v1.56: a non-desert biome now gets the water-crossing tier labeled in its formula (was desert-only)', R.v156.nonDesertGetsWaterCrossingLabel);
+  A('v1.56: a severe non-desert dry gap is genuinely slower than no gap (graduated response, not a flat 1.1x with no speed penalty)', R.v156.severeNonDesertGapSlowerThanNoGap);
+  A('v1.56: a severe non-desert dry gap names the matching auto tier (e.g. Deep Desert Crossing)', R.v156.severeNonDesertGapNamesDeepTier);
+  A('v1.56: the explicit desert-override dropdown stays desert-only — a non-desert stage ignores it and uses the measured auto tier instead', R.v156.explicitOverrideIgnoredOnNonDesert);
+  A('v1.56: a genuine desert stage still honors an explicit override (unchanged regression)', R.v156.desertExplicitOverrideStillHonored);
+  A('v1.56: a genuine desert stage on auto still resolves and labels its tier', R.v156.desertAutoStillResolvesAndLabels);
 
 
 

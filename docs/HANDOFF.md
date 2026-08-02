@@ -9,11 +9,34 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.55.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.56.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.56 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.54` are kept and never edited.
+  (v1.57 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.55` are kept and never edited.
+- **v1.56 — water-constraint softening.** Owner: "for water now it quickly gives a hard
+  constraint. Whilst in reality people often drank from streams/rivers/other smaller stops along
+  a route... Suggest an adjustment to reflect this instead of the hard warning" — the two-part fix
+  researched and presented in the prior session, now approved and built.
+  `docs/research/water-access-travel.md` (new). Hash vs v1.55 ALL IDENTICAL. 1001 / 852 / 496 green.
+  - Root cause: `_jpStageDryKm`'s freshwater test reused `flowThresh=GW*GH*0.0004`, the SAME
+    constant `buildRiverNetwork` uses as its own order-1 channel-initiation bar (at default
+    density, `channelThreshold` reduces to `thresh` exactly) — conflating "renders as a mapped
+    river" with "a party can find a drink." `JP_DRINKING_FLOW_DIVISOR=16` (Horton's laws,
+    Rb²≈9-36 two Strahler orders down; confirmed on a real generated world via new
+    `tests/perf/probe_water_gap.js`: 59/60 sampled routes read "dry" at the old threshold, 28/60
+    at ÷16) is applied ONLY inside `_jpStageDryKm` — rendering/`buildRiverNetwork` untouched.
+  - The auto water-crossing tier (`JP_DESERT_WATER`) was `isDesert`-gated, so a non-desert biome
+    with a genuinely long dry stretch got a flat, ungraduated 1.1× reserve and no speed penalty at
+    any severity. The gate is removed for the AUTO path (any biome); the explicit override
+    dropdown stays desert-only (its labels are desert-narrative, and it's only ever shown on a
+    desert stage).
+  - A pre-existing v1.51 smoke assertion relied on the ambient, heavily-mutated smoke-suite
+    world's hydrology by chance to show a dry stretch — broken by the fix's own intended effect
+    (fewer routes read as dry). Replaced with a controlled synthetic-`flowField` scenario that
+    proves the same claim deterministically.
+  - Known scope cuts: `jpAssessResupply`'s hard-block threshold/wording is untouched (fires less
+    often, isn't loosened); sea/river water rules are untouched (land-stage-only change).
 - **v1.55 — faction-first Civilization menu.** Owner: "I like the new civilization menu,
   implement it please in a logical fashion, maybe make it scroll into the screen from the left.
   Only showing a simplified version at first (that for examples only shows a global overview)" —
@@ -1904,19 +1927,11 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **Water-constraint softening — researched, presented, NOT approved yet.** ← **next session
-  starts here if the owner returns to it.** Owner: journeys hit a hard water-supply warning too
-  readily; historically parties drank from streams/smaller stops along a route, not just carried
-  water. Researched and measured (a `probe_water_gap.js`-style land-transect sweep): the current
-  `_jpStageDryKm` freshwater-reach test reuses the SAME `flowThresh=GW*GH*0.0004` river-rendering
-  threshold, conflating "renders as a mapped river" with "a party can find a drink" — 23/23 land
-  transects showed a "dry" stretch (mean 74.9 km) at that threshold, vs. 11/23 (mean 19.6 km) at
-  1/12th and 6/23 at 1/30th. Proposed two-part fix, presented to the owner with "Want me to build
-  this?" and NOT yet answered: (1) a separate, lower drinking-water-reach threshold for
-  `_jpStageDryKm` only, grounded in a real historical source before shipping; (2) generalize the
-  existing graduated desert-tier auto-response (`JP_DESERT_WATER`/`_jpDesertTierForGap`) to every
-  biome instead of gating it entirely on `isDesert`. Do not build this without the owner's go-ahead
-  — it is a separate, independent task from the v1.55 civ-menu work that shipped this session.
+- **Water-constraint softening (v1.56) — shipped.** See CHANGELOG/above for the full writeup;
+  `JP_DRINKING_FLOW_DIVISOR=16` + the auto water-crossing tier generalized to every biome. Not
+  independently calibrated against a real-world drainage-density figure for this engine's specific
+  grid resolution — a reasoned mid-value in a theoretically- and empirically-grounded band, not a
+  historical constant. Would be the natural next refinement if the owner wants it tightened further.
 - **The LOD tile seam is reduced, not eliminated (v1.29).** After moving the sea-floor smoothing to
   the shared world-wide fields, two adjacent tiles now agree at their shared world column to a RGB
   MAD of 0.04 (interior 0.3–0.6, was 6.71) — the tiles themselves are seamless. In the live composite

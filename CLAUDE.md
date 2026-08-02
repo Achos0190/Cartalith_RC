@@ -3,19 +3,19 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.55**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.56**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.55.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.54.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.56.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.55.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
 | `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
@@ -997,6 +997,56 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Water-constraint softening (v1.56)
+
+Owner: "for water now it quickly gives a hard constraint. Whilst in reality people often drank from
+streams/rivers/other smaller stops along a route — aside from literally carrying their own water
+sources. Suggest an adjustment to reflect this instead of the hard warning." Researched, measured,
+and presented as a two-part plan in the prior session; this session builds it after approval.
+`docs/research/water-access-travel.md` (new). Hash vs v1.55 ALL IDENTICAL. 1001 / 852 / 496 green.
+
+- **Root cause: `_jpStageDryKm` (the Journey Planner's "is there freshwater in reach" test) reused
+  `flowThresh=GW*GH*0.0004`, the SAME constant used file-wide to decide whether a cell renders as
+  part of the mapped river network.** That constant is not merely a rendering cutoff: at the
+  default river-density, `buildRiverNetwork`'s own `channelThreshold(thresh,slopeN,1)` reduces to
+  `thresh` exactly, independent of slope — so `flowThresh` IS the engine's own order-1
+  channel-initiation bar. A travelling party historically needed a spring or minor stream, not a
+  mapped river; the planner was conflating "renders on the map" with "a party can find a drink."
+- **`JP_DRINKING_FLOW_DIVISOR=16`**, applied ONLY inside `_jpStageDryKm` (`drinkThresh =
+  flowThresh/16`), grounded two ways: (1) Horton's laws (bifurcation ratio Rb≈3-5, already cited
+  in `docs/research/natural-rivers.md` for the Min-stream-order slider) put a channel two Strahler
+  orders below `flowThresh` at roughly Rb²≈9-36× less flow; (2) new `tests/perf/probe_water_gap.js`
+  (samples 60 straight-line routes on a real generated world) measured the practical effect
+  directly — 59/60 routes read "dry" at the old threshold (mean 74 km gap), 28/60 at ÷16 (mean
+  12.4 km), squarely inside the theoretical band. `buildRiverNetwork`, the rendered river network,
+  and every other `flowThresh` consumer are untouched, so `generate()`/`render()` stay
+  bit-identical — this is a Journey-Planner-only (civ-layer) change.
+- **The auto water-crossing tier (`JP_DESERT_WATER`/`_jpDesertTierForGap`) was gated on
+  `isDesert`**, so a non-desert biome with a genuinely long dry stretch got only a flat,
+  ungraduated 1.1× reserve and no speed adjustment at any severity — the same treatment for a
+  half-day gap and a week-long one. The gate is removed for the **auto** path only (a measured-gap
+  tier now resolves for any biome); the **explicit override dropdown stays desert-only**, since its
+  labels ("Dense Oasis Route") are desert-narrative and the control is only ever shown once a
+  journey includes a desert stage. The formula trace's "desert route" line is renamed "water
+  crossing" and now prints whenever a tier resolved, any biome — not just when `isDesert`.
+- **Net effect**: most routes now measure a short gap and get the "Dense Oasis"-tier treatment
+  (1.10× reserve, a small speed *bonus*) instead of ever approaching `jpAssessResupply`'s hard "no
+  party size fixes this" block — untouched, and still correct for a genuinely week-long waterless
+  crossing, desert or otherwise.
+- **A pre-existing v1.51 smoke assertion had to be made deterministic, not just re-passed.** It
+  proved "the gap is measured from real hydrology, not a constant" by picking one arbitrary
+  straight-line test route through the ambient (by-then ~500-assertions-mutated) smoke-suite world
+  and relying on it to happen to show a dry stretch under the OLD, over-strict threshold — which
+  this fix's own intended effect (far fewer routes read as dry at all) broke by design, not by
+  accident. Replaced with a controlled synthetic-`flowField` scenario (one pass with no water
+  anywhere near the route, one pass with abundant water along it) that proves the same claim with
+  certainty instead of by chance.
+- **Known scope cuts**: `jpAssessResupply`'s hard-block threshold/wording is untouched (fires less
+  often, isn't loosened); sea/river water rules (`_jpAutoStageVessel`, `jpCalcWater`) are untouched
+  — a land-stage-only change; the divisor is a reasoned mid-value in a theoretically- and
+  empirically-grounded 9–36 band, not independently calibrated against a historical drainage-density
+  figure for this engine's specific grid resolution.
 
 ### Faction-first Civilization menu (v1.55)
 

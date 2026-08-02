@@ -12,6 +12,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.56 — Water-constraint softening
+
+Owner: "for water now it quickly gives a hard constraint. Whilst in reality people often drank from
+streams/rivers/other smaller stops along a route — aside from literally carrying their own water
+sources. Suggest an adjustment to reflect this instead of the hard warning." Researched, measured,
+presented as a two-part plan, then approved and built. `docs/research/water-access-travel.md` (new).
+Hash vs v1.55 **ALL IDENTICAL**. 1001 / 852 / 496 green.
+
+- **Root cause: two different questions were sharing one threshold.** `_jpStageDryKm` (the Journey
+  Planner's "is there freshwater in reach" test) tested `flowField[i] > flowThresh`, the SAME
+  `GW*GH*0.0004` constant used file-wide to decide whether a cell renders as part of the mapped
+  river network. That constant is not merely a rendering cutoff: at the default river-density,
+  `buildRiverNetwork`'s own `channelThreshold(thresh,slopeN,1)` reduces to `thresh` exactly,
+  independent of slope — so `flowThresh` IS the engine's own order-1 channel-initiation bar. A
+  travelling party historically needed a spring or minor stream, not a mapped river; the planner was
+  conflating "renders on the map" with "a party can find a drink."
+- **`JP_DRINKING_FLOW_DIVISOR = 16`**, applied only inside `_jpStageDryKm` (`drinkThresh =
+  flowThresh/16`) — grounded two ways, not guessed: (1) Horton's laws (bifurcation ratio Rb≈3-5,
+  already cited in `docs/research/natural-rivers.md` for the Min-stream-order slider) put a channel
+  two Strahler orders below `flowThresh` at roughly Rb²≈9-36× less flow; (2) `tests/perf/
+  probe_water_gap.js` (new — samples 60 straight-line routes on a real generated world) measured the
+  practical effect directly: at the old threshold 59/60 sampled routes read "dry" (mean 74 km gap);
+  at ÷16 that drops to 28/60 (mean 12.4 km) — squarely inside the theoretical band. Scoped to this
+  one function; `buildRiverNetwork`, the rendered river network, and every other `flowThresh`
+  consumer are untouched, so `generate()`/`render()` stay bit-identical.
+- **The auto water-crossing tier (`JP_DESERT_WATER`/`_jpDesertTierForGap`) was gated on `isDesert`**,
+  so a non-desert biome with a genuinely long dry stretch got only a flat, ungraduated 1.1× reserve
+  and no speed adjustment at all — the same treatment for a half-day gap and a week-long one. The
+  gate is removed for the **auto** path only (a measured-gap tier now resolves for any biome); the
+  **explicit override dropdown stays desert-only**, since its labels ("Dense Oasis Route") are
+  desert-narrative and the control is only ever shown once a journey includes a desert stage. The
+  formula trace's "desert route" line is renamed "water crossing" and now prints whenever a tier
+  resolved, any biome — not just when `isDesert`.
+- **Net effect**: most routes now measure a short gap and get the "Dense Oasis"-tier treatment
+  (1.10× reserve, a small speed *bonus*) instead of ever approaching `jpAssessResupply`'s hard "no
+  party size fixes this" block — which is untouched and still fires correctly for a genuinely
+  week-long waterless crossing, desert or otherwise.
+- **A pre-existing v1.51 smoke assertion had to be made deterministic, not just re-passed.** It
+  asserted "the gap is measured from real hydrology, not a constant" by picking one arbitrary
+  straight-line test route through the ambient (by-then ~500-assertions-mutated) smoke-suite world
+  and hoping it happened to show a dry stretch under the old, over-strict threshold — which the
+  fix's own intended effect (far fewer routes read as dry at all) broke by design, not by accident.
+  Replaced with a controlled synthetic-`flowField` scenario (one pass with no water anywhere near
+  the route, one pass with abundant water along it) that proves the same claim with certainty
+  instead of by chance — arguably a stronger test of "responds to real hydrology" than the original.
+- **Tests**: 8 new smoke assertions (`R.v156`) — the divisor constant exists and is wired in; a
+  synthetic "minor stream" that fails the old mapped-river test now reads as freshwater; a
+  non-desert biome gets the "water crossing" formula line; a severe non-desert dry gap is genuinely
+  slower than no gap and names the matching tier (e.g. "Deep Desert Crossing"); the explicit
+  override dropdown stays desert-only (a non-desert stage ignores it); a genuine desert stage's
+  explicit-override and auto-tier behavior are both unchanged (regression).
+- **Known scope cuts**: `jpAssessResupply`'s hard-block threshold/wording itself is untouched — the
+  fix is that it fires far less often, not that the block was loosened; the sea-lane/river-transport
+  water rules (`_jpAutoStageVessel`, `jpCalcWater`) are untouched, this is a land-stage-only change;
+  `JP_DRINKING_FLOW_DIVISOR=16` is a reasoned mid-value in a theoretically- and empirically-grounded
+  9–36 band, not independently calibrated against a historical drainage-density figure for this
+  specific engine's grid resolution.
+
 ### v1.55 — Faction-first Civilization menu
 
 Owner: "I like the new civilization menu, implement it please in a logical fashion, maybe make it
