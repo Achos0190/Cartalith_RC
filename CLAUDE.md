@@ -3,19 +3,19 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.57**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.58**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.57.html` | **Current** unified tool (~28.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.56.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.58.html` | **Current** unified tool (~28.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.57.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
 | `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
@@ -997,6 +997,53 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Political fragmentation on a single landmass (v1.58)
+
+Owner, on the v1.57 scope cut: "if there is only 1 continent it should lead to a division of the
+continent, based on geography and industrial prowess (or at least do some research but I think
+those are easy denominators to use)." `docs/research/political-fragmentation.md` (new) grounds it —
+most of history's large landmasses hosted several simultaneous polities, split along exactly those
+two axes (mountains/rivers/distance raising unification cost; an independent polity needing a
+resource base large enough to support itself). Civ-layer only — no engine/UME change. Hash vs
+v1.57 ALL IDENTICAL. 1001 / 852 green; 508 smoke green.
+
+- **Root cause**: `_civIterativeAutoWorld` gave every candidate on a landmass the SAME faction id
+  (`contFaction`, cycling per connected component), so any faction id past the landmass count got
+  zero settlements — worst case a single continent where only faction 1 ever got anything (the
+  owner-reported 27/2/0/0/0/0 split). True for any landmass count, not just one — a 1-continent
+  world is the extreme case, not a special one.
+- **`_civAssignLandmassFactions(candidates)` (new)**: `factionCount − L` spare faction ids (L =
+  landmasses with candidates, only nonzero when there's real unused capacity) are apportioned by
+  **highest-averages** (the Jefferson/Webster family of real seat-apportionment method) weighted by
+  each landmass's summed settlement suitability — already the file's own unified geography+resource
+  signal (v1.30's "one function" rule), reused as the "industrial prowess" denominator rather than
+  re-derived. Extra seats become extra capitals, seeded by suitability + blue-noise spacing (v1.26's
+  scatter idiom) so a rival capital is both economically strong and far enough from an existing one
+  to be genuinely separate. Every other candidate joins its nearest capital.
+- **The geography-respecting BORDER needs zero new code** — `_civAutoPolity` ("Recalculate
+  Territories") already floods outward from every settlement's own faction through
+  `buildTravelCost` (slope-squared cost), so two rival capitals on opposite sides of a mountain
+  range naturally meet and settle near the ridge once territory is painted.
+- **Byte-identical whenever `factionCount<=L`** (today's ordinary multi-continent case) — the
+  apportionment loop only ever hands out ids the old cycling left unused; a landmass's PRIMARY id
+  is assigned in the exact same order as before. A strict generalisation, not a special case.
+  Measured on a real world (seed 12345, 6 factions, 2 landmasses): 27/2/0/0/0/0 (2 factions) →
+  6/2/16/14/2/6 (all 6, 5 capitals spread proportional to each landmass's capacity).
+- **A pre-existing v1.46 smoke assertion needed to become statistically honest.** It compared the
+  coastal-preference pass ON vs OFF by independently re-running the whole stochastic multi-pass
+  pipeline twice per seed across a fixed 3-seed sample — already riding cross-run RNG-cascade
+  noise (the swap's settlement moves reshape the road network the downstream centrality-driven
+  promote/demote passes read). v1.58 widens achievable capital count per landmass (1 → up to
+  `factionCount`), which widens that pre-existing cascade enough to occasionally flip one seed —
+  not the swap logic failing (it can only ever ADD port traits within one run). Widened to 8 seeds,
+  changed to an aggregate "never net-worse across the sample" comparison — the same "small fixed
+  sample is fragile to noise" lesson v1.56 already learned about this exact pipeline. `CIV_FACTIONS`
+  also pinned for the test's duration (the v1.24 BUG-3 test-isolation pattern), since faction count
+  now genuinely affects placement where it didn't before.
+- **Known scope cut**: territory PAINTING is untouched — a world that skips "Recalculate
+  Territories" after auto-populate shows the new faction split in the settlement list but not the
+  map's territory-fill colouring, the same pre-existing two-button workflow as always.
 
 ### Factions pop-up + one editing surface per faction field (v1.57)
 

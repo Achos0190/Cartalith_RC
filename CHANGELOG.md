@@ -12,6 +12,83 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.58 — Political fragmentation on a single landmass
+
+Owner, on the settlement-clustering finding v1.57 tracked but didn't fix: "I think its okay in the
+base, but if there is only 1 continent it should lead to a division of the continent, based on
+geography and industrial prowess (or at least do some research but I think those are easy
+denominators to use)." `docs/research/political-fragmentation.md` (new) grounds the fix — most of
+history's large landmasses hosted several simultaneous, often rival, polities (Warring States
+China, the Indian subcontinent, classical Greece), split along the same two axes historically:
+geography (mountains/rivers/distance raising the cost of unification) and economic base (an
+independent polity needs a resource base large enough to support itself). Civ-layer (block 2)
+only — no engine/UME change. Hash vs v1.57 **ALL IDENTICAL**. 1001 / 852 green; hash battery ALL
+IDENTICAL; 508 smoke assertions green.
+
+- **Root cause confirmed by measurement**: `_civIterativeAutoWorld` gave every candidate on a
+  landmass the SAME faction id (`contFaction`, one per connected component, cycling if there were
+  more landmasses than factions) — so any faction id past the landmass count got zero settlements,
+  worst-case a single-continent world where only faction 1 ever got anything (the owner-reported
+  27/2/0/0/0/0 split). True whether there was 1 landmass or several; a 1-continent world is just
+  the extreme case, not a special one.
+- **`_civAssignLandmassFactions(candidates)` (new)** replaces the flat per-landmass assignment.
+  `factionCount - L` spare faction ids (only ever >0 when there's real unused capacity — L =
+  landmasses with candidates) are apportioned by **highest-averages** (the Jefferson/Webster family
+  of apportionment, the same family real seat allocation like the US House uses): repeatedly hand
+  the next seat to whichever landmass has the highest `capacity/(seats+1)`, where capacity is that
+  landmass's summed settlement suitability — already the file's own unified "land quality +
+  resources" signal (v1.30's "one function" rule), reused rather than re-derived as the "industrial
+  prowess" denominator. Extra seats become extra capitals, seeded by suitability + blue-noise
+  spacing (the v1.26 asset-scatter idiom) so a rival capital is both economically strong and far
+  enough from an existing one to be a genuinely separate centre — "geography and industrial
+  prowess" restated as the two seeding criteria. Every other candidate on that landmass joins its
+  nearest capital.
+- **The fine, geography-respecting BORDER is left entirely to the existing `_civAutoPolity`
+  ("Recalculate Territories") flood-fill** — zero changes needed there. It already floods outward
+  from every settlement's own faction through `buildTravelCost` (a slope-squared cost field), so
+  two rival capitals seeded on opposite sides of a mountain range naturally meet and stop near the
+  ridge once territory is painted — the historical pattern, not a new mechanism.
+- **A landmass's PRIMARY faction id is assigned in the exact same cycling order the old code
+  used** — the apportionment loop only ever hands out ids the old code left unused
+  (`L+1..factionCount`). When `factionCount<=L` (today's ordinary multi-continent case, which the
+  owner explicitly called "okay in the base"), the loop never fires and output is **byte-identical**
+  to the pre-fix code — verified directly (same seed, same faction count, identical `factionOf`/
+  `capitalOf` down to the array). A strict generalisation, not a special-cased rewrite.
+- **Measured on a real world** (seed 12345, 256px, 6 factions defined, 2 landmasses with
+  settlements): before, 29 settlements split 27/2/0/0/0/0 (2 factions used); after, 46 settlements
+  split 6/2/16/14/2/6 (all 6 factions used, 5 capitals spread across both landmasses in proportion
+  to each landmass's own capacity). Settlement total legitimately rises too — more distinct
+  capitals means more inter-capital trade-route junctions for the existing crossroads-emergence
+  feedback loop to seed, a real and disclosed downstream effect, not a bug.
+- **A pre-existing v1.46 smoke assertion needed to become statistically honest, not just
+  re-passed.** It compared coastal-preference-pass-ON vs -OFF by independently re-running the
+  entire stochastic multi-pass placement pipeline twice per seed across a FIXED sample of 3 seeds,
+  asserting the ON run is never worse on any single seed. That comparison was already riding
+  cross-run RNG-cascade noise (the swap pass's own settlement moves reshape the road network the
+  downstream centrality-driven promote/demote passes read); v1.58 widens the achievable capital
+  count per landmass (1 → up to `factionCount`), which widens that same pre-existing cascade enough
+  that one seed, out of 3, occasionally showed the ON run in genuinely worse shape by chance alone
+  — not the swap logic failing (it can only ever ADD port traits within a single run). Widened to 8
+  seeds and changed to an aggregate ("never net-worse across the sample") comparison — the
+  statistically honest version of the same claim, the same "small fixed sample is fragile to noise"
+  lesson v1.56 already learned about this exact pipeline. Also pinned `CIV_FACTIONS` for the
+  test's duration (the same test-isolation discipline v1.24's BUG-3 assertion needed), since
+  faction count now genuinely affects placement where it didn't before.
+- **Tests**: 5 new smoke assertions (`R.v158`) against `_civAssignLandmassFactions` directly with
+  controlled synthetic candidate arrays (this file's own v1.56 "synthetic scenario over sampling
+  the ambient world by chance" precedent) — byte-identical baseline when `factionCount<=L`; a
+  single landmass with spare capacity uses every defined faction with one capital each; the
+  richer of two landmasses earns more of the spare seats and the total matches `factionCount`
+  exactly; a landmass never earns more capitals than it has candidates to seed them with — plus
+  one real-world end-to-end check (fresh world, default faction roster, more than 1-2 factions now
+  get settlements).
+- **Known scope cuts**: the swap-pass's own `have<target` search doesn't reason about which
+  specific non-capital settlement is "least essential to its own polity" — it just avoids every
+  capital, same as before; territory PAINTING itself needed and got zero changes, so a world that
+  never runs "Recalculate Territories" after auto-populate shows the new faction split in the
+  settlement list/table but not yet in the map's territory-fill colouring, exactly as today's
+  existing two-separate-buttons workflow already requires.
+
 ### v1.57 — Factions pop-up + one editing surface per faction field
 
 Owner, immediately after reviewing the v1.55 faction-first redesign: "I'd also very much love it to
