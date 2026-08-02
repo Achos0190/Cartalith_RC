@@ -3,19 +3,19 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.53**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.54**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.53.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.52.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.54.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.53.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
-| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
+| `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
 | `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
@@ -997,6 +997,71 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Agricultural technology as a per-faction axis (v1.54)
+
+Owner: the flat 9:1 farmer:urbanite ratio "doesn't sit against a civilisation having mastered the
+plow and sitting roughly at a level of industrial production, even so barely" — research requested
+into how agricultural productivity actually scales, and how to wire it into auto-populate.
+`docs/research/agricultural-productivity.md` (new) grounds the feature in the England agricultural-
+labour-share series (Broadberry & Gardner 2013; CAMPOP): 9:1/~90% farming is a **pre-improvement**
+baseline, not "mastered the plow" — by the time a society genuinely masters rotation/drainage/
+selective breeding (England ~1700-1760) the ratio had already fallen to ~1:1; "barely industrial"
+(steam threshing, first chemical fertilizer, England ~1800, pre-mass-import) sat at ~0.54:1. Hash
+vs v1.53 ALL IDENTICAL. 1001 / 852 / 479 green.
+
+- **Scope decided with the owner via `AskUserQuestion` before building**: per-faction (not one
+  world-level setting), live-editable in the Faction Inspector (not setup-gate-only), re-read every
+  `_civFoodShed` call rather than requiring a re-populate.
+- **`AG_TECH_LEVELS`** (6 named rungs, Subsistence → Industrial, each carrying a `farmersPerUrbanite`
+  calibrated from the research doc) + **`civFactionAgTech`** — a new per-faction parallel array,
+  same convention as `civFactionCulture`/`civFactionReligion`/`civFactionGovernment` (append-only
+  default, old-save-compatible rebuild-on-load, save-format field) — but unlike those three, this is
+  explicitly **not pure flavor**: it's read by `foodSurplusRatio()`, disclosed as such everywhere.
+- **`foodSurplusRatio(soil, refSoil, farmersPerUrbanite)`** gained a third argument, and fixing it
+  properly surfaced two real formula bugs that only mattered once R (farmers per urbanite) could
+  drop below ~2 — which the fixed 9:1 constant never did:
+  1. **`1/R` is the wrong formula; `1/(R+1)` is.** Population balance (R farmers + 1 urbanite,
+     uniform per-capita consumption, R yields must cover R+1 people) gives surplus fraction
+     `1/(R+1)`, not `1/R`. The shipped `1/9≈0.1111` (vs. the derived `1/10=0.1`) was never wrong
+     enough to notice at a fixed R=9, but `1/R` blows past 100% below R=2. **Pinned exactly** at the
+     historical `FOOD_BASE_SURPLUS_RATIO` constant when `farmersPerUrbanite===FARMERS_PER_URBANITE`
+     (every existing world's numbers untouched to the bit, asserted); corrected formula everywhere
+     else.
+  2. **`FOOD_SURPLUS_RATIO_MAX=0.35` is a pre-industrial ceiling, not a soil-quality ceiling —
+     using it unscaled silently neutralised this entire feature, caught only by measuring a real
+     settlement before shipping.** Early Industrial's/Industrial's own BASELINE (0.69/0.87 at
+     median soil) already exceeds 0.35, so every cell at or above median saturated at the same flat
+     cap as Traditional Agrarian's best-soil case — first measurement showed an "industrial"
+     faction's food shed only ~0.5% bigger than a traditional one's, not the order-of-magnitude
+     difference the ratio implies. Fixed: the cap now scales with the rung's own base ratio
+     (`FOOD_RICH_SOIL_MULT≈3.15`, preserving the original best-soil-vs-median relationship), clamped
+     at a new `FOOD_SURPLUS_RATIO_ABS_MAX=0.95`. Re-measured: Early Industrial now gives a real
+     settlement **2.66×** Traditional Agrarian's food-shed capacity.
+- **`_civFoodShed(p)`** resolves `_civFarmersPerUrbanite(p.faction)` once and threads it through all
+  three `foodSurplusRatio` call sites — own-cell local capacity, the hinterland integral (both using
+  `p`'s own faction — a settlement's immediate countryside is, in practice, its own territory, so a
+  per-cell territory-raster lookup in that hot loop would be needless complexity for the same
+  answer), and an exporting settlement `q`'s spare capacity (using `q.faction`, since a supplier's
+  surplus depends on ITS OWN farmers, not the consumer's).
+- **Deliberately does not touch yield-per-hectare, soil, or carrying capacity** — "one lever is
+  enough" (research doc §4): `_civPlaceCatchmentCeiling` already represents the land's total food-
+  output capacity in population-equivalent terms (calibrated against real historical density, itself
+  a predominantly-agrarian mix); the tech-level ratio governs what SHARE of that fixed capacity must
+  stay agricultural versus can be urban — exactly the real "agricultural labour share" metric this
+  is calibrated from. Disclosed scope cut: no total-population-growth-from-industrialisation effect
+  (better nutrition/medicine, urban migration pulls) — would need to touch the carrying-capacity
+  chain, deliberately left alone this pass.
+- **UI**: "Ag. technology" `<select>` in the Faction Inspector (`_civPopulateFactionEditor`,
+  alongside Government/Culture/Religion, with a live hint line) + a matching compact dropdown in
+  `_civBuildFactionPicker`'s per-faction pill row — same two-surfaces convention those three fields
+  already use.
+- **Known scope cuts**: no total-population-ceiling growth from industrialisation (see above); six
+  discrete rungs, not a continuous slider (matches the World Structure archetype convention); the
+  exact `farmersPerUrbanite` values are England-specific historical anchors — an illustrative curve,
+  not a claim every fantasy world's agricultural history must mirror England's (the research doc
+  also explains why later 19th-century England figures, confounded by grain imports, were NOT used
+  to anchor the Industrial rung).
 
 ### Route drawing prioritizes existing infrastructure; a named per-stage transport advisory (v1.53)
 

@@ -12,6 +12,87 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.54 — Agricultural technology as a per-faction axis
+
+Owner: the flat 9:1 farmer:urbanite ratio "doesn't sit against a civilisation having mastered
+things like the plow and sitting roughly at a level of industrial production, even so barely" —
+asked for research into how agricultural productivity actually slides across eras and how to wire
+it into auto-populate. `docs/research/agricultural-productivity.md` (new) grounds the whole feature
+in the England agricultural-labour-share series (Broadberry & Gardner 2013; CAMPOP): ~90% farming
+(9:1) is a *pre-improvement* baseline, not "mastered the plow" — by the time a society genuinely
+masters rotation/drainage/selective breeding (England ~1700–1760) agricultural share had already
+fallen to 43–47% (~1:1), and "barely industrial" (steam threshing/reaper, first chemical
+fertilizer, England ~1800, pre-mass-import) sat at 35% (~0.54:1). Hash vs v1.53 **ALL IDENTICAL**.
+1001 / 852 / 479 green.
+
+- **Scope, decided with the owner via `AskUserQuestion` before building**: per-faction (not one
+  world-level setting — different peoples on the same map can sit at different rungs), live-editable
+  in Generate → Civilization → Factions (not a setup-gate-only archetype), re-read every time
+  `_civFoodShed` runs rather than requiring a re-populate.
+- **`AG_TECH_LEVELS`** (6 named rungs, Subsistence → Industrial, each carrying a `farmersPerUrbanite`
+  calibrated from the research doc) + **`civFactionAgTech`** — a new per-faction parallel array,
+  same convention as `civFactionCulture`/`civFactionReligion`/`civFactionGovernment` (append-only
+  default, old-save-compatible rebuild-on-load, save-format field). Unlike those three, this is
+  explicitly **not pure flavor** — it's read by `foodSurplusRatio()`, so it's disclosed as such
+  everywhere it's wired, and the compact faction-picker's new dropdown carries a title saying so.
+- **`foodSurplusRatio(soil, refSoil, farmersPerUrbanite)`** gained a third argument. Two real
+  formula bugs surfaced only once R (farmers per urbanite) could drop below ~2, which the fixed 9:1
+  constant never did:
+  1. **`1/R` is the wrong formula; `1/(R+1)` is.** Population balance — R farmers + 1 urbanite,
+     uniform per-capita consumption, R farmer-yields must cover R+1 people — gives surplus fraction
+     `1/(R+1)`, not `1/R`. The shipped `1/9≈0.1111` (vs. the derived `1/10=0.1`) was never wrong
+     enough to notice at a fixed R=9, but `1/R` blows past 100% below R=2, which would make every
+     industrial-tier rung nonsensical. **Pinned exactly** at the historical `FOOD_BASE_SURPLUS_RATIO`
+     constant when `farmersPerUrbanite===FARMERS_PER_URBANITE`, so every existing world's numbers
+     are untouched to the bit (asserted); the corrected formula is used for every other rung.
+  2. **`FOOD_SURPLUS_RATIO_MAX=0.35` is a pre-industrial ceiling, not a soil-quality ceiling, and
+     using it unscaled silently neutralised this entire feature on first measurement.** Early
+     Industrial's/Industrial's *baseline* (0.69/0.87 at median soil) already exceeds 0.35, so every
+     cell at or above median saturated at the SAME flat cap as Traditional Agrarian's own best-soil
+     case — an industrial faction's food shed came out ~0.5% bigger than a traditional one's on a
+     real test settlement, not the multi-fold difference the ratio implies. Caught only by measuring
+     a real settlement before shipping, per this file's own discipline. Fixed: the cap now scales
+     with `baseRatio` (`FOOD_RICH_SOIL_MULT≈3.15`, preserving the original best-soil-vs-median
+     relationship), clamped at a new `FOOD_SURPLUS_RATIO_ABS_MAX=0.95` (a farm household always
+     keeps something back). Re-measured: Early Industrial now gives a real settlement **2.66×**
+     Traditional Agrarian's food-shed capacity — the order-of-magnitude shift the research predicts,
+     not a rounding nudge.
+- **`_civFoodShed(p)`** resolves `_civFarmersPerUrbanite(p.faction)` once per call and threads it
+  through all three of its `foodSurplusRatio` call sites (own-cell local capacity, the hinterland
+  integral, and an exporting settlement `q`'s spare — using `q.faction`, not `p.faction`, there,
+  since a supplier's surplus depends on its OWN farmers). The hinterland loop deliberately uses the
+  settlement's own faction throughout rather than a per-cell territory lookup — a settlement's
+  immediate countryside is, in practice, its own territory, and a per-cell raster read in that hot
+  loop would be needless complexity for the same answer.
+- **Deliberately does NOT touch yield-per-hectare** (`grainYieldKgHa`/`GRAIN_YIELD_MIN/MAX_KG_HA`,
+  soil, carrying capacity, or `currentAgrarianDensity`) — "one lever is enough" (§4 of the research
+  doc): `_civPlaceCatchmentCeiling` already represents the land's total food-output capacity in
+  population-equivalent terms, calibrated against real historical density (itself a predominantly-
+  agrarian mix); the tech-level ratio governs what SHARE of that fixed capacity has to remain in
+  agricultural labour versus what can be urban — precisely the real-world "agricultural labour
+  share" metric this is calibrated from. Scope cut, disclosed: this models the urbanisation SPLIT of
+  a fixed land-based population ceiling, not industrialisation's separate total-population-growth
+  effect (better nutrition/medicine, urban migration pulls) — genuinely out of scope, would need to
+  touch the carrying-capacity chain this version deliberately left alone.
+- **UI**: an "Ag. technology" `<select>` in the Faction Inspector (`_civPopulateFactionEditor`,
+  alongside Government/Culture/Religion, with a live hint line describing the rung) and a matching
+  compact dropdown in `_civBuildFactionPicker`'s per-faction pill row — same two-surfaces convention
+  those three fields already use.
+- **Tests**: 8 new smoke assertions (`R.v154`) — the default rung reproduces the exact legacy
+  constants to `1e-9` (both the baseline ratio and the cap), every faction defaults to Traditional
+  Agrarian on a fresh/old-save world, the corrected `1/(R+1)` formula, an industrial rung gives
+  substantially (not marginally) more surplus, low-R never exceeds the absolute cap or 100%, a real
+  settlement's food shed changes substantially when its faction's tech level changes, and the
+  Faction Inspector select exists/lists every level/writes through. `probe_foodshed.js` re-run
+  clean on a fresh default world (14.29% urbanisation, still inside the pre-industrial 5–20% band).
+- **Known scope cuts**: no total-population-ceiling growth from industrialisation (see above); the
+  six rungs are a discrete ladder, not a continuous slider (matches the World Structure archetype
+  convention already in this file); `AG_TECH_LEVELS`' exact `farmersPerUrbanite` values are England-
+  specific historical anchors, presented as an illustrative curve, not a claim every fantasy world's
+  agricultural history must mirror England's (see the research doc's own caveats, including why the
+  later 19th-century England figures — confounded by grain imports — were NOT used to anchor the
+  Industrial rung).
+
 ### v1.53 — Route drawing actually prefers existing infrastructure; a named per-stage transport advisory
 
 Owner audit: "when a route has been selected each stage of the route has its own optimal

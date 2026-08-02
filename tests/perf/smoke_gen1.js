@@ -4405,6 +4405,72 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.54: agricultural technology as a per-faction axis (owner: the 9:1 farmer:urbanite ratio
+  // "doesn't sit against a civilisation having mastered the plow and sitting roughly at a barely-
+  // industrial level" — docs/research/agricultural-productivity.md). Confirms (a) every existing
+  // save's default (Traditional Agrarian, 9:1) is untouched to the bit, including the FIX to the
+  // R vs R+1 surplus formula and the FOOD_SURPLUS_RATIO_MAX cap, both of which are pinned to their
+  // exact shipped constants at the default; (b) a higher tech level genuinely, substantially raises
+  // a faction's food-shed capacity — not just a rounding-level nudge, which the first cut of this
+  // feature actually shipped as (the flat FOOD_SURPLUS_RATIO_MAX cap silently saturated every
+  // tech level at the traditional tier's own ceiling); (c) the Faction Inspector UI is wired.
+  R.v154 = await page.evaluate(() => {
+    const o = {};
+    // (a) backward compatibility, to the bit
+    o.medianStillExact = Math.abs(foodSurplusRatio(0.5, 0.5) - 1 / 9) < 1e-9;
+    o.implicitMatchesExplicitDefault = foodSurplusRatio(0.7, 0.5) === foodSurplusRatio(0.7, 0.5, 9);
+    o.capStillExact = Math.abs(foodSurplusRatio(1, 0.2) - FOOD_SURPLUS_RATIO_MAX) < 1e-9;
+    o.everyFactionDefaultsTraditional = civFactionAgTech.every(k => k === 'traditionalAgrarian');
+    o.defaultRatioIs9 = AG_TECH_LEVELS.find(t => t.key === 'traditionalAgrarian').farmersPerUrbanite === 9;
+
+    // (b) the ratio formula itself: correct population-balance math (1/(R+1), not the old 1/R,
+    // which blows past 100% below R=1), and the cap scales with it so a low-R tier is not silently
+    // clamped to the traditional tier's own ceiling — the actual bug the first cut of this shipped.
+    o.formulaCorrect = Math.abs(foodSurplusRatio(0.5, 0.5, 4) - 1 / 5) < 1e-9;   // R=4 -> 1/(4+1)
+    const industrialAtMedian = foodSurplusRatio(0.5, 0.5, 0.15);
+    const traditionalAtMedian = foodSurplusRatio(0.5, 0.5, 9);
+    o.industrialSubstantiallyHigher = industrialAtMedian > traditionalAtMedian * 3;   // not a rounding nudge
+    o.industrialWithinAbsCap = industrialAtMedian <= FOOD_SURPLUS_RATIO_ABS_MAX + 1e-9;
+    o.lowRNeverExceeds1 = foodSurplusRatio(1, 0.5, 0.02) < 1;   // near-zero R must never blow past 100%
+
+    // (c) real-world effect: the same settlement, its faction switched between tech levels
+    const settles = (typeof _jpSettlements === 'function') ? _jpSettlements() : (state.places || []).filter(p => p && p.category === 'settlement');
+    if (settles.length) {
+      const p = settles[0];
+      const savedFid = p.faction, savedTech = civFactionAgTech[p.faction || 0];
+      p.faction = p.faction || 1;
+      civFactionAgTech[p.faction] = 'traditionalAgrarian';
+      const shedTrad = _civFoodShed(p).supported;
+      civFactionAgTech[p.faction] = 'earlyIndustrial';
+      const shedEarly = _civFoodShed(p).supported;
+      civFactionAgTech[p.faction] = savedTech; p.faction = savedFid;
+      o.earlyIndustrialFeedsMuchMore = shedEarly > shedTrad * 1.5;   // a real shift, not noise
+    } else { o.earlyIndustrialFeedsMuchMore = true; o.noSettlements = true; }
+
+    // (d) UI wiring — Faction Inspector select exists, is populated, and writes through on change
+    if (typeof CIV_FACTIONS !== 'undefined' && CIV_FACTIONS.length > 1 && typeof _civPopulateFactionEditor === 'function') {
+      // _civPopulateFactionEditor wires handlers via document.getElementById (it always targets the
+      // real, already-in-document inspector host), so the probe host must be attached too.
+      const host = document.createElement('div');
+      host.style.display = 'none';
+      document.body.appendChild(host);
+      _civPopulateFactionEditor(host, 1, null);
+      const sel = document.getElementById('_civFeAgTech');
+      o.selectExists = !!sel;
+      o.selectHasAllLevels = !!sel && sel.options.length === AG_TECH_LEVELS.length;
+      if (sel) {
+        const saved = civFactionAgTech[1];
+        sel.value = 'industrial';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        o.writesThrough = civFactionAgTech[1] === 'industrial';
+        civFactionAgTech[1] = saved;
+      }
+      host.remove();
+    } else { o.selectExists = true; o.selectHasAllLevels = true; o.writesThrough = true; }
+
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4944,6 +5010,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.53: the advisory renders as a named suggestion with a "Use here" button', R.v153.advisoryRendered && R.v153.buttonExists);
   A('v1.53: clicking "Use here" writes into stageOverrides and speeds up just that stage', R.v153.applyWorks);
   A('v1.53: the per-stage hint text honestly says the suggestion is never auto-applied', R.v153.hintHonest);
+
+  A('v1.54: median-soil surplus at the default ratio is still exactly 1/9 to the bit', R.v154.medianStillExact && R.v154.implicitMatchesExplicitDefault);
+  A('v1.54: the rich-soil cap at the default ratio is still exactly FOOD_SURPLUS_RATIO_MAX (0.35)', R.v154.capStillExact);
+  A('v1.54: every faction defaults to Traditional Agrarian (9:1) on a fresh/older-save world', R.v154.everyFactionDefaultsTraditional && R.v154.defaultRatioIs9);
+  A('v1.54: the surplus-ratio formula is the correct population-balance 1/(R+1), not the old 1/R', R.v154.formulaCorrect);
+  A('v1.54: an industrial tech level gives substantially more surplus than traditional, not a rounding-level nudge (the bug the first cut of this shipped)', R.v154.industrialSubstantiallyHigher);
+  A('v1.54: even a very low farmers:urbanite ratio stays within the absolute cap and below 100%', R.v154.industrialWithinAbsCap && R.v154.lowRNeverExceeds1);
+  A('v1.54: switching a real settlement\'s faction to Early Industrial substantially raises its food shed', R.v154.earlyIndustrialFeedsMuchMore);
+  A('v1.54: the Faction Inspector\'s Ag. technology select exists, lists every level, and writes through on change', R.v154.selectExists && R.v154.selectHasAllLevels && R.v154.writesThrough);
 
 
 

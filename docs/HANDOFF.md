@@ -9,11 +9,45 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.53.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.54.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.54 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.52` are kept and never edited.
+  (v1.55 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.53` are kept and never edited.
+- **v1.54 — agricultural technology as a per-faction axis.** Owner: the flat 9:1 farmer:urbanite
+  ratio "doesn't sit against a civilisation having mastered the plow and sitting roughly at a
+  level of industrial production, even so barely" — asked for research into how productivity
+  actually scales and how to use it in auto-populate. `docs/research/agricultural-productivity.md`
+  (new) grounds it in the England agricultural-labour-share series: 9:1/~90% is a *pre-improvement*
+  baseline (closer to ancient/early-medieval than to "mastered the plow"); by the time a society
+  genuinely masters rotation/drainage/selective breeding (England ~1700-1760) the ratio was already
+  ~1:1; "barely industrial" (steam threshing, first chemical fertilizer, England ~1800) sat at
+  ~0.54:1. Hash vs v1.53 ALL IDENTICAL. 1001 / 852 / 479 green.
+  - **Scope, decided with the owner via `AskUserQuestion` before building**: per-faction (not one
+    world setting), live-editable in the Faction Inspector (not setup-gate-only), read fresh every
+    `_civFoodShed` call.
+  - **New `AG_TECH_LEVELS` (6 rungs) + `civFactionAgTech`** (per-faction parallel array, same
+    convention as Culture/Religion/Government — but NOT pure flavor, disclosed as such everywhere).
+  - **Two real formula bugs found only by measuring, not by deriving on paper.** (1) The shipped
+    `FOOD_BASE_SURPLUS_RATIO=1/FARMERS_PER_URBANITE` should be `1/(FARMERS_PER_URBANITE+1)` —
+    population balance (R farmers + 1 urbanite, R yields must cover R+1 people) gives `1/(R+1)`, and
+    `1/R` blows past 100% below R=2, which the fixed R=9 default never triggered. Pinned exactly at
+    the historical constant for the default rung (every existing world untouched to the bit,
+    asserted); corrected formula used for every other rung. (2) `FOOD_SURPLUS_RATIO_MAX=0.35` is a
+    PRE-INDUSTRIAL ceiling, not a soil-quality ceiling — using it unscaled silently neutralised the
+    whole feature on first real measurement (an "industrial" faction's food shed came out ~0.5%
+    bigger than traditional's, because both saturated at the same flat cap). Fixed: the cap now
+    scales with the rung's own base ratio (preserving the original best-soil-vs-median relationship),
+    clamped at a new absolute 0.95. Re-measured: Early Industrial now gives **2.66×** Traditional
+    Agrarian's food-shed capacity on a real settlement — the order-of-magnitude shift the research
+    predicts, not the ~0.5% nudge the first cut actually shipped.
+  - **Deliberately does not touch yield-per-hectare or carrying capacity** — the tech-level ratio
+    governs what SHARE of the land's already-calibrated population ceiling must stay agricultural,
+    which is exactly the real "agricultural labour share" metric this is calibrated from. Disclosed
+    scope cut: no total-population-growth-from-industrialisation effect (nutrition/medicine/
+    migration pulls) — would need to touch the carrying-capacity chain, deliberately left alone.
+  - **UI**: Faction Inspector "Ag. technology" select (with live hint text) + a matching compact
+    picker dropdown, same two-surfaces convention Government/Culture/Religion already use.
 - **v1.53 — route drawing prioritizes existing infrastructure; a named per-stage transport
   advisory.** Owner audit: does each stage of a route get its own optimal transport, and does
   drawing a route between two settlements with an existing connecting way (e.g. a sea lane)
