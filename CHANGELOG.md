@@ -12,6 +12,62 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.57 — Factions pop-up + one editing surface per faction field
+
+Owner, immediately after reviewing the v1.55 faction-first redesign: "I'd also very much love it to
+be in a pop-up menu." Building it surfaced a second, unrelated defect the same conversation had
+already flagged by inspection: editing a faction's Government/Culture/Religion/Ag. technology
+existed in **two places at once** — an inline `<select>` per field in the v0.62/v1.07/v1.10/v1.16/
+v1.54 quick-select pill row, AND the v1.55/v1.54 Faction Inspector drawer's own fields for the exact
+same four values, edited independently with no sync between the two DOM nodes beyond both writing
+the same underlying array. Both fixed in one pass since the pop-up restructuring touched the same
+HTML region. Hash vs v1.56 **ALL IDENTICAL** (civ-layer/UI only — no engine or UME touch). 1001 / 852
+green; hash battery ALL IDENTICAL.
+
+- **The pop-up: `#civFactionsModal`, the same shell contract as `#cityViewerModal` (v1.18) and
+  `#routeEditorModal` (v1.44).** Fixed-inset overlay, `display:none` until `.open`, its own Escape
+  handler, a `_cfmOpen` presence flag other guard sites check the same way `_cvCam`/`_reOpen`
+  already do, added to `_overCanvasOverlay`'s scroll-fix list and `_sculptNavSync`'s joystick gate
+  (z-index 72, after the City Viewer's 70 and Route Editor's 71 — the three are mutually exclusive
+  in practice but the code never assumes that). `_civOpenFactionsModal()`/`_civCloseFactionsModal()`
+  mirror `_civOpenRouteEditor`/`_civOpenCityViewer`'s own "refresh on every open, not just on tab
+  entry" discipline, so content edited elsewhere (a settlement reassigned to a different faction
+  from the map) is never stale when the pop-up is reopened without leaving the Civilization tab.
+- **What moved vs. what stayed.** The world overview, the "All factions" roster, and the v1.55
+  detail drawer (unchanged slide-in-from-the-left behaviour, just re-scoped from the old sidebar
+  `#civFactionsWrap` to the pop-up's own `#civFactionsStage`) all moved into the modal. The
+  quick-select pills stayed in the sidebar — they drive `_civActiveFaction`, the Territory-paint/
+  Drop-settlement map tools' "paint/drop as" selection, which needs to stay visible and reachable
+  while the canvas itself is on screen; a pop-up that covers the map would defeat that. `_civRefresh
+  ActiveSubPage()`'s factions branch now closes the pop-up (not just the drawer inside it) on every
+  re-entry to the tab — the v1.55 "always land back on the simplified overview" rule, extended one
+  level up, so switching tabs away and back never leaves it hanging open over the sidebar.
+- **The dedup fix: `_civBuildFactionPicker()` no longer builds the four per-pill selects.** The
+  pills' job is picking `_civActiveFaction` for map authoring; editing a faction's own attributes is
+  the Inspector's job, now reached via the pop-up — there is exactly one place each of those four
+  fields can be changed. Double-click-to-rename stays on the pill (naming a faction while painting
+  its territory is a genuine map-authoring action, unlike the other four attributes, and the
+  Inspector's own Name field already writes the identical `civFactionNames` array either surface
+  would produce).
+- **Existing v1.07/v1.10 regression assertions tested the removed UI directly** (`pickerSelects >= 6`
+  culture selects, `religionSelects >= 6` religion selects, both counted inside `#civFactionPicker`)
+  — genuinely broken by this change, not a false alarm, so both were rewritten rather than deleted:
+  they now assert the picker carries **zero** selects of any kind, and that the Faction Inspector's
+  own `_civFeCul`/`_civFeRel` selects (opened via the real `_civOpenFactionsModal()`/
+  `_civRenderFactionInspector()` path) still list every `CIV_CULTURES`/religion entry and still round
+  -trip through `_civSyncToState`/`_civSyncFromState` unchanged.
+- **Tests**: 7 new smoke assertions (`R.v157`) — the modal carries the shell class and starts closed;
+  the sidebar launcher button opens it with real roster content rendered; `_overCanvasOverlay`
+  recognizes it; Escape closes it; the close button closes it; re-entering the Factions tab with it
+  left open always closes it; the pill row carries zero selects. Plus the two rewritten v1.07/v1.10
+  assertions above.
+- **Known scope cuts**: the settlement-clustering finding from the same review session (auto-populate
+  assigns one faction per LANDMASS via `contFaction`, not per settlement, so a world with few
+  landmasses can read as "favoring the first faction" when it's really "one polity per continent") is
+  real, reproduces identically on v1.54 (pre-dating this session's work), and is tracked separately in
+  `docs/HANDOFF.md` — a placement-algorithm change, not a UI change, and deliberately not bundled into
+  this version.
+
 ### v1.56 — Water-constraint softening
 
 Owner: "for water now it quickly gives a hard constraint. Whilst in reality people often drank from

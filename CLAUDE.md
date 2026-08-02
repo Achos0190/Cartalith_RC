@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.56**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.57**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.56.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.55.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.57.html` | **Current** unified tool (~28.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.56.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,47 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Factions pop-up + one editing surface per faction field (v1.57)
+
+Owner, immediately after reviewing v1.55: "I'd also very much love it to be in a pop-up menu." The
+same review had already surfaced, by inspection, a second defect: Government/Culture/Religion/Ag.
+technology were editable in TWO places — an inline `<select>` per field in the v0.62/v1.07/v1.10/
+v1.16/v1.54 quick-select pill row, AND the v1.55/v1.54 Faction Inspector drawer's own fields for the
+same four values, with no sync between the two beyond both writing the same underlying array. Both
+fixed in one pass, since the pop-up restructuring touched the same HTML region. Civ-layer (block 2)
+only — no engine/UME change. Hash vs v1.56 ALL IDENTICAL. 1001 / 852 green.
+
+- **`#civFactionsModal`** — same shell contract as `#cityViewerModal` (v1.18) / `#routeEditorModal`
+  (v1.44): fixed-inset overlay, `display:none` until `.open`, own Escape handler, a `_cfmOpen`
+  presence flag other guard sites check the same way `_cvCam`/`_reOpen` already do, added to
+  `_overCanvasOverlay`'s scroll-fix list and `_sculptNavSync`'s joystick gate (z-index 72, after the
+  City Viewer's 70 and Route Editor's 71). `_civOpenFactionsModal()`/`_civCloseFactionsModal()`
+  refresh the overview/roster/inspector on every open, not just on Factions-tab entry — the same
+  discipline `_civOpenRouteEditor`/`_civOpenCityViewer` already use, so content edited elsewhere
+  (a settlement reassigned to a different faction from the map) is never stale on reopen.
+- **What moved vs. what stayed.** World overview, the "All factions" roster, and the v1.55 detail
+  drawer (unchanged slide-in-from-the-left, just re-scoped from the old sidebar `#civFactionsWrap`
+  to the pop-up's own `#civFactionsStage`) moved into the modal. The quick-select pills stayed in
+  the sidebar — they drive `_civActiveFaction` for the Territory-paint/Drop-settlement map tools,
+  which needs the canvas visible, not covered by a pop-up. `_civRefreshActiveSubPage()`'s factions
+  branch now closes the pop-up (not just the drawer inside it) on every tab re-entry — the v1.55
+  "always land back on the simplified overview" rule extended one level up.
+- **The dedup fix**: `_civBuildFactionPicker()` no longer builds the four per-pill selects — the
+  pills' job is picking `_civActiveFaction`; editing a faction's attributes is the Inspector's job,
+  reached via the pop-up, so each of those four fields has exactly one editing surface.
+  Double-click-to-rename stays on the pill (a genuine map-authoring action, unlike the other four
+  fields, and it writes the identical `civFactionNames` array the Inspector's own Name field does).
+- **Two existing regression assertions tested the removed selects directly** (v1.07's `pickerSelects
+  >= 6`, v1.10's `religionSelects >= 6`, both counted inside `#civFactionPicker`) — rewritten, not
+  deleted: they now assert zero selects on the pill plus the Inspector's own selects (opened via the
+  real `_civOpenFactionsModal()`/`_civRenderFactionInspector()` path) still list every culture/
+  religion entry and still round-trip through sync.
+- **Known scope cut, tracked in HANDOFF, NOT fixed this pass**: auto-populate assigns one faction
+  per LANDMASS (`contFaction`, keyed on `contId`), not per settlement — found during the same
+  review, reproduces identically on v1.54 (pre-dates this session), and reads as "settlements
+  cluster onto one faction" on a world with few large landmasses. A placement-algorithm change, not
+  a UI change.
 
 ### Water-constraint softening (v1.56)
 

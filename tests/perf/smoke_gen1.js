@@ -113,7 +113,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // civFactionCulture round-tripping through the same state.civ sync used for faction names.
   R.cultureNaming = await page.evaluate(() => {
     if (typeof CIV_CULTURES === 'undefined' || typeof civFactionCulture === 'undefined') return { present: false };
+    // v1.57: the pill row must carry ZERO inline selects now (dedup fix — culture/religion/
+    // government/ag-tech editing moved solely into the Faction Inspector drawer inside the new
+    // Factions pop-up, so there is exactly one place each field can be changed).
     const pickerSelects = document.querySelectorAll('#civFactionPicker select').length;
+    const savedSelFaction = _civSelectedFaction;
+    _civSelectedFaction = 1;
+    if (typeof _civOpenFactionsModal === 'function') _civOpenFactionsModal(); else _civRenderFactionInspector();
+    const culSel = document.getElementById('_civFeCul');
+    const inspectorCultureOptions = culSel ? culSel.options.length : 0;
+    if (typeof _civCloseFactionsModal === 'function') _civCloseFactionsModal();
+    _civSelectedFaction = savedSelFaction;
     // give faction 1 an unmistakable culture and sample many generated names for its own suffixes
     const savedCulture1 = civFactionCulture[1];
     civFactionCulture[1] = 'imperial';
@@ -138,7 +148,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const restored = civFactionCulture[2] === 'desert';
     civFactionCulture[1] = savedCulture1;
     state.places = savedPlaces; _civSelectedPlace = savedSel; _civRenderPlaceEditor();
-    return { present: true, pickerSelects, adherenceRate: hits / N, rollBtnExists: !!rollBtn, rerolled, restored, savedArrLen: savedArr.length };
+    return { present: true, pickerSelects, inspectorCultureOptions, culturesLen: CIV_CULTURES.length, adherenceRate: hits / N, rollBtnExists: !!rollBtn, rerolled, restored, savedArrLen: savedArr.length };
   });
 
   // ── v1.08 (borrow-list #2, after Azgaar's FMG heightmap templates): setup-gate world-shape
@@ -261,10 +271,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       let provAreaKm2 = 0; for (const f of provFeats) for (const poly of f.geometry.coordinates) { provAreaKm2 += ringArea(poly[0]); for (let h = 1; h < poly.length; h++) provAreaKm2 -= ringArea(poly[h]); }
       let paintedCells = 0; for (let i = 0; i < civTerritory.length; i++) if (civTerritory[i]) paintedCells++;
       const cellKm = state.mapWidthKm / GW, territoryAreaKm2 = paintedCells * cellKm * cellKm;
-      // religion: picker DOM presence + persistence round-trip
+      // religion: picker DOM absence (v1.57 dedup) + Inspector DOM presence + persistence round-trip
       civFactionReligion[1] = 'sun_cult'; civFactionReligion[2] = 'sea_lords';
       _civBuildFactionPicker();
       const religionSelects = document.querySelectorAll('#civFactionPicker select[title="State religion"]').length;
+      const savedSelFaction2 = _civSelectedFaction;
+      _civSelectedFaction = 1; _civRenderFactionInspector();
+      const relSel = document.getElementById('_civFeRel');
+      const inspectorReligionOptions = relSel ? relSel.options.length : 0;
+      _civSelectedFaction = savedSelFaction2; _civRenderFactionInspector();
       _civSyncToState();
       const savedReligionLen = state.civ.factionReligion.length;
       civFactionReligion[1] = 'none';
@@ -276,7 +291,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       return {
         present: true, ok: true, prov1Count: prov1.length, prov2Count: prov2.length, prov2Name: prov2[0] && prov2[0].name,
         crossFactionLeak, diffPx, provFeatCount: provFeats.length, provGeomTypes: [...new Set(provFeats.map(f => f.geometry.type))],
-        areaRatio: provAreaKm2 / territoryAreaKm2, religionSelects, savedReligionLen, religionRestored
+        areaRatio: provAreaKm2 / territoryAreaKm2, religionSelects, inspectorReligionOptions, savedReligionLen, religionRestored
       };
     }).catch(e => {
       document.createElement = realCreateElement;
@@ -4635,6 +4650,58 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.57 (owner: "I'd also very much love it to be in a pop-up menu" — the v1.55 Factions
+  // sub-page): the world overview/roster/per-faction drawer moved out of the sidebar into a new
+  // full-screen #civFactionsModal, same shell contract as #cityViewerModal (v1.18)/#routeEditorModal
+  // (v1.44) — own .open-class toggle, own Escape handler, added to _overCanvasOverlay's scroll-fix
+  // list. Bundled in the same pass: the faction-pill dedup fix (culture/religion/government/ag-tech
+  // editing previously existed BOTH as inline <select>s in the pill row AND in the Faction Inspector
+  // drawer for the same four fields — now only the Inspector edits them; assertions for that live in
+  // the v1.07/v1.10 blocks above, which this version's edit touched directly).
+  R.v157 = await page.evaluate(() => {
+    const o = {};
+    const modal = document.getElementById('civFactionsModal');
+    o.modalHasClass = !!modal && modal.classList.contains('civ-factions-modal');
+    o.modalClosedInitially = !!modal && !modal.classList.contains('open');
+
+    // the Factions tab must be active for the sidebar launcher button to exist/matter
+    const bar = document.querySelectorAll('#civSubBar .subtab');
+    if (bar.length) bar[0].click();   // bar[0] is Factions per the v1.55 faction-first ordering
+
+    const openBtn = document.getElementById('civOpenFactionsBtn');
+    o.openBtnExists = !!openBtn;
+    if (openBtn) openBtn.click();
+    o.opensOnButtonClick = !!modal && modal.classList.contains('open');
+    const listEl = document.getElementById('civFactionList');
+    o.rosterRendersOpen = !!listEl && listEl.innerHTML.trim().length > 0;   // populated by _civOpenFactionsModal's refresh-on-open, not left blank
+    o.overCanvasRecognizesModal = typeof _overCanvasOverlay === 'function' &&
+      _overCanvasOverlay({ target: document.getElementById('civWorldOverviewOut') }) === true;
+
+    // Escape closes it
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    o.closesOnEscape = !!modal && !modal.classList.contains('open');
+
+    // close button closes it too
+    if (openBtn) openBtn.click();
+    const reopened = !!modal && modal.classList.contains('open');
+    const closeBtn = document.getElementById('cfmCloseBtn');
+    if (closeBtn) closeBtn.click();
+    o.closesOnCloseButton = reopened && !!modal && !modal.classList.contains('open');
+
+    // re-entering the Factions tab with the modal left open always closes it (v1.55's drawer-reset
+    // rule, extended one level up) — leave it open, then click the tab button again (real path).
+    if (openBtn) openBtn.click();
+    const leftOpen = !!modal && modal.classList.contains('open');
+    if (bar.length) bar[0].click();
+    o.reEntryClosesModal = leftOpen && !!modal && !modal.classList.contains('open');
+
+    // the picker itself must now carry ZERO selects of any kind (dedup fix) — a direct, feature-
+    // named check alongside the v1.07/v1.10 blocks' own coverage of the same fact.
+    o.pickerHasNoSelects = document.querySelectorAll('#civFactionPicker select').length === 0;
+
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -4828,7 +4895,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
   A('v1.06: setup-gate seed box exists, 🎲 rolls a new value, and the typed seed drives state.tect.seed', R.setupSeedApplied === 'vacuous' || (R.setupSeed.present && R.setupSeed.diceChanged && R.setupSeedApplied === true));
   // ── v1.07: culture-flavored naming (borrow-list #1) ──
-  A('v1.07: every non-Unclaimed faction gets a naming-culture picker in the faction pill row', R.cultureNaming.present && R.cultureNaming.pickerSelects >= 6);
+  A('v1.07/v1.57: the faction pill row carries no naming-culture select (moved to the Faction Inspector); the Inspector\'s own culture select lists every CIV_CULTURES entry', R.cultureNaming.present && R.cultureNaming.pickerSelects === 0 && R.cultureNaming.inspectorCultureOptions === R.cultureNaming.culturesLen);
   A('v1.07: a faction pinned to a distinctive culture names its settlements from that culture\'s own suffix pool', R.cultureNaming.adherenceRate > 0.9);
   A('v1.07: the settlement editor\'s 🎲 re-rolls a name from the settlement\'s own faction culture', R.cultureNaming.rollBtnExists && R.cultureNaming.rerolled);
   A('v1.07: civFactionCulture round-trips through the same state.civ sync as faction names', R.cultureNaming.savedArrLen > 0 && R.cultureNaming.restored);
@@ -4844,7 +4911,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.10: a province never crosses its own faction\'s territory boundary', R.provinces.crossFactionLeak === false);
   A('v1.10: enabling the provinces tint produces a real pixel difference on the civ canvas', R.provinces.diffPx > 0);
   A('v1.10: exported province MultiPolygons exactly tile the parent territory (combined area == territory area)', R.provinces.provFeatCount === 3 && R.provinces.provGeomTypes.length === 1 && R.provinces.provGeomTypes[0] === 'MultiPolygon' && Math.abs(R.provinces.areaRatio - 1) < 0.001);
-  A('v1.10: every non-Unclaimed faction gets a state-religion picker, and civFactionReligion round-trips through sync', R.provinces.religionSelects >= 6 && R.provinces.savedReligionLen > 0 && R.provinces.religionRestored);
+  A('v1.10/v1.57: the faction pill row carries no state-religion select (moved to the Faction Inspector, which lists it correctly), and civFactionReligion round-trips through sync', R.provinces.religionSelects === 0 && R.provinces.inspectorReligionOptions > 0 && R.provinces.savedReligionLen > 0 && R.provinces.religionRestored);
   // ── v1.11: submap/resample UX (borrow-list #5) ──
   A('v1.11: "Extract as new world" shows a confirm() and hands off to the calibrate step at the requested resolution', R.submap.confirmSeen === true && R.submap.resolutionIsRequested === true);
   A('v1.11: the extracted region preserves real-world scale (new mapWidthKm == parent width × region-fraction, both in the state and the prefilled calibrate field)', Math.abs(R.submap.afterExtract.mapWidthKm - R.submap.expectedMapWidthKm) < 0.01 && Math.abs(R.submap.afterExtract.calWidthValue - R.submap.expectedMapWidthKm) < 1);
@@ -5203,7 +5270,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.56: a genuine desert stage still honors an explicit override (unchanged regression)', R.v156.desertExplicitOverrideStillHonored);
   A('v1.56: a genuine desert stage on auto still resolves and labels its tier', R.v156.desertAutoStillResolvesAndLabels);
 
-
+  A('v1.57: the Factions pop-up carries the modal shell class and starts closed', R.v157.modalHasClass && R.v157.modalClosedInitially);
+  A('v1.57: the sidebar launcher button opens it, with real roster content rendered', R.v157.openBtnExists && R.v157.opensOnButtonClick && R.v157.rosterRendersOpen);
+  A('v1.57: _overCanvasOverlay recognizes the Factions pop-up (scroll/wheel events inside it are handed back to native scrolling)', R.v157.overCanvasRecognizesModal);
+  A('v1.57: Escape closes the pop-up', R.v157.closesOnEscape);
+  A('v1.57: the close button closes the pop-up', R.v157.closesOnCloseButton);
+  A('v1.57: re-entering the Factions tab always closes the pop-up if left open (v1.55\'s drawer-reset rule, extended one level up)', R.v157.reEntryClosesModal);
+  A('v1.57: the faction pill row carries zero selects of any kind (Government/Culture/Religion/Ag.-tech editing now lives only in the Inspector)', R.v157.pickerHasNoSelects);
 
 
 
