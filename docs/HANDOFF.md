@@ -9,11 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.58.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.59.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.59 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.57` are kept and never edited.
+  (v1.60 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.58` are kept and never edited.
+- **v1.59 — Civilization menu reorder: faction creation leads into world generation.** Owner:
+  "completely redesign and rethink the civilisation menu's under generate and make it a bottom up
+  system that populates on the map as it does at the moment... Refactor and Consolidate the
+  Generation → Civilization menu from the ground up putting the menu's in a logical order of
+  faction creation that leads up to the autopopulate (auto routes and settlements) function." Pure
+  civ-layer HTML/DOM reorganization — no engine/UME change, every id/handler unchanged, only
+  physical placement moved. Hash vs v1.58 ALL IDENTICAL. 1001 / 852 green; hash battery ALL
+  IDENTICAL; 516 smoke green; see CHANGELOG for the full writeup.
+  - `#civSubBar` reordered: Generation moves from last to 2nd, right after Factions — **Factions →
+    Generation → Settlements → Economy → Statistics** (was Factions → Settlements → Economy →
+    Statistics → Generation, v1.55's ordering, which left the world-gen trigger buttons dead last
+    behind three post-generation report pages that read empty until Auto-populate has run). No JS
+    change needed — the tab click handler keys off `dataset.civsub`, not DOM position.
+  - `#civSubGeneration` restructured into an explicit **Step 1 (populate) → Step 2 (roads) → Ways →
+    Step 3 (territories) → Provinces → Display** sequence, dissolving the old "Advanced" catch-all
+    `<details>` — Ways/Provinces promoted to always-visible sections (Provinces stays after Step 3
+    on purpose, since `_civGenerateProvinces()` needs `civTerritory` populated first); the four
+    map-styling sliders isolated into their own "Display" accordion.
+  - The Territory-paint brush radius (`civTerRadius`) moved out of Generation entirely into a new
+    contextual row (`civTerritoryToolRow`, beside `civPoiTypeRow`), shown only while the Territory
+    tool is armed — it's a tool-brush parameter, not a generation setting.
 - **v1.58 — political fragmentation on a single landmass.** Owner, on the v1.57 scope cut below:
   "if there is only 1 continent it should lead to a division of the continent, based on geography
   and industrial prowess." `docs/research/political-fragmentation.md` (new). Hash vs v1.57 ALL
@@ -1966,6 +1987,10 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Civilization menu reorder (v1.59) — shipped.** See CHANGELOG/above for the full writeup;
+  `#civSubBar` now reads Factions → Generation → Settlements → Economy → Statistics, and
+  `#civSubGeneration` is an explicit Step 1→2→3 sequence. Pure reorganization — no scope cuts, no
+  functionality changed.
 - **Settlement placement clusters onto one faction (v1.58) — shipped.** See CHANGELOG/above for
   the full writeup; `_civAssignLandmassFactions()` apportions spare faction capacity across
   landmasses by highest-averages, weighted by summed settlement suitability. Known scope cut: the

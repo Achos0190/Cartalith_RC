@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.58**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.59**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.58.html` | **Current** unified tool (~28.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.57.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.59.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.58.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,52 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Civilization menu reorder: faction creation leads into world generation (v1.59)
+
+Owner: "completely redesign and rethink the civilisation menu's under generate and make it a
+bottom up system that populates on the map as it does at the moment... Refactor and Consolidate
+the Generation → Civilization menu from the ground up putting the menu's in a logical order of
+faction creation that leads up to the autopopulate (auto routes and settlements) function." Pure
+civ-layer (block 2) HTML/DOM reorganization — no engine/UME change, no new mechanics; every id,
+JS function, and handler is unchanged, only physical placement/grouping/labels moved. Hash vs
+v1.58 ALL IDENTICAL. 1001 / 852 green.
+
+- **`#civSubBar` reordered**: Generation moves from last to 2nd, right after Factions — **Factions
+  → Generation → Settlements → Economy → Statistics** (was Factions → Settlements → Economy →
+  Statistics → Generation, v1.55's ordering). v1.55 got faction *browsing* first but left the
+  world-gen trigger buttons (Auto-populate/Generate Roads/Recalculate Territories) dead last,
+  behind three post-generation report pages that read empty until Auto-populate has run. Factions
+  stays the default landing tab. The tab click handler keys its `pages` map by `dataset.civsub`
+  string, not DOM position, so the reorder needed **zero JS changes** — grep-confirmed no
+  positional (`nth-child`/`children[n]`) indexing touches `#civSubBar`/`#civSubGeneration`
+  anywhere in the file.
+- **`#civSubGeneration` restructured into an explicit Step 1→2→3 sequence** (populate → connect →
+  formalize control), replacing the old three `.sec` blocks + one catch-all "Advanced" `<details>`
+  (a grab-bag that existed, per its own v1.16 comment, only because those controls "had no named
+  slot" — never a deliberate grouping): **Step 1 · Populate settlements** (unchanged) → **Step 2 ·
+  Generate roads** (moved up from after Territories — confirmed safe: `_civAutoRoutes()` never
+  reads faction/territory state, `_civAutoPolity()` never reads `civWays`/journeys, so the reorder
+  is purely narrative) → **Ways** (promoted out of Advanced, always-visible, directly under Step 2
+  since `#civWayList` is that step's own output) → **Step 3 · Recalculate territories** →
+  **Provinces** (promoted out of Advanced, stays after Step 3 on purpose — `_civGenerateProvinces()`
+  bails empty until `civTerritory` is populated) → **Display** (the four map-styling sliders, now
+  in their own collapsed accordion instead of sharing one with Provinces/Ways, which have nothing
+  to do with each other besides also lacking a slot).
+- **The Territory-paint brush radius (`civTerRadius`) moved out of Generation entirely** — it's a
+  tool-brush parameter (`_civPaintTerritoryAt` reads the global `_civTerRadius`), not a generation
+  setting. New contextual row `#civTerritoryToolRow`, inserted between `#civPoiTypeRow` and
+  `#civWayDrawRow`, mirroring `civPoiTypeRow`'s own `_civSetTool`-driven `display:none`/`''`
+  toggle idiom exactly (shown only while the Territory tool is armed). The pre-existing
+  `civTerRadius`/`civTerRadiusV` input-listener wiring needed zero changes — `getElementById`-
+  driven, doesn't care where the element lives in the DOM.
+- **Tests**: 8 new smoke assertions (`R.v159`) — real DOM tab order; Generation's internal section
+  order via a real tab click (Step 1→2→Ways→Step 3→Provinces→Display, Roads before Territories);
+  `civTerRadius` relocated into `civTerritoryToolRow` and out of `#civSubGeneration`; a real
+  click-path arming the Territory tool reveals the row and marks the button `.on`; the slider
+  wiring survives the move; the old Advanced grab-bag is genuinely gone (`civWayList`/
+  `civProvincesChk` no longer inside any `<details>`).
+- **Known scope cuts**: none — pure reorganization of existing, working controls.
 
 ### Political fragmentation on a single landmass (v1.58)
 

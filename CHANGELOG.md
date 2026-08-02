@@ -12,6 +12,73 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.59 — Civilization menu reorder: faction creation leads into world generation
+
+Owner: "I'd like you to completely redesign and rethink the civilisation menu's under generate and
+make it a bottom up system that populates on the map as it does at the moment. So effectively:
+Refactor and Consolidate the Generation → Civilization menu from the ground up putting the menu's
+in a logical order of faction creation that leads up to the autopopulate (auto routes and
+settlements) function." A pure civ-layer (block 2) HTML/DOM reorganization — no engine/UME change,
+no new mechanics; every id, JS function, and handler is unchanged, only physical placement/
+grouping/labels moved. Hash vs v1.58 **ALL IDENTICAL**. 1001 / 852 green; hash battery ALL
+IDENTICAL; 516 smoke assertions green.
+
+- **`#civSubBar` reordered**: `Generation` moves from last to 2nd position, directly after
+  `Factions` — **Factions → Generation → Settlements → Economy → Statistics** (was Factions →
+  Settlements → Economy → Statistics → Generation, v1.55's faction-first ordering). v1.55 got
+  faction *browsing* first, but left the actual world-gen trigger buttons (Auto-populate, Generate
+  Roads, Recalculate Territories) dead last, behind three post-generation report pages that read
+  empty until Auto-populate has run — the tab order read as "browse, browse, browse, browse, then
+  finally the button," not a workflow. Factions stays the default landing tab (`_civSubTab`
+  unchanged, still `'factions'`) — you still start by defining who's in your world, but the very
+  next tab is now "populate it." The tab click handler keys its `pages` map by `dataset.civsub`
+  string, not DOM position, so **no JS change was needed** for the reorder — confirmed by a grep
+  audit finding zero positional (`nth-child`/`children[n]`) indexing anywhere touching
+  `#civSubBar`/`#civSubGeneration`.
+- **`#civSubGeneration` restructured into an explicit Step 1→2→3 sequence** (populate → connect →
+  formalize control), dissolving the old three-loosely-labeled-`.sec`-blocks-plus-one-catch-all-
+  "Advanced"-`<details>` shape (a grab-bag that existed, per its own v1.16 comment, only because
+  those controls "had no named slot in the 4-item Generation list" — never a deliberate grouping):
+  1. **Step 1 · Populate settlements** — the existing Auto-populate-counts block, verbatim, sublabel
+     reworded.
+  2. **Step 2 · Generate roads** — the existing Roads block, moved up to directly follow Step 1
+     (was after Territories). Confirmed safe by reading both functions: `_civAutoRoutes()` never
+     reads faction/territory state, `_civAutoPolity()` never reads `civWays`/journeys — no
+     dependency either direction, so the reorder is purely narrative.
+  3. **Ways** — promoted out of "Advanced" to its own always-visible section directly under Step 2,
+     since `#civWayList` is literally that step's own output.
+  4. **Step 3 · Recalculate territories** — the existing Territories block, now after Ways.
+  5. **Provinces** — promoted out of "Advanced", directly after Step 3. Not arbitrary:
+     `_civGenerateProvinces()` bails to an empty result until `civTerritory` is populated, so
+     Provinces can't move any earlier than this.
+  6. **Display** — the four rendering sliders (icon/way scale, territory/way opacity), given their
+     own collapsed `<details class="cat-acc">` instead of sharing one with Provinces/Ways, since
+     they're pure map styling with nothing to do with generation.
+- **The Territory-paint brush radius (`civTerRadius`) moved out of Generation entirely.** It was
+  parked inside "Advanced → Provinces," but it's not a generation parameter — it's the brush radius
+  for the *manual* Territory-paint tool (`_civPaintTerritoryAt` reads the global `_civTerRadius`).
+  New contextual row `#civTerritoryToolRow`, inserted between the existing `#civPoiTypeRow` and
+  `#civWayDrawRow`, mirroring `civPoiTypeRow`'s own pattern exactly (`display:none` by default,
+  shown only while its tool is armed via the same `_civSetTool`-driven toggle idiom). The pre-
+  existing `civTerRadius`/`civTerRadiusV` input-listener wiring in the init IIFE needed **zero
+  changes** — it's `getElementById`-driven and doesn't care where the element lives in the DOM.
+  Placing the new row between the POI row and the Way-draw row also means the three contextual/
+  always-visible rows now read top-to-bottom in the same order as the tool-palette buttons above
+  them (place_poi → territory → draw_way) — a free coherence win.
+- **`#civSubFactions` is unchanged** — already well-designed (v1.55/v1.57) and already sits first.
+- **Tests**: 8 new smoke assertions (`R.v159`) — real DOM tab order equals
+  `['factions','generation','settlements','economy','statistics']`; Generation's internal section
+  order (via the real Generation tab click) is Step 1 → Step 2 → Ways → Step 3 → Provinces →
+  Display, with Generate Roads specifically before Recalculate Territories; `civTerRadius` no
+  longer lives inside `#civSubGeneration`, only inside the new `civTerritoryToolRow`; a real
+  click-path (arm the Territory tool via the palette) reveals the row and marks the button `.on`,
+  arming Inspect hides it again; the slider wiring survives the move (a real `input` event still
+  updates `_civTerRadius`/the readout); the old "Advanced" grab-bag is genuinely gone —
+  `civWayList`/`civProvincesChk` are no longer inside any `<details>`, and the new Display
+  accordion contains neither.
+- **Known scope cuts**: none — this is a pure reorganization of existing, working controls; no
+  functionality was added, removed, or changed.
+
 ### v1.58 — Political fragmentation on a single landmass
 
 Owner, on the settlement-clustering finding v1.57 tracked but didn't fix: "I think its okay in the

@@ -4823,6 +4823,83 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.59 (owner: "completely redesign and rethink the civilisation menu's under generate...
+  // Refactor and Consolidate the Generation → Civilization menu from the ground up putting the
+  // menu's in a logical order of faction creation that leads up to the autopopulate function").
+  // Pure civ-layer HTML/DOM reorganization: #civSubBar reorders Generation from last to 2nd
+  // (right after Factions); #civSubGeneration restructures into an explicit Step 1→2→3 sequence
+  // (populate → roads → territories), dissolving the old "Advanced" grab-bag — Ways/Provinces
+  // promoted to always-visible sections, map-styling sliders isolated into their own "Display"
+  // accordion; the Territory-paint brush radius (civTerRadius) moves out of Generation entirely
+  // into a new contextual row (civTerritoryToolRow) beside civPoiTypeRow, shown only while the
+  // Territory tool is armed. No ids/handlers/logic changed — only physical placement.
+  R.v159 = await page.evaluate(() => {
+    const o = {};
+
+    // (1) real DOM tab order
+    const tabs = [...document.querySelectorAll('#civSubBar .subtab')].map(b => b.dataset.civsub);
+    o.tabOrderCorrect = JSON.stringify(tabs) === JSON.stringify(['factions', 'generation', 'settlements', 'economy', 'statistics']);
+
+    // (2) Generation page's internal section order — click the real tab button first
+    const genBtn = [...document.querySelectorAll('#civSubBar .subtab')].find(b => b.dataset.civsub === 'generation');
+    if (genBtn) genBtn.click();
+    const genPage = document.getElementById('civSubGeneration');
+    const children = genPage ? [...genPage.children].filter(el => el.classList.contains('sec') || (el.tagName === 'DETAILS' && el.classList.contains('cat-acc'))) : [];
+    const labelOf = el => {
+      if (el.tagName === 'DETAILS') { const s = el.querySelector('summary'); return s ? s.textContent.trim() : ''; }
+      const sl = el.querySelector('.sublabel');
+      return sl ? sl.textContent.trim() : '';
+    };
+    const labels = children.map(labelOf);
+    o.stepOrderCorrect = labels.length >= 6 &&
+      labels[0].startsWith('Step 1') && labels[1].startsWith('Step 2') &&
+      labels[2] === 'Ways' && labels[3].startsWith('Step 3') &&
+      labels[4] === 'Provinces' && labels[5] === 'Display';
+    o.roadsBeforeTerritories = labels.findIndex(l => l.startsWith('Step 2')) < labels.findIndex(l => l.startsWith('Step 3'));
+
+    // (3) civTerRadius relocated out of Generation into civTerritoryToolRow, a sibling row before #civSubBar
+    const terRadius = document.getElementById('civTerRadius');
+    const terRow = document.getElementById('civTerritoryToolRow');
+    o.terRadiusNotInGeneration = !!terRadius && !!genPage && !genPage.contains(terRadius);
+    o.terRadiusInsideTerRow = !!terRadius && !!terRow && terRow.contains(terRadius);
+    const poiRow = document.getElementById('civPoiTypeRow'), wayRow = document.getElementById('civWayDrawRow'), subBar = document.getElementById('civSubBar');
+    o.terRowIsRowSiblingBeforeBar = !!terRow && terRow.classList.contains('row') && !!poiRow && !!wayRow && !!subBar &&
+      !!(terRow.compareDocumentPosition(poiRow) & Node.DOCUMENT_POSITION_PRECEDING) &&
+      !!(terRow.compareDocumentPosition(wayRow) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+      !!(terRow.compareDocumentPosition(subBar) & Node.DOCUMENT_POSITION_FOLLOWING);
+    o.terRowHiddenByDefault = !!terRow && getComputedStyle(terRow).display === 'none';
+
+    // (4) real click-path: arm Territory → row visible + button .on; arm Inspect → row hides
+    const terBtn = document.querySelector('#civToolPalette [data-civtool="territory"]');
+    const inspectBtn = document.querySelector('#civToolPalette [data-civtool="inspect"]');
+    if (terBtn) terBtn.click();
+    o.terRowVisibleWhenArmed = !!terRow && getComputedStyle(terRow).display !== 'none';
+    o.terBtnHasOnClass = !!terBtn && terBtn.classList.contains('on');
+    if (inspectBtn) inspectBtn.click();
+    o.terRowHidesOnInspect = !!terRow && getComputedStyle(terRow).display === 'none';
+
+    // (5) slider wiring survives the move
+    if (terBtn) terBtn.click();   // re-arm territory
+    if (terRadius) { terRadius.value = '17'; terRadius.dispatchEvent(new Event('input', { bubbles: true })); }
+    const terRadiusV = document.getElementById('civTerRadiusV');
+    o.sliderUpdatesGlobal = typeof _civTerRadius !== 'undefined' && _civTerRadius === 17;
+    o.sliderUpdatesLabel = !!terRadiusV && terRadiusV.textContent === '17';
+    if (inspectBtn) inspectBtn.click();   // leave tools back at rest
+
+    // (6) old "Advanced" grab-bag is genuinely gone — civWayList/civProvincesChk are no longer
+    // inside any <details>, and the Display accordion contains neither of them.
+    const wayList = document.getElementById('civWayList');
+    const provChk = document.getElementById('civProvincesChk');
+    o.wayListNotInDetails = !!wayList && !wayList.closest('details');
+    o.provChkNotInDetails = !!provChk && !provChk.closest('details');
+    const iconScale = document.getElementById('civIconScaleR');
+    const displayDetails = iconScale ? iconScale.closest('details.cat-acc') : null;
+    o.displayAccordionExists = !!displayDetails;
+    o.displayAccordionExcludesWaysProvinces = !!displayDetails && !displayDetails.contains(wayList) && !displayDetails.contains(provChk);
+
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5405,6 +5482,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.58: a landmass never earns more capitals than it has candidate settlements to seed them with', R.v158.seatsNeverExceedCandidates);
   A('v1.58: on a real generated world with few landmasses, more than 1-2 factions now get settlements — every defined faction gets at least one', R.v158.realWorldUsesMoreThanTwoFactions && R.v158.realWorldEveryFactionHasASettlement);
 
+  A('v1.59: Civilization sub-tab order is Factions → Generation → Settlements → Economy → Statistics (owner: faction creation leads up to autopopulate)', R.v159.tabOrderCorrect);
+  A('v1.59: Generation restructured into Step 1 (populate) → Step 2 (roads) → Ways → Step 3 (territories) → Provinces → Display', R.v159.stepOrderCorrect);
+  A('v1.59: Generate Roads sits before Recalculate Territories (settle → connect → formalize control)', R.v159.roadsBeforeTerritories);
+  A('v1.59: civTerRadius relocated out of #civSubGeneration into the new civTerritoryToolRow contextual row', R.v159.terRadiusNotInGeneration && R.v159.terRadiusInsideTerRow);
+  A('v1.59: civTerritoryToolRow sits between civPoiTypeRow and civWayDrawRow, before #civSubBar, hidden by default', R.v159.terRowIsRowSiblingBeforeBar && R.v159.terRowHiddenByDefault);
+  A('v1.59: arming the Territory tool reveals civTerritoryToolRow and marks the palette button on; arming Inspect hides it again', R.v159.terRowVisibleWhenArmed && R.v159.terBtnHasOnClass && R.v159.terRowHidesOnInspect);
+  A('v1.59: civTerRadius slider wiring survives the relocation — dispatching input still updates _civTerRadius and the readout', R.v159.sliderUpdatesGlobal && R.v159.sliderUpdatesLabel);
+  A('v1.59: the old "Advanced" grab-bag is gone — civWayList/civProvincesChk are no longer inside any <details>, and the Display accordion holds neither', R.v159.wayListNotInDetails && R.v159.provChkNotInDetails && R.v159.displayAccordionExists && R.v159.displayAccordionExcludesWaysProvinces);
 
 
 
