@@ -12,6 +12,67 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.55 — Faction-first Civilization menu
+
+Owner: "I like the new civilization menu, implement it please in a logical fashion, maybe make it
+scroll into the screen from the left. Only showing a simplified version at first (that for examples
+only shows a global overview)" — approving and requesting real implementation of the faction-first
+mockup/proposal from the prior session (audit: faction culture had zero mechanical effect on
+settlement placement — naming-flavor only). Civ-layer (block 2) UI + one `_civFactionAggregates()`
+extension only. Hash vs v1.54 **ALL IDENTICAL**. 1001 / 852 / 488 green.
+
+- **Faction-first ordering.** `#civSubBar` reordered to Factions → Settlements → Economy →
+  Statistics → Generation (was Generation-first); `_civSubTab` now defaults to `'factions'` (was
+  `'generation'`) — factions drive settlement sizing (ag. technology, v1.54) and territory, so
+  they're the entry point, while Generation (one-off world-gen trigger buttons) moves last.
+- **Overview-first, drawer-on-demand.** `#civSubFactions` is now `#civFactionsWrap`
+  (`position:relative;overflow:hidden`) holding two layers: an always-in-flow **global overview**
+  (new world-summary line + the existing quick-select pills + a richer roster list showing
+  government/ag.-tech/population per faction) and a **detail drawer** (`#civFactionDrawer`,
+  `.civ-drawer`) that slides in **from the left** over it when a roster row is clicked — the same
+  `transform:translateX(...); transition:transform .22s ease` idiom the mobile `<aside>` panel
+  already uses (mirrored to the opposite edge, scoped to this sub-page instead of the viewport).
+  `_civRefreshActiveSubPage()` closes the drawer on every entry into the Factions tab, so switching
+  away and back always lands on the simplified overview first, never mid-drill-down — the literal
+  reading of "only showing a simplified version at first."
+- **Territory Fit** (new, in the faction drawer): surfaces the prior session's audit finding
+  honestly instead of quietly leaving it unaddressed. `_civFactionAggregates()`'s existing single
+  `O(GW·GH)` pass (never a second full-grid scan — this function's own header rule) now also
+  accumulates a per-faction terrain-mix (river/coastal/arid/forest/hills cell fractions, reusing
+  `buildBiomeRaster()`, the file-wide `flowThresh=GW*GH*0.0004` river convention,
+  `_civOceanDistField()`'s cached chamfer DT floored at 1.5 cells per the v1.35 sub-cell-threshold
+  rule, and `_civPlaceDefensibility`'s existing mild-upland relative-elevation threshold for
+  "hills," since no dedicated biome key exists for it) plus the matching world-mean twin.
+  `_civCultureTerrainFit(cultureKey, terrainMix, worldMeanTerrain)` compares the five terrain-themed
+  cultures (highland/desert/riverlands/sylvan/maritime) against the WORLD mean (never an absolute
+  cut — the same relative-margin discipline v1.30/v1.32/v1.37/v1.46 already established) and returns
+  a match/typical/mismatch verdict; `common`/`imperial` are identity-flavored, not terrain-themed, so
+  they get composition-only, **never a fabricated verdict** (the same "a verdict with no real signal
+  behind it is worse than none" discipline as v1.35's `basis` field).
+- **Pre-world guard, found during verification, not by inspection.** Making Factions the default
+  tab surfaced a latent bug: `generate()`'s own wrapper calls `_civRenderPlaceEditor()` — which
+  reaches `_civFactionAggregates()` via `_civRefreshActiveSubPage()` whenever the Factions tab is
+  active — **before** the real `generate()` body runs, on every single (re)generate. Previously this
+  branch was dead unless a user had manually opened Factions and then hit Regenerate; defaulting to
+  Factions makes it run unconditionally and it crashed inside `currentLithology()`'s `plateCrust()`
+  (`plates[plateId[i]].base` on an empty `plates` array) — a real throw inside `generate()`, against
+  this file's own "generate() completes synchronously, never throws" invariant. Root-caused to the
+  exact `plates=[]` / `field[]`-already-allocated-but-zeroed pre-tectonic-substrate state the file's
+  own v0.106 tectonic-inversion comment already documents for imported DEMs. Fixed with an explicit
+  `plates.length` guard at the top of `_civFactionAggregates()` returning a safe all-zero shape
+  (deliberately not cached, so the very next call after a real world exists falls through normally).
+- **Tests**: 9 new smoke assertions (`R.v155`) — default/first sub-tab is Factions; the drawer
+  carries the slide-in CSS class and starts closed; a row click opens it and Back closes it;
+  re-entering the tab always resets to the overview even with a faction still selected; the overview
+  renders real content; `_civFactionAggregates()` exposes `terrainMix`/`worldMeanTerrain` with
+  fractions in `[0,1]`; `common`/`imperial` get no fabricated Territory Fit verdict while a
+  terrain-themed culture (riverlands) gets a real one; the pre-world guard never throws and returns
+  a safe zeroed shape when `plates` is emptied to simulate the pre-generate() state.
+- **Known scope cuts**: Territory Fit is read-only (no placement bias added — that would be a much
+  larger, separate change the owner hasn't asked for); the roster row's richer summary line doesn't
+  yet show Territory Fit at a glance (only in the drawer) — a reasonable follow-up, not attempted
+  this pass; Settlements/Economy/Statistics sub-pages are unchanged (only their tab position moved).
+
 ### v1.54 — Agricultural technology as a per-faction axis
 
 Owner: the flat 9:1 farmer:urbanite ratio "doesn't sit against a civilisation having mastered

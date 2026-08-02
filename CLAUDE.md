@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.54**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.55**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.54.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.53.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.55.html` | **Current** unified tool (~24.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.54.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,83 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Faction-first Civilization menu (v1.55)
+
+Owner: "I like the new civilization menu, implement it please in a logical fashion, maybe make it
+scroll into the screen from the left. Only showing a simplified version at first (that for examples
+only shows a global overview)" — approving and requesting real implementation of a faction-first
+mockup/proposal from the prior session, which also delivered an audit finding: `CIV_CULTURES`
+(highland/desert/riverlands/sylvan/maritime/common/imperial) has **zero mechanical effect on
+settlement placement or faction territory** — naming-flavor only (feeds `_civSettleName`'s syllable
+pool and a "plumbing only" UME `opts.culture` passthrough). Civ-layer (block 2) UI + one
+`_civFactionAggregates()` extension; no engine/UME changes. Hash vs v1.54 ALL IDENTICAL. 1001 / 852 /
+488 green.
+
+- **Faction-first ordering.** `#civSubBar` reordered Factions→Settlements→Economy→Statistics→
+  Generation (was Generation-first); `_civSubTab` now defaults to `'factions'` (was `'generation'`)
+  — factions drive settlement sizing (ag. technology, v1.54) and territory, so they're the entry
+  point, while Generation (one-off world-gen trigger buttons: Auto-populate/Recalculate Territories/
+  Generate Roads) moves last.
+- **Overview-first, drawer-on-demand.** `#civSubFactions` restructured into `#civFactionsWrap`
+  (`position:relative;overflow:hidden`) holding two layers: an always-in-flow **global overview**
+  (`#civFactionsOverview` — a new world-summary line via `_civRenderFactionsWorldOverview()`, the
+  existing quick-select pills, and a richer roster list showing government/ag.-tech/population per
+  faction) and a **detail drawer** (`#civFactionDrawer`, `.civ-drawer`) that slides in **from the
+  left** over the overview when a roster row is clicked — the exact `transform:translateX(...);
+  transition:transform .22s ease` idiom the mobile `<aside>` slide-in panel already uses (v0.80),
+  mirrored to the opposite edge and scoped to this sub-page's own wrapper instead of the viewport.
+  `_civOpenFactionDrawer()`/`_civCloseFactionDrawer()` toggle the `.open` class only — visibility
+  never lives in `display:none/''` on the inspector host, so the slide has something to animate. A
+  `← Back to overview` button (`.su-back`, the same textual convention the setup-gate's own back
+  buttons use) closes it. `_civRefreshActiveSubPage()` closes the drawer on **every** entry into the
+  Factions tab (not just the first ever visit), so switching away and back always lands on the
+  simplified overview first, never mid-drill-down — the literal reading of "only showing a
+  simplified version at first."
+- **Territory Fit** (new, in the faction drawer): surfaces the prior session's audit finding
+  honestly instead of quietly leaving it unaddressed. `_civFactionAggregates()`'s existing single
+  `O(GW·GH)` pass (never a second full-grid scan — this function's own header rule) now also
+  accumulates a per-faction terrain-mix — river/coastal/arid/forest/hills cell fractions of a
+  faction's own territory — reusing `buildBiomeRaster()` (arid = desert+savanna+tropDry; forest =
+  conifer+tempForest+tempRain+tropWet), the file-wide `flowThresh=GW*GH*0.0004` river-significance
+  convention, `_civOceanDistField()`'s cached chamfer DT (oceanOnly, matching `_civIsCoastal`'s own
+  convention) floored at 1.5 cells per the v1.35 "a sub-cell distance threshold is unsatisfiable, not
+  strict" rule, and `_civPlaceDefensibility`'s existing mild-upland relative-elevation threshold
+  (`r>0.35`) for "hills," since no dedicated biome key exists for it — plus a matching world-mean
+  twin (`worldMeanTerrain`), same shape as the existing `worldMeanResource`.
+  `_civCultureTerrainFit(cultureKey, terrainMix, worldMeanTerrain)` compares the five terrain-themed
+  cultures against the WORLD mean (never an absolute cut — the same relative-margin discipline
+  v1.30/v1.32/v1.37/v1.46 already established for this exact "compare to a fixed number vs. the
+  world mean" mistake) and returns a match/typical/mismatch verdict; `common`/`imperial` are
+  identity-flavored, not terrain-themed, so they get composition-only, **never a fabricated
+  verdict** — the same "a verdict with no real signal behind it is worse than none" discipline as
+  v1.35's `basis` field.
+- **Pre-world guard, found during verification, not by inspection.** Making Factions the default
+  tab surfaced a latent bug: `generate()`'s own wrapper calls `_civRenderPlaceEditor()` — which
+  reaches `_civFactionAggregates()` via `_civRefreshActiveSubPage()` whenever the Factions tab is
+  active — **before** the real `generate()` body runs, on every single (re)generate. Previously this
+  branch was unreachable unless a user had manually opened Factions and then hit Regenerate;
+  defaulting to Factions makes it run unconditionally, and it crashed inside `currentLithology()`'s
+  `plateCrust()` (`plates[plateId[i]].base` on an empty `plates` array) — a real throw inside
+  `generate()`, against invariant 12 ("generate() completes synchronously," which this file has
+  always read as "never throws" too). Root-caused to the exact `plates=[]` / `field[]`-already-
+  allocated-but-zeroed pre-tectonic-substrate state the file's own v0.106 tectonic-inversion comment
+  already documents for imported DEMs. Fixed with an explicit `plates.length` guard at the top of
+  `_civFactionAggregates()` returning a safe all-zero shape (deliberately not cached into
+  `_civAgg`/`_civAggKey`, so the very next call after a real world exists falls through normally).
+- **Tests**: 9 new smoke assertions (`R.v155`) — Factions is the default/first sub-tab (checked via
+  the real click-handler path, not by reading ambient `_civSubTab` state left over from earlier
+  blocks in the same long sequential smoke run); the drawer carries the slide-in class and starts
+  closed; a row click opens it and Back closes it; re-clicking the Factions tab button always resets
+  to the overview even with a faction still selected; the overview renders real content;
+  `_civFactionAggregates()` exposes `terrainMix`/`worldMeanTerrain` with fractions in `[0,1]`;
+  `common`/`imperial` get no fabricated Territory Fit verdict while riverlands gets a real one; the
+  pre-world guard never throws and returns a safe zeroed shape when `plates` is emptied to simulate
+  the pre-generate() state.
+- **Known scope cuts**: Territory Fit is read-only (no placement bias added — a much larger,
+  separate change the owner hasn't asked for); the roster row's summary line doesn't show Territory
+  Fit at a glance (drawer-only); Settlements/Economy/Statistics sub-pages are unchanged (only their
+  tab position moved).
 
 ### Agricultural technology as a per-faction axis (v1.54)
 

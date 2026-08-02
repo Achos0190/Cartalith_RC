@@ -4471,6 +4471,86 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.55: faction-first Civilization menu redesign (owner: "I like the new civilization menu,
+  // implement it please in a logical fashion, maybe make it scroll into the screen from the left.
+  // Only showing a simplified version at first"). Confirms (a) Factions is now the default/first
+  // sub-tab; (b) the detail drawer starts closed (the "simplified... global overview" state) and
+  // opens/closes correctly via row click / Back button, sliding via the .open class; (c) the world
+  // overview renders real aggregate numbers; (d) Territory Fit — the audit finding that CIV_CULTURES
+  // has zero mechanical effect on placement — is surfaced honestly: common/imperial get no fabricated
+  // verdict, a terrain-themed culture gets a real relative-to-world-mean verdict; (e) the pre-world
+  // guard added to _civFactionAggregates() (needed once Factions became the default tab, since
+  // generate()'s own wrapper now reaches _civFactionAggregates() before the real generate() body
+  // runs) never throws and returns a safe zeroed shape.
+  R.v155 = await page.evaluate(() => {
+    const o = {};
+    // (a) faction-first ordering. The DOM-position check is independent of any runtime state this
+    // long sequential suite's earlier blocks may have left _civSubTab in; the click drives the REAL
+    // handler path (same as a user clicking the tab), which is the only reliable way to test the
+    // "entering Factions" behavior this deep into a shared-page test run.
+    const bar = document.querySelectorAll('#civSubBar .subtab');
+    o.firstTabIsFactions = bar.length > 0 && bar[0].dataset.civsub === 'factions';
+    if (bar.length) bar[0].click();
+    o.defaultSubTabIsFactions = _civSubTab === 'factions';
+    o.firstTabShowsOn = bar.length > 0 && bar[0].classList.contains('on');
+    o.factionsPageVisibleByDefault = document.getElementById('civSubFactions').style.display !== 'none';
+
+    // (b) drawer starts closed on a fresh entry into the tab; opens on row click; closes on Back
+    const drawer = document.getElementById('civFactionDrawer');
+    o.drawerHasClass = !!drawer && drawer.classList.contains('civ-drawer');
+    o.drawerClosedByDefault = !!drawer && !drawer.classList.contains('open');
+    if (typeof CIV_FACTIONS !== 'undefined' && CIV_FACTIONS.length > 1) {
+      _civRenderFactionList();
+      const row = document.querySelector('#civFactionList > div');
+      if (row) row.click();
+      o.drawerOpensOnRowClick = !!drawer && drawer.classList.contains('open');
+      const backBtn = document.getElementById('civFactionBackBtn');
+      if (backBtn) backBtn.click();
+      o.drawerClosesOnBack = !!drawer && !drawer.classList.contains('open');
+      // re-entering the tab (clicking its own subtab button again, a faction still left selected)
+      // always resets to the overview — the real re-entry path, not a direct internal-function call
+      if (row) row.click();
+      const drawerReopened = !!drawer && drawer.classList.contains('open');
+      if (bar.length) bar[0].click();
+      o.reEntryResetsToOverview = drawerReopened && !!drawer && !drawer.classList.contains('open');
+    } else {
+      o.drawerOpensOnRowClick = true; o.drawerClosesOnBack = true; o.reEntryResetsToOverview = true;
+    }
+
+    // (c) world overview renders real numbers
+    _civRenderFactionsWorldOverview();
+    const overviewText = (document.getElementById('civWorldOverviewOut') || {}).textContent || '';
+    o.overviewHasContent = overviewText.length > 0 && !/^\s*$/.test(overviewText);
+    o.overviewMentionsFactionCount = /faction/i.test(overviewText);
+
+    // (d) Territory Fit — verdict shape + honesty for non-terrain cultures
+    const agg = _civFactionAggregates();
+    o.aggHasTerrainMix = !!(agg.byFaction[1] && agg.byFaction[1].terrainMix);
+    o.aggHasWorldMeanTerrain = !!agg.worldMeanTerrain && ['river', 'coast', 'arid', 'forest', 'hills'].every(k => typeof agg.worldMeanTerrain[k] === 'number');
+    o.commonGetsNoVerdict = _civCultureTerrainFit('common', agg.byFaction[1].terrainMix, agg.worldMeanTerrain) === null;
+    o.imperialGetsNoVerdict = _civCultureTerrainFit('imperial', agg.byFaction[1].terrainMix, agg.worldMeanTerrain) === null;
+    const riverlandsFit = _civCultureTerrainFit('riverlands', agg.byFaction[1].terrainMix, agg.worldMeanTerrain);
+    o.riverlandsGetsAVerdict = !!riverlandsFit && ['match', 'typical', 'mismatch'].includes(riverlandsFit.verdict);
+    o.terrainMixFractionsInRange = ['river', 'coast', 'arid', 'forest', 'hills'].every(k => {
+      const v = agg.byFaction[1].terrainMix[k]; return v >= 0 && v <= 1;
+    });
+
+    // (e) the pre-world guard: simulate the pre-generate() state (plates=[]) and confirm no throw
+    const savedPlates = plates, savedAgg = _civAgg, savedAggKey = _civAggKey;
+    try {
+      plates = []; _civAgg = null; _civAggKey = '';
+      let threw = false, safe = null;
+      try { safe = _civFactionAggregates(); } catch (e) { threw = true; }
+      o.preWorldGuardNoThrow = !threw;
+      o.preWorldGuardSafeShape = !!safe && Array.isArray(safe.byFaction) && safe.byFaction.length === CIV_FACTIONS.length
+        && safe.byFaction.every(b => b.pop === 0 && b.terrainMix && b.terrainMix.river === 0);
+    } finally {
+      plates = savedPlates; _civAgg = savedAgg; _civAggKey = savedAggKey;
+    }
+
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5019,6 +5099,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.54: even a very low farmers:urbanite ratio stays within the absolute cap and below 100%', R.v154.industrialWithinAbsCap && R.v154.lowRNeverExceeds1);
   A('v1.54: switching a real settlement\'s faction to Early Industrial substantially raises its food shed', R.v154.earlyIndustrialFeedsMuchMore);
   A('v1.54: the Faction Inspector\'s Ag. technology select exists, lists every level, and writes through on change', R.v154.selectExists && R.v154.selectHasAllLevels && R.v154.writesThrough);
+
+  A('v1.55: Factions is the default/first Civilization sub-tab', R.v155.firstTabIsFactions && R.v155.defaultSubTabIsFactions && R.v155.firstTabShowsOn && R.v155.factionsPageVisibleByDefault);
+  A('v1.55: the faction detail drawer carries the slide-in CSS class and starts closed', R.v155.drawerHasClass && R.v155.drawerClosedByDefault);
+  A('v1.55: clicking a faction row opens the drawer; Back closes it', R.v155.drawerOpensOnRowClick && R.v155.drawerClosesOnBack);
+  A('v1.55: re-entering the Factions tab always resets to the simplified overview, even if a faction was left selected', R.v155.reEntryResetsToOverview);
+  A('v1.55: the world overview renders real content mentioning factions', R.v155.overviewHasContent && R.v155.overviewMentionsFactionCount);
+  A('v1.55: _civFactionAggregates() exposes per-faction terrainMix + a world-mean twin, fractions in [0,1]', R.v155.aggHasTerrainMix && R.v155.aggHasWorldMeanTerrain && R.v155.terrainMixFractionsInRange);
+  A('v1.55: Territory Fit gives no fabricated verdict for identity-flavored cultures (common/imperial)', R.v155.commonGetsNoVerdict && R.v155.imperialGetsNoVerdict);
+  A('v1.55: Territory Fit gives a real match/typical/mismatch verdict for a terrain-themed culture (riverlands)', R.v155.riverlandsGetsAVerdict);
+  A('v1.55: _civFactionAggregates()\'s pre-world guard never throws and returns a safe zeroed shape (needed once Factions became the default tab)', R.v155.preWorldGuardNoThrow && R.v155.preWorldGuardSafeShape);
 
 
 

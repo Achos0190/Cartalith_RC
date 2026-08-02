@@ -9,11 +9,38 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.54.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.55.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.55 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.53` are kept and never edited.
+  (v1.56 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.54` are kept and never edited.
+- **v1.55 — faction-first Civilization menu.** Owner: "I like the new civilization menu,
+  implement it please in a logical fashion, maybe make it scroll into the screen from the left.
+  Only showing a simplified version at first (that for examples only shows a global overview)" —
+  approving and implementing the faction-first mockup/proposal from the prior session (which
+  found, by audit, that faction culture had ZERO mechanical effect on settlement placement or
+  territory — naming-flavor only). Hash vs v1.54 ALL IDENTICAL. 1001 / 852 / 488 green.
+  - `#civSubBar` reordered Factions→Settlements→Economy→Statistics→Generation (was Generation-
+    first); `_civSubTab` now defaults to `'factions'`.
+  - `#civFactionsWrap` holds an always-in-flow **global overview** (world-summary line + quick-
+    select pills + a richer roster) and a **detail drawer** (`#civFactionDrawer`, `.civ-drawer`)
+    that slides in FROM THE LEFT on a row click — same `translateX`+`.22s ease` idiom the mobile
+    `<aside>` panel already uses, mirrored to the opposite edge. `_civRefreshActiveSubPage()`
+    closes the drawer on every entry into the tab, so re-visiting Factions always lands on the
+    simplified overview first.
+  - **Territory Fit** (new, in the drawer): `_civFactionAggregates()`'s existing single
+    `O(GW·GH)` pass now also accumulates a per-faction terrain-mix (river/coastal/arid/forest/
+    hills) + world-mean twin; `_civCultureTerrainFit()` compares a terrain-themed culture
+    (highland/desert/riverlands/sylvan/maritime) against the world mean for a match/typical/
+    mismatch verdict — `common`/`imperial` get composition-only, never a fabricated verdict.
+  - **Found during verification, not by inspection**: making Factions the default tab surfaced a
+    latent bug where `generate()`'s own wrapper reaches `_civFactionAggregates()` (via
+    `_civRenderPlaceEditor()`→`_civRefreshActiveSubPage()`) BEFORE the real `generate()` body
+    runs — crashed inside `plateCrust()` on an empty `plates` array (`generate()` must never
+    throw — this file's own invariant). Fixed with a `plates.length` guard returning a safe
+    all-zero shape, not cached.
+  - Known scope cuts: Territory Fit is read-only (no placement bias); the roster row doesn't
+    show Territory Fit at a glance (drawer-only); Settlements/Economy/Statistics pages unchanged.
 - **v1.54 — agricultural technology as a per-faction axis.** Owner: the flat 9:1 farmer:urbanite
   ratio "doesn't sit against a civilisation having mastered the plow and sitting roughly at a
   level of industrial production, even so barely" — asked for research into how productivity
@@ -1877,6 +1904,19 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **Water-constraint softening — researched, presented, NOT approved yet.** ← **next session
+  starts here if the owner returns to it.** Owner: journeys hit a hard water-supply warning too
+  readily; historically parties drank from streams/smaller stops along a route, not just carried
+  water. Researched and measured (a `probe_water_gap.js`-style land-transect sweep): the current
+  `_jpStageDryKm` freshwater-reach test reuses the SAME `flowThresh=GW*GH*0.0004` river-rendering
+  threshold, conflating "renders as a mapped river" with "a party can find a drink" — 23/23 land
+  transects showed a "dry" stretch (mean 74.9 km) at that threshold, vs. 11/23 (mean 19.6 km) at
+  1/12th and 6/23 at 1/30th. Proposed two-part fix, presented to the owner with "Want me to build
+  this?" and NOT yet answered: (1) a separate, lower drinking-water-reach threshold for
+  `_jpStageDryKm` only, grounded in a real historical source before shipping; (2) generalize the
+  existing graduated desert-tier auto-response (`JP_DESERT_WATER`/`_jpDesertTierForGap`) to every
+  biome instead of gating it entirely on `isDesert`. Do not build this without the owner's go-ahead
+  — it is a separate, independent task from the v1.55 civ-menu work that shipped this session.
 - **The LOD tile seam is reduced, not eliminated (v1.29).** After moving the sea-floor smoothing to
   the shared world-wide fields, two adjacent tiles now agree at their shared world column to a RGB
   MAD of 0.04 (interior 0.3–0.6, was 6.71) — the tiles themselves are seamless. In the live composite
