@@ -12,6 +12,74 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.70 — Dense grid and roadside villages merged into one suitability-weighted, road-biased pass
+
+Owner, immediately after v1.69 shipped: "can we mix the dense village function and the roadside
+village function into something more nuanced? And only come into view when our zoom is at about 60%
+zoomed in." Three designs were put to the owner via `AskUserQuestion`; the owner picked
+**Suitability-weighted road bias**: "candidates still come from the suitability grid (like dense
+mode — so good land gets covered everywhere, not just along roads), but a candidate's acceptance
+odds rise the closer it is to a road, with a soft falloff rather than a hard cutoff... Replaces both
+toggles with one." Civ-layer only. Hash vs v1.69 **ALL IDENTICAL** — the new toggle defaults off.
+
+- **Root cause of "waay too populated" wasn't fixed by v1.68's opt-out — it was v0.76's own
+  mechanism.** `villageMode` (dense grid) worked by tightening the suppression radius and lowering
+  the seed threshold for `_civIterativeAutoWorld`'s BASE placement pass, so turning it on densified
+  EVERY tier — capitals, cities, towns, villages, hamlets all at once — not just villages. v1.70
+  removes `villageMode` from base placement entirely; base capital/city/town/village/hamlet
+  placement is now byte-identical regardless of the new toggle (asserted live). Only the additive
+  layer below responds to it, which is the actual fix, not just a coexistence option.
+- **One unified additive pass, `_civSeedVillages(places, ways, rng, suit)`,** replaces both
+  `_civIterativeAutoWorld`'s old `villageMode` branch and v1.68/v1.69's arc-length road-walk
+  (`_civSeedRoadsideVillages`). Candidates come from `findSettlementSeeds(suit, GW, GH,
+  {thresh:VILLAGE_SUIT_THRESH, suppR:spacing})` — dense mode's own full-map-coverage technique,
+  reused rather than reinvented — at the same relaxed `VILLAGE_SUIT_THRESH=0.32` floor (renamed from
+  v1.69's `ROADSIDE_VILLAGE_SUIT_THRESH`, same value). Below this floor a cell is never even a
+  candidate, road or no road — "never appear on bad land regardless of road proximity" holds by
+  construction, not by a runtime check.
+- **`_civVillageAcceptProb(roadDist, suitScore, roadFalloff, suitLo, suitHi)`** — a new pure,
+  independently unit-tested function — is the soft accept test replacing dense mode's old
+  unconditional accept. `roadProb = exp(-roadDist/roadFalloff)` decays smoothly from 1 at a real road
+  (found via the new `_civRoadProximityQuery`, a bucket-grid nearest-point query over resampled LAND
+  way segments, the same shared bucket technique `_civSeedVillages` already uses for spacing
+  rejection). `suitProb` ramps 0→1 between the relaxed floor and `SETTLE_SEED_THRESH=0.42` — land
+  good enough that the strict, unconstrained base pass would have seeded it on its own, i.e.
+  genuinely "great land." `accept = max(roadProb, suitProb)`: either signal alone can qualify a
+  candidate (near a road on so-so land, OR great land far from any road — both explicitly requested),
+  and they stack for a village that is both. `roadFalloff` reuses the existing `VILLAGE_SPACING_KM`
+  spacing constant rather than inventing an independent decay tunable.
+- **Zoom-reveal threshold bumped for "~60%."** `CIV_VILLAGE_ADDON_LOD=2.4` (was v1.68's
+  `CIV_ROADSIDE_VILLAGE_LOD=2.0`, framed by the owner as "~50%"), scaled by the same 6/5 ratio the
+  owner's new figure implies (`2.0×6/5=2.4`). Still comfortably past every existing `CIV_LOD_PLACE`
+  tier; still no small-dot fallback below it, unlike every other settlement kind — the deep,
+  deliberate reveal stays.
+- **`p.roadsideVillage` renamed to `p.villageAddon`** throughout (the LOD gate in `drawCivLayer`, the
+  pick-gate in `_civSelectPlaceAt`) — the tag no longer implies "road-anchored only," since a village
+  can now land well off any road on sufficiently good land.
+- **One checkbox, one flag.** `civVillageDensityChk`/`_civVillageDensity` (v0.76) and
+  `civRoadsideVillagesChk`/`_civRoadsideVillages` (v1.68) are both gone, replaced by
+  `civVillagesChk`/`_civVillages`. `_CIV_VILLAGE_CAP=200` is reused as the one additive-layer cap
+  (was dense mode's overall-placement cap; `_CIV_ROADSIDE_VILLAGE_CAP=120` is retired).
+- **Measured on a real generated world** (seed 31337, 800 km / 512 px): baseline 35 settlements;
+  with the toggle on, 235 total (200 addon villages, hitting the cap). A direct comparison of the
+  pure seeding function against the SAME base places/suitability/RNG seed — real roads vs. none —
+  accepted 200 (capped) vs. 192 with no roads at all, and of the 200 accepted, 76% sit within the
+  road-proximity search window (i.e. plausibly road-biased) while the remaining 24% got in purely on
+  high suitability, off-road — both explicitly requested behaviors, both observed.
+- **Tests**: the v0.76/v1.68/v1.69 village-mode smoke blocks (`R.village`, `R.villageToggle`,
+  `R.roadsideVillages`, `R.roadsideVillagesToggle`) are retired and replaced by `R.villagesUnit`
+  (5 deterministic assertions on `_civRoadProximityQuery`/`_civVillageAcceptProb` in isolation — the
+  road/no-road/floor/great-land/soft-falloff claims proven exactly rather than statistically) and
+  `R.villages`/`R.villagesToggle` (13 assertions: off-by-default, capped, real settlements, spacing,
+  land, suit floor, base-tier-unaffected, toggle-off restores baseline, pick-gate, a comparative
+  road-bias sanity check, checkbox wiring, regional-population estimate) — 18 new assertions in all.
+- **Known scope cuts**: `roadFalloff`'s decay scale reuses `VILLAGE_SPACING_KM` rather than being
+  independently calibrated; the comparative road-bias check uses a generous slack (`+5`) rather than
+  a strict inequality, since a candidate's acceptance can shift which OTHER nearby candidate a
+  spacing rejection blocks — a real but small effect, disclosed rather than asserted away; the ~60%
+  zoom framing is a proportional bump of v1.68's own un-calibrated "~50%" constant, not independently
+  measured against a literal percentage (same disclosed cut v1.68 carried).
+
 ### v1.69 — Roadside villages now also factor in settlement suitability
 
 Owner, immediately after v1.68 shipped: "They should still also factor in settlement suitability."

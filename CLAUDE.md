@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.69**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.70**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.69.html` | **Current** unified tool (~29.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.68.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.70.html` | **Current** unified tool (~29.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.69.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,43 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Dense grid and roadside villages merged into one suitability-weighted, road-biased pass (v1.70)
+
+Owner, immediately after v1.69 shipped: "mix the dense village function and the roadside village
+function into something more nuanced? And only come into view when our zoom is at about 60% zoomed
+in." Owner picked **Suitability-weighted road bias** via `AskUserQuestion`. Civ-layer only. Hash vs
+v1.69 ALL IDENTICAL.
+
+- **v0.76's `villageMode` is removed from BASE placement entirely** — it used to tighten suppression/
+  threshold for the whole `_civIterativeAutoWorld` seed pass, densifying every tier at once, which
+  was the actual cause of "waay too populated," not something the v1.68 opt-out fixed. Base capital/
+  city/town/village/hamlet placement is now byte-identical regardless of the new toggle.
+- **`_civSeedVillages(places, ways, rng, suit)`** replaces both `villageMode` and v1.68/v1.69's
+  `_civSeedRoadsideVillages`. Candidates: `findSettlementSeeds(suit, GW, GH,
+  {thresh:VILLAGE_SUIT_THRESH, suppR:spacing})` — dense mode's full-map-coverage technique, at the
+  same relaxed `VILLAGE_SUIT_THRESH=0.32` floor (renamed from `ROADSIDE_VILLAGE_SUIT_THRESH`). Below
+  the floor a cell is never a candidate at all — road proximity cannot bypass it.
+- **`_civVillageAcceptProb(roadDist, suitScore, roadFalloff, suitLo, suitHi)`** — new pure, unit-
+  tested function — is the soft accept test. `roadProb=exp(-roadDist/roadFalloff)` decays smoothly
+  from 1 at a road (found via `_civRoadProximityQuery`, a bucket-grid nearest-point query over
+  resampled land-way segments); `suitProb` ramps 0→1 between the floor and `SETTLE_SEED_THRESH=0.42`
+  ("great land" — good enough the strict unconstrained pass would seed it unaided). `accept =
+  max(roadProb, suitProb)` — either alone qualifies, both stack. `roadFalloff` reuses
+  `VILLAGE_SPACING_KM` rather than a new tunable.
+- **`CIV_VILLAGE_ADDON_LOD=2.4`** (was v1.68's `CIV_ROADSIDE_VILLAGE_LOD=2.0`, "~50%"), scaled by the
+  6/5 ratio the "~60%" ask implies. `p.roadsideVillage` renamed `p.villageAddon` (no longer
+  road-only).
+- **One checkbox, one flag**: `civVillagesChk`/`_civVillages` replaces `civVillageDensityChk`/
+  `_civVillageDensity` and `civRoadsideVillagesChk`/`_civRoadsideVillages`. `_CIV_VILLAGE_CAP=200`
+  is the one additive-layer cap (`_CIV_ROADSIDE_VILLAGE_CAP` retired).
+- Measured (seed 31337, 800km/512px): baseline 35 settlements → 235 with the toggle on (200 addon
+  villages, hit the cap). Direct pure-function comparison, same base/suit/RNG seed: 200 accepted with
+  real roads vs. 192 with none; of the 200, 76% sit within the road-proximity search window, the
+  rest got in on high suitability alone, off-road.
+- Tests: 18 new smoke assertions — 5 deterministic unit tests of the two new pure primitives
+  (`R.villagesUnit`) plus 13 live-world/toggle assertions (`R.villages`/`R.villagesToggle`),
+  replacing the retired v0.76/v1.68/v1.69 village-mode blocks outright.
 
 ### Roadside villages now also factor in settlement suitability (v1.69)
 
