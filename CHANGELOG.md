@@ -12,6 +12,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.72 — Three v1.71 village-connector defects found by bug hunt (roads to invisible settlements)
+
+A deliberate bug-hunt pass over the v1.68–v1.71 village layer. All three defects were **measured on a
+real generated world before any fix** (`bughunt_v171.js`), and all three share one shape: the
+`villageAddon` tag is the single thing separating a deep-zoom decorative connector from an ordinary
+road, and three separate code paths didn't know about it. Civ-layer only. Hash vs v1.71 **ALL
+IDENTICAL** (the layer is off by default, and the serialization change emits `undefined` — which
+`JSON.stringify` omits — when no connector exists).
+
+- **BUG-A (HIGH, rendering) — `villageAddon` was dropped from every way on save/load.**
+  `_civSyncToState`/`_civSyncFromState` serialize ways through an explicit **field whitelist**, not a
+  spread, so any property not named there is silently discarded. v1.71 added the flag to the way
+  object and to the renderer's LOD gate, but not to the whitelist. Measured: 199 connectors → **0**
+  after a round trip; the 199 ways survived as plain `'ancient'` and therefore drew from
+  `CIV_LOD_ROAD.ancient=0.7` while their villages stayed hidden until `CIV_VILLAGE_ADDON_LOD=2.4`.
+  **Reopening a saved project showed a web of ~199 roads leading to settlements that weren't there.**
+  Places kept the flag (`serializeState` deep-clones `state` wholesale), and that asymmetry is exactly
+  what made the defect visible rather than merely cosmetic. Fixed by adding `villageAddon` to both
+  whitelists.
+- **BUG-B (HIGH, rendering + correctness) — "Generate Roads" destroyed the connectors and then
+  rebuilt the villages into the trunk network.** `_civAutoRoutes` opens with
+  `civWays=priorManualWays.slice()`, keeping only `w.manual` — an auto-generated connector is not
+  manual, so **all 199 were deleted**. It then passed every settlement-kind place to
+  `_civHierarchicalNetwork`, and since `hamlet` is in `CIV_SETTLE_KEYS` the 200 addon villages were
+  admitted as ordinary settlements: measured **226 ways touching a village at LOD 0 / 0.35 / 0.7**,
+  i.e. fully visible at world zoom. Same roads-to-nowhere symptom as BUG-A, plus it defeated the
+  entire deep-zoom design the layer exists for. Fixed in two parts: villages are excluded from the
+  trunk `settles` list (they are an additive layer, not part of the settlement hierarchy), and the
+  connectors are **regenerated** via `_civConnectVillageAddons` onto the freshly-built network rather
+  than preserved — preserving them would keep geometry routed around roads that no longer exist, and
+  v1.71's shared multi-source Dijkstra makes re-running it cheap. Re-measured: 199 connectors survive,
+  **every** way touching a village sits at LOD 2.4, and no trunk way touches a village.
+  - **Unintended but welcome: Generate Roads got ~10× faster with villages on — 3919 ms → 397 ms.**
+    The trunk builder was running `2 × 235` full-grid Dijkstra searches over places that had no
+    business being in the hierarchy; it now runs `2 × 35` plus one shared multi-source pass.
+- **BUG-C (MEDIUM, usability) — the way list flooded with 199 unnamed connector cards.**
+  `_civRenderWayList` builds a full DOM card (6 elements + handlers) per way and is **not**
+  virtualized, unlike the v1.16 settlements table. Measured: **53 cards → 252 cards / 2016 DOM nodes**,
+  burying the ~53 roads the user actually authored. `_CIV_VILLAGE_CAP=200` exists, by its own comment,
+  precisely to "keep the editor list usable" for PLACES — the ways v1.71 added bypassed that same
+  constraint. Fixed by grouping connectors under a collapsed `<details>` disclosure ("🏚 Village
+  tracks (N)"), the file's own existing progressive-disclosure idiom. Top-level cards 252 → **54**
+  (53 real + 1 disclosure); every connector stays fully reachable (rename/retype/focus/delete all
+  still work), one click away. *Disclosed honestly: total DOM node count is essentially unchanged
+  (2016 → 2019) since the cards are still constructed, just not at top level — the fix targets
+  signal-to-noise, not allocation. Render cost was never the problem (8→13 ms).*
+- **Tests**: 7 new smoke assertions (`R.v172`), one or two per bug, each asserting the *observable*
+  regression (LOD ordering, trunk-network contamination, list density) rather than the internal flag.
+- **Found but deliberately NOT fixed** (noted for a future pass, not silently dropped):
+  `_civAutoRoutes` builds way `aIdx`/`bIdx` against its filtered `settles` array while
+  `_civIterativeAutoWorld` and `_civConnectVillageAddons` build them against the full `state.places`
+  array. With a POI present the two bases diverge. This is **latent, not user-visible**:
+  `_civNetworkMetrics` — the only consumer that reads those indices — is called exclusively from
+  inside `_civIterativeAutoWorld`, always with the full array. Fixing it means picking one canonical
+  index base across both paths, which is a wider refactor than a bug-fix pass should take on
+  speculatively (the v1.62 precedent: ablate and confirm a defect actually manifests before changing
+  placement/indexing code).
+
 ### v1.71 — Addon villages are connected to the network by a low-tier "Ancient route"
 
 Owner, immediately after v1.70 shipped: "the new settlements on the deeper level also need to be

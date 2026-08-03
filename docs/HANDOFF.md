@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.71.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.72.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.72 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.70` are kept and never edited.
+  (v1.73 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.71` are kept and never edited.
+- **v1.72 — bug hunt: three v1.71 village-connector defects, all one missing tag.** A
+  deliberate hunt over the v1.68–v1.71 village layer, each defect measured on a real world
+  before fixing. Civ-layer only. 1016 / 852 green; hash ALL IDENTICAL; smoke green (+7 new).
+  - **A (HIGH, rendering):** the way serialization whitelist dropped `villageAddon`, so a
+    save→reload left 199 connectors as ordinary `'ancient'` ways visible from zoom 0.7 while
+    their villages stayed hidden until 2.4 — a web of roads to invisible settlements in any
+    reopened project. Places kept the flag (state is deep-cloned wholesale); that asymmetry is
+    what made it visible.
+  - **B (HIGH):** "Generate Roads" kept only `w.manual` ways (destroying all 199 connectors)
+    and then fed the villages to the trunk-network builder, producing 226 normally-visible
+    ways to them. Villages are now excluded from the trunk network and connectors regenerated
+    onto it. **Side effect: 3919 ms → 397 ms.**
+  - **C (MEDIUM):** the way list is not virtualized; 199 unnamed connectors buried the ~53
+    authored roads (252 cards). They now sit in a collapsed `<details>` — 54 top-level cards,
+    all still reachable.
+  - **Latent, deliberately unfixed:** `_civAutoRoutes` builds way `aIdx`/`bIdx` against a
+    filtered `settles` array while the other paths use full-`state.places` indices. Divergent
+    only when a POI exists, and `_civNetworkMetrics` (the sole reader) is never called on that
+    path — so nothing misreads it today. Noted rather than refactored speculatively.
 - **v1.71 — addon villages connected by a low-tier "Ancient route."** Owner, immediately after
   v1.70 shipped: "the new settlements on the deeper level also need to be connected. By a lower
   type road (ancient route for example) so it only shows when zoomed in." Civ-layer only.
@@ -2236,6 +2255,12 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **v1.72 shipped**: bug-hunt pass fixing three v1.71 connector defects (save/load flag loss,
+  Generate Roads destroying + re-creating connectors as trunk roads, way-list flooding). See
+  CHANGELOG. **Open follow-up left by that pass**: the `aIdx`/`bIdx` index-base divergence between
+  `_civAutoRoutes` (filtered `settles`) and `_civIterativeAutoWorld`/`_civConnectVillageAddons`
+  (full `state.places`) — latent today because `_civNetworkMetrics` is only ever called from the
+  latter path, but it should be unified before anything else starts reading those indices.
 - **v1.71 shipped**: addon villages now get a low-tier 'ancient' way connecting each to its nearest
   real settlement, deep-zoom-gated together with the village (`_civConnectVillageAddons`). See
   CHANGELOG for the full writeup and the self-loop bug the first cut (connect to nearest ROAD

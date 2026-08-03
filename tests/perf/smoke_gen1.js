@@ -666,6 +666,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillages;
     return { defaultChecked, on, off };
   });
+  // v1.72 bug-hunt: three defects in the v1.71 village-connector layer, each measured before fixing.
+  // A: the way serialization whitelist dropped `villageAddon`, so a save→reload turned every deep-zoom
+  //    connector back into an ordinary 'ancient' way visible from zoom 0.7 while its village stayed
+  //    hidden until 2.4 — a web of roads leading to invisible settlements.
+  // B: "Generate Roads" kept only `w.manual` ways (destroying all connectors) and passed the villages
+  //    themselves to the trunk-network builder (because 'hamlet' is in CIV_SETTLE_KEYS), producing
+  //    normally-visible roads to them and defeating the deep-zoom design outright.
+  // C: the way list is not virtualized, so ~199 unnamed auto connectors buried the ~53 authored roads.
+  R.v172 = await page.evaluate(() => {
+    const o = {};
+    state.places = []; civWays = [];
+    _civVillages = true; _civMetropolis = false;
+    _civAutoWorld();
+    o.connectors = civWays.filter(w => w.villageAddon).length;
+
+    // --- A: save/load round trip ---
+    _civSyncToState();
+    o.A_savedKeepsFlag = state.civ.ways.some(w => w.villageAddon === true);
+    _civSyncFromState();
+    const reloaded = civWays.filter(w => w.villageAddon);
+    o.A_survivesReload = reloaded.length === o.connectors && reloaded.length > 0;
+    // the defect was observable purely as a LOD regression, so assert on that directly
+    const ancient = civWays.filter(w => w.type === 'ancient');
+    o.A_noRoadOutrunsItsVillage = ancient.length > 0 && ancient.every(w => _civWayLodMin(w) >= CIV_VILLAGE_ADDON_LOD);
+
+    // --- B: Generate Roads ---
+    _civAutoRoutes();
+    o.B_connectorsSurvive = civWays.filter(w => w.villageAddon).length > 0;
+    const vIdx = new Set(); state.places.forEach((p, i) => { if (p.villageAddon) vIdx.add(i); });
+    const touching = civWays.filter(w => vIdx.has(w.aIdx) || vIdx.has(w.bIdx));
+    o.B_everyVillageWayIsDeepZoom = touching.length > 0 && touching.every(w => _civWayLodMin(w) >= CIV_VILLAGE_ADDON_LOD);
+    // the trunk network must not have been rebuilt over the villages
+    o.B_noTrunkWayTouchesAVillage = !touching.some(w => !w.villageAddon);
+
+    // --- C: way list density ---
+    _civRenderWayList();
+    const el = document.getElementById('civWayList');
+    const topLevelCards = el ? el.children.length : -1;
+    const connectorCount = civWays.filter(w => w.villageAddon && !w.hidden).length;
+    o.C_topLevelCards = topLevelCards;
+    o.C_connectorCount = connectorCount;
+    o.C_listNotFlooded = topLevelCards < connectorCount / 2;
+    const det = el ? el.querySelector('details') : null;
+    o.C_disclosureExists = !!det;
+    o.C_disclosureStartsClosed = det ? det.open === false : false;
+    o.C_connectorsStillReachable = det ? det.querySelectorAll('input[type=text]').length === connectorCount : false;
+
+    // restore clean civ state (v0.76's own precedent)
+    _civVillages = false;
+    state.places = []; civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+    return o;
+  });
   // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
   //        populate, confirm the readout shows a number, then restore clean civ state.
   R.popAuto = await page.evaluate(() => {
@@ -5715,6 +5770,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.71 villages: most villages reach the existing network with a connector (a few may be genuinely unreachable, e.g. an isolated landmass)', R.villages.mostVillagesConnected);
   A('v1.71 villages: every connected village is registered as non-isolated by _civNetworkMetrics — not a silently-dropped self-loop', R.villages.allConnectedVillagesNonIsolated);
   A('v1.71 villages: toggling the layer off leaves no villageAddon connector ways behind', R.villages.offHasNoConnectors);
+
+  A('v1.72 BUG-A: the way serialization whitelist keeps villageAddon, so connectors survive a save/load round trip', R.v172.A_savedKeepsFlag && R.v172.A_survivesReload);
+  A('v1.72 BUG-A: after a reload no village connector draws at a shallower zoom than the village it leads to (was 0.7 vs 2.4 — roads to invisible settlements)', R.v172.A_noRoadOutrunsItsVillage);
+  A('v1.72 BUG-B: Generate Roads no longer destroys the village connectors', R.v172.B_connectorsSurvive);
+  A('v1.72 BUG-B: after Generate Roads every way touching a village is still deep-zoom gated', R.v172.B_everyVillageWayIsDeepZoom);
+  A('v1.72 BUG-B: Generate Roads does not rebuild the trunk network over addon villages', R.v172.B_noTrunkWayTouchesAVillage);
+  A('v1.72 BUG-C: the way list is no longer flooded by auto connectors', R.v172.C_listNotFlooded && R.v172.C_connectorCount > 0);
+  A('v1.72 BUG-C: connectors live in a collapsed disclosure and stay fully reachable', R.v172.C_disclosureExists && R.v172.C_disclosureStartsClosed && R.v172.C_connectorsStillReachable);
   A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
   A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
   A('v0.82 recovery: a city collapses into a fortified ruin under Survival + tier-from-population is sane', R.recovery && R.recovery.demoted && R.recovery.tierFn);

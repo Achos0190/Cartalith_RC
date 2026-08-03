@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.71**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.72**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.71.html` | **Current** unified tool (~29.2k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.70.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.72.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.71.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,39 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Bug hunt: three v1.71 connector defects, all one missing tag (v1.72)
+
+Deliberate bug-hunt pass over the v1.68–v1.71 village layer; all three measured on a real world
+before fixing. Civ-layer only. Hash vs v1.71 ALL IDENTICAL. **The lesson: `villageAddon` is the ONE
+thing separating a deep-zoom decorative connector from an ordinary road — grep for it before
+touching any way code.**
+
+- **A serialization whitelist silently drops what it doesn't name.** `_civSyncToState`/
+  `_civSyncFromState` list way fields explicitly rather than spreading, so v1.71's `villageAddon`
+  vanished on save. 199 connectors → 0 on reload, surviving as plain `'ancient'` at
+  `CIV_LOD_ROAD.ancient=0.7` while their villages stayed hidden to `2.4` — **a web of roads to
+  invisible settlements in any reopened project.** Places kept the flag (`serializeState` deep-clones
+  `state` wholesale); that asymmetry is what made it visible. Both whitelists now carry the field.
+- **"Generate Roads" both destroyed and re-created the problem.** `_civAutoRoutes` keeps only
+  `w.manual`, so every auto connector was deleted; it then fed the villages themselves to
+  `_civHierarchicalNetwork` (because `hamlet` ∈ `CIV_SETTLE_KEYS`), yielding 226 village-touching ways
+  at LOD 0/0.35/0.7. Villages are now excluded from the trunk `settles` list, and connectors are
+  **regenerated** via `_civConnectVillageAddons` onto the new network (preserving them would keep
+  geometry hugging roads that no longer exist). **Side effect: 3919 ms → 397 ms**, since the trunk
+  builder no longer runs 2×235 full-grid Dijkstras over places that never belonged in the hierarchy.
+- **`_civRenderWayList` is not virtualized** (unlike the v1.16 settlements table) — 199 unnamed auto
+  connectors buried the ~53 authored roads (252 cards / 2016 nodes). Connectors now sit in a collapsed
+  `<details>`; top-level cards 252 → 54, all still reachable. Node count is unchanged by design — the
+  fix is signal-to-noise, not allocation.
+- **Latent, deliberately unfixed**: `_civAutoRoutes` builds way `aIdx`/`bIdx` against its filtered
+  `settles` array while `_civIterativeAutoWorld`/`_civConnectVillageAddons` use full-`state.places`
+  indices. Divergent when a POI exists, but `_civNetworkMetrics` (the only reader) is called solely
+  from inside `_civIterativeAutoWorld` with the full array, so nothing currently misreads it. Picking
+  one canonical index base is a wider refactor than a fix pass should take on speculatively (v1.62's
+  ablate-then-fix precedent).
+- Tests: 7 new smoke assertions (`R.v172`), each asserting the observable regression (LOD ordering,
+  trunk contamination, list density) rather than the internal flag.
 
 ### Addon villages connected by a low-tier "Ancient route" (v1.71)
 
