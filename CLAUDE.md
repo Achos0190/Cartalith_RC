@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.66**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.67**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.66.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.65.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.67.html` | **Current** unified tool (~29.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.66.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,45 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### A water-driven convergence loop could return a physically absurd, unblocked stage (v1.67)
+
+Owner pasted a full Journey Planner "Severe" verdict — an 18-month, 4253 km, 14-stage journey with
+several stages at 525%–1475% of carrying capacity, all showing the identical flat 0.450 load
+multiplier and no hard block — ending with "Somehow it feels like it is way too long for travel
+time." Root-caused by directly reproducing the report's own Stage 11 numbers before writing any
+fix. Civ-layer only (`jpCalcLand`). Hash vs v1.66 ALL IDENTICAL.
+
+- **v1.63's `JP_LOAD_INVALID_RATIO` check only ever saw `ratio0`** — cargo plus a flat, non-
+  iterating water estimate — computed BEFORE the convergence loop runs. The loop's own water term
+  is measured each iteration from `dryKm ÷ the speed reached so far`: slower speed → more days to
+  cross the gap → more water mass → more load → slower speed, a real feedback loop unrelated to
+  `ratio0`. `jpLoadPenalty` floors at a flat 0.45× past 150%, so instead of failing to converge the
+  loop "converges" at a stable but physically absurd number and returns it as a real, summed stage.
+  Reproduced exactly: the reported stage's `ratio0` is 0.82 (read as fine), the loop's own
+  converged `loadRatio` is 15.3.
+- **Fix: the SAME `JP_LOAD_INVALID_RATIO` cutoff is now also checked on the post-loop
+  `loadRatio`**, right after the convergence loop. Consistent with every other hard block in this
+  function — `_jpPlan`'s existing `blockedIdx` check already zeroes `plan.totalDays` for any one
+  blocked stage; this closes the gap where a water-driven overload could slip past that net and get
+  summed into the trip total instead of flagging "Impossible as configured".
+- **Directly explains the report**: `_jpPlan` only sums days for non-blocked stages, so several
+  already-known-infeasible stages (76/31/51/208 days each) were still contributing their absurd
+  duration to the 18-month headline instead of hard-blocking the plan.
+- **Fixing this surfaced 3 pre-existing v1.56 smoke assertions that were themselves accidentally
+  overloaded** — the same shape v1.63's own CHANGELOG entry already named. A synthetic 3000 km
+  waterless gap for a 4-person Walking party with zero animals is genuinely infeasible under ANY
+  reserve multiplier, even a flat 1.1× with no tier escalation. Investigated whether more capacity
+  fixes it first (it doesn't: in a non-desert biome an animal's own water draw during a multi-day
+  gap always exceeds its pack capacity, so adding animals makes a long dry crossing WORSE — the
+  same divergent-fixed-point shape v1.48 documented for fodder). Fixed by shrinking the test
+  scenario to a genuinely carriable 110 km and moving the "can the tier ladder reach Deep Desert
+  Crossing" check onto `_jpDesertTierForGap` directly — a pure function decoupled from whether any
+  party could survive carrying that much water, which is a capacity question v1.63/v1.67 already
+  own.
+- **Tests**: 5 new smoke assertions (`R.v167`) plus the 3 corrected v1.56 assertions above.
+- **Known scope cuts**: no change to the loop's iteration count, `jpLoadPenalty`'s curve, or any
+  terrain/weather/infrastructure table — only the missing post-loop capacity check.
 
 ### Per-stage pack-animal + vehicle fine-tuning, with a swap advisory (v1.66)
 

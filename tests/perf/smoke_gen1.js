@@ -4721,22 +4721,39 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
     // (b) the auto tier now applies to a non-desert biome — a severe synthetic dry gap gets a real
     // graduated reserve (not the old flat 1.1×) and the formula names it "water crossing".
+    // v1.67 (owner report of an absurd multi-month journey): jpCalcLand now ALSO invalidates a stage
+    // whose water-driven convergence loop pushes load past JP_LOAD_INVALID_RATIO, not just its
+    // pre-loop ratio0 (see jpCalcLand's own v1.67 comment). This test's original 3000 km "severe" gap
+    // was never actually carriable — even under a flat 1.1× reserve with zero tier escalation (part
+    // (c)'s override plan, below) it works out to ~75 days of carried water for a 4-person walking
+    // party with no pack animals, which no configuration of this model can carry; v1.67 now correctly
+    // blocks it where earlier versions silently returned a triple-digit-percent-overloaded "answer".
+    // 110 km is the same scenario shrunk to a genuinely carriable severity that still clears the
+    // Sparse Wells threshold (gapDays>3) and reads as a real, graduated slowdown — the actual claim
+    // this test exists to prove. Reaching the DEEPEST tier (Deep Desert Crossing, gapDays>6) is
+    // checked directly below via _jpDesertTierForGap itself, decoupled from whether any specific
+    // party could survive carrying water that long — that's a capacity question v1.63/v1.67 already
+    // own, not this labeling test's job.
     const basePlan = { groupSize: 4, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 20,
       supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true,
       desertWater: 'auto', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 };
     const stForest = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
       infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm });
     const rNoGap = jpCalcLand(stForest(0), basePlan);
-    const rSevereGap = jpCalcLand(stForest(3000), basePlan);   // a huge synthetic waterless run
+    const rSevereGap = jpCalcLand(stForest(110), basePlan);   // a real, carriable waterless run (Sparse Wells tier)
     o.nonDesertGetsWaterCrossingLabel = !rNoGap.blocked && /water crossing/.test(rNoGap.formula);
     o.severeNonDesertGapSlowerThanNoGap = !rSevereGap.blocked && !rNoGap.blocked && rSevereGap.dailyKm < rNoGap.dailyKm;
-    o.severeNonDesertGapNamesDeepTier = !rSevereGap.blocked && /Deep Desert Crossing/.test(rSevereGap.formula);
+    o.severeNonDesertGapNamesDeepTier = !rSevereGap.blocked && /Sparse Wells/.test(rSevereGap.formula)
+      && _jpDesertTierForGap(0.5) === 'Dense Oasis Route' && _jpDesertTierForGap(2) === 'Established Caravan Route'
+      && _jpDesertTierForGap(4.5) === 'Sparse Wells' && _jpDesertTierForGap(8) === 'Deep Desert Crossing';
 
-    // (c) the explicit override dropdown stays desert-only: a non-desert stage ignores an explicit
-    // override and still resolves the auto (measured) tier instead.
+    // (c) the explicit override dropdown stays desert-only: on a non-desert stage, setting it to a
+    // literal tier (not 'auto') suppresses tier resolution entirely — jpCalcLand's override branch
+    // requires isDesert and its auto branch requires _dwAuto, so neither fires — the formula shows no
+    // water-crossing line at all rather than the override's own label.
     const overridePlan = Object.assign({}, basePlan, { desertWater: 'Sparse Wells' });
-    const rOverrideNonDesert = jpCalcLand(stForest(3000), overridePlan);
-    o.explicitOverrideIgnoredOnNonDesert = !rOverrideNonDesert.blocked && !/Sparse Wells/.test(rOverrideNonDesert.formula);
+    const rOverrideNonDesert = jpCalcLand(stForest(110), overridePlan);
+    o.explicitOverrideIgnoredOnNonDesert = !rOverrideNonDesert.blocked && !/water crossing/.test(rOverrideNonDesert.formula);
 
     // (d) a genuine desert stage: explicit override still honored (unchanged regression check).
     // v1.63: 4 Walking humans with zero animals (120 kg porter capacity) cannot carry Hot Desert's own
@@ -5396,6 +5413,78 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.67 (owner report: an 18-month, 4253 km, 14-stage journey with several stages at
+  // 525%-1475% load all showing an identical flat 0.450 load-penalty multiplier and no error —
+  // "Somehow it feels like it is way too long for travel time"). Root cause: jpCalcLand's
+  // convergence loop derives its own water-carry mass from THIS stage's dryKm ÷ the speed reached
+  // SO FAR — slower speed → longer gap in days → more water mass → more load → slower speed, a real
+  // feedback loop — and jpLoadPenalty floors at a flat 0.45× for ANY ratio past 150%, so the loop
+  // "converges" at a stable but physically absurd load and returns it as a real, summed stage
+  // (reproduced from the report's own Stage 11: ratio0 0.82 read as fine by v1.63's pre-loop check,
+  // converged loadRatio 15.3). Fix: the SAME JP_LOAD_INVALID_RATIO cutoff v1.63 already checks on
+  // ratio0 is now ALSO checked on the post-loop loadRatio.
+  R.v167 = await page.evaluate(() => {
+    const o = {};
+    // (a) the owner's own reported stage (Hills / Ruined Region / Hot Desert, 215 km dry run,
+    // Baggage Train with 1 mule + 1 wagon, 2 people, Forced March/12h, 200 kg cargo, 20 supply
+    // days) now blocks instead of silently returning an 1100%+-of-capacity "answer".
+    const st = { km: 293.0, cat: 'land', terrain: 'Hills', routeCond: 'None / Wild', infra: 'Ruined Region',
+      biome: 'Hot Desert', dryKm: 215 };
+    const plan = { groupSize: 2, transport: 'Baggage Train', pace: 'Forced March', hours: 12, cargoKg: 200,
+      supplyDays: 20, season: 'Autumn', grazing: 'Partial — graze at camp', foraging: 'Active', carryFood: true,
+      desertWater: 'auto', animals: { donkey: 0, mule: 1, camel: 0, horse: 0 }, carts: 0, wagons: 1, travois: 0, sleds: 0 };
+    const r = jpCalcLand(st, plan);
+    o.reportedStageNowBlocked = !!r.blocked;
+    o.reportedStageMsgNamesCapacity = !!(r.blocked && /capacity/i.test(r.blocked) && /no party departs/i.test(r.blocked));
+
+    // (b) a genuinely fine stage (no dry gap, light cargo, no animals) is completely unaffected —
+    // same threshold, same constant, no new false positives.
+    const stFine = { km: 100, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard', infra: 'Stable Settlements',
+      biome: 'Temperate Forest', dryKm: 0 };
+    const planFine = { groupSize: 4, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 20,
+      supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true,
+      desertWater: 'auto', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 };
+    const rFine = jpCalcLand(stFine, planFine);
+    o.fineStageUnaffected = !rFine.blocked && isFinite(rFine.dailyKm) && rFine.dailyKm > 0;
+
+    // (c) the fix reuses the SAME v1.63 constant on the post-loop ratio — not a new, separate
+    // magic threshold that could drift from the ratio0 check.
+    o.reusesSharedConstant = typeof JP_LOAD_INVALID_RATIO === 'number' && JP_LOAD_INVALID_RATIO === 1.50 &&
+      (jpCalcLand.toString().split('JP_LOAD_INVALID_RATIO').length - 1) >= 2;
+
+    // (d) plan-level: a journey mixing the fine stage and the reported-bug stage blocks the WHOLE
+    // plan's total (the same _jpPlan blockedIdx precedent every other hard block already uses),
+    // while the fine stage's own per-stage result is still a real, computed number — one bad
+    // stretch does not swallow the rest of the route's honest numbers.
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    try {
+      const sea = state.seaLevel || 0.42;
+      let landPt = null;
+      for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+        if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+      const pts = []; for (let k = 0; k <= 10; k++) pts.push([landPt[0] + k, landPt[1]]);
+      const jn = { pts, name: 'v167', groupSize: 2 };
+      state.places = []; civWays = []; civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      window._jpDeriveStages = () => [
+        Object.assign({}, stFine, { i0: 0, i1: 5 }),
+        Object.assign({}, st, { i0: 5, i1: 10 })
+      ];
+      const p = _jpEnsurePlan(jn);
+      Object.assign(p, plan);
+      const full = _jpPlan(jn);
+      o.planBlocked = !!(full && full.blocked);
+      o.planBlockedMsgNamesCapacity = !!(full && full.blockedMsg && /capacity/i.test(full.blockedMsg));
+      o.planTotalDaysNull = !!full && full.totalDays === null;
+      o.fineStageStillComputedInPlan = !!(full && full.results && full.results[0] && !full.results[0].blocked && isFinite(full.results[0].days) && full.results[0].days > 0);
+      o.badStageIsTheBlockedOne = !!(full && full.blockedIdx === 1);
+    } finally {
+      window._jpDeriveStages = origDerive;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5959,8 +6048,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.56: a minor stream that fails the old mapped-river flowThresh test now reads as freshwater', R.v156.minorStreamFailsOldTest && R.v156.minorStreamNowFound);
   A('v1.56: a non-desert biome now gets the water-crossing tier labeled in its formula (was desert-only)', R.v156.nonDesertGetsWaterCrossingLabel);
   A('v1.56: a severe non-desert dry gap is genuinely slower than no gap (graduated response, not a flat 1.1x with no speed penalty)', R.v156.severeNonDesertGapSlowerThanNoGap);
-  A('v1.56: a severe non-desert dry gap names the matching auto tier (e.g. Deep Desert Crossing)', R.v156.severeNonDesertGapNamesDeepTier);
-  A('v1.56: the explicit desert-override dropdown stays desert-only — a non-desert stage ignores it and uses the measured auto tier instead', R.v156.explicitOverrideIgnoredOnNonDesert);
+  A('v1.56/v1.67: a severe non-desert dry gap resolves to a real auto tier (Sparse Wells), and the tier ladder itself reaches every tier up to Deep Desert Crossing for a large enough gap', R.v156.severeNonDesertGapNamesDeepTier);
+  A('v1.56: the explicit desert-override dropdown stays desert-only — on a non-desert stage it shows no water-crossing tier at all (neither the override nor the auto measurement applies)', R.v156.explicitOverrideIgnoredOnNonDesert);
   A('v1.56: a genuine desert stage still honors an explicit override (unchanged regression)', R.v156.desertExplicitOverrideStillHonored);
   A('v1.56: a genuine desert stage on auto still resolves and labels its tier', R.v156.desertAutoStillResolvesAndLabels);
 
@@ -6029,6 +6118,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.66: a party already on travois where wheels are viable again gets a "cart (was travois)" advisory once cargo clears the margin', R.v166.vehicleAdvisoryRendered && R.v166.vehicleAdvisoryHasNoSpeciesFix);
   A('v1.66: clicking it switches to a cart and leaves species alone (mule was already optimal there)', R.v166.vehicleFixApplied && R.v166.vehicleFixLeftSpeciesAlone);
 
+  A('v1.67: the owner\'s reported stage (Hills/Ruined Region/Hot Desert, 215km dry, 1 mule+1 wagon) now blocks instead of returning an 1100%+-overloaded "answer"', R.v167.reportedStageNowBlocked && R.v167.reportedStageMsgNamesCapacity);
+  A('v1.67: a genuinely fine stage is completely unaffected by the new post-loop check', R.v167.fineStageUnaffected);
+  A('v1.67: the fix reuses the SAME v1.63 JP_LOAD_INVALID_RATIO constant, not a new separate threshold', R.v167.reusesSharedConstant);
+  A('v1.67: a journey mixing a fine stage and the reported-bug stage blocks the WHOLE plan (blockedIdx precedent) with a capacity-naming message', R.v167.planBlocked && R.v167.planBlockedMsgNamesCapacity && R.v167.badStageIsTheBlockedOne);
+  A('v1.67: plan.totalDays is nulled on a block, but the fine stage\'s own per-stage result is still a real computed number', R.v167.planTotalDaysNull && R.v167.fineStageStillComputedInPlan);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

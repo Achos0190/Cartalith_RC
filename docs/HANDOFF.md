@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.66.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.67.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.67 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.65` are kept and never edited.
+  (v1.68 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.66` are kept and never edited.
+- **v1.67 — a water-driven convergence loop could return a physically absurd, unblocked
+  stage.** Owner pasted a full "Severe" Journey Planner verdict — an 18-month, 4253 km journey
+  with stages at 525%-1475% of capacity and no hard block — "Somehow it feels like it is way
+  too long for travel time." Root-caused by reproducing the report's own Stage 11 numbers before
+  writing any fix: v1.63's `JP_LOAD_INVALID_RATIO` check only ever saw the UN-iterated `ratio0`
+  (0.82, read as fine); the convergence loop's OWN water term is a real feedback loop (slower
+  speed → longer gap in days → more water → more load → slower speed) that converged at 15.3×
+  capacity while `jpLoadPenalty` silently floors at 0.45× past 150%. Civ-layer only
+  (`jpCalcLand`). 1016 / 852 green; hash battery ALL IDENTICAL; 557 smoke green; see CHANGELOG
+  for the full writeup.
+  - Fix: the SAME `JP_LOAD_INVALID_RATIO` cutoff is now also checked on the post-loop
+    `loadRatio`, not just `ratio0` — one `if`, right after the convergence loop.
+  - Fixing this surfaced 3 pre-existing v1.56 smoke assertions that were themselves accidentally
+    overloaded (a synthetic 3000 km dry gap for a 4-person Walking party with zero animals) — the
+    same shape v1.63's own entry already named. Fixed by shrinking the scenario to a genuinely
+    carriable 110 km, not by loosening the new check.
+  - Known scope cuts: no change to the loop's iteration count, `jpLoadPenalty`'s curve, or any
+    terrain/weather/infrastructure table — only the missing post-loop capacity check.
 - **v1.66 — per-stage pack-animal + vehicle fine-tuning, with a swap advisory.** Owner: a
   2-person party travels moderate climate for 2/3 of a route then desert, wanting to swap
   mule+cart for camel+travois at the transition; "For now I cant make any such a finetunement."
@@ -2144,7 +2162,18 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **← next session: the rest of a cut-off owner message, never resolved.** The desert-transition
+- **← next session (in progress): village density spacing + zoom-gated visibility.** Owner: the
+  existing "dense village grid" option (v0.76) "sometimes feels waay to populated on the map" —
+  wants the dense-grid function KEPT, but when it's OFF, villages should space out along the
+  settlement generator's own routes instead of the current behavior, and the whole additive village
+  layer should only become visible once zoomed in to roughly 50% (with their ways). Not yet
+  investigated: what "spaced along the routes" should mean mechanically (candidate: seed extra
+  village-tier settlements along already-generated `civWays`, spacing-rejected like v1.26's scatter
+  brush, rather than the existing grid/suitability seeding v0.76 uses) and what "50% zoom" maps to
+  in this file's own zoom conventions (`viewT.scale` off-LOD vs `_lodZoom` under Tiled LOD — see
+  v1.23's `_civZoomPickR` for the two-camera-convention precedent). Investigate + present a plan
+  before building, per this file's own working-rules discipline.
+- **the rest of a cut-off owner message, never resolved.** The desert-transition
   request that shipped as v1.66 arrived mid-typing, cut off after "Also I'd like that the current
   [...]." Asked the owner whether to wait for the rest or proceed on the water/desert-swap part
   alone via `AskUserQuestion`; they said proceed as-is. The unfinished sentence was never followed

@@ -12,6 +12,68 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.67 — A water-driven convergence loop could return a physically absurd, unblocked stage
+
+Owner pasted a full Journey Planner "Severe" verdict — an 18-month, 4253 km, 14-stage journey with
+several stages reading 525%–1475% of carrying capacity, all showing the identical flat 0.450 load
+multiplier and no hard block — ending with "Somehow it feels like it is way too long for travel
+time." Root-caused with a direct reproduction of the report's own Stage 11 numbers
+(`terrain:'Hills', infra:'Ruined Region', biome:'Hot Desert', dryKm:215, km:293.0,
+transport:'Baggage Train', groupSize:2, hours:12, pace:'Forced March', cargoKg:200,
+supplyDays:20, animals:{mule:1}, wagons:1`) before writing any fix. Civ-layer only (`jpCalcLand`).
+Hash vs v1.66 **ALL IDENTICAL** — the fix only changes when a stage returns `blocked`, never any
+generated field.
+
+- **The gap v1.63 left open.** v1.63 (`JP_LOAD_INVALID_RATIO=1.50`) checks the UN-iterated `ratio0`
+  — cargo plus a flat, non-iterating water estimate from `jpCapacity` — before the convergence loop
+  runs, catching a stage that's hopeless from cargo alone. But the loop's OWN water term is measured
+  each iteration from `dryKm ÷ the speed reached so far`: a real feedback loop (slower speed → more
+  days to cross the gap → more water mass → more load → slower speed again) that is structurally
+  unrelated to `ratio0` and can diverge far past it. `jpLoadPenalty` floors at a flat 0.45× for ANY
+  ratio past 150%, so instead of failing to converge, the loop "converges" at a stable but physically
+  absurd number and returns it as a real, computed, summed stage. Reproduced exactly: `ratio0` for
+  the reported stage is 0.82 (read as fine), the loop's own converged `loadRatio` is 15.3 — the same
+  defect class v1.63 already fixed for `ratio0`, recurring one level deeper for the term that check
+  never saw.
+- **Fix: check the SAME `JP_LOAD_INVALID_RATIO` cutoff on the post-loop `loadRatio`, not just
+  `ratio0`.** One `if` added right after the convergence loop, before the final `waterGapDays`
+  recompute. Consistent with every other hard block in this function (wheel/mount/season/`ratio0`):
+  `_jpPlan`'s existing `blockedIdx` check already zeroes `plan.totalDays` for any single blocked
+  stage — this closes the one gap where a water-driven-during-the-loop overload slipped past that
+  net and got summed into the trip total instead.
+- **Directly explains the report.** `_jpPlan` only sums `r.days` for non-blocked stages; the reported
+  journey had several stages already flagged "resupply infeasible" internally (76/31/51/208 days
+  each) while still contributing their absurd duration to the 18-month headline. With the fix, a
+  stage this overloaded returns `blocked` and the whole plan reports "Impossible as configured"
+  instead of a misleadingly precise total.
+- **Fixing this surfaced 3 pre-existing v1.56 smoke assertions that were themselves accidentally
+  overloaded** — the third occurrence of exactly the shape v1.63's own CHANGELOG entry already
+  named ("test scenarios that were themselves accidentally overloaded"). The "severe non-desert dry
+  gap" scenario used a synthetic 3000 km waterless run for a 4-person Walking party with zero pack
+  animals — genuinely infeasible under ANY reserve multiplier (even the override plan's flat 1.1×,
+  with no tier escalation at all, works out to ~75 days of carried water no configuration of this
+  model can carry). Investigated whether more capacity could fix it first (it can't: in a non-desert
+  biome, `JP_DESERT_ANIMAL_MOD`'s water discount never applies, so every animal's own water draw
+  during a multi-day gap exceeds its pack capacity — adding animals makes a long dry crossing WORSE,
+  the same divergent-fixed-point shape v1.48 already documented for fodder). Fixed by shrinking the
+  scenario to a genuinely carriable 110 km (still clears the Sparse Wells tier and reads as a real,
+  graduated slowdown — the actual claim the test exists to prove) and moving the "can it reach the
+  deepest tier" check onto `_jpDesertTierForGap` directly, a pure function decoupled from whether any
+  specific party could survive carrying that much water — a capacity question v1.63/v1.67 already
+  own, not this labeling test's job. Also corrected a stale comment: an explicit (non-`'auto'`)
+  `desertWater` override on a non-desert stage doesn't fall back to the auto tier as the old comment
+  claimed — `jpCalcLand`'s override branch requires `isDesert` and its auto branch requires
+  `_dwAuto`, so neither fires and the formula shows no water-crossing line at all.
+- **Tests**: 5 new smoke assertions (`R.v167`) — the reported stage now blocks with a capacity-
+  naming message; a genuinely fine stage is unaffected; the fix reuses the exact v1.63 constant (not
+  a new magic number); a mixed-stage plan blocks the WHOLE total while the fine stage's own result
+  stays a real computed number; `blockedIdx` correctly names the bad stage. Plus the 3 corrected
+  v1.56 assertions above.
+- **Known scope cuts**: the convergence loop's OTHER inputs (food, fodder) were already covered by
+  v1.48's analogous fix for pack-animal count; this closes the water-specific instance for
+  `jpCalcLand` itself. No change to the loop's iteration count, `jpLoadPenalty`'s curve, or any
+  terrain/weather/infrastructure table.
+
 ### v1.66 — Per-stage pack-animal + vehicle fine-tuning, with a swap advisory
 
 Owner: a 2-person party travels moderate climate for the first 2/3 of a route, then desert; they
