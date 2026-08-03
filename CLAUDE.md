@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.70**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.71**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.70.html` | **Current** unified tool (~29.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.69.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.71.html` | **Current** unified tool (~29.2k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.70.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,32 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Addon villages connected by a low-tier "Ancient route" (v1.71)
+
+Owner, immediately after v1.70 shipped: "the new settlements... also need to be connected. By a
+lower type road (ancient route for example) so it only shows when zoomed in." Civ-layer only. Hash
+vs v1.70 ALL IDENTICAL.
+
+- **`_civConnectVillageAddons`** connects every addon village to its nearest REAL SETTLEMENT with a
+  `type:'ancient'`, `villageAddon:true` way, gated on `CIV_VILLAGE_ADDON_LOD` via `_civWayLodMin`
+  (factored out of `drawCivLayer`'s inline LOD ternary) — the road reveals together with its
+  village, not at the generic ancient-road threshold (0.7) every other way of that type keeps.
+- **First cut targeted the nearest existing WAY cell (a T-junction), not a settlement, and measured
+  broken**: `_civNetworkMetrics` only recognises settlement-to-settlement edges; a short spur's far
+  endpoint fell back to nearest-place-by-coordinate, which usually found the VILLAGE ITSELF — an
+  `aIdx===bIdx` self-loop silently dropped. All 200 villages read isolated despite 161 having a
+  drawn connector. Routing to the nearest SETTLEMENT instead guarantees valid, distinct `aIdx`/
+  `bIdx`, fixing it by construction — the existing-infrastructure cost discount still makes the
+  track prefer to run alongside a road en route, it just always terminates at a real town.
+- **`roadDijkstra` gained an additive multi-source form**: `sx` may be an array of cell indices,
+  seeding all at dist=0 in one pass — connects every village to its nearest settlement in ONE
+  full-grid search instead of one per village (`_civHierarchicalNetwork` already tolerates
+  one-Dijkstra-per-settlement at this scale; up to 200 villages would have been a full extra order
+  of magnitude). Every pre-v1.71 scalar call site is bit-identical (same seed, same loop).
+- Measured (seed 31337, 800km/512px, 200 villages): 199 connectors, 1 genuinely unreachable island
+  fragment, every connected village correctly non-isolated post-fix (was 200/200 isolated pre-fix).
+- Tests: 9 new smoke assertions (3 deterministic unit, 6 live-world).
 
 ### Dense grid and roadside villages merged into one suitability-weighted, road-biased pass (v1.70)
 

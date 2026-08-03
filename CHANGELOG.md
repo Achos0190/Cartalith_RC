@@ -12,6 +12,62 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.71 — Addon villages are connected to the network by a low-tier "Ancient route"
+
+Owner, immediately after v1.70 shipped: "the new settlements on the deeper level also need to be
+connected. By a lower type road (ancient route for example) so it only shows when zoomed in." v1.70
+added the villages themselves but never gave them any way — this closes that gap. Civ-layer only.
+Hash vs v1.70 **ALL IDENTICAL** — the new pass only runs when `_civVillages` is on and villages were
+actually added.
+
+- **`_civConnectVillageAddons(places, villages, ways)`** connects every addon village to its nearest
+  REAL SETTLEMENT with a new `type:'ancient'` way, tagged `villageAddon:true` so the renderer gates
+  it on `CIV_VILLAGE_ADDON_LOD` (the same deep-zoom threshold the village's own pin already uses —
+  see `_civWayLodMin`, factored out of `drawCivLayer`'s inline LOD ternary for exactly this) instead
+  of the generic `CIV_LOD_ROAD.ancient=0.7` every other ancient-typed way keeps. The `_CIV_EXISTING_
+  WAY_DISCOUNT` cost discount (v1.64) still applies en route, so a track prefers to run alongside a
+  real road on its way to a settlement rather than cut its own parallel line — it just always
+  terminates at an actual town.
+- **First cut targeted the nearest existing WAY cell, not a settlement, and measured broken.** A
+  spur stopping at a bare road junction reads well visually, but `_civNetworkMetrics` — the function
+  every population/trade/betweenness figure in this app is built on — only ever recognises
+  SETTLEMENT-to-SETTLEMENT edges (via `aIdx`/`bIdx`, or a nearest-place-to-endpoint coordinate
+  fallback when either is missing). A junction is invisible to it as a graph vertex. For a SHORT spur
+  (the common case — most villages are already road-biased at placement, v1.70), the fallback's
+  nearest-place search for the far endpoint usually finds the VILLAGE ITSELF, producing an
+  `aIdx===bIdx` self-loop the metrics function silently drops. Measured before the fix: 161/200
+  connectors built, but **all 200 villages read `componentSize===1`** (isolated) regardless — the
+  connector existed on the map and meant nothing to the simulation underneath it. Routing to the
+  nearest settlement instead guarantees `aIdx`/`bIdx` always resolve to two distinct real places, so
+  the metrics function's own direct branch picks up the edge correctly, by construction. Re-measured:
+  199/200 connectors, and every one of them now reads as genuinely connected (non-isolated).
+- **One shared multi-source Dijkstra pass, not one Dijkstra per village.** `_civHierarchicalNetwork`
+  already runs one full-grid `roadDijkstra` per SETTLEMENT to build the base road MST (confirmed by
+  reading it) — up to `_CIV_VILLAGE_CAP=200` villages on top of that would be a full extra order of
+  magnitude of full-grid searches. `roadDijkstra` gained an additive multi-source form (v1.71): `sx`
+  may now be an array of pre-computed cell indices, seeding every one at dist=0 in the same pass, so
+  one call finds every village's nearest settlement — and the full path back to it — in the same
+  asymptotic cost as ONE ordinary Dijkstra call. Every pre-v1.71 scalar call site is bit-identical
+  (same single seed, same relaxation loop) — asserted directly.
+- **Endpoints snap exactly onto both pins**, the same v1.02 precedent every other generated way
+  follows: the village end is forced onto the village's own `{x,y}`, the settlement end onto the
+  target settlement's — no "stops just short" gap.
+- **Measured** (seed 31337, 800 km / 512 px, 200 addon villages): 199 connectors built (1 village
+  genuinely unreachable — an isolated landmass fragment), all `type:'ancient'`, all correctly
+  registered as non-isolated by `_civNetworkMetrics`. Toggling the layer off leaves zero
+  `villageAddon`-tagged ways behind.
+- **Tests**: 9 new smoke assertions — 3 deterministic unit tests (multi-source `roadDijkstra` matches
+  the min of each source's own single-source distance at every cell; every scalar call stays
+  byte-identical; `_civWayLodMin` overrides correctly for a `villageAddon` way and leaves a plain
+  `ancient` way untouched) plus 6 live-world assertions (bounded non-empty batch, both endpoints snap
+  exactly, LOD matches the village's own threshold, most villages connect, every connected village
+  reads non-isolated, toggle-off leaves no connectors).
+- **Known scope cuts**: no cap on connector length (a genuinely remote village earns a genuinely long
+  ancient track, same as the base network's own uncapped MST edges); a village on a landmass with no
+  real settlement at all gets no connector (nothing to connect to); village-to-village connections
+  are not modelled — each addon village always spurs independently to its nearest real settlement,
+  never to a neighbouring village, even when that would be a shorter path.
+
 ### v1.70 — Dense grid and roadside villages merged into one suitability-weighted, road-biased pass
 
 Owner, immediately after v1.69 shipped: "can we mix the dense village function and the roadside

@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.70.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.71.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.71 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.69` are kept and never edited.
+  (v1.72 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.70` are kept and never edited.
+- **v1.71 — addon villages connected by a low-tier "Ancient route."** Owner, immediately after
+  v1.70 shipped: "the new settlements on the deeper level also need to be connected. By a lower
+  type road (ancient route for example) so it only shows when zoomed in." Civ-layer only.
+  1016 / 852 green; hash battery ALL IDENTICAL; 581 smoke green (572 + 9 new); see CHANGELOG for
+  the full writeup.
+  - `_civConnectVillageAddons` connects every addon village to its nearest REAL SETTLEMENT with a
+    new `type:'ancient'`, `villageAddon:true` way, gated on `CIV_VILLAGE_ADDON_LOD` via a new
+    `_civWayLodMin` helper — the road reveals together with its village, not at the generic
+    ancient-road threshold (0.7).
+  - First cut targeted the nearest existing WAY cell (a T-junction) instead of a settlement, and
+    measured broken: `_civNetworkMetrics` only recognises settlement-to-settlement edges, so a
+    short spur's far endpoint fell back to nearest-place-by-coordinate — which usually found the
+    VILLAGE ITSELF, an `aIdx===bIdx` self-loop silently dropped. All 200 test villages read
+    isolated despite 161 having a drawn connector. Routing to the nearest settlement instead
+    fixed it by construction (guaranteed distinct, valid `aIdx`/`bIdx`).
+  - `roadDijkstra` gained an additive multi-source form (`sx` may be an array of cell indices) so
+    every village's nearest-settlement connection is found in ONE shared full-grid search instead
+    of one Dijkstra call per village (up to 200). Every pre-v1.71 scalar call site is bit-identical.
+  - Measured (seed 31337, 800km/512px, 200 villages): 199 connectors, 1 genuinely unreachable
+    island fragment, every connected village correctly non-isolated post-fix.
 - **v1.70 — dense grid and roadside villages merged into one suitability-weighted, road-biased
   pass.** Owner, immediately after v1.69 shipped: "mix the dense village function and the
   roadside village function into something more nuanced? And only come into view when our zoom
@@ -2216,6 +2236,13 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **v1.71 shipped**: addon villages now get a low-tier 'ancient' way connecting each to its nearest
+  real settlement, deep-zoom-gated together with the village (`_civConnectVillageAddons`). See
+  CHANGELOG for the full writeup and the self-loop bug the first cut (connect to nearest ROAD
+  junction, not settlement) measured and fixed. Known scope cuts: no cap on connector length; a
+  village on a landmass with no real settlement gets no connector; village-to-village connections
+  are not modelled (every addon village always spurs to its nearest SETTLEMENT, never to a
+  neighbouring village even when that would be shorter).
 - **v1.70 shipped**: dense-village-grid and roadside-villages merged into one suitability-weighted,
   road-biased pass, replacing both toggles with `civVillagesChk`/`_civVillages`. See CHANGELOG for
   the full writeup. Known scope cuts: `roadFalloff` reuses `VILLAGE_SPACING_KM` rather than an

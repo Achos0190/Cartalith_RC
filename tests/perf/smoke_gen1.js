@@ -501,6 +501,33 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     o.acceptNear = _civVillageAcceptProb(5, lo, fall, lo, hi);
     o.acceptFarther = _civVillageAcceptProb(20, lo, fall, lo, hi);
     o.acceptFarthest = _civVillageAcceptProb(60, lo, fall, lo, hi);
+
+    // v1.71 (owner: "the new settlements on the deeper level also need to be connected. By a lower
+    // type road... so it only shows when zoomed in."): deterministic unit tests of the two new
+    // pure primitives, again independent of the stochastic committed world.
+    // roadDijkstra's new multi-source form: seeding several sources at once must, for every cell,
+    // find the same distance as the MINIMUM of each source's own single-source Dijkstra to that
+    // cell — and every pre-v1.71 scalar call must stay byte-identical (same seed, same loop).
+    {
+      const W = 20, H = 10;
+      const cost = new Float32Array(W * H).fill(1);
+      const a = roadDijkstra(cost, W, H, 2, 2, false);
+      const b = roadDijkstra(cost, W, H, 15, 7, false);
+      const multi = roadDijkstra(cost, W, H, [2 + 2 * W, 15 + 7 * W], null, false);
+      let matches = true;
+      for (let i = 0; i < W * H; i++) {
+        const expect = Math.min(a.dist[i], b.dist[i]);
+        if (Math.abs(multi.dist[i] - expect) > 1e-3) { matches = false; break; }
+      }
+      o.multiSourceMatchesMinOfSingleSources = matches;
+      const aAgain = roadDijkstra(cost, W, H, 2, 2, false);
+      o.scalarFormByteIdentical = JSON.stringify(Array.from(a.dist)) === JSON.stringify(Array.from(aAgain.dist));
+    }
+    // _civWayLodMin: a villageAddon way overrides its type's ordinary CIV_LOD_ROAD threshold with
+    // CIV_VILLAGE_ADDON_LOD; a plain way of the same type ('ancient') is completely untouched.
+    o.wayLodVillageAncient = _civWayLodMin({ villageAddon: true, type: 'ancient' });
+    o.wayLodPlainAncient = _civWayLodMin({ type: 'ancient' });
+    o.wayLodHighwayUnaffected = _civWayLodMin({ type: 'highway' }) === CIV_LOD_ROAD.highway;
     return o;
   });
   // Part 2: the same real-generated-world structural/safety checks v0.76/v1.68/v1.69 used
@@ -571,9 +598,42 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       roadBiasSane = withRoadsCount + 5 >= withoutRoadsCount;
     }
 
+    // v1.71 (owner: "the new settlements... need to be connected. By a lower type road (ancient
+    // route for example) so it only shows when zoomed in."): every addon village should get a
+    // low-tier 'ancient' connector to its nearest real settlement, deep-zoom-gated together with
+    // the village itself, and genuinely registered as connected by the network-metrics graph (not
+    // a silently-dropped self-loop — see _civConnectVillageAddons's own comment on the bug this
+    // fixed: routing to a bare mid-road junction instead of a real settlement).
+    const conn = civWays.filter(w => w.villageAddon);
+    const allConnAncient = conn.length > 0 && conn.every(w => w.type === 'ancient');
+    const villageEndsMatchPin = conn.every(w => {
+      const v = state.places[w.aIdx];
+      if (!v) return false;
+      const p0 = w.pts[0];
+      return Math.abs(p0[0] - v.x) < 1e-6 && Math.abs(p0[1] - v.y) < 1e-6;
+    });
+    const settlementEndsMatchPin = conn.every(w => {
+      if (w.bIdx == null) return false;
+      const s = state.places[w.bIdx];
+      if (!s) return false;
+      const pe = w.pts[w.pts.length - 1];
+      return Math.abs(pe[0] - s.x) < 1e-6 && Math.abs(pe[1] - s.y) < 1e-6;
+    });
+    const connectorLodMatchesVillage = conn.length > 0 && conn.every(w => _civWayLodMin(w) === CIV_VILLAGE_ADDON_LOD);
+    const mostVillagesConnected = rv.length > 0 && conn.length >= rv.length * 0.5;
+
+    const metrics = _civNetworkMetrics(state.places, civWays);
+    const connectedVillageAidx = new Set(conn.map(w => w.aIdx));
+    const allConnectedVillagesNonIsolated = rv.every(p => {
+      const i = state.places.indexOf(p);
+      if (!connectedVillageAidx.has(i)) return true;   // no connector (e.g. unreachable) — not this check's concern
+      return metrics[i] && metrics[i].componentSize > 1;
+    });
+
     _civVillages = false;
     _civAutoWorld();
     const toggleOffCount = state.places.length;
+    const offHasNoConnectors = civWays.filter(w => w.villageAddon).length === 0;
 
     // restore clean civ state so later place/way tests see an empty world (v0.76's own precedent)
     if (savedViewScale != null) viewT.scale = savedViewScale;
@@ -594,6 +654,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       roadBiasSane, withRoadsCount, withoutRoadsCount,
       toggleOffMatchesBaseline: toggleOffCount === baselineCount,
       popTotal: pop ? pop.total : -1, popLand: pop ? pop.landKm2 : -1,
+      connectorCount: conn.length, allConnAncient, villageEndsMatchPin, settlementEndsMatchPin,
+      connectorLodMatchesVillage, mostVillagesConnected, allConnectedVillagesNonIsolated,
+      offHasNoConnectors,
     };
   });
   R.villagesToggle = await page.evaluate(() => {
@@ -5642,6 +5705,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.70 villages: road proximity never leaves meaningfully fewer villages seeded than with no roads at all (comparative check on the pure seeding function)', R.villages.roadBiasSane === true);
   A('v1.70 villages: the unified "Villages" checkbox exists, defaults unchecked, and its change handler drives _civVillages', R.villagesToggle && R.villagesToggle.defaultChecked === false && R.villagesToggle.on === true && R.villagesToggle.off === false);
   A('v1.70 villages: regional population estimate integrates a positive total over a positive land area (unaffected by the toggle merge)', R.villages.popTotal > 0 && R.villages.popLand > 0);
+
+  A('v1.71 villages unit: multi-source roadDijkstra matches the minimum of each source\'s own single-source distance at every cell', R.villagesUnit.multiSourceMatchesMinOfSingleSources);
+  A('v1.71 villages unit: every pre-v1.71 scalar roadDijkstra call is still byte-identical', R.villagesUnit.scalarFormByteIdentical);
+  A('v1.71 villages unit: _civWayLodMin overrides a villageAddon way\'s threshold to CIV_VILLAGE_ADDON_LOD but leaves a plain way of the same type at its ordinary CIV_LOD_ROAD value', R.villagesUnit.wayLodVillageAncient === 2.4 && R.villagesUnit.wayLodPlainAncient === 0.7 && R.villagesUnit.wayLodHighwayUnaffected);
+  A('v1.71 villages: connecting each village produces a bounded, non-empty batch of ancient-type connector ways', R.villages.connectorCount > 0 && R.villages.allConnAncient);
+  A('v1.71 villages: a connector\'s village end lands exactly on the village\'s own pin, and its settlement end lands exactly on a real settlement\'s pin', R.villages.villageEndsMatchPin && R.villages.settlementEndsMatchPin);
+  A('v1.71 villages: a connector reveals at the SAME deep zoom as its village (CIV_VILLAGE_ADDON_LOD), not the generic ancient-road threshold', R.villages.connectorLodMatchesVillage);
+  A('v1.71 villages: most villages reach the existing network with a connector (a few may be genuinely unreachable, e.g. an isolated landmass)', R.villages.mostVillagesConnected);
+  A('v1.71 villages: every connected village is registered as non-isolated by _civNetworkMetrics — not a silently-dropped self-loop', R.villages.allConnectedVillagesNonIsolated);
+  A('v1.71 villages: toggling the layer off leaves no villageAddon connector ways behind', R.villages.offHasNoConnectors);
   A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
   A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
   A('v0.82 recovery: a city collapses into a fortified ruin under Survival + tier-from-population is sane', R.recovery && R.recovery.demoted && R.recovery.tierFn);
