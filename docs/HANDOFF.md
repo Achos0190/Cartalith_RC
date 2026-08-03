@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.61.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.62.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.62 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.60` are kept and never edited.
+  (v1.63 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.61` are kept and never edited.
+- **v1.62 — settlements no longer land on top of each other, even across opposing factions.**
+  Owner: "settlements being created on top of each other even from oposing factions now."
+  Root-caused by ablation (disable one candidate mechanism at a time, re-measure) before any fix.
+  1016 / 852 green; hash battery ALL IDENTICAL; 524 smoke green; see CHANGELOG for the full writeup.
+  - **The v1.46 coastal-preference swap relocates a landmass's worst non-port settlement onto a
+    fresh coastal candidate and never checked that candidate against settlements already standing
+    on the landmass.** `byLandmass` groups by LANDMASS, not faction; since v1.58 let several
+    factions share one landmass, this could drop one faction's settlement directly onto a rival's.
+  - **Measured, not assumed**: an 8-seed sweep found overlapping pairs (several at 0 km) on 5 of 8
+    seeds, including cross-faction pairs. Disabling `_civOceanDistField` (the v1.46 smoke test's own
+    technique for turning the swap off) eliminated every overlap; disabling the water-edge snap did
+    not — isolating the coastal swap as the sole cause.
+  - **Fix**: reject a swap candidate within `suppR` (already computed, the same value every other
+    placement pass in the function uses) of any OTHER settlement. Four lines, civ-layer only.
+  - **Known scope cut**: the crossroads-settlement snap and the all-settlement water-edge snap
+    share the same "move without checking siblings" shape in principle, but the ablation showed
+    neither produces overlaps in practice on the sample tested — left alone, not fixed speculatively.
 - **v1.61 — LOD tile refinement: one bad tile can no longer take its neighbours down with
   it.** Owner report (screenshot): a rectangular block of Tiled-LOD tiles permanently stuck on
   the coarse/unshaded overview — deep zoom, plain Biome view, no bake involved, panning away and

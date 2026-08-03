@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.61**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.62**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.61.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.60.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.62.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.61.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,33 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Settlement overlap: the coastal-preference swap never checked its target (v1.62)
+
+Owner report: "settlements being created on top of each other even from oposing factions now."
+Root-caused by ablation (disable one candidate mechanism at a time, re-measure — not by inspection
+alone) before writing any fix.
+
+- **The v1.46 coastal-preference swap relocates a landmass's worst non-port settlement onto a fresh
+  coastal candidate, and never checked that candidate against the settlements ALREADY standing on
+  that landmass.** The candidate is spaced against the OTHER coastal candidates (via
+  `findSettlementSeeds`'s own suppression radius) and against its own swap target's CURRENT position
+  (a `<2`-cell no-op guard) — but nothing else. `byLandmass` groups by LANDMASS, not faction; since
+  v1.58 let several factions share one landmass, this could — and measurably did — drop one
+  faction's settlement directly onto a rival's already-placed town.
+- **Measured before fixing**: an 8-seed sweep of a fresh `_civIterativeAutoWorld(3)` found
+  settlement pairs within 3 km (several at literally 0 km) on 5 of 8 seeds, including cross-faction
+  pairs (a faction-2 town + faction-3 hamlet at 0 km; a faction-6 capital landing on a faction-1
+  hamlet). Disabling `_civOceanDistField` (the v1.46 smoke test's own established technique for
+  turning the swap off) eliminated every overlap across all 8 seeds; disabling the water-edge snap
+  did not — isolating the coastal swap as the sole cause before any code changed.
+- **Fix**: reject a swap candidate within `suppR` (already computed earlier in the same function,
+  the same value every other placement pass in it uses) of any OTHER settlement, falling through to
+  try the next candidate. Four lines, civ-layer only. Hash vs v1.61 ALL IDENTICAL.
+- **Known scope cut**: the crossroads-settlement snap and the all-settlement water-edge snap
+  (`_civSnapToWaterEdge`, both v1.39) share the same "move without checking siblings" shape in
+  principle, but the ablation showed neither produces overlaps in practice on the sample tested —
+  left alone rather than fixed speculatively.
 
 ### LOD tile refinement: per-tile failure isolation (v1.61)
 
@@ -2045,7 +2072,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (521 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

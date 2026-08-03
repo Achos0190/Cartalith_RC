@@ -4987,6 +4987,49 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ---- v1.62 (owner report: "settlements being created on top of each other even from opposing
+  // factions"). Root cause, confirmed by ablation before any fix: the v1.46 coastal-preference swap
+  // relocates a landmass's worst non-port settlement onto a fresh coastal candidate, checked for
+  // spacing against the OTHER coastal candidates but never against the settlements already standing
+  // on that landmass — byLandmass groups by LANDMASS, not faction, so once v1.58 let several factions
+  // share one landmass this could drop one faction's settlement directly onto a rival's. Disabling
+  // _civOceanDistField (the v1.46 smoke test's own technique for turning the swap off) eliminated
+  // every observed overlap across 8 seeds; disabling the water-edge snap did not. Fixed by rejecting
+  // a swap candidate within suppR of any OTHER settlement — the same suppression-radius convention
+  // every other placement pass in this function already uses. Runs its own dedicated small worlds
+  // (four of the seeds the pre-fix ablation actually reproduced on), matching this file's own
+  // test-isolation precedent, and restores ambient state afterward. ----
+  R.v162 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+    try {
+      const seeds = [12345, 424242, 55555, 31337];
+      const results = [];
+      for (const seed of seeds) {
+        state.mapWidthKm = 800; state.tect.seed = seed; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+        await generate();
+        state.places = []; _civIterativeAutoWorld(3);
+        const places = (state.places || []).filter(p => p && p.category === 'settlement');
+        const cellKm = state.mapWidthKm / GW;
+        let overlaps = 0, crossFactionOverlaps = 0;
+        for (let i = 0; i < places.length; i++) for (let j = i + 1; j < places.length; j++) {
+          const a = places[i], b = places[j];
+          if (Math.hypot(a.x - b.x, a.y - b.y) * cellKm < 3) { overlaps++; if (a.faction !== b.faction) crossFactionOverlaps++; }
+        }
+        results.push({ seed, nPlaces: places.length, overlaps, crossFactionOverlaps });
+      }
+      o.results = results;
+      o.noOverlapsAnySeed = results.every(r => r.overlaps === 0);
+      o.noCrossFactionOverlapsAnySeed = results.every(r => r.crossFactionOverlaps === 0);
+      o.settlementsStillPlaced = results.every(r => r.nPlaces > 10);
+    } finally {
+      state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5584,7 +5627,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.61: a refine failure is now logged instead of silently swallowed', R.v161.warningLogged);
   A('v1.61: a repeated failure on the same tile never escapes refineVisibleTiles as an uncaught rejection', R.v161.neverThrowsUncaughtOnRetry);
 
-
+  A('v1.62: no two settlements land within 3km of each other on any of the 4 seeds that reproduced the pre-fix bug', R.v162.noOverlapsAnySeed);
+  A('v1.62: no cross-faction settlement overlaps either — the reported "even opposing factions" case', R.v162.noCrossFactionOverlapsAnySeed);
+  A('v1.62: the overlap guard does not suppress placement outright — settlements are still placed normally', R.v162.settlementsStillPlaced);
 
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');

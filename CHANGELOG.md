@@ -12,6 +12,47 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.62 — settlements no longer land on top of each other, even across opposing factions
+
+Owner report: "settlements being created on top of each other even from oposing factions now."
+Root-caused by ablation (disable one candidate mechanism at a time, re-measure) before writing any
+fix, per this file's own working-rules discipline — not by inspection alone.
+
+- **Root cause: the v1.46 coastal-preference swap never checked its target position against
+  existing settlements.** `_civIterativeAutoWorld`'s coastal-swap pass relocates a landmass's worst
+  non-port settlement onto a fresh coastal candidate (`best`, drawn from a separate
+  `findSettlementSeeds` run over the coastal-masked suitability field). That candidate is spaced
+  against the OTHER coastal candidates (via `findSettlementSeeds`'s own suppression radius) and
+  checked against its own swap target's current position (the `<2` no-op guard) — but never against
+  the OTHER settlements already standing on that landmass. `byLandmass` groups candidates by
+  LANDMASS, not faction; since v1.58 let several factions share one landmass (spare faction seats
+  seeding extra capitals), this pass could — and, per the ablation below, reliably did — drop one
+  faction's settlement directly onto a rival's already-placed town.
+- **Measured, not assumed**: an 8-seed sweep of a fresh `_civIterativeAutoWorld(3)` call found
+  settlement pairs within 3 km of each other (several at literally 0 km) on 5 of 8 seeds, including
+  a same-landmass CROSS-faction pair (a faction-2 town and a faction-3 hamlet at 0 km on seed
+  55555, and a faction-6 capital landing on a faction-1 hamlet on seed 31337). Disabling
+  `_civOceanDistField` (the v1.46 smoke test's own established technique for turning the coastal
+  swap off) eliminated every overlap across all 8 seeds; disabling the water-edge snap instead did
+  not — isolating the coastal swap as the sole cause before any code changed.
+- **Fix**: the swap now rejects a candidate within `suppR` (the same suppression-radius value
+  already computed earlier in this function and used by every other placement pass) of any OTHER
+  settlement, falling through to try the next candidate. Four lines, civ-layer only — no engine/UME
+  change. Hash vs v1.61 **ALL IDENTICAL** (placement-only fix, `generate()` untouched).
+- **Re-measured post-fix**: 0 overlaps, 0 cross-faction overlaps, across all 8 sweep seeds.
+  Settlement counts are essentially unchanged (a rejected swap simply leaves that settlement
+  non-coastal or tries the next candidate, same as any other "candidate doesn't clear the bar" case
+  this pass already handles).
+- **Tests**: 3 new smoke assertions (`R.v162`) on 4 of the seeds the pre-fix ablation actually
+  reproduced the bug on (dedicated fresh worlds, ambient state restored afterward, matching this
+  file's own test-isolation precedent) — no two settlements within 3 km on any seed, no
+  cross-faction overlaps, and settlements are still placed in normal numbers (the guard doesn't
+  suppress placement outright). 1016 / 852 green; hash battery ALL IDENTICAL; 524 smoke green.
+- **Known scope cut**: the crossroads-settlement snap and the all-settlement water-edge snap
+  (`_civSnapToWaterEdge`, both v1.39) share the same "move without checking siblings" shape in
+  principle, but the ablation showed neither actually produces overlaps in practice on the sample
+  tested — left alone rather than fixed speculatively.
+
 ### v1.61 — LOD tile refinement: one bad tile can no longer take its neighbours down with it
 
 Owner report (screenshot): a rectangular block of tiles under deep Tiled-LOD zoom, plain Biome view,
