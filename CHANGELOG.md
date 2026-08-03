@@ -12,6 +12,60 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.61 — LOD tile refinement: one bad tile can no longer take its neighbours down with it
+
+Owner report (screenshot): a rectangular block of tiles under deep Tiled-LOD zoom, plain Biome view,
+permanently stuck on the coarse/unshaded overview — no loading indicator, panning away and back never
+fixed it, no baking involved. Investigated extensively before writing any fix: audited every LOD
+camera-move path for a missing `scheduleLodRefine()` call (none found — the v1.29 fix already covers
+pan/pinch/wheel/joystick/zoom-buttons), checked whether any v1.60 function (`terrainDetailK`/
+`riverFlowThresh`) was missing from the Web Worker's function whitelist and would `ReferenceError`
+inside a worker (it isn't — neither is called from `pyramidTile`'s dependency chain), ruled out stale
+baked-atlas chunks (owner confirmed no baking), and attempted reproduction via Playwright — a single
+deep-zoom jump, forced refine cycles, and an aggressive fast zoom+pan gesture sequence across 6 seeds —
+without ever triggering a persistently-stuck tile. The exact trigger was not reproduced this session.
+
+- **What the code audit DID find: a real, structural isolation gap.** `refineVisibleTiles()` dispatches
+  missing tiles to a Web Worker pool (`GENPOOL.runTiles`) when available, falling back to a synchronous
+  `pyramidTile()` loop on the main thread otherwise. Neither path isolated one tile's failure:
+  - **Worker side**: the `stage==='tile'` handler looped `results.push(pyramidTile(...))` with no
+    per-job try/catch. An uncaught throw inside a Worker's `onmessage` never calls `postMessage` — it
+    fires `onerror` on the MAIN thread instead, which `_runTiles` turns into a full REJECTION of
+    `GENPOOL.runTiles()`. Since jobs are round-robin split across however many workers exist
+    (`i%nw`), that takes down every tile dispatched to the SAME worker, not just the bad one.
+  - **Sync fallback**: `refineVisibleTiles()`'s own `for(const n of need)` loop called `pyramidTile()`
+    directly with no per-iteration try/catch, so a throw there stopped the loop entirely — every tile
+    still queued after the bad one in iteration order stayed uncached too.
+  - **Both failures were silently swallowed** by `scheduleLodRefine()`'s outer `catch(_){}`, so nothing
+    ever surfaced an error — matching the reported "no loading indicator, nothing visibly wrong except
+    the stuck block" exactly, and matching "permanently stuck": since the same tile position is
+    recomputed identically on every subsequent refine attempt, a deterministic failure fails forever.
+- **Fix: isolate every tile's success/failure independently, in both paths, and log instead of
+  swallow.** The worker's per-job loop now wraps each `pyramidTile(...)` call in its own try/catch,
+  pushing `null` (already the existing skip-on-falsy convention at the call site) and collecting an
+  `{z,col,row,msg}` error record instead of letting one job kill the batch. `_runTiles`'s `onmessage`
+  now `console.warn`s any such records. `refineVisibleTiles()`'s sync loop gained the matching
+  per-iteration try/catch + `console.warn`. A tile that fails is simply left uncached (exactly the
+  existing "not yet refined" state — it shows the coarse overview and is retried on the next debounced
+  settle) instead of blocking or crashing its siblings. `bakeVisibleTiles()`/`bakeAllTiles()` share the
+  same latent shape but are out of scope this pass — the owner explicitly confirmed baking wasn't
+  involved, and finalized-world baking failure modes deserve their own dedicated look rather than a
+  drive-by fix bundled into an unrelated report.
+- **Bit-identical to v1.60** (`hash_gen1.js` — ALL IDENTICAL): this is pure error-handling around calls
+  that never throw on the happy path, so the return value is byte-for-byte unchanged whenever nothing
+  fails.
+- **Tests**: 5 new smoke assertions (`R.v161`) — force the sync path (disable `GENPOOL.usableForTiles`)
+  and monkeypatch the global `pyramidTile` to throw for exactly one visible tile, twice in a row:
+  confirms the scenario has multiple visible tiles (so a sibling-survival check means something), the
+  bad tile stays uncached rather than crashing, its siblings still get cached, a warning is now logged,
+  and a repeated failure on the same tile never escapes `refineVisibleTiles()` as an uncaught rejection.
+  1016 / 852 green; hash battery ALL IDENTICAL; 521 smoke green.
+- **Known scope cut, disclosed**: the root TRIGGER for the originally-reported stuck tile was not
+  identified — this fix prevents it from ever manifesting as a permanent, silent, multi-tile block
+  again, and (via the new `console.warn`) makes the underlying cause diagnosable the next time it
+  fires, but the underlying "why did `pyramidTile` throw at all" question remains genuinely open. If
+  it recurs, the browser console will now name the exact `z/col/row` and error message.
+
 ### v1.60 — Rivers/relief become real-km-aware: small regions get genuinely finer drainage detail
 
 Owner: "when choosing a smaller region rivers dont become more visible (i think its a scaling

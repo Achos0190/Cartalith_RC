@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.60**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.61**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.60.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.59.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.61.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.60.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,52 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### LOD tile refinement: per-tile failure isolation (v1.61)
+
+Owner report (screenshot): a rectangular block of Tiled-LOD tiles permanently stuck on the coarse/
+unshaded overview — deep zoom, plain Biome view, no bake involved, panning away and back never fixed
+it. Investigated thoroughly before writing any fix (see CHANGELOG for the full audit trail: every LOD
+camera-move path checked for a missing `scheduleLodRefine()` call, every v1.60 function checked against
+the Worker's function whitelist, baking ruled out by the owner directly, reproduction attempted via
+Playwright across 6 seeds with forced refine cycles and an aggressive fast zoom/pan gesture sequence) —
+the exact trigger was never reproduced, but the audit found a real structural gap worth fixing
+regardless of what specifically triggers it.
+
+- **`refineVisibleTiles()` has two paths to compute a missing tile — a Web Worker pool
+  (`GENPOOL.runTiles`) and a synchronous main-thread fallback — and neither isolated one tile's
+  failure from its neighbours.** Worker side: the `stage==='tile'` per-job loop had no try/catch, so an
+  uncaught throw never reaches `postMessage` — it fires the main thread's `onerror` instead, which
+  rejects the ENTIRE batch dispatched to that worker (jobs are round-robin split across however many
+  workers exist, so several tiles die together). Sync side: the fallback loop had the same gap — no
+  per-iteration try/catch, so a throw stopped it partway through `need`, leaving every tile queued
+  after the bad one uncached too. Both failures were silently swallowed by `scheduleLodRefine()`'s
+  outer `catch(_){}` — nothing ever surfaced an error, matching the report's "no loading indicator,
+  nothing visibly wrong except the stuck block" exactly. And since the same tile position recomputes
+  identically every time, a deterministic failure fails forever — matching "permanently stuck."
+- **Fix: isolate every tile independently in both paths, and log instead of swallow.** The worker's
+  per-job loop wraps each `pyramidTile(...)` call in its own try/catch, pushing `null` (the existing
+  skip-on-falsy convention at the call site already handles this) and collecting an error record;
+  `_runTiles`'s `onmessage` now `console.warn`s them. `refineVisibleTiles()`'s sync loop gained the
+  matching per-iteration try/catch + warn. A failed tile is simply left uncached — the ordinary
+  "not yet refined" state, shown as the coarse overview and retried on the next debounced settle —
+  instead of blocking or crashing its siblings.
+- **`bakeVisibleTiles()`/`bakeAllTiles()` share the identical latent shape and are deliberately left
+  alone this pass** — the owner confirmed baking wasn't involved in the report, and a finalized-world
+  baking failure is a different enough failure mode (silently missing atlas chunks in output meant to
+  be permanent) to deserve its own dedicated look rather than a drive-by bundled into an unrelated fix.
+- **Bit-identical to v1.60** — pure error-handling around calls that never throw on the happy path, so
+  the return value is byte-for-byte unchanged whenever nothing fails.
+- **Tests**: 5 new smoke assertions (`R.v161`) force the sync path (`GENPOOL.usableForTiles=()=>false`)
+  and monkeypatch the global `pyramidTile` to throw for exactly one visible tile, twice in a row —
+  confirming multiple tiles are genuinely in view (so sibling-survival means something), the bad tile
+  stays uncached rather than crashing, siblings still get cached, a warning is now logged, and a
+  repeated failure never escapes `refineVisibleTiles()` as an uncaught rejection.
+- **Known scope cut, disclosed**: the root TRIGGER for the originally-reported stuck tile was not
+  identified. This fix prevents it from ever manifesting as a silent, permanent, multi-tile block
+  again, and the new `console.warn` makes the underlying cause diagnosable if it recurs — naming the
+  exact `z/col/row` and error message — but the "why did `pyramidTile` throw at all" question is
+  genuinely still open.
 
 ### Real-km-aware relief and rivers (v1.60)
 
@@ -1999,7 +2045,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (516 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (521 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

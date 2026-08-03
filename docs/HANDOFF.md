@@ -9,11 +9,42 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.60.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.61.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.61 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.59` are kept and never edited.
+  (v1.62 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.60` are kept and never edited.
+- **v1.61 — LOD tile refinement: one bad tile can no longer take its neighbours down with
+  it.** Owner report (screenshot): a rectangular block of Tiled-LOD tiles permanently stuck on
+  the coarse/unshaded overview — deep zoom, plain Biome view, no bake involved, panning away and
+  back never fixed it. Investigated thoroughly before any fix: audited every LOD camera-move path
+  for a missing `scheduleLodRefine()` call (none found), checked v1.60's new functions against the
+  Worker's function whitelist (not the cause), ruled out stale baked tiles (owner confirmed no
+  baking), attempted reproduction via Playwright across 6 seeds with forced refine cycles and
+  aggressive fast zoom/pan (never triggered a stuck tile). **The exact trigger was not
+  reproduced this session** — but the audit found a real structural gap worth fixing regardless.
+  1016 / 852 green; hash battery ALL IDENTICAL; 521 smoke green; see CHANGELOG for the full writeup.
+  - **Neither of `refineVisibleTiles()`'s two compute paths (Web Worker pool, sync main-thread
+    fallback) isolated one tile's failure from its neighbours.** Worker side: an uncaught throw
+    inside a job never reaches `postMessage` — it fires the main thread's `onerror` instead, which
+    rejects the WHOLE batch dispatched to that worker (several tiles die together, jobs are
+    round-robin split). Sync side: the fallback loop had no per-iteration try/catch, so a throw
+    stopped it partway through, leaving every tile queued after the bad one uncached too. Both
+    failures were silently swallowed by `scheduleLodRefine()`'s outer `catch(_){}` — matching the
+    report's "no loading indicator, nothing visibly wrong except the stuck block" exactly, and
+    matching "permanently stuck" since the same tile position recomputes identically every time.
+  - **Fix**: per-job try/catch in the worker loop (pushes `null`, already the existing
+    skip-on-falsy convention) + matching per-iteration try/catch in the sync fallback, both now
+    `console.warn`ing instead of swallowing. A failed tile is simply left uncached — the ordinary
+    "not yet refined" state, retried on the next debounced settle — instead of taking siblings
+    down with it.
+  - **`bakeVisibleTiles()`/`bakeAllTiles()` share the identical latent shape, deliberately not
+    touched this pass** — baking wasn't implicated in the report, and a finalized-world baking
+    failure (silently missing atlas chunks meant to be permanent) deserves its own dedicated look.
+  - **Known scope cut, disclosed**: the root TRIGGER was never identified. This fix prevents it
+    from ever manifesting as a silent, permanent, multi-tile block again, and the new
+    `console.warn` makes it diagnosable (exact `z/col/row` + error message) if it recurs — but
+    "why did `pyramidTile` throw at all" is genuinely still open.
 - **v1.60 — real-km-aware relief and rivers: small regions get genuinely finer drainage
   detail.** Owner: "when choosing a smaller region rivers dont become more visible (i think its
   a scaling issue). I cant seem to find any rivers with the branching pattern or length you might

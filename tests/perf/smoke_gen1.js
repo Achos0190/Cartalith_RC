@@ -4932,6 +4932,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ---- v1.61 (owner-reported screenshot: a rectangular block of LOD tiles permanently stuck on the
+  // coarse overview under deep Tiled-LOD zoom, plain Biome view, no bake involved). Root cause: neither
+  // the worker's per-job loop nor refineVisibleTiles' sync fallback loop isolated one tile's pyramidTile()
+  // call — a throw (whatever the trigger; not reproduced in this session) killed the rest of the batch/
+  // loop and was swallowed silently by scheduleLodRefine's outer catch. Forces the SYNC path (disables
+  // GENPOOL) and monkeypatches the global pyramidTile to fail for exactly one visible tile, twice in a
+  // row, verifying siblings still land, the bad tile is skipped (not crashed into), a warning is now
+  // logged, and a second refine attempt never throws uncaught either. ----
+  R.v161 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+    const savedLodOn = _lodOn, savedLodCx = _lodCx, savedLodCy = _lodCy, savedLodZoom = _lodZoom;
+    const origPyramidTile = window.pyramidTile, origUsableForTiles = GENPOOL.usableForTiles, origWarn = console.warn;
+    const warnings = [];
+    console.warn = (...args) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+      await generate();
+      GENPOOL.usableForTiles = () => false;   // force refineVisibleTiles' own sync fallback loop
+      _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 30; applyView(); renderNow();
+      lodCacheClear();
+      const v = lodViewRect();
+      const keys = [...visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1)];
+      o.multipleTilesVisible = keys.length >= 2;
+      const bad = keys[0];
+      const failer = (coarse, cW, cH, z, col, row, tileSize, opts) => {
+        if (col === bad.col && row === bad.row && z === v.z) throw new Error('forced test failure');
+        return origPyramidTile(coarse, cW, cH, z, col, row, tileSize, opts);
+      };
+      window.pyramidTile = failer;
+      await refineVisibleTiles();
+      window.pyramidTile = origPyramidTile;
+      const badKey = lodCacheKey(v.z, bad.col, bad.row, _lodTile);
+      o.badTileStillUncached = !lodCacheGet(badKey);
+      o.siblingsCached = keys.length > 1 && keys.slice(1).every(k => !!lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile)));
+      o.warningLogged = warnings.some(w => w.indexOf('LOD tile') >= 0 && w.indexOf('refine failed') >= 0);
+      // a repeated failure on the SAME tile must keep behaving the same way, not throw out of refineVisibleTiles
+      window.pyramidTile = failer;
+      let threwOnRetry = false;
+      try { await refineVisibleTiles(); } catch (e) { threwOnRetry = true; }
+      window.pyramidTile = origPyramidTile;
+      o.neverThrowsUncaughtOnRetry = !threwOnRetry;
+    } finally {
+      window.pyramidTile = origPyramidTile;
+      GENPOOL.usableForTiles = origUsableForTiles;
+      console.warn = origWarn;
+      lodCacheClear();
+      _lodOn = savedLodOn; _lodCx = savedLodCx; _lodCy = savedLodCy; _lodZoom = savedLodZoom;
+      state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces; applyView(); renderNow();
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5523,7 +5578,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.59: civTerRadius slider wiring survives the relocation — dispatching input still updates _civTerRadius and the readout', R.v159.sliderUpdatesGlobal && R.v159.sliderUpdatesLabel);
   A('v1.59: the old "Advanced" grab-bag is gone — civWayList/civProvincesChk are no longer inside any <details>, and the Display accordion holds neither', R.v159.wayListNotInDetails && R.v159.provChkNotInDetails && R.v159.displayAccordionExists && R.v159.displayAccordionExcludesWaysProvinces);
 
-
+  A('v1.61: the test scenario has multiple visible LOD tiles (so a sibling-survival check is meaningful)', R.v161.multipleTilesVisible);
+  A('v1.61: a tile whose refine throws is skipped, not crashed into — it stays uncached, ready to retry', R.v161.badTileStillUncached);
+  A('v1.61: siblings of a failed tile still get cached — one bad tile can no longer take its neighbours down with it', R.v161.siblingsCached);
+  A('v1.61: a refine failure is now logged instead of silently swallowed', R.v161.warningLogged);
+  A('v1.61: a repeated failure on the same tile never escapes refineVisibleTiles as an uncaught rejection', R.v161.neverThrowsUncaughtOnRetry);
 
 
 
