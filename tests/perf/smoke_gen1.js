@@ -497,6 +497,82 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillageDensity;
     return { on, off };
   });
+  // v1.68 (owner: the dense village grid "sometimes feels waay to populated" — keep it, but add a
+  // sparser alternative for when it's off, spaced along the settlement generator's own routes and
+  // only shown once zoomed in a good deal further). Auto-populates the committed world four ways
+  // (baseline / roadside-on / both-on / toggle-off) on the shared world, then restores clean civ
+  // state exactly like v0.76's own R.village block above.
+  R.roadsideVillages = await page.evaluate(() => {
+    const savedViewScale = (typeof viewT !== 'undefined' && viewT) ? viewT.scale : null;
+    _civRoadsideVillages = false; _civVillageDensity = false;
+    _civAutoWorld();
+    const baselineCount = state.places.length;
+    const baselineHasAny = state.places.some(p => p.roadsideVillage);
+
+    _civRoadsideVillages = true; _civVillageDensity = false;
+    _civAutoWorld();
+    const rv = state.places.filter(p => p.roadsideVillage);
+    const others = state.places.filter(p => !p.roadsideVillage);
+    const spacingCells = suppressionRadiusCells(VILLAGE_SPACING_KM, GW, state.mapWidthKm || 800);
+    let minSepAmong = Infinity, minSepOthers = Infinity;
+    for (let i = 0; i < rv.length; i++) for (let j = i + 1; j < rv.length; j++) {
+      const d = Math.hypot(rv[i].x - rv[j].x, rv[i].y - rv[j].y); if (d < minSepAmong) minSepAmong = d;
+    }
+    for (const a of rv) for (const b of others) {
+      const d = Math.hypot(a.x - b.x, a.y - b.y); if (d < minSepOthers) minSepOthers = d;
+    }
+    const sea = state.seaLevel || 0.42;
+    const allOnLand = rv.every(p => {
+      const gx = Math.round(p.x), gy = Math.round(p.y);
+      return gx >= 0 && gx < GW && gy >= 0 && gy < GH && field[gy * GW + gx] >= sea;
+    });
+
+    // pick-gate check: below CIV_ROADSIDE_VILLAGE_LOD a roadside village can't be clicked; above it, it can.
+    let pickHiddenBelow = null, pickVisibleAbove = null;
+    if (rv.length && typeof _civSelectPlaceAt === 'function' && typeof viewT !== 'undefined' && viewT) {
+      const target = rv[0];
+      viewT.scale = Math.max(0.05, CIV_ROADSIDE_VILLAGE_LOD - 0.5);
+      _civSelectPlaceAt(target.x, target.y);
+      pickHiddenBelow = _civSelectedPlace !== target;
+      viewT.scale = CIV_ROADSIDE_VILLAGE_LOD + 0.5;
+      _civSelectPlaceAt(target.x, target.y);
+      pickVisibleAbove = _civSelectedPlace === target;
+      _civSelectedPlace = null;
+    }
+
+    _civRoadsideVillages = true; _civVillageDensity = true;
+    _civAutoWorld();
+    const denseOnCount = state.places.filter(p => p.roadsideVillage).length;
+
+    _civRoadsideVillages = false; _civVillageDensity = false;
+    _civAutoWorld();
+    const toggleOffCount = state.places.length;
+
+    // restore clean civ state so later place/way tests see an empty world (v0.76's own precedent)
+    if (savedViewScale != null) viewT.scale = savedViewScale;
+    state.places = []; if (typeof civWays !== 'undefined') civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+
+    return {
+      baselineHasAny, roadsideAdded: rv.length,
+      allHamlet: rv.every(p => p.kind === 'hamlet'), allNamed: rv.every(p => p.name && p.name.length > 0),
+      allPopPositive: rv.every(p => p.pop > 0), allHaveFaction: rv.every(p => p.faction != null),
+      spacingRespectedAmong: !isFinite(minSepAmong) || minSepAmong >= spacingCells - 1,
+      spacingRespectedVsOthers: !isFinite(minSepOthers) || minSepOthers >= spacingCells - 1,
+      allOnLand, cappedSanely: rv.length > 0 && rv.length <= _CIV_ROADSIDE_VILLAGE_CAP,
+      pickHiddenBelow, pickVisibleAbove,
+      denseOnHasNone: denseOnCount === 0,
+      toggleOffMatchesBaseline: toggleOffCount === baselineCount,
+    };
+  });
+  R.roadsideVillagesToggle = await page.evaluate(() => {
+    const cb = document.getElementById('civRoadsideVillagesChk'); if (!cb) return null;
+    const defaultChecked = cb.checked;
+    cb.checked = true; cb.dispatchEvent(new Event('change')); const on = _civRoadsideVillages;
+    cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civRoadsideVillages;
+    return { defaultChecked, on, off };
+  });
   // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
   //        populate, confirm the readout shows a number, then restore clean civ state.
   R.popAuto = await page.evaluate(() => {
@@ -5520,6 +5596,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.76 village mode: dense grid places more settlements than the default, bounded at the 200-pin cap', R.village.denser && R.village.capBounded && R.village.nDefault >= 2);
   A('v0.76 village mode: off by default, checkbox toggles the flag', R.village.defaultOff && R.villageToggle && R.villageToggle.on === true && R.villageToggle.off === false);
   A('v0.76 regional population: integrates a positive total over a positive land area', R.village.popTotal > 0 && R.village.popLand > 0);
+
+  A('v1.68: roadside villages off by default — no roadsideVillage-tagged settlements on a plain auto-populate', !R.roadsideVillages.baselineHasAny);
+  A('v1.68: enabling it adds a bounded, non-empty batch of roadside villages', R.roadsideVillages.cappedSanely);
+  A('v1.68: every roadside village is a real hamlet — named, populated, factioned, same code path as any other settlement', R.roadsideVillages.allHamlet && R.roadsideVillages.allNamed && R.roadsideVillages.allPopPositive && R.roadsideVillages.allHaveFaction);
+  A('v1.68: roadside villages respect VILLAGE_SPACING_KM both among themselves and against pre-existing settlements', R.roadsideVillages.spacingRespectedAmong && R.roadsideVillages.spacingRespectedVsOthers);
+  A('v1.68: every roadside village lands on dry land', R.roadsideVillages.allOnLand);
+  A('v1.68: has no effect while Dense village grid is on — literally "when the dense option isn\'t active"', R.roadsideVillages.denseOnHasNone);
+  A('v1.68: toggling it back off reproduces the exact baseline settlement count — no residual state', R.roadsideVillages.toggleOffMatchesBaseline);
+  A('v1.68: a roadside village\'s map pin is hidden below CIV_ROADSIDE_VILLAGE_LOD and pickable once zoomed past it (deliberately no dot fallback)', R.roadsideVillages.pickHiddenBelow === true && R.roadsideVillages.pickVisibleAbove === true);
+  A('v1.68: the "Roadside villages" checkbox exists, defaults unchecked, and its change handler drives _civRoadsideVillages', R.roadsideVillagesToggle && R.roadsideVillagesToggle.defaultChecked === false && R.roadsideVillagesToggle.on === true && R.roadsideVillagesToggle.off === false);
   A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
   A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
   A('v0.82 recovery: a city collapses into a fortified ruin under Survival + tier-from-population is sane', R.recovery && R.recovery.demoted && R.recovery.tierFn);

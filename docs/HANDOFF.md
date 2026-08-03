@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.67.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.68.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.68 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.66` are kept and never edited.
+  (v1.69 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.67` are kept and never edited.
+- **v1.68 — roadside villages: a sparser alternative to the dense grid, revealed only at
+  deep zoom.** Owner: the existing "Dense village grid" option (v0.76) "sometimes feels waay
+  to populated on the map" — keep it, but add a sparser alternative for when it's off, villages
+  spaced along the settlement generator's own routes, visible only once zoomed in roughly
+  halfway toward a close view. Confirmed the persistence-model fork (real settlements vs. a
+  decorative overlay) with the owner via `AskUserQuestion` before building — real settlements
+  chosen. Civ-layer only. 1016 / 852 green; hash battery ALL IDENTICAL; 566 smoke green; see
+  CHANGELOG for the full writeup.
+  - `_civSeedRoadsideVillages` walks the finished road network at `VILLAGE_SPACING_KM` arc-
+    length steps, blue-noise-rejecting candidates via v1.26's own bucket-grid technique; runs
+    after routing settles, before population assignment, so new villages are real hamlets
+    swept into the same food-shed/economy math as any other settlement.
+  - Zoom-gating reuses `drawCivLayer`'s existing `CIV_LOD_PLACE` convention (one raw zoom
+    number compared directly for either camera) rather than inventing a new percentage system
+    — a new `CIV_ROADSIDE_VILLAGE_LOD=2.0` threshold, deeper than every existing tier, with no
+    dot-fallback below it (fully hidden, not just faded).
+  - Known scope cuts: the reveal threshold isn't independently calibrated against a literal
+    percentage (none exists in this file to calibrate against); `_civAutoRoutes` alone doesn't
+    re-seed roadside villages; only the primary map-click pick site is zoom-gated.
 - **v1.67 — a water-driven convergence loop could return a physically absurd, unblocked
   stage.** Owner pasted a full "Severe" Journey Planner verdict — an 18-month, 4253 km journey
   with stages at 525%-1475% of capacity and no hard block — "Somehow it feels like it is way
@@ -2162,17 +2181,10 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **← next session (in progress): village density spacing + zoom-gated visibility.** Owner: the
-  existing "dense village grid" option (v0.76) "sometimes feels waay to populated on the map" —
-  wants the dense-grid function KEPT, but when it's OFF, villages should space out along the
-  settlement generator's own routes instead of the current behavior, and the whole additive village
-  layer should only become visible once zoomed in to roughly 50% (with their ways). Not yet
-  investigated: what "spaced along the routes" should mean mechanically (candidate: seed extra
-  village-tier settlements along already-generated `civWays`, spacing-rejected like v1.26's scatter
-  brush, rather than the existing grid/suitability seeding v0.76 uses) and what "50% zoom" maps to
-  in this file's own zoom conventions (`viewT.scale` off-LOD vs `_lodZoom` under Tiled LOD — see
-  v1.23's `_civZoomPickR` for the two-camera-convention precedent). Investigate + present a plan
-  before building, per this file's own working-rules discipline.
+- **v1.68 shipped**: roadside villages — a sparser, deep-zoom-only alternative to the dense village
+  grid, seeded along the finished road network. See CHANGELOG for the full writeup. Known scope cuts
+  there: only the primary map-click pick site is zoom-gated (table/right-click reach them regardless
+  of zoom); `_civAutoRoutes` alone (Generate Roads without a full Auto-populate) doesn't re-seed them.
 - **the rest of a cut-off owner message, never resolved.** The desert-transition
   request that shipped as v1.66 arrived mid-typing, cut off after "Also I'd like that the current
   [...]." Asked the owner whether to wait for the rest or proceed on the water/desert-swap part

@@ -12,6 +12,75 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.68 — Roadside villages: a sparser alternative to the dense grid, revealed only at deep zoom
+
+Owner: the existing "Dense village grid" option (v0.76) "sometimes feels waay to populated on the
+map" — wants the function KEPT, but a sparser alternative for when it's off, with villages spaced
+along the settlement generator's own routes instead of the suitability grid, and the whole additive
+layer visible only once zoomed in "roughly 50%" (including their ways). Investigated the placement
+pipeline and zoom conventions before building (`_civIterativeAutoWorld`'s routing order, the
+`civWays` point-format inconsistency CLAUDE.md's v1.42 entry already warns about, the existing
+`CIV_LOD_PLACE`/`CIV_LOD_ROAD` zoom-gate convention) and confirmed one design fork with the owner via
+`AskUserQuestion` before writing any code: real, persisted settlements (chosen) vs. a purely
+decorative render-time overlay. Civ-layer only (block 2). Hash vs v1.67 **ALL IDENTICAL** — the new
+toggle defaults off, so `generate()`/`render()` are untouched by default.
+
+- **`_civSeedRoadsideVillages(places, ways, rng)`** (new) walks every LAND way in the FINISHED
+  network at `VILLAGE_SPACING_KM` (10 km — the same constant dense-village mode already uses, for a
+  consistent feel) arc-length steps, blue-noise-rejecting each candidate against existing settlements
+  AND previously accepted candidates via the same shared bucket-grid `fits`/`take` technique
+  `placeMapIconsRuled`'s relief scatterer uses (v1.26) — just walking a polyline instead of scanning
+  an area. Each accepted candidate is nudged onto dry land via `_civSnapLand` (the same primitive
+  crossroads promotion already uses) and re-checked against the bucket grid after the nudge. Bounded
+  at `_CIV_ROADSIDE_VILLAGE_CAP=120` (roughly half `_CIV_VILLAGE_CAP`, since these are ADDITIVE on
+  top of whatever the normal pass already placed).
+- **Must run AFTER routing is fully finished** — the same v1.39 rule this whole function already
+  respects for `_civSnapToWaterEdge`. Called from `_civIterativeAutoWorld` right after the sea-routes
+  block (every routing pass, including the crossroads re-route, is done by then) and BEFORE the
+  final network-metrics/population pass, so new villages are swept up by exactly the same population/
+  food-shed/faction-aggregate math every other hamlet gets — no bespoke formula needed. Gated on
+  `_civRoadsideVillages && !villageMode` — has no effect while Dense village grid is checked,
+  literally "when the dense option isn't active." Never called from `_civAutoRoutes` (the standalone
+  "Generate Roads" button), which per v1.64 never touches `state.places` — extending it would break
+  that established contract.
+- **Deliberately does NOT get network-metrics edges (`aIdx`/`bIdx`) of its own** — these are minor
+  roadside stops sitting ON an existing edge, not new junctions. Reading `_civNetworkMetrics` first
+  confirmed it builds its own adjacency purely from way ENDPOINTS, so an interior-of-a-way village
+  naturally scores as an isolated single-node component — the correct answer for what it is, no
+  special-casing required.
+- **Zoom-gated visibility reuses the file's OWN existing convention, not a new invented one.**
+  Reading `drawCivLayer` found `CIV_LOD_PLACE`/`CIV_LOD_ROAD` are already compared directly against
+  ONE raw zoom number (`zoom=_lodOn?_lodZoom:viewT.scale` — the Tiled-LOD viewer pins `viewT.scale`
+  at 1 while `_lodOn`, per the file's own comment) for EITHER camera, unconverted — the two zoom
+  variables already occupy the same conceptual role by construction. `CIV_ROADSIDE_VILLAGE_LOD=2.0`
+  is a new threshold in that same family, deliberately deeper than every existing `CIV_LOD_PLACE`
+  tier (hamlet's own 1.4 is the previous deepest) — a single tunable constant, not independently
+  calibrated against a literal "50%" (there is no existing 0–100% zoom convention on the main map to
+  calibrate against — disclosed, not silently invented). Below it, a roadside village's pin is fully
+  hidden — unlike every other kind, it gets NO small-dot fallback, since the whole point of the
+  additive layer is to stay out of the way until zoomed in.
+- **"Including their ways" needed no extra code.** Every `CIV_LOD_ROAD` tier is already shallower
+  (≤0.7) than `CIV_ROADSIDE_VILLAGE_LOD` (2.0), so a village's own supporting road segment is always
+  already visible by the time the village itself reveals — satisfied by construction, not a new rule.
+- **`_civZoomRaw()`** (new, factored out of `drawCivLayer`'s existing inline expression, bit-identical
+  by construction) is reused by the new pick-gate in `_civSelectPlaceAt` — a roadside village below
+  the reveal threshold can't be clicked on the map either (it's still reachable via the Settlements
+  table at any zoom, since it's a real settlement).
+- **UI**: a new "Roadside villages (space along routes)" checkbox next to the existing "Dense village
+  grid" one, off by default, same wiring convention (`_civRoadsideVillages` transient module global,
+  not serialized — mirrors `_civVillageDensity`'s own comment on invariant 6).
+- **Verified on a real generated world** (not just read): 120 roadside villages added (hit the cap),
+  every one a real named/populated/factioned hamlet, minimum inter-village and village-to-existing-
+  settlement spacing exactly at the spacing floor, 100% on dry land, zero effect with Dense village
+  grid on, exact baseline settlement count restored when the toggle is off, and the pick-gate
+  correctly hides/reveals a village across the `CIV_ROADSIDE_VILLAGE_LOD` threshold.
+- **Tests**: 9 new smoke assertions (`R.roadsideVillages`/`R.roadsideVillagesToggle`).
+- **Known scope cuts**: the reveal threshold is one flat constant, not independently calibrated
+  against a literal percentage (disclosed above); `_civAutoRoutes` (Generate Roads alone) doesn't
+  re-seed roadside villages, only full Auto-populate does; only the primary map-click pick site
+  (`_civSelectPlaceAt`) is zoom-gated — the Settlements table, right-click menu, and other place-pick
+  tools reach roadside villages regardless of zoom (the table is the intended off-zoom access path).
+
 ### v1.67 — A water-driven convergence loop could return a physically absurd, unblocked stage
 
 Owner pasted a full Journey Planner "Severe" verdict — an 18-month, 4253 km, 14-stage journey with

@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.67**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.68**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.67.html` | **Current** unified tool (~29.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.66.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.68.html` | **Current** unified tool (~29.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.67.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,48 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Roadside villages: a sparser alternative to the dense grid, revealed only at deep zoom (v1.68)
+
+Owner: the existing "Dense village grid" option (v0.76) "sometimes feels waay to populated on the
+map" — keep it, but add a sparser alternative for when it's off, villages spaced along the
+settlement generator's own routes instead of the suitability grid, visible only once zoomed in
+roughly halfway toward a close view (including their ways). Investigated the placement pipeline and
+existing zoom conventions before building, then confirmed the persistence-model fork with the owner
+via `AskUserQuestion` (real settlements chosen over a decorative overlay). Civ-layer only. Hash vs
+v1.67 ALL IDENTICAL — the new toggle defaults off.
+
+- **`_civSeedRoadsideVillages(places, ways, rng)`** walks every land way at `VILLAGE_SPACING_KM`
+  (10 km, the same constant dense mode uses) arc-length steps, blue-noise-rejecting each candidate
+  against existing settlements and prior candidates via the same bucket-grid technique v1.26's
+  scatter engine uses. Runs from `_civIterativeAutoWorld` AFTER routing is fully finished (the v1.39
+  rule) and BEFORE the population/food-shed pass, so new villages are real hamlets swept up by the
+  same math every other settlement gets — no bespoke formula. Gated on
+  `_civRoadsideVillages && !villageMode` — no effect while Dense village grid is checked. Never
+  called from `_civAutoRoutes`, which per v1.64 never touches `state.places`.
+- **No network-metrics edges of their own** — `_civNetworkMetrics` builds adjacency purely from way
+  endpoints, so an interior-of-a-way village naturally scores as an isolated component, which is
+  correct for what it is.
+- **Zoom-gating reuses the file's own existing convention.** `drawCivLayer` already compares
+  `CIV_LOD_PLACE`/`CIV_LOD_ROAD` directly against one raw zoom number
+  (`zoom=_lodOn?_lodZoom:viewT.scale`) for either camera, unconverted. `CIV_ROADSIDE_VILLAGE_LOD=2.0`
+  is a new threshold in that same family, deeper than every existing tier (hamlet's own 1.4 was the
+  previous deepest) — a single tunable constant, since there is no existing 0–100% zoom convention on
+  the main map to calibrate a literal "50%" against (disclosed, not invented). Below it a roadside
+  village's pin is fully hidden — no small-dot fallback, unlike every other kind. Every
+  `CIV_LOD_ROAD` tier is already shallower than this threshold, so "including their ways" needed no
+  extra code — a village's own road segment is always already visible by the time it reveals.
+- **`_civZoomRaw()`** (factored out of `drawCivLayer`'s existing inline expression, bit-identical)
+  gates the map-click pick site (`_civSelectPlaceAt`) too — a hidden roadside village can't be
+  clicked on the map, though it's still reachable via the Settlements table at any zoom.
+- **Verified on a real generated world**: 120 villages added (hit the cap), all real named/
+  populated/factioned hamlets, spacing floor respected both among themselves and against existing
+  settlements, 100% on dry land, zero effect with Dense mode on, exact baseline restored when off,
+  pick-gate correctly hides/reveals across the threshold.
+- **Tests**: 9 new smoke assertions.
+- **Known scope cuts**: the reveal threshold isn't independently calibrated against a literal
+  percentage; `_civAutoRoutes` alone doesn't re-seed roadside villages; only the primary map-click
+  pick site is zoom-gated (the Settlements table is the intended off-zoom access path).
 
 ### A water-driven convergence loop could return a physically absurd, unblocked stage (v1.67)
 
