@@ -9,11 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.68.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.69.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.69 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.67` are kept and never edited.
+  (v1.70 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.68` are kept and never edited.
+- **v1.69 — roadside villages now also factor in settlement suitability.** Owner, immediately
+  after v1.68 shipped: "They should still also factor in settlement suitability." v1.68's
+  seeding pass walked the road network and spaced candidates against existing settlements, but
+  never consulted `currentSettlementSuitability()`. Civ-layer only. 1016 / 852 green; hash
+  battery ALL IDENTICAL; 568 smoke green; see CHANGELOG for the full writeup.
+  - `_civSeedRoadsideVillages` now takes the SAME `suit` field the rest of auto-populate reads
+    (threaded in, not re-derived) and, at each arc-length step, searches a small local window for
+    the highest-suitability dry cell instead of taking the raw interpolated point.
+  - A window with no cell clearing `ROADSIDE_VILLAGE_SUIT_THRESH=0.32` (the same relaxed
+    threshold dense-village mode already uses) is skipped outright.
+  - Measured: 112 villages added (down from 120 — marginal sites v1.68 force-placed are now
+    correctly skipped), min score 0.320, mean 0.428.
 - **v1.68 — roadside villages: a sparser alternative to the dense grid, revealed only at
   deep zoom.** Owner: the existing "Dense village grid" option (v0.76) "sometimes feels waay
   to populated on the map" — keep it, but add a sparser alternative for when it's off, villages
@@ -2181,10 +2193,13 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **v1.69 shipped**: roadside villages now also factor in settlement suitability, not just road
+  spacing + dry land. See CHANGELOG for the full writeup.
 - **v1.68 shipped**: roadside villages — a sparser, deep-zoom-only alternative to the dense village
   grid, seeded along the finished road network. See CHANGELOG for the full writeup. Known scope cuts
-  there: only the primary map-click pick site is zoom-gated (table/right-click reach them regardless
-  of zoom); `_civAutoRoutes` alone (Generate Roads without a full Auto-populate) doesn't re-seed them.
+  there (still true in v1.69): only the primary map-click pick site is zoom-gated (table/right-click
+  reach them regardless of zoom); `_civAutoRoutes` alone (Generate Roads without a full
+  Auto-populate) doesn't re-seed them.
 - **the rest of a cut-off owner message, never resolved.** The desert-transition
   request that shipped as v1.66 arrived mid-typing, cut off after "Also I'd like that the current
   [...]." Asked the owner whether to wait for the rest or proceed on the water/desert-swap part

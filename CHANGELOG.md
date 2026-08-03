@@ -12,6 +12,48 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.69 — Roadside villages now also factor in settlement suitability
+
+Owner, immediately after v1.68 shipped: "They should still also factor in settlement suitability."
+v1.68's `_civSeedRoadsideVillages` walked the road network and blue-noise-spaced candidates against
+existing settlements, but never consulted `currentSettlementSuitability()` — a candidate could land
+on a genuinely poor site as long as it was spaced correctly and on dry land. Civ-layer only. Hash vs
+v1.68 **ALL IDENTICAL** — the new toggle still defaults off, and the suitability field itself is
+unchanged.
+
+- **The `suit` field `_civIterativeAutoWorld` already computes at its own top-of-function
+  `currentSettlementSuitability()` call is now threaded into `_civSeedRoadsideVillages(places, ways,
+  rng, suit)`** rather than re-derived — the same "one field for view + placer" (v1.30) discipline
+  every other placement pass already follows, so a roadside village's site quality can never
+  disagree with what the rest of auto-populate scored the same cell.
+- **At each arc-length step along a way, the function now searches a small local window
+  (`searchR = round(spacing/3)` cells, so it scales with `VILLAGE_SPACING_KM` rather than being an
+  independent constant) for the highest-suitability DRY cell that also blue-noise-fits the existing
+  bucket grid**, instead of taking the raw interpolated point and only checking spacing + land. This
+  replaces the old two-step "interpolate then `_civSnapLand`" dance (which never looked at
+  suitability at all) with a single pass that is both more precise (chooses the best nearby site,
+  not just the first dry one found) and simpler (no separate re-check after snapping, since the
+  chosen cell is already guaranteed dry and spaced by construction).
+- **A window with no cell clearing `ROADSIDE_VILLAGE_SUIT_THRESH=0.32` is skipped outright** — the
+  road determines roughly where a village could be, suitability still decides whether that stretch
+  is worth settling at all. `0.32` is deliberately the SAME relaxed threshold `villageMode` (dense
+  grid) already uses, not a new number: a roadside village's rough position is already constrained
+  by the road, so it's held to the same "still real, not the single best site in the region" bar
+  dense mode accepts, not the stricter unconstrained 0.42 the normal pass uses.
+- **The dry-land test is inlined from `_civSnapLand`'s own predicate** (land ≥ sea level, not a water
+  body, not sub-cell lake-flooded) rather than calling `_civSnapLand` itself — needed because the
+  function now evaluates dryness across a whole search window, not a single spiral-outward probe.
+- **Measured on the same seed/resolution v1.68 was verified against**: 112 villages added (down from
+  120 — some candidates that v1.68 would have force-placed on marginal ground are now correctly
+  skipped), every one scoring ≥0.32 on the real suitability field (min 0.320, mean 0.428 — well above
+  the floor, confirming the local search finds genuinely decent sites rather than barely-passing
+  ones), spacing and land constraints unchanged from v1.68.
+- **Tests**: 2 new smoke assertions, extending the existing `R.roadsideVillages` block rather than a
+  new one (`allMeetSuitThreshold`, `meanSuitAboveThreshold`).
+- **Known scope cuts**: unchanged from v1.68 (reveal threshold not independently calibrated against a
+  literal percentage; `_civAutoRoutes` alone doesn't re-seed roadside villages; only the primary
+  map-click pick site is zoom-gated).
+
 ### v1.68 — Roadside villages: a sparser alternative to the dense grid, revealed only at deep zoom
 
 Owner: the existing "Dense village grid" option (v0.76) "sometimes feels waay to populated on the

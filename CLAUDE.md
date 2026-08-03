@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.68**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.69**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.68.html` | **Current** unified tool (~29.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.67.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.69.html` | **Current** unified tool (~29.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.68.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,26 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Roadside villages now also factor in settlement suitability (v1.69)
+
+Owner, immediately after v1.68 shipped: "They should still also factor in settlement suitability."
+v1.68's seeding pass walked the road network and spaced candidates against existing settlements, but
+never consulted `currentSettlementSuitability()`. Civ-layer only. Hash vs v1.68 ALL IDENTICAL.
+
+- `_civSeedRoadsideVillages` now takes the SAME `suit` field `_civIterativeAutoWorld` already
+  computed at its own top of function, threaded in rather than re-derived (v1.30's "one field for
+  view + placer" discipline).
+- At each arc-length step, instead of taking the raw interpolated point, it searches a small local
+  window (`round(spacing/3)` cells) for the highest-suitability dry cell that still blue-noise-fits
+  the bucket grid — replacing the old "interpolate then `_civSnapLand`" two-step with one pass that's
+  both more precise and simpler.
+- A window with no cell clearing `ROADSIDE_VILLAGE_SUIT_THRESH=0.32` is skipped outright — the SAME
+  relaxed threshold `villageMode` already uses, not a new number, since the candidate's rough
+  position is already constrained by the road.
+- Measured: 112 villages added (down from 120 — marginal-ground candidates v1.68 would have
+  force-placed are now correctly skipped), min score 0.320, mean 0.428 — well above the floor.
+- Tests: 2 new smoke assertions extending the existing `R.roadsideVillages` block.
 
 ### Roadside villages: a sparser alternative to the dense grid, revealed only at deep zoom (v1.68)
 

@@ -527,6 +527,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       return gx >= 0 && gx < GW && gy >= 0 && gy < GH && field[gy * GW + gx] >= sea;
     });
 
+    // v1.69 (owner: "they should still also factor in settlement suitability"): every roadside
+    // village's own cell must clear ROADSIDE_VILLAGE_SUIT_THRESH on the SAME suit field every
+    // other placement pass reads — not just be spaced/dry.
+    const suitField = currentSettlementSuitability();
+    const suitScores = rv.map(p => suitField[Math.round(p.y) * GW + Math.round(p.x)]);
+    const allMeetSuitThreshold = suitScores.every(s => s >= ROADSIDE_VILLAGE_SUIT_THRESH);
+    const meanSuitAboveThreshold = suitScores.length > 0 && (suitScores.reduce((a, b) => a + b, 0) / suitScores.length) > ROADSIDE_VILLAGE_SUIT_THRESH;
+
     // pick-gate check: below CIV_ROADSIDE_VILLAGE_LOD a roadside village can't be clicked; above it, it can.
     let pickHiddenBelow = null, pickVisibleAbove = null;
     if (rv.length && typeof _civSelectPlaceAt === 'function' && typeof viewT !== 'undefined' && viewT) {
@@ -561,6 +569,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       spacingRespectedAmong: !isFinite(minSepAmong) || minSepAmong >= spacingCells - 1,
       spacingRespectedVsOthers: !isFinite(minSepOthers) || minSepOthers >= spacingCells - 1,
       allOnLand, cappedSanely: rv.length > 0 && rv.length <= _CIV_ROADSIDE_VILLAGE_CAP,
+      allMeetSuitThreshold, meanSuitAboveThreshold,
       pickHiddenBelow, pickVisibleAbove,
       denseOnHasNone: denseOnCount === 0,
       toggleOffMatchesBaseline: toggleOffCount === baselineCount,
@@ -5602,6 +5611,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.68: every roadside village is a real hamlet — named, populated, factioned, same code path as any other settlement', R.roadsideVillages.allHamlet && R.roadsideVillages.allNamed && R.roadsideVillages.allPopPositive && R.roadsideVillages.allHaveFaction);
   A('v1.68: roadside villages respect VILLAGE_SPACING_KM both among themselves and against pre-existing settlements', R.roadsideVillages.spacingRespectedAmong && R.roadsideVillages.spacingRespectedVsOthers);
   A('v1.68: every roadside village lands on dry land', R.roadsideVillages.allOnLand);
+  A('v1.69: every roadside village clears ROADSIDE_VILLAGE_SUIT_THRESH on the SAME suit field every other placement pass reads', R.roadsideVillages.allMeetSuitThreshold);
+  A('v1.69: the local suitability search finds genuinely decent sites, not just barely-passing ones (mean score above threshold)', R.roadsideVillages.meanSuitAboveThreshold);
   A('v1.68: has no effect while Dense village grid is on — literally "when the dense option isn\'t active"', R.roadsideVillages.denseOnHasNone);
   A('v1.68: toggling it back off reproduces the exact baseline settlement count — no residual state', R.roadsideVillages.toggleOffMatchesBaseline);
   A('v1.68: a roadside village\'s map pin is hidden below CIV_ROADSIDE_VILLAGE_LOD and pickable once zoomed past it (deliberately no dot fallback)', R.roadsideVillages.pickHiddenBelow === true && R.roadsideVillages.pickVisibleAbove === true);
