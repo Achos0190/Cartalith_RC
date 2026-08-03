@@ -5312,6 +5312,90 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.66: per-stage pack animal + vehicle fine-tuning, with a swap advisory ───────────────────
+  // Owner: a 2-person party travels moderate climate for 2/3 of the route then desert, and wants
+  // to swap their mule+cart for a camel with travois at the transition — "For now I cant make any
+  // such a finetunement." The underlying water/food math was already species- and per-stage-correct
+  // (jpCapacity reads JP_ANIMALS[k]/JP_DESERT_ANIMAL_MOD[k] fresh per stage's own biome); the real
+  // gaps were no per-stage vehicle control (only animalSpecies had one, since v1.50) and no
+  // auto-detected advisory. _jpBestPackageForStage is the species/vehicle twin of v1.53's
+  // _jpBestLandTransportForStage — same "measure, never silently apply" contract, same >10% margin.
+  R.v166 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const span = Math.max(40, Math.min(GW - 10 - landPt[0], 60));
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    try {
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v166', groupSize: 2 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // sanity: the primitive itself declines outside its domain (no pack animals / not a Baggage Train)
+      {
+        const stTest = { km: 50, cat: 'land', terrain: 'Desert Hardpack', biome: 'Hot Desert', routeCond: 'Standard', infra: 'Stable Settlements', dryKm: 0 };
+        o.declinesNonBaggageTrain = _jpBestPackageForStage(stTest, { transport: 'Walking', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 }) === null;
+        o.declinesNoAnimals = _jpBestPackageForStage(stTest, { transport: 'Baggage Train', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 1, wagons: 0, travois: 0, sleds: 0 }) === null;
+      }
+
+      // the owner's own scenario: moderate climate for the first stretch, desert for the rest
+      window._jpDeriveStages = () => [
+        { km: 100, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard', infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 27 },
+        { km: 50, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard', infra: 'Stable Settlements', biome: 'Hot Desert', dryKm: 40, i0: 27, i1: 40 }
+      ];
+      const p = _jpEnsurePlan(jn);
+      Object.assign(p, { transport: 'Baggage Train', assetMode: 'manual', carts: 1, wagons: 0, travois: 0, sleds: 0,
+        groupSize: 2, cargoKg: 300, stageOverrides: {}, desertWater: 'Established Caravan Route',
+        animals: { donkey: 0, mule: 2, camel: 0, horse: 0 } });
+      _civOpenRouteEditor(0);
+      _jpRenderResults(jn);
+      o.stage1NoAdvisory = !document.querySelector('[data-jps-pkg-idx="0"]');
+      const btn = document.querySelector('[data-jps-pkg-idx="1"]');
+      o.stage2AdvisoryExists = !!btn;
+      o.stage2RecommendsCamel = btn && btn.dataset.jpsPkgSpecies === 'camel';
+      if (btn) btn.click();
+      o.stage1UntouchedByClick = !p.stageOverrides['0'];
+      o.stage2CamelApplied = p.stageOverrides['1'] && p.stageOverrides['1'].animals &&
+        p.stageOverrides['1'].animals.camel === 2 && p.stageOverrides['1'].animals.mule === 0;
+      o.basePlanStillMule = p.animals.mule === 2 && p.animals.camel === 0;
+
+      // per-stage Vehicle select: options, inherit label, writes overrides, base plan untouched
+      const sel = document.querySelector('select[data-jps="vehicle"][data-jps-idx="1"]');
+      o.vehicleSelectExists = !!sel;
+      o.vehicleSelectOptions = sel && Array.from(sel.options).map(op => op.value).join(',') === ',none,carts,wagons,travois,sleds';
+      if (sel) { sel.value = 'travois'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      o.stage2TravoisApplied = p.stageOverrides['1'] && p.stageOverrides['1'].travois === 1 && p.stageOverrides['1'].carts === 0;
+      o.stage1CartStillBasePlan = p.carts === 1 && !p.stageOverrides['0'];
+
+      // vehicle-axis advisory: a wheel-blocked terrain currently on wheels gets the v1.65 hard-block
+      // fix instead (deliberately deferred there); a party already on travois where wheels are viable
+      // again gets THIS advisory (cart edges travois on speed per JP_TRAIN_PACE) once cargo makes the
+      // difference cross the 10% bar
+      window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+        infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+      const p2 = _jpEnsurePlan(jn);
+      Object.assign(p2, { transport: 'Baggage Train', assetMode: 'manual', carts: 0, wagons: 0, travois: 1, sleds: 0,
+        groupSize: 2, cargoKg: 300, stageOverrides: {}, animals: { donkey: 0, mule: 2, camel: 0, horse: 0 } });
+      _jpRenderResults(jn);
+      const h = document.getElementById('reResults').innerHTML;
+      o.vehicleAdvisoryRendered = /better animal\/vehicle available/.test(h) && /cart \(was travois\)/i.test(h);
+      const vbtn = document.querySelector('[data-jps-pkg-idx="0"]');
+      o.vehicleAdvisoryHasNoSpeciesFix = vbtn && vbtn.dataset.jpsPkgSpecies === '';
+      if (vbtn) vbtn.click();
+      o.vehicleFixApplied = p2.stageOverrides['0'] && p2.stageOverrides['0'].carts === 1 && p2.stageOverrides['0'].travois === 0;
+      o.vehicleFixLeftSpeciesAlone = !('animals' in (p2.stageOverrides['0'] || {}));
+    } finally {
+      window._jpDeriveStages = origDerive;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5935,6 +6019,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.65: a winter-closed mountain pass renders a "Turn off seasonal closures" quick-fix button', R.v165.seasonBlockRendered && R.v165.seasonButtonLabel && R.v165.seasonButtonExists);
   A('v1.65: clicking it sets plan.seasonalClosures=false and unblocks the stage', R.v165.seasonFixWorks);
   A('v1.65: a capacity/overload block still gets no fix button — only deterministic, side-effect-free remedies get one', R.v165.noFixButtonForCapacityBlock);
+
+  A('v1.66: _jpBestPackageForStage declines outside its domain (non-Baggage-Train, or no pack animals)', R.v166.declinesNonBaggageTrain && R.v166.declinesNoAnimals);
+  A('v1.66: the owner\'s own scenario — moderate-climate stage gets no swap advisory', R.v166.stage1NoAdvisory);
+  A('v1.66: the desert-transition stage gets a species advisory recommending camel', R.v166.stage2AdvisoryExists && R.v166.stage2RecommendsCamel);
+  A('v1.66: clicking it applies camel to ONLY that stage — the moderate stage and the shared plan stay mule', R.v166.stage1UntouchedByClick && R.v166.stage2CamelApplied && R.v166.basePlanStillMule);
+  A('v1.66: a per-stage Vehicle select exists with None/Cart/Wagon/Travois/Sled options', R.v166.vehicleSelectExists && R.v166.vehicleSelectOptions);
+  A('v1.66: picking Travois on it writes a per-stage override without touching the shared plan\'s cart', R.v166.stage2TravoisApplied && R.v166.stage1CartStillBasePlan);
+  A('v1.66: a party already on travois where wheels are viable again gets a "cart (was travois)" advisory once cargo clears the margin', R.v166.vehicleAdvisoryRendered && R.v166.vehicleAdvisoryHasNoSpeciesFix);
+  A('v1.66: clicking it switches to a cart and leaves species alone (mule was already optimal there)', R.v166.vehicleFixApplied && R.v166.vehicleFixLeftSpeciesAlone);
 
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');

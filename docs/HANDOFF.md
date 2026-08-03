@@ -9,11 +9,25 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.65.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.66.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.66 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.64` are kept and never edited.
+  (v1.67 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.65` are kept and never edited.
+- **v1.66 — per-stage pack-animal + vehicle fine-tuning, with a swap advisory.** Owner: a
+  2-person party travels moderate climate for 2/3 of a route then desert, wanting to swap
+  mule+cart for camel+travois at the transition; "For now I cant make any such a finetunement."
+  Investigated first — the water/food math was already species- and per-stage-correct; the real
+  gaps were no per-stage vehicle control and no auto-detected advisory. Owner picked "auto-detect
+  + advisory button" via `AskUserQuestion`. Civ-layer only. 1016 / 852 green; hash battery ALL
+  IDENTICAL; 552 smoke green; see CHANGELOG for the full writeup.
+  - `_jpBestPackageForStage` (species/vehicle twin of v1.53's `_jpBestLandTransportForStage`) +
+    a new per-stage Vehicle override (None/Cart/Wagon/Travois/Sled, mirroring v1.50's Pack
+    animal select) + a "Use here" advisory button writing both together.
+  - Verified against the owner's literal two-stage scenario: moderate stage shows no advisory,
+    desert stage recommends camel, applying it touches only that one stage.
+  - Known scope cuts: Mounted Rider's mount species not covered; sleds manual-only; vehicle
+    sizing/existence stays the whole-route auto-picker's job.
 - **v1.65 — Journey Planner: one-click auto-fix buttons for stage bugs.** Owner: "when a stage
   gives a bug give a button to automate a fix." Extends v1.53's "Use here"/v1.47's "Re-route"
   advisory-button pattern to blocked-stage trouble cards. Civ-layer only. 1016 / 852 green; hash
@@ -2130,23 +2144,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **← next session: owner request, mid-typing when it arrived — get the full ask before building.**
-  "For travel stages i need a better fine tunement and modificators for water carried. An example:
-  I got a party of 2 traveling in moderate climate for the first 2/3 and then moving trough a
-  desert. At the desert transitions they will exchange their mule and cart for camels with travois
-  and a different supply set-up. For now I cant make any such a finetunement. Also I'd like that
-  the current [message cut off here]." Two things bundled: (1) water-carry modeling needs finer
-  control/modifiers than exists today — `JP_DRINKING_FLOW_DIVISOR`/`_jpStageDryKm` (v1.56) measure
-  water RANGE from real hydrology but aren't user-tunable per stage; (2) a desert-transition
-  equipment swap (mule+cart → camel+travois, "a different supply set-up") mid-route. The per-stage
-  override mechanism (`stageOverrides[idx]`, generic `Object.assign` merge — see v1.65's
-  `carts`/`wagons` override, which proved arbitrary fields work even without a dedicated UI
-  control) already supports SOME of this manually per stage (animalSpecies, cargoKg, pace,
-  transport), so part of the ask may already be reachable — confirm exactly what's missing (is it
-  that travois/cart-type isn't overridable per stage? that there's no *automatic* swap suggestion
-  at a biome transition, mirroring v1.53's "faster mode available" advisory? that water-carry days/
-  rate isn't independently tunable from `desertWater`?) before implementing. The message was
-  visibly truncated mid-sentence ("Also I'd like that the current") — get the rest before scoping.
+- **← next session: the rest of a cut-off owner message, never resolved.** The desert-transition
+  request that shipped as v1.66 arrived mid-typing, cut off after "Also I'd like that the current
+  [...]." Asked the owner whether to wait for the rest or proceed on the water/desert-swap part
+  alone via `AskUserQuestion`; they said proceed as-is. The unfinished sentence was never followed
+  up — if the owner returns to it, that's the loose thread, not a new report. v1.66 also
+  deliberately did NOT touch `JP_DRINKING_FLOW_DIVISOR`/`_jpStageDryKm` (v1.56, the water-RANGE-
+  from-hydrology measurement) — the owner's own answer to the clarifying question narrowed "water
+  carry" specifically to the animal-species accounting (already correct, confirmed by investigation)
+  rather than the water-range model, so that axis is untouched and still a candidate if raised again.
+- **v1.66 shipped**: per-stage pack-animal + vehicle fine-tuning with a swap advisory — the
+  mule+cart → camel+travois desert-transition scenario. See CHANGELOG for the full writeup.
 - **v1.65 shipped**: "when a stage gives a bug give a button to automate a fix" — one-click
   auto-fix buttons for the three deterministic blocked-stage subcases (seasonal closure, mounted/
   baggage-train-no-animals, wheel-vehicle-present). See CHANGELOG for the full writeup.

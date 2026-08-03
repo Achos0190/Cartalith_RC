@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.65**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.66**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.65.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.64.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.66.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.65.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,29 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Per-stage pack-animal + vehicle fine-tuning, with a swap advisory (v1.66)
+
+Owner: a 2-person party travels moderate climate for 2/3 of a route then desert, wanting to swap
+mule+cart for camel+travois at the transition — "For now I cant make any such a finetunement."
+Investigated first: the water/food math was already species- and per-stage-correct (`jpCapacity`
+reads `JP_ANIMALS[k]`/`JP_DESERT_ANIMAL_MOD[k]` fresh per stage's own biome); the real gaps were
+no per-stage vehicle control and no auto-detected advisory. Owner picked "auto-detect + advisory
+button" via `AskUserQuestion`. Civ-layer only. Hash vs v1.65 ALL IDENTICAL.
+
+- `_jpBestPackageForStage` — species/vehicle twin of v1.53's `_jpBestLandTransportForStage`.
+  Species from `jpBestAnimalForContext` (same primitive the route-wide auto-picker already uses
+  internally); vehicle recommendation only ever proposes travois when the current wheeled vehicle
+  can't cross the terrain, or cart when travois is used but wheels are viable again.
+- New per-stage Vehicle override (None/Cart/Wagon/Travois/Sled), mirroring v1.50's Pack animal
+  select — translates into the same four flat plan fields `jpCalcLand` already reads.
+- "Use here" on the advisory writes species + vehicle together in one click.
+- Verified against the owner's literal scenario: moderate stage gets no advisory, desert stage
+  recommends camel, clicking it changes only that stage — shared plan and other stages stay mule.
+- **Tests**: 8 new smoke assertions (`R.v166`).
+- **Known scope cuts**: Mounted Rider's mount species not covered (Baggage Train only, per the
+  owner's example); sleds are manually selectable but not part of the auto-recommendation; vehicle
+  sizing/existence decisions stay `jpAutoPickTransport`'s whole-route job.
 
 ### Journey Planner: one-click auto-fix buttons for stage bugs (v1.65)
 

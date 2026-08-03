@@ -12,6 +12,59 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.66 — Per-stage pack-animal + vehicle fine-tuning, with a swap advisory
+
+Owner: a 2-person party travels moderate climate for the first 2/3 of a route, then desert; they
+want to swap their mule and cart for a camel with travois at the transition, "and a different
+supply set-up. For now I cant make any such a finetunement." Investigated before building: the
+water/food accounting was already correct and per-stage-aware — `jpCapacity` reads
+`JP_ANIMALS[key].water`/`JP_DESERT_ANIMAL_MOD[key].water` fresh from each stage's OWN biome, so a
+per-stage species override already got the right numbers. The real gaps were narrower: no
+per-stage control for the VEHICLE (only `animalSpecies` had one, since v1.50), and nothing ever
+suggested a swap — the existing auto-picker (`jpAutoPickTransport`) only ever picks one species
+for the WHOLE route. Owner chose "auto-detect + advisory button" (same shape as v1.53's "faster
+mode available") via `AskUserQuestion` before building. Civ-layer only. Hash vs v1.65 ALL
+IDENTICAL.
+
+- **`_jpBestPackageForStage(st,eff)`** — the species/vehicle twin of v1.53's
+  `_jpBestLandTransportForStage`: same "measure, never silently apply" contract, tests a
+  different axis (which animal + which vehicle a Baggage Train should use on THIS stage's own
+  terrain/biome, not which of Walking/Mounted/Baggage-Train is fastest). Species comes from
+  `jpBestAnimalForContext` — the SAME primitive `jpPickSpeciesForRoute` already uses internally
+  per-stage, reused rather than reimplemented, so this can never disagree with the route-wide
+  auto-picker's own scoring. Vehicle recommendation is deliberately narrow: only ever proposes
+  travois when the current wheeled vehicle (cart/wagon) can't legally cross the terrain
+  (`JP_WHEEL_BLOCKED`), or cart when the party is on travois but wheels are viable again (cart
+  edges travois on speed per `JP_TRAIN_PACE`, 3.6 vs 3.4 km/h) — it never decides whether a
+  vehicle should exist or sizes one from cargo, which stays `jpAutoPickTransport`'s job for the
+  whole route. Gated `!isWater&&!bad`, matching `bestT`'s own precedent — a hard-blocked stage
+  (e.g. a cart on wheel-blocked terrain) gets v1.65's quick-fix instead, not this advisory.
+- **Per-stage Vehicle override** (`data-jps="vehicle"`, mirroring v1.50's "Pack animal" select
+  exactly): None / Cart / Wagon / Travois / Sled, translating a type pick into the four flat
+  `carts`/`wagons`/`travois`/`sleds` plan fields `jpCalcLand` already reads — `jpCanUseWheels`/
+  `_jpEffectiveStagePlan`'s generic `Object.assign` merge needed zero engine changes, exactly like
+  v1.65's code-only carts/wagons quick-fix proved works even without a dedicated control. "None"
+  explicitly zeroes all four (distinct from "Inherit", which deletes the override).
+- **"Use here"** on the new advisory writes species into the same `animals{}` shape the Pack
+  animal select uses and vehicle into the same four fields the new Vehicle select uses — one
+  click for what those two selects already do manually, matching v1.53's own "Use here" precedent.
+- **Verified against the owner's literal scenario**: a two-stage journey (moderate → desert) with
+  a 2-person mule+cart Baggage Train shows no advisory on the moderate stage, a "Camel" advisory
+  on the desert stage (Desert Hardpack — wheel-viable, so species is the only axis that fires),
+  and clicking it applies camel to ONLY that stage while the shared plan and the other stage stay
+  mule. A separate scenario (cargo high enough to clear the 10% margin) confirmed the reverse
+  vehicle-only direction: a party already on travois where wheels are viable again gets a
+  "cart (was travois)" advisory with species correctly left alone.
+- **Tests**: 8 new smoke assertions (`R.v166`), same `_jpDeriveStages` monkeypatch technique v1.65
+  established, plus a direct-call check that the primitive declines outside its domain (non-
+  Baggage-Train, no pack animals).
+- **Known scope cuts, disclosed**: Mounted Rider's single mount species is not covered by the new
+  advisory (only Baggage Train pack-animal swaps are — the owner's own example); sleds are
+  reachable via the manual Vehicle select but not part of the automatic recommendation set (no
+  clear "sled beats X" signal outside Snow/Ice, where `sledOnSnow` already gives it a speed
+  bonus); the advisory doesn't resize a vehicle from cargo or decide whether one should exist at
+  all — both remain `jpAutoPickTransport`'s whole-route job.
+
 ### v1.65 — Journey Planner: one-click auto-fix buttons for stage bugs
 
 Owner: "when a stage gives a bug give a button to automate a fix." Extends the existing advisory-
