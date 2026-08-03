@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.64**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.65**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.64.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.63.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.65.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.64.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,28 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Journey Planner: one-click auto-fix buttons for stage bugs (v1.65)
+
+Owner: "when a stage gives a bug give a button to automate a fix." Extends v1.53's "Use here"/
+v1.47's "Re-route" advisory-button pattern to the per-stage trouble cards in `_jpRenderResults`.
+Civ-layer only. Hash vs v1.64 ALL IDENTICAL.
+
+- Only subcases with a single, deterministic, side-effect-free remedy get a button: a winter-
+  closed pass ("🔧 Turn off seasonal closures" — sets `plan.seasonalClosures=false`, syncs the
+  party-form checkbox), a mount-blocked/baggage-train-without-animals stage ("🔧 Switch to
+  Walking" — reuses v1.53's existing `stageOverrides[idx].transport` mechanism verbatim), and a
+  wheel-vehicle-present block ("🔧 Remove carts/wagons here" — clears per-stage carts/wagons AND
+  switches to Walking, since clearing carts alone just trades one wheel-block message for
+  another).
+- A vessel swap and any cargo/party-size change stay text-only hints — this planner has always
+  treated those as the user's own call, never silently computed (v1.48/v1.49's precedent).
+- Every fix was verified by actually clicking the rendered button and checking the stage
+  unblocked on the next `_jpPlan()` call, not assumed from reading the code — the wheel-vehicle
+  case's first cut (clear carts/wagons only) failed exactly this check and was corrected before
+  shipping.
+- **Tests**: 7 new smoke assertions (`R.v165`), monkeypatching `_jpDeriveStages` to force exact
+  blocked terrain/biome/season combinations through the real render pipeline.
 
 ### Auto-generated roads preserve and prefer manually-drawn ways (v1.64)
 

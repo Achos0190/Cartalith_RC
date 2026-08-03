@@ -9,11 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.64.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.65.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.65 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.63` are kept and never edited.
+  (v1.66 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.64` are kept and never edited.
+- **v1.65 — Journey Planner: one-click auto-fix buttons for stage bugs.** Owner: "when a stage
+  gives a bug give a button to automate a fix." Extends v1.53's "Use here"/v1.47's "Re-route"
+  advisory-button pattern to blocked-stage trouble cards. Civ-layer only. 1016 / 852 green; hash
+  battery ALL IDENTICAL; 544 smoke green; see CHANGELOG for the full writeup.
+  - Three subcases with a deterministic, side-effect-free fix get a button: winter-closed pass
+    (turn off seasonal closures), mount-blocked/baggage-train-without-animals (switch to
+    Walking), wheel-vehicle-present (clear carts/wagons + switch to Walking — clearing carts
+    alone was tried first and just traded one wheel-block message for another, caught by testing
+    the button end-to-end).
+  - A vessel swap and any cargo/party-size change stay text-only — treated as the user's own call.
+  - Every fix verified by clicking the actual rendered button and confirming the stage unblocked,
+    not assumed from reading the code.
 - **v1.64 — auto-generated roads preserve and prefer manually-drawn ways.** Owner: "on parts of
   routes and ways, when applicable always follow them as they are optimized." Investigated first
   (the phrase was ambiguous across three candidate mechanisms) — the manual Route/Way tools already
@@ -2118,14 +2130,26 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **← next session: one item from the owner message that shipped v1.63/v1.64, not yet started.**
-  "when a stage gives a bug give a button to automate a fix" — extend the existing advisory-button
-  pattern (v1.53's "Use here" per-stage transport swap, v1.47's "Re-route for mode") to more
-  `_stageTrouble`-classified bug types (overload, seasonal closure, wheel-block) — needs a design
-  pass on which bug types get a one-click fix and what each fix actually does before implementing.
-  (The message's other two items are both shipped: the load-penalty/coordination fix as v1.63, and
-  "always follow routes/ways when applicable" — investigated and root-caused to the auto-generated
-  road network having no knowledge of manually-drawn ways — as v1.64.)
+- **← next session: owner request, mid-typing when it arrived — get the full ask before building.**
+  "For travel stages i need a better fine tunement and modificators for water carried. An example:
+  I got a party of 2 traveling in moderate climate for the first 2/3 and then moving trough a
+  desert. At the desert transitions they will exchange their mule and cart for camels with travois
+  and a different supply set-up. For now I cant make any such a finetunement. Also I'd like that
+  the current [message cut off here]." Two things bundled: (1) water-carry modeling needs finer
+  control/modifiers than exists today — `JP_DRINKING_FLOW_DIVISOR`/`_jpStageDryKm` (v1.56) measure
+  water RANGE from real hydrology but aren't user-tunable per stage; (2) a desert-transition
+  equipment swap (mule+cart → camel+travois, "a different supply set-up") mid-route. The per-stage
+  override mechanism (`stageOverrides[idx]`, generic `Object.assign` merge — see v1.65's
+  `carts`/`wagons` override, which proved arbitrary fields work even without a dedicated UI
+  control) already supports SOME of this manually per stage (animalSpecies, cargoKg, pace,
+  transport), so part of the ask may already be reachable — confirm exactly what's missing (is it
+  that travois/cart-type isn't overridable per stage? that there's no *automatic* swap suggestion
+  at a biome transition, mirroring v1.53's "faster mode available" advisory? that water-carry days/
+  rate isn't independently tunable from `desertWater`?) before implementing. The message was
+  visibly truncated mid-sentence ("Also I'd like that the current") — get the rest before scoping.
+- **v1.65 shipped**: "when a stage gives a bug give a button to automate a fix" — one-click
+  auto-fix buttons for the three deterministic blocked-stage subcases (seasonal closure, mounted/
+  baggage-train-no-animals, wheel-vehicle-present). See CHANGELOG for the full writeup.
 - **Civilization menu reorder (v1.59) — shipped.** See CHANGELOG/above for the full writeup;
   `#civSubBar` now reads Factions → Generation → Settlements → Economy → Statistics, and
   `#civSubGeneration` is an explicit Step 1→2→3 sequence. Pure reorganization — no scope cuts, no

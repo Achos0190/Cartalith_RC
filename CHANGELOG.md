@@ -12,6 +12,58 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.65 — Journey Planner: one-click auto-fix buttons for stage bugs
+
+Owner: "when a stage gives a bug give a button to automate a fix." Extends the existing advisory-
+button pattern (v1.53's "Use here" per-stage transport swap, v1.47's "Re-route for mode") to the
+per-stage trouble cards `_jpRenderResults` already renders for a blocked stage. Civ-layer only
+(`_jpRenderResults`'s local `_stageTrouble` closure + three new click handlers). Hash vs v1.64 ALL
+IDENTICAL.
+
+- **Only subcases with a single, deterministic, side-effect-free remedy get a button** — the same
+  bar v1.53's "Use here" already set. A vessel swap (would need a "best hull for this stage's
+  cargo" resolver that doesn't exist) and any cargo/party-size change (this planner has always
+  treated as the user's own call, never silently computed — v1.48/v1.49's own "never applied
+  automatically" precedent) stay text-only hints, unchanged. Three subcases qualified:
+  - **A winter-closed pass** (`r.seasonal`): "🔧 Turn off seasonal closures" sets
+    `plan.seasonalClosures=false` — the one fix that must act on the whole-plan flag, not a
+    per-stage override (a season's closure isn't a property of one stage), so it also syncs the
+    party form's own checkbox (`data-jp="seasonalClosures"`, otherwise stale — it lives outside
+    `#reResults`) and re-renders via the same `_jpRefresh(false)` the checkbox's own handler uses.
+  - **A mount-blocked stage or a Baggage-Train-without-pack-animals stage**: "🔧 Switch to
+    Walking" — reuses `_civDijkstraPath`... no, reuses the *existing* `data-jps-quick-idx`/
+    `data-jps-quick-mode` mechanism v1.53 already built for the "faster mode available" advisory,
+    since both write the identical `stageOverrides[idx].transport` field. Zero new click-handler
+    code needed for this branch.
+  - **A wheel-vehicle-present block** ("Wheeled vehicles cannot traverse…", fires whenever
+    carts/wagons>0 on wheel-blocked terrain regardless of transport): "🔧 Remove carts/wagons
+    here" clears `stageOverrides[idx].carts`/`.wagons` — and *also* switches that stage's
+    transport to Walking. The first cut clearing only carts/wagons was tested end-to-end (button
+    click → re-plan → check the stage), not assumed, and failed: a Baggage-Train party with zero
+    pack animals just traded this block for `jpCalcLand`'s OTHER wheel-adjacent message ("A
+    baggage train cannot operate on X"). Walking with nothing to haul never hits either check, so
+    it's the one combination guaranteed to actually clear the stage regardless of what else the
+    party carries. `_jpEffectiveStagePlan` is a generic `Object.assign({},plan,ov)` merge, so a
+    per-stage carts/wagons override works even though no dedicated UI select exposes it.
+- **Every fix was verified by actually clicking the button**, not by reading the code and
+  assuming it works — the wheel-vehicle case above is exactly the failure that verification
+  caught. `_jpDeriveStages` is monkeypatched per test case (real terrain sampling can't reliably
+  hit an exact terrain/biome/season combination) to force the precise blocked condition through
+  the real `_jpPlan`/`_jpRenderResults` pipeline, then the rendered button is located and clicked
+  for real, and the NEXT `_jpPlan()` call is checked for an actual unblock — the same "swap the
+  primitive, verify the whole path, restore it" technique v1.51/v1.61 already use for
+  hard-to-reach scenarios.
+- **Tests**: 7 new smoke assertions (`R.v165`) — each of the three button types renders with the
+  right label on the right blocked message, clicking it genuinely unblocks the stage (not just
+  "a button appeared"), and a capacity/overload block still gets no button (the existing
+  text-only-hint behavior is unchanged for the disclosed-scope-cut subcases).
+- **Known scope cuts, disclosed**: no auto-fix for a vessel-rating/hold-overloaded water block
+  (needs a "best hull for this cargo" resolver that doesn't exist yet) or for the two resupply-
+  infeasible cases (water-out-of-reach, over-carrying-capacity) — both would require picking a
+  cargo/party-size reduction, a decision this planner has consistently left to the user rather
+  than silently computing (v1.48/v1.49/v1.53's own precedent). The general "Overloaded" (loadRatio
+  >1.0 but still valid) advisory also stays text-only for the same reason.
+
 ### v1.64 — Auto-generated roads preserve and prefer manually-drawn ways
 
 Owner: "on parts of routes and ways, when applicable always follow them as they are optimized."

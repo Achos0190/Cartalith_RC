@@ -5211,6 +5211,107 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.65: one-click auto-fix buttons for stage bugs ──────────────────────────────────────────
+  // Owner: "when a stage gives a bug give a button to automate a fix." Extends the existing
+  // advisory-button pattern (v1.53's "Use here", v1.47's "Re-route") to the three blocked-stage
+  // subcases with a single, deterministic, side-effect-free remedy: a season-closed pass, a
+  // mount-blocked/wheel-lacking-animals stage (both fixed by switching mode to Walking), and a
+  // wheel-vehicle-present block (fixed by clearing this stage's carts/wagons AND switching to
+  // Walking — clearing carts alone was tried first and just traded one wheel-block message for
+  // the other, caught by testing the button end-to-end rather than assuming the fix worked).
+  // _jpDeriveStages is monkeypatched per case to force an exact blocked terrain/biome/season
+  // combination through the real _jpPlan/_jpRenderResults pipeline — real terrain sampling can't
+  // reliably hit these specific combinations, and this is the same "swap the primitive, verify
+  // the whole path, restore it" technique v1.51/v1.61 already use for hard-to-reach scenarios.
+  R.v165 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const span = Math.max(20, Math.min(GW - 10 - landPt[0], 40));
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    try {
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v165', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // ── wheel-vehicle block: carts present on wheel-blocked terrain ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Deep Sand', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Baggage Train', assetMode: 'manual', carts: 2, wagons: 0, groupSize: 4,
+          cargoKg: 10, stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _civOpenRouteEditor(0);
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.wheelBlockRendered = /Impossible as configured/.test(h) && /Wheeled vehicles cannot traverse/.test(h);
+        const btn = document.querySelector('[data-jps-fix-no-wheels="0"]');
+        o.wheelButtonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.wheelFixWorks = !plan2.results[0].blocked && p.stageOverrides['0'] &&
+          p.stageOverrides['0'].carts === 0 && p.stageOverrides['0'].wagons === 0 && p.stageOverrides['0'].transport === 'Walking';
+      }
+
+      // ── mounted block: Mounted Rider on mount-blocked terrain ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Swamp / Marsh', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Mounted Rider', mountAnimal: 'horse', carts: 0, wagons: 0, groupSize: 1,
+          cargoKg: 20, stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.mountBlockRendered = /Impossible as configured/.test(h) && /Mounted travel is not viable/.test(h);
+        o.mountButtonLabel = /Switch to Walking/.test(h);
+        const btn = document.querySelector('[data-jps-quick-idx="0"][data-jps-quick-mode="Walking"]');
+        o.mountButtonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.mountFixWorks = !plan2.results[0].blocked && p.stageOverrides['0'] && p.stageOverrides['0'].transport === 'Walking';
+      }
+
+      // ── seasonal closure: a winter mountain pass ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Mountain Pass', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Mountain Highland', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', season: 'Winter', seasonalClosures: true, carts: 0, wagons: 0,
+          groupSize: 4, cargoKg: 20, stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.seasonBlockRendered = /Impossible as configured/.test(h) && /closed by snow/.test(h);
+        o.seasonButtonLabel = /Turn off seasonal closures/.test(h);
+        const btn = document.querySelector('[data-jps-fix-season-off]');
+        o.seasonButtonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.seasonFixWorks = !plan2.results[0].blocked && p.seasonalClosures === false;
+      }
+
+      // ── the existing advisory bar is untouched: vessel/capacity/cargo blocks stay text-only ──
+      o.noFixButtonForCapacityBlock = (() => {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', carts: 0, wagons: 0, groupSize: 1, cargoKg: 5000,
+          stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        return /Impossible as configured/.test(h) && !document.querySelector('[data-jps-fix-no-wheels], [data-jps-fix-season-off]');
+      })();
+    } finally {
+      window._jpDeriveStages = origDerive;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5826,6 +5927,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.64: Generate Roads no longer destroys a manually-drawn LAND way (was civWays=[])', R.v164.skip || R.v164.manualLandSurvived);
   A('v1.64: Generate Roads no longer destroys a manually-drawn SEA-LANE way either', R.v164.skip || R.v164.manualSeaSurvived);
   A('v1.64: Generate Roads still builds a fresh auto-generated network alongside the preserved manual ways', R.v164.skip || R.v164.autoWaysAlsoPresent);
+
+  A('v1.65: a wheel-vehicle-blocked stage (carts on wheel-blocked terrain) renders with its own quick-fix button', R.v165.wheelBlockRendered && R.v165.wheelButtonExists);
+  A('v1.65: clicking that button clears carts/wagons AND switches the stage to Walking, actually unblocking it', R.v165.wheelFixWorks);
+  A('v1.65: a mount-blocked stage renders a "Switch to Walking" quick-fix button', R.v165.mountBlockRendered && R.v165.mountButtonLabel && R.v165.mountButtonExists);
+  A('v1.65: clicking it overrides that stage to Walking and unblocks it', R.v165.mountFixWorks);
+  A('v1.65: a winter-closed mountain pass renders a "Turn off seasonal closures" quick-fix button', R.v165.seasonBlockRendered && R.v165.seasonButtonLabel && R.v165.seasonButtonExists);
+  A('v1.65: clicking it sets plan.seasonalClosures=false and unblocks the stage', R.v165.seasonFixWorks);
+  A('v1.65: a capacity/overload block still gets no fix button — only deterministic, side-effect-free remedies get one', R.v165.noFixButtonForCapacityBlock);
 
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
