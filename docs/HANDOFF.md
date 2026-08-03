@@ -9,11 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.63.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.64.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.64 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.62` are kept and never edited.
+  (v1.65 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.63` are kept and never edited.
+- **v1.64 — auto-generated roads preserve and prefer manually-drawn ways.** Owner: "on parts of
+  routes and ways, when applicable always follow them as they are optimized." Investigated first
+  (the phrase was ambiguous across three candidate mechanisms) — the manual Route/Way tools already
+  had a real discount (v1.53); the auto-generated network never did, and silently destroyed manual
+  ways on every "Generate Roads" run. Civ-layer only. 1016 / 852 green; hash battery ALL IDENTICAL;
+  537 smoke green; see CHANGELOG for the full writeup.
+  - `_civAutoRoutes()` used to open with `civWays=[]`, destroying every manual way. Now manual
+    ways (`w.manual===true`) are preserved across a rebuild instead of discarded.
+  - `_civHierarchicalNetwork` gained optional `opts.existingWays`: cells along a supplied way get
+    the same `_CIV_EXISTING_WAY_DISCOUNT=0.25` the manual tools use (v1.53), via a shared helper so
+    the two mechanisms can't drift apart. `_civAutoRoutes` feeds its preserved manual land ways in.
+  - Measured: a settlement pair the base network didn't connect directly went from 30 to 134
+    usage-count on the manual way's own cells and became a direct edge once discounted.
+  - Known scope cuts: `_civMstRoutes` (sea-lane MST) not threaded with this; `_civIterativeAutoWorld`
+    ("Auto World") regenerates settlements from scratch each run so preservation wasn't extended
+    there (only the standalone "Generate Roads" button, which leaves settlements untouched).
 - **v1.63 — Journey Planner: an impossible load is finally flagged, not silently crawled at
   45%; Small Caravan gets its own +20% back.** Owner supplied a research prompt diagnosing two
   findings from a fresh audit of the load-penalty/coordination chain, plus three lower-priority
@@ -2102,17 +2118,14 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **← next session: two items from the same owner message that shipped v1.63, not yet started.**
-  (1) "on parts of routes and ways, when applicable always follow them as they are optimized" —
-  ambiguous as written; needs clarification before building anything. Candidate readings: the
-  Route/Way drawing tool's existing infrastructure-discount cost grid (v1.53), the auto-generated
-  road network builder (`_civHierarchicalNetwork`/`_civMstRoutes`), or the Journey Planner's stage
-  derivation (`_jpDeriveStages`) preferring an existing `civWay` over a fresh line more strongly.
-  Ask the owner which behavior they're seeing before picking one. (2) "when a stage gives a bug
-  give a button to automate a fix" — extend the existing advisory-button pattern (v1.53's "Use
-  here" per-stage transport swap, v1.47's "Re-route for mode") to more `_stageTrouble`-classified
-  bug types (overload, seasonal closure, wheel-block) — needs a design pass on which bug types get
-  a one-click fix and what each fix actually does before implementing.
+- **← next session: one item from the owner message that shipped v1.63/v1.64, not yet started.**
+  "when a stage gives a bug give a button to automate a fix" — extend the existing advisory-button
+  pattern (v1.53's "Use here" per-stage transport swap, v1.47's "Re-route for mode") to more
+  `_stageTrouble`-classified bug types (overload, seasonal closure, wheel-block) — needs a design
+  pass on which bug types get a one-click fix and what each fix actually does before implementing.
+  (The message's other two items are both shipped: the load-penalty/coordination fix as v1.63, and
+  "always follow routes/ways when applicable" — investigated and root-caused to the auto-generated
+  road network having no knowledge of manually-drawn ways — as v1.64.)
 - **Civilization menu reorder (v1.59) — shipped.** See CHANGELOG/above for the full writeup;
   `#civSubBar` now reads Factions → Generation → Settlements → Economy → Statistics, and
   `#civSubGeneration` is an explicit Step 1→2→3 sequence. Pure reorganization — no scope cuts, no

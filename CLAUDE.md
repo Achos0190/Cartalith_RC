@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.63**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.64**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.63.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.62.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.64.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.63.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,35 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Auto-generated roads preserve and prefer manually-drawn ways (v1.64)
+
+Owner: "on parts of routes and ways, when applicable always follow them as they are optimized."
+Investigated before writing any fix — the phrase was ambiguous across three candidate mechanisms
+(manual Route/Way tools, the auto-generated network, Journey Planner stage derivation). The manual
+tools already had a real discount (v1.53); the auto-generated network never did, and also silently
+destroyed manual ways on every run. Civ-layer only. Hash vs v1.63 ALL IDENTICAL.
+
+- **`_civAutoRoutes()` ("Generate Roads") opened with a flat `civWays=[]`**, discarding every
+  manually-drawn way (road AND sea-lane) on every run. Now manual ways (`w.manual===true`) are
+  snapshotted before the rebuild and preserved in the final list alongside the fresh network — the
+  v1.24 BUG-4 "preserve deliberate user work" precedent, applied by simply not destroying the data.
+- **`_civHierarchicalNetwork` had zero knowledge of pre-existing ways even where it wasn't
+  destructive.** New optional `opts.existingWays` applies the same `_CIV_EXISTING_WAY_DISCOUNT=0.25`
+  multiplicative cost reduction the manual tools already use (v1.53), extracted into a shared helper
+  (`_civMarkWaysOnGrid`) so the two mechanisms can't drift apart — the umpteenth instance of this
+  file's "two functions answering one question WILL drift" lesson. `_civAutoRoutes` feeds its
+  preserved manual LAND ways in; every other call site omits it and is an exact no-op fall-through.
+- **Measured**: a settlement pair the base network did NOT connect directly, after adding a manual
+  way between them and re-running with `opts.existingWays`, went from 30 to 134 usage-count on the
+  way's own cells and became a direct edge.
+- **Known scope cuts**: `_civMstRoutes` (sea-lane MST) not threaded with this — narrower, separate
+  code path, left for later. `_civIterativeAutoWorld` ("Auto World") also regenerates settlements
+  from scratch each run, which would leave a preserved way's anchors pointing at stale positions —
+  deliberately not extended there; only the standalone "Generate Roads" button (settlements
+  untouched) is a safe, unambiguous preservation case. The Journey Planner's `_jpDeriveStages`
+  already samples whatever the Route tool committed, which now follows infrastructure more by
+  construction — no separate JP-side change needed.
 
 ### Journey Planner: a load-penalty ceiling, and Small Caravan's own bonus restored (v1.63)
 

@@ -12,6 +12,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.64 — Auto-generated roads preserve and prefer manually-drawn ways
+
+Owner: "on parts of routes and ways, when applicable always follow them as they are optimized."
+Investigated before writing any fix, since the phrase was ambiguous across three candidate
+mechanisms (the manual Route/Way drawing tools, the auto-generated road network, the Journey
+Planner's stage derivation). Reading the code found the manual tools already had a real "ride
+existing infrastructure" discount (v1.53); the AUTO-GENERATED network builder never did — and
+worse, silently destroyed any manually-drawn way on every "Generate Roads" run. Civ-layer only
+(`_civAutoRoutes`, `_civHierarchicalNetwork`, plus a shared-helper extraction from
+`_civDijkstraPath`) — hash vs v1.63 **ALL IDENTICAL**.
+
+- **`_civAutoRoutes()` ("Generate Roads") used to open with a flat `civWays=[]`**, discarding
+  every manually-drawn way — road AND sea-lane — on every run, with no more standing than
+  whatever got rebuilt from scratch. A user's own hand-authored infrastructure had zero
+  persistence across the one button meant to fill in the REST of the network. Now the manual
+  ways (`w.manual===true`, the same flag `_civCommitWay` already sets) are snapshotted before the
+  rebuild and preserved in the final `civWays` list alongside the freshly-generated network — the
+  same "preserve deliberate user work" precedent as v1.24 BUG-4's confirm() guards, except here
+  the fix is to simply not destroy the data rather than asking permission to destroy it.
+- **`_civHierarchicalNetwork` (the MST/degree-fill/shortcut builder both "Generate Roads" and the
+  one-click "Auto World" use) had zero knowledge of pre-existing ways even where it wasn't
+  destructive.** New optional `opts.existingWays`: cells along a supplied way get the same
+  `_CIV_EXISTING_WAY_DISCOUNT=0.25` multiplicative cost reduction the manual Route/Way tools
+  already apply (v1.53) — extracted into a shared helper (`_civMarkWaysOnGrid`/
+  `_civMarkWayNeighborhood`) so the two mechanisms can't drift apart, the umpteenth instance of
+  this file's own "two functions answering one question WILL drift" lesson
+  (v1.30/v1.33/v1.35/v1.37/v1.46/v1.53...). `_civAutoRoutes` feeds its preserved manual LAND ways
+  in as `opts.existingWays`; absent it (every other existing call site), the function is an exact
+  no-op fall-through — the same "optional opts.\* addition" contract v1.20/v1.26 established.
+- **Measured, not assumed.** On a settlement pair the base auto-network did NOT connect with a
+  direct edge (a genuine detour case, not a trivial already-optimal geodesic), adding a manual way
+  between them and re-running the network with `opts.existingWays` raised usage on the way's own
+  cells from 30 to 134 and turned the previously-indirect pair into a direct edge — the discount
+  measurably steers the network, not just theoretically applies.
+- **Refactor safety**: `_civDijkstraPath`'s pre-existing discount logic was extracted to the
+  shared helpers verbatim (same neighbourhood radius, same 0.25 constant, same civWays/`state.roads`
+  handling) — bit-identical behaviour there, confirmed by the existing v1.53 smoke assertion
+  (updated only because it string-matched the old inline literal `cost[i]*0.25:1.0`, which the
+  extraction naturally rewrote to reference the shared constant — a fragile golden-string test,
+  now a behavioural + constant-name check instead).
+- **Tests**: 6 new smoke assertions (`R.v164`, isolated on a dedicated fresh world per the v1.24
+  BUG-3/v1.46/v1.58/v1.60 test-isolation precedent) — the shared discount constant is 0.25 and
+  used by both mechanisms; `opts.existingWays` measurably increases usage on the marked corridor;
+  a previously-indirect settlement pair becomes direct; a manual land way survives Generate Roads;
+  a manual sea-lane way survives it too; the auto-generated network still builds alongside the
+  preserved manual ways (not replaced by them). 1016 / 852 green; hash battery ALL IDENTICAL; 537
+  smoke green.
+- **Known scope cuts, disclosed**: `_civMstRoutes` (the sea-lane MST used by both "Generate
+  Roads" and "Auto World") is NOT threaded with the existing-ways discount or preservation logic
+  this pass — a narrower, separate code path left for a future version if requested. The one-click
+  "Auto World" pipeline (`_civIterativeAutoWorld`) also regenerates settlements from scratch each
+  run, which would leave a preserved way's anchor points pointing at stale settlement positions —
+  deliberately NOT extended there this pass (only the standalone "Generate Roads" button, which
+  keeps existing settlements untouched, is a safe, unambiguous case for preservation). The Journey
+  Planner's own stage derivation (`_jpDeriveStages`) was investigated and already samples whatever
+  path the Route tool committed — since that path now more often follows existing infrastructure
+  by construction (this fix + v1.53), no separate Journey-Planner-side change was needed.
+
 ### v1.63 — Journey Planner: an impossible load is finally flagged, not silently crawled at 45%; Small Caravan gets its own +20% back
 
 Owner supplied a research prompt (`74285d8c-fixloadandcoordinationfactorsprompt.md`) diagnosing two

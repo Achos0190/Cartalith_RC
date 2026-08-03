@@ -4490,7 +4490,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
         o.laneFollowed = minDistToBend <= 5;   // grid-cell-quantised path; C itself is a bend apex, not a hard waypoint
         o.bendIsReal = Math.abs(cy - ay) > 5;   // the beeline would stay near y=ay, nowhere near C
       } else { o.laneFollowed = true; o.bendIsReal = true; }   // no suitable open ocean on this world — vacuous
-      o.discountIsMultiplicative = _civDijkstraPath.toString().includes('cost[i]*0.25:1.0');
+      // v1.64: the 0.25 discount was extracted into the shared _CIV_EXISTING_WAY_DISCOUNT
+      // constant (now also used by _civHierarchicalNetwork), so the old literal-substring match
+      // ('cost[i]*0.25:1.0') no longer appears verbatim — check the function references the
+      // shared constant instead, plus that its value genuinely lands below the old
+      // Math.min(cost,1.0) cap this test exists to guard against (the bug the cap papered over).
+      o.discountIsMultiplicative = _civDijkstraPath.toString().includes('_CIV_EXISTING_WAY_DISCOUNT')
+        && _CIV_SEA_COST * _CIV_EXISTING_WAY_DISCOUNT < 1.0;
       civWays = savedWays;
 
       let landPt = null;
@@ -5142,6 +5148,69 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // ── v1.64: auto-generated roads preserve and prefer manually-drawn ways ──────────────────────
+  // Owner: "on parts of routes and ways, when applicable always follow them as they are
+  // optimized." _civAutoRoutes used to wipe ALL of civWays (civWays=[]) before rebuilding, and
+  // _civHierarchicalNetwork had zero knowledge of pre-existing ways even when it wasn't
+  // destructive — v1.53's "ride existing infrastructure" discount only ever reached the manual
+  // Route/Way tools (_civDijkstraPath). Isolated on a dedicated fresh world (same test-isolation
+  // discipline as v1.24 BUG-3/v1.46/v1.58/v1.60's own smelting check above).
+  R.v164 = await page.evaluate(async () => {
+    const o = {};
+    o.discountConstantShared = _CIV_EXISTING_WAY_DISCOUNT === 0.25;
+    const savedPlaces = state.places, savedWays = civWays, savedSeed = state.tect.seed,
+      savedResW = state.resW, savedKm = state.mapWidthKm;
+    try {
+      state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+      await generate();
+      state.places = []; _civIterativeAutoWorld(3);
+      const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+      if (settles.length < 4) { o.skip = true; return o; }
+
+      // find a pair the base auto-network does NOT already connect directly — the case a
+      // discount can actually change, not one where the direct line was already the cheapest
+      // path regardless (which would make the before/after comparison a tautology).
+      const netBase = _civHierarchicalNetwork(settles, {});
+      const directPairs = new Set();
+      for (const w of netBase.ways) { if (w.aIdx == null) continue;
+        directPairs.add(Math.min(w.aIdx, w.bIdx) + '_' + Math.max(w.aIdx, w.bIdx)); }
+      let pair = null;
+      for (let i = 0; i < settles.length && !pair; i++) for (let j = i + 1; j < settles.length && !pair; j++) {
+        const d = Math.hypot(settles[i].x - settles[j].x, settles[i].y - settles[j].y) * (state.mapWidthKm / GW);
+        if (d > 15 && d < 150 && !directPairs.has(i + '_' + j)) pair = [i, j];
+      }
+      if (!pair) { o.skip = true; return o; }
+      const [ai, bi] = pair, A = settles[ai], B = settles[bi];
+      const N = 16, manualPts = [];
+      for (let k = 0; k <= N; k++) manualPts.push([Math.round(A.x + (B.x - A.x) * k / N), Math.round(A.y + (B.y - A.y) * k / N)]);
+      const manualWay = { pts: manualPts, sea: false, type: 'road', manual: true, name: 'TEST-MANUAL' };
+
+      // _civHierarchicalNetwork actually prefers the manual corridor once handed it: cells along
+      // the manual way see more usage, and the previously-indirect pair often becomes a direct edge.
+      const { RW, RH, sc } = _civRoutingGrid();
+      const wSet = new Set(); _civMarkWaysOnGrid([manualWay], RW, RH, sc, wSet);
+      const netWith = _civHierarchicalNetwork(settles, { existingWays: [manualWay] });
+      let usageNo = 0, usageWith = 0;
+      for (const i of wSet) { usageNo += netBase.usageCount[i] || 0; usageWith += netWith.usageCount[i] || 0; }
+      o.discountSteersTheNetwork = usageWith > usageNo;
+      o.pairBecomesDirect = netWith.ways.some(w => w.aIdx != null &&
+        ((w.aIdx === ai && w.bIdx === bi) || (w.aIdx === bi && w.bIdx === ai)));
+
+      // _civAutoRoutes preserves manual ways (land AND sea-lane) instead of wiping civWays=[],
+      // while still building a fresh auto-generated network alongside them.
+      civWays = [manualWay, { pts: [[A.x, A.y], [B.x, B.y]], sea: true, type: 'sea-lane', manual: true, name: 'TEST-MANUAL-SEA' }];
+      _civAutoRoutes();
+      o.manualLandSurvived = civWays.some(w => w.name === 'TEST-MANUAL' && w.manual);
+      o.manualSeaSurvived = civWays.some(w => w.name === 'TEST-MANUAL-SEA' && w.manual);
+      o.autoWaysAlsoPresent = civWays.some(w => !w.manual);
+    } finally {
+      state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces; civWays = savedWays;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -5750,6 +5819,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.63: an extreme overload (~22x-166x capacity) is now flagged infeasible instead of silently crawling at a flat 45%', R.v163.extremeOverloadBlocked && R.v163.extremeOverloadNamesOverload);
   A('v1.63: the existing graduated load bands (<=1.50x) are untouched — a moderate overload still returns a valid, merely-penalized speed', R.v163.moderateOverloadStaysValid);
   A('v1.63: grazing speedMod scale is confirmed correctly ordered (None > Partial > Full), not inverted', R.v163.grazingOrderedCorrectly);
+
+  A('v1.64: _civHierarchicalNetwork shares the manual Route/Way tools\' own 0.25x "existing infrastructure" discount constant', R.v164.discountConstantShared);
+  A('v1.64: opts.existingWays measurably steers the auto-generated network onto the manual corridor (or the test scenario was skipped)', R.v164.skip || R.v164.discountSteersTheNetwork);
+  A('v1.64: a settlement pair the base network did NOT connect directly often becomes a direct edge once a manual way exists between them (or skipped)', R.v164.skip || R.v164.pairBecomesDirect);
+  A('v1.64: Generate Roads no longer destroys a manually-drawn LAND way (was civWays=[])', R.v164.skip || R.v164.manualLandSurvived);
+  A('v1.64: Generate Roads no longer destroys a manually-drawn SEA-LANE way either', R.v164.skip || R.v164.manualSeaSurvived);
+  A('v1.64: Generate Roads still builds a fresh auto-generated network alongside the preserved manual ways', R.v164.skip || R.v164.autoWaysAlsoPresent);
 
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
