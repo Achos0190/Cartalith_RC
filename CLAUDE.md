@@ -3,20 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.59**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.60**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.59.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.58.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.60.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.59.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1001-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1016-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +28,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1001 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1016 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -998,6 +998,69 @@ reference world did. Three causes, one lesson.
   that is precisely why this survived several versions.
 
 
+### Real-km-aware relief and rivers (v1.60)
+
+Owner: "when choosing a smaller region rivers dont become more visible (i think its a scaling
+issue). I cant seem to find any rivers with the branching pattern or length you might expect...
+check any and all information on river formation and how simulations/terrain programs
+realistically generate them and apply them with proper scaling." Scope decided via
+`AskUserQuestion`: fix everything, including the underlying terrain relief, not just the river
+threshold. `docs/research/scale-invariant-terrain.md` (new) grounds the fix in Montgomery &
+Dietrich (1988/1992) channel initiation and Horton/Strahler/Hack self-similar drainage density —
+read it before touching `terrainDetailK`, `riverFlowThresh`, or the crater/volcano radius clamp.
+
+- **Root cause, measured before any code changed.** (1) The relief pipeline
+  (`fillWarpRows`/`fillHeteroRows`/`fillHeightRows`) samples fractal noise at a frequency fixed as a
+  fraction of grid width, never a real km wavelength — a 50 km region and a 40,000 km world at the
+  same resolution produce statistically identical relief (confirmed bit-identical with craters/
+  volcanoes disabled). (2) Craters/volcanoes are the one place real km IS used (`radKm/cellKm`), and
+  it had only floor clamps — measured largest crater radius reaching **2.8× the entire grid width**
+  at a 50 km region. (3) The channel-initiation threshold (`GW*GH*0.0004`) is likewise a pure
+  grid-cell fraction, independently reimplemented at ~18 call sites, ungrounded in any real km².
+- **`terrainDetailK(gw,mapWidthKm)`** is the central mechanism — a one-sided
+  `Math.min(16,Math.max(1,REF_CELLKM/cellKm))` anchored at `REF_CELLKM=800/2048`, the app's own
+  literal untouched default (true for both Region and World mode). The same anchor-at-the-default,
+  one-sided-clamp discipline `_V3D_RATIO0` (v0.67) already established for 3D exaggeration, now
+  applied to relief-*generation* frequency: `heightParams().nf=5.0*terrainDetailK(...)` and
+  `heteroParams().hf=1.5*terrainDetailK(...)`. `k===1` exactly at/above the reference cell size
+  (world scale, or any region ≥800 km at ≤2048 resolution — the overwhelmingly common case), so both
+  frequencies are bit-identical to v1.59 there. Warp frequency and `state.tect.blurR` are
+  deliberately left grid-relative — disclosed scope cuts, not silent omissions.
+- **`clampFeatureRadiusCells(radCells,gw,gh)`** caps a single crater/volcano at
+  `FEATURE_RADIUS_MAX_FRAC=0.12` of the shorter grid axis — a universal correctness fix, not
+  scale-gated (a crater covering the whole map is wrong at any resolution), so it can occasionally
+  bind even at the literal default scale.
+- **`riverFlowThresh(gw,gh) = gw*gh*0.0004/terrainDetailK(GW,state.mapWidthKm)`** consolidates ~18
+  independent inline recomputations into one canonical function (the umpteenth instance of this
+  file's own "two functions answering one question WILL drift" lesson) AND divides by the same
+  `terrainDetailK` that raised the noise frequency. The division was added only after measurement
+  showed it was needed: Stage B alone made a 50 km region's drainage network measurably *sparser*
+  (channel cells 4233→3345, max Strahler order 4→3) — finer relief fragments the long contiguous
+  downhill runs flow accumulation needs. Dividing by `terrainDetailK` recovered it (channel cells
+  →**6001**, +42%; polylines 718→**1497**, +109%) while keeping the identical bit-identity guarantee
+  at reference scale. The divisor always reads the world's own `GW`/`state.mapWidthKm` rather than
+  the `gw`/`gh` passed in, so an LOD tile's own smaller grid still gets the world's real detail
+  level, not a tile-local mis-estimate.
+- **Bit-identity, disclosed precisely.** The standard `hash_gen1.js` battery shows a mismatch vs
+  v1.59 at every scenario — this is the crater/volcano clamp alone (not scale-gated by design, and
+  can fire at any resolution depending on the random roll, including the literal default). An
+  isolated A/B with craters/volcanoes disabled proves `terrainDetailK`'s mechanism is bit-identical
+  to v1.59 at the reference scale, exactly as designed. A deliberate, measured re-baseline — the
+  same class as v1.36/v1.39/v1.46's placement fixes.
+- **Two smoke assertions needed new fixtures, not new logic**, both root-caused to the crater/
+  volcano clamp reshaping a specific hardcoded seed's terrain/geology: the v0.94 routing-fix
+  regression's two coordinate pairs (re-found via the same independent-probe methodology against
+  the current terrain) and the v1.31 §10.3 fuel-limited-settlement check (isolated onto its own
+  dedicated fresh world inside a save/restore block, matching the v1.46/v1.58 test-isolation
+  precedent, instead of depending on whatever world ~40 assertions of shared ambient state happened
+  to leave behind).
+- **Known scope cuts**: warp frequency and `state.tect.blurR` stay grid-relative (only the noise
+  that actually shapes ridges/valleys/drainage divides changed); erosion kernels, coastal/glacial
+  passes, `carveRiverValleys`, and fjord masking were all audited and confirmed already
+  resolution-relative with no real-km dependence, so none needed changes; `TERRAIN_DETAIL_MAX_K=16`
+  and `FEATURE_RADIUS_MAX_FRAC=0.12` are reasoned starting values confirmed against measurement, not
+  independently historically calibrated.
+
 ### Civilization menu reorder: faction creation leads into world generation (v1.59)
 
 Owner: "completely redesign and rethink the civilisation menu's under generate and make it a
@@ -1928,7 +1991,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1001-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1016-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -1936,7 +1999,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
-node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (464 assertions: onboarding/layers/presets/phase + per-version regressions)
+node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (516 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
 Stubs live in `tests/stub_head.js`; assertions in `tests/test_tail.js` — extend both when adding

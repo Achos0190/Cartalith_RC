@@ -3853,6 +3853,54 @@ if (typeof carveRiverValleys === 'function') {
     check('style preset probe restored managed viz keys', STYLE_MANAGED_NUM.every(k => state.viz[k] === 0) && STYLE_MANAGED_BOOL.every(k => state.viz[k] === false));
   }
 
+  /* ---------- v1.60: real-km-aware relief/river scaling ---------- */
+  if (typeof terrainDetailK === 'function') {
+    check('terrainDetailK===1 at the reference scale (mapWidthKm:800, resW:2048)', terrainDetailK(2048, 800) === 1);
+    check('terrainDetailK===1 above the reference scale (world-scale mapWidthKm)', terrainDetailK(256, 40075) === 1);
+    check('terrainDetailK===1 at any mapWidthKm/GW ratio at or above REF_CELLKM', terrainDetailK(256, 800) === 1 && terrainDetailK(1024, 3200) === 1);
+    check('terrainDetailK>1 below the reference scale (smaller region, same resolution)', terrainDetailK(2048, 100) > 1);
+    check('terrainDetailK grows as mapWidthKm shrinks (finer relief for smaller regions)', terrainDetailK(1024, 50) > terrainDetailK(1024, 200));
+    check('terrainDetailK is capped at TERRAIN_DETAIL_MAX_K', terrainDetailK(2048, 1) === TERRAIN_DETAIL_MAX_K);
+    check('heightParams().nf reproduces the literal default (5.0) at the reference scale', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 800; const gwSave = GW; GW = 2048;
+      const nf = heightParams().nf; GW = gwSave; state.mapWidthKm = savedW; return nf === 5.0;
+    })());
+    check('heteroParams().hf reproduces the literal default (1.5) at the reference scale', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 800; const gwSave = GW; GW = 2048;
+      const hf = heteroParams().hf; GW = gwSave; state.mapWidthKm = savedW; return hf === 1.5;
+    })());
+    check('heightParams().nf rises above 5.0 for a smaller-than-reference region', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 50; const gwSave = GW; GW = 2048;
+      const nf = heightParams().nf; GW = gwSave; state.mapWidthKm = savedW; return nf > 5.0;
+    })());
+  }
+  if (typeof clampFeatureRadiusCells === 'function') {
+    check('clampFeatureRadiusCells is a no-op under the ceiling', clampFeatureRadiusCells(3, 256, 164) === 3);
+    check('clampFeatureRadiusCells never exceeds FEATURE_RADIUS_MAX_FRAC of the shorter axis', clampFeatureRadiusCells(9999, 256, 164) === 164 * FEATURE_RADIUS_MAX_FRAC);
+    check('clampFeatureRadiusCells uses the SHORTER of gw/gh', clampFeatureRadiusCells(9999, 164, 256) === 164 * FEATURE_RADIUS_MAX_FRAC);
+  }
+  if (typeof riverFlowThresh === 'function') {
+    check('riverFlowThresh matches the legacy gw*gh*0.0004 formula at the reference scale', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 800; const gwSave = GW; GW = 2048;
+      const t = riverFlowThresh(2048, 1311); GW = gwSave; state.mapWidthKm = savedW;
+      return Math.abs(t - 2048 * 1311 * 0.0004) < 1e-6;
+    })());
+    check('riverFlowThresh drops below the legacy formula for a smaller-than-reference region (more channels can form)', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 50; const gwSave = GW; GW = 2048;
+      const t = riverFlowThresh(2048, 1311); GW = gwSave; state.mapWidthKm = savedW;
+      return t < 2048 * 1311 * 0.0004;
+    })());
+    check('buildRiverNetwork call sites still route through the one canonical threshold (spot check: buildLandformField)', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 800; const gwSave = GW; GW = 256;
+      const W = 16, H = 16, sea = 0.05;
+      const t = new Float32Array(W * H).fill(15), r = new Float32Array(W * H).fill(0.4), noFlow = new Float32Array(W * H);
+      const flat = new Float32Array(W * H).fill(0.1);
+      buildLandformField(flat, t, r, noFlow, W, H, sea);   // must not throw with the new signature
+      GW = gwSave; state.mapWidthKm = savedW;
+      return true;
+    })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

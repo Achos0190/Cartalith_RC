@@ -12,6 +12,104 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.60 — Rivers/relief become real-km-aware: small regions get genuinely finer drainage detail
+
+Owner: "when choosing a smaller region rivers dont become more visible (i think its a scaling
+issue). I cant seem to find any rivers with the branching pattern or length you might expect...
+check any and all information on river formation and how simulations/terrain programs
+realistically generate them and apply them with proper scaling." Follow-up scope decision (via
+`AskUserQuestion`): go all the way, including rescaling the underlying terrain relief, not just the
+river-channel threshold. Root-caused by direct measurement before any code changed —
+`docs/research/scale-invariant-terrain.md` (new) is the full grounding; read it before touching
+`terrainDetailK`, `riverFlowThresh`, or the crater/volcano radius clamp.
+
+- **Root cause, three findings.** (1) The relief pipeline (`fillWarpRows`/`fillHeteroRows`/
+  `fillHeightRows`) samples fractal noise at a frequency defined as a fixed fraction of grid width —
+  never a real km wavelength — so a 50 km region and a 40,000 km world at the same resolution
+  produce statistically identical relief (confirmed: with craters/volcanoes disabled, field/flow
+  hashes are bit-identical across a 40000/800/200/50 km `mapWidthKm` sweep). (2) Craters/volcanoes
+  are the one place real km *is* used (`radKm/cellKm`), and it had only floor clamps — measured
+  largest crater radius reaching **2.8× the entire grid width** at a 50 km region. (3) The
+  channel-initiation threshold (`flowThresh=GW*GH*0.0004`) is likewise a pure grid-cell fraction,
+  independently reimplemented at ~18 call sites, with zero real-km conversion — ungrounded in
+  Montgomery & Dietrich's (1988/1992) real ~0.1–1 km² channel-initiation catchment area, already
+  this repo's own cited source for the River-Density/Min-Stream-Order slope-area law.
+- **Stage A — crater/volcano radius ceiling.** `clampFeatureRadiusCells(radCells,gw,gh)` caps a
+  single feature at `FEATURE_RADIUS_MAX_FRAC=0.12` of the shorter grid axis, applied at
+  `placeSizedVolcano`'s and `stampCraters`' radius sites. A universal correctness fix, not
+  scale-gated — a crater covering the whole map is wrong at any resolution, and the clamp can
+  occasionally bind even at the literal default scale when a large/rare roll would otherwise exceed
+  it (measured: 44.8 → 19.7 cells at 800 km/`GW`=256).
+- **Stage B — relief noise frequency becomes real-km-aware.** New `terrainDetailK(gw,mapWidthKm)`,
+  anchored at `REF_CELLKM=800/2048` — the app's own literal untouched default (`mapWidthKm:800`,
+  `resW:2048`, true for both Region and World mode) — the same anchor-at-the-default,
+  one-sided-clamp discipline `_V3D_RATIO0` (v0.67) already established for 3D exaggeration, now
+  applied to relief-*generation* frequency itself: `Math.min(16, Math.max(1, REF_CELLKM/cellKm))`.
+  Threaded into exactly two constants: `heightParams().nf = 5.0*terrainDetailK(...)` (the height
+  formula's own noise term) and `heteroParams().hf = 1.5*terrainDetailK(...)` (crustal
+  heterogeneity, feeding the same height formula). The one-sided clamp means `k===1` exactly at or
+  above the reference cell size — world scale, or any region ≥800 km at ≤2048 resolution, the
+  overwhelmingly common case — so both frequencies are bit-identical to v1.59 there. Warp frequency
+  and `state.tect.blurR` are deliberately untouched (disclosed scope cuts, §5 below). Costs zero
+  extra compute — `fbm()`/`ridged()` are always 6 fixed octaves, and frequency is just a coordinate
+  multiplier, not an extra sampling loop.
+- **Stage C — one canonical channel threshold, extended once measurement called for it.** Step 1
+  consolidated all ~18 inline `GW*GH*0.0004` recomputations into one `riverFlowThresh(gw,gh)` (a
+  pure refactor, byte-identical to the old inline literal) — the umpteenth instance of this repo's
+  own "two functions answering one question WILL drift" lesson (v1.30/v1.33/v1.35/v1.37/v1.46).
+  Step 2 was planned as conditional, evaluated only after measuring Stage A+B — and the measurement
+  found a real problem: at a 50 km region, finer relief alone made the drainage network **sparser**
+  (channel cells 4233→3345, max Strahler order 4→3), because fragmenting terrain into smaller local
+  bumps interrupts the long contiguous downhill runs flow accumulation needs. Rather than
+  hand-deriving a Montgomery-Dietrich area constant (which back-of-envelope arithmetic showed could
+  as easily produce a no-op as "declare the whole map a river"), `riverFlowThresh` now divides by
+  the same `terrainDetailK` that raised the noise frequency: `gw*gh*0.0004/terrainDetailK(GW,
+  state.mapWidthKm)` — keeping both knobs coherent and inheriting the identical bit-identity
+  guarantee. Re-measured: channel cells 4233→**6001** (+42%, Strahler order recovered to 4),
+  distinct polylines 718→**1497** (+109%) at 50 km. At a more realistic resolution (`GW`=1024),
+  channel fraction rose **12×** at 100 km and **28×** at 25 km vs. the unchanged default.
+- **Bit-identity story, disclosed precisely.** The standard `hash_gen1.js` battery (default/geoid/
+  waves/ao/icons scenarios) shows a mismatch vs v1.59 — this is Stage A alone: an isolated A/B with
+  craters/volcanoes disabled (removing Stage A's universal, non-scale-gated effect) proves Stage
+  B/C's `terrainDetailK` mechanism is bit-identical to v1.59 at the reference scale, exactly as
+  designed. Stage A is deliberately not scale-gated (a crater covering the whole map is wrong at any
+  resolution) and can fire at any `mapWidthKm`/`resW` combination depending on the random crater/
+  volcano roll — including, occasionally, the literal default scenario the hash battery tests. A
+  deliberate, measured re-baseline, the same class as v1.36/v1.39/v1.46's placement fixes.
+- **Two smoke-suite assertions needed new fixtures, not new logic** — both root-caused to Stage A's
+  crater/volcano clamp legitimately reshaping specific hardcoded seeds' terrain/geology, verified by
+  independent probe before touching the test:
+  1. The v0.94 routing-fix regression test (`routingSeaShortcut`) hardcoded two pixel coordinate
+     pairs at seed 424242/`GW`=1024 whose sea-shortcut route collapsed (waterFrac 0.35/0.50 → 0)
+     once the clamp reshaped that seed's coastline near those exact pixels. Re-found via the same
+     independent-probe methodology (scan coastal land-cell pairs, filter for a genuine water
+     shortcut) against the current terrain; the routing FIX itself (`_civDijkstraPath`/mixed-mode
+     cost) is untouched and civ-layer-blind to this version's engine changes.
+  2. The v1.31 §10.3 "at least one settlement is genuinely fuel-limited" assertion measured whatever
+     world happened to be ambient ~40 assertions deep into the smoke run (seed 55555, `GW`=512,
+     `mapWidthKm`≈400 — a v1.11 submap-resample leftover) — a small, seed-specific statistical
+     property Stage A's clamp legitimately moved to zero fuel-limited settlements at that exact
+     seed. Isolated onto a dedicated fresh world (seed 12345, `GW`=256, `mapWidthKm`=800 — the same
+     seed this feature's own CHANGELOG entry was originally verified against) inside a save/restore
+     block matching v1.46/v1.58's own test-isolation precedent; confirmed "2+ of N iron settlements
+     fuel-limited" reproduces on both v1.59 and v1.60 there, so the underlying mechanic is intact —
+     only the fragile shared-ambient-state measurement was wrong.
+- **Known scope cuts** (full detail in the research doc §5): warp frequency and
+  `state.tect.blurR` stay grid-relative — only the height/heterogeneity noise that actually shapes
+  ridges/valleys/drainage divides was made real-km-aware; erosion kernels, coastal/glacial passes,
+  `carveRiverValleys`, and fjord masking were all audited and confirmed already resolution-relative
+  with no real-km dependence, so none needed changes; `TERRAIN_DETAIL_MAX_K=16` and
+  `FEATURE_RADIUS_MAX_FRAC=0.12` are reasoned starting values confirmed against the §4 measurements,
+  not independently historically calibrated.
+- **Tests**: 15 new headless assertions (`tests/test_tail.js`) covering `terrainDetailK` (at/above/
+  below reference, cap), `heightParams().nf`/`heteroParams().hf` (legacy value at reference, rise
+  below it), `clampFeatureRadiusCells` (no-op under ceiling, ceiling enforcement using the shorter
+  axis), `riverFlowThresh` (matches the legacy formula at reference, drops below it for smaller
+  regions), and a `buildLandformField` signature spot-check — **1016/1016** green. `tests/run_um.sh`
+  (block 4, untouched) **852/852** green. `tests/perf/smoke_gen1.js` **516/516** green (514 + the 2
+  fixtures above). `hash_gen1.js` shows the disclosed Stage-A-only mismatch at defaults; isolated
+  A/B (craters/volcanoes off) confirms Stage B/C ALL IDENTICAL at the reference scale.
+
 ### v1.59 — Civilization menu reorder: faction creation leads into world generation
 
 Owner: "I'd like you to completely redesign and rethink the civilisation menu's under generate and

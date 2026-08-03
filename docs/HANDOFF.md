@@ -9,11 +9,58 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.59.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.60.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.60 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.58` are kept and never edited.
+  (v1.61 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.59` are kept and never edited.
+- **v1.60 — real-km-aware relief and rivers: small regions get genuinely finer drainage
+  detail.** Owner: "when choosing a smaller region rivers dont become more visible (i think its
+  a scaling issue). I cant seem to find any rivers with the branching pattern or length you might
+  expect... check any and all information on river formation and how simulations/terrain
+  programs realistically generate them and apply them with proper scaling." Scope decided via
+  `AskUserQuestion`: fix everything, including the underlying terrain relief, not just the river
+  threshold. `docs/research/scale-invariant-terrain.md` (new). 1016 / 852 green; hash battery
+  shows the disclosed Stage-A-only mismatch at defaults (see below); 516 smoke green; see
+  CHANGELOG for the full writeup.
+  - **Root cause, measured before any code changed**: (1) the relief pipeline
+    (warp/heterogeneity/height-formula noise) samples at a frequency fixed to a fraction of grid
+    width, never real km — a 50 km region and a 40,000 km world at the same resolution produced
+    statistically identical relief; (2) crater/volcano radii convert real km to cells with only
+    floor clamps, reaching **2.8× the grid width** at a 50 km region; (3) the river
+    channel-initiation threshold (`GW*GH*0.0004`) is likewise a pure grid-cell fraction,
+    independently reimplemented at ~18 call sites, ungrounded in any real km² (Montgomery &
+    Dietrich's ~0.1-1 km² channel-initiation area).
+  - **`terrainDetailK(gw,mapWidthKm)`** (new) — one-sided `Math.min(16,Math.max(1,
+    REF_CELLKM/cellKm))` anchored at the app's own literal default (`mapWidthKm:800`,
+    `resW:2048`), the same anchor-at-the-default discipline `_V3D_RATIO0` (v0.67) already uses.
+    `k===1` exactly at/above the reference scale (world mode, or any region ≥800 km at ≤2048
+    resolution — the common case), so it's provably bit-identical to v1.59 there. Threaded into
+    `heightParams().nf` and `heteroParams().hf` only — warp frequency and `state.tect.blurR` stay
+    grid-relative (disclosed scope cuts).
+  - **`clampFeatureRadiusCells`** caps a single crater/volcano at 12% of the shorter grid axis —
+    universal, not scale-gated (a crater covering the whole map is wrong at any resolution).
+  - **`riverFlowThresh(gw,gh)`** consolidates ~18 inline recomputations into one function AND
+    divides by the same `terrainDetailK` — added only after measurement showed Stage B alone made
+    a 50 km region's drainage network measurably SPARSER (channel cells 4233→3345, finer relief
+    fragments the long downhill runs flow accumulation needs). Dividing by `terrainDetailK`
+    recovered it: channel cells →**6001** (+42%), polylines 718→**1497** (+109%) at 50 km; channel
+    fraction **12×**/**28×** higher at 100 km/25 km on a 1024-res world vs. the unchanged default.
+  - **Bit-identity, disclosed precisely**: the standard `hash_gen1.js` battery mismatches at every
+    scenario vs v1.59 — this is the crater/volcano clamp ALONE (not scale-gated, fires at any
+    resolution depending on the random roll, including the literal default). An isolated A/B with
+    craters/volcanoes disabled proves `terrainDetailK` is bit-identical to v1.59 at reference
+    scale. A deliberate, measured re-baseline — same class as v1.36/v1.39/v1.46's placement fixes.
+  - **Two smoke assertions needed new fixtures**, both root-caused to the crater/volcano clamp
+    reshaping a specific hardcoded seed's terrain/geology (verified by independent probe before
+    touching the test, not assumed): the v0.94 routing-fix regression's two coordinate pairs, and
+    the v1.31 §10.3 fuel-limited-settlement check (isolated onto its own dedicated fresh world in
+    a save/restore block, matching v1.46/v1.58's test-isolation precedent, instead of depending on
+    whatever world ~40 assertions of shared ambient smoke-suite state happened to leave behind).
+  - **Known scope cuts**: warp frequency and `state.tect.blurR` stay grid-relative; erosion
+    kernels, coastal/glacial passes, `carveRiverValleys`, and fjord masking were all audited and
+    confirmed already resolution-relative, so none needed changes; `TERRAIN_DETAIL_MAX_K=16` and
+    `FEATURE_RADIUS_MAX_FRAC=0.12` are reasoned, not independently historically calibrated.
 - **v1.59 — Civilization menu reorder: faction creation leads into world generation.** Owner:
   "completely redesign and rethink the civilisation menu's under generate and make it a bottom up
   system that populates on the map as it does at the moment... Refactor and Consolidate the

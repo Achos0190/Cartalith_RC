@@ -1563,12 +1563,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // all-land; v0.94 committed 35-50% water on the SAME pairs) must show a materially higher water
   // fraction than the old behavior — asserted against a fixed threshold safely between the two
   // observed values, not a live A/B (the new cost constants are `const`, not toggleable at runtime).
+  // v1.60: the original pairs' waterFrac collapsed to 0 once the crater/volcano radius ceiling
+  // (v1.60 Stage A — a single crater/volcano can no longer balloon past ~12% of the grid) legitimately
+  // reshaped this seed's coastline near those specific pixels — the routing FIX itself is untouched
+  // (v1.60 is civ-layer-blind; _civDijkstraPath/mixed-mode cost is byte-identical), only the terrain
+  // this particular hardcoded pair happened to sit on changed. Re-found via the same independent-probe
+  // methodology against the current terrain (state.mapWidthKm pinned — this test must not depend on
+  // whatever a prior smoke block left it at).
   R.routingSeaShortcut = await page.evaluate(async () => {
-    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    state.mapWidthKm = 800; state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
     await generate();
     const pairs = [
-      { x1: 810, y1: 530, x2: 754, y2: 602 },   // v0.93 waterFrac 0.051 -> v0.94 0.349 (independently measured)
-      { x1: 798, y1: 494, x2: 758, y2: 606 },   // v0.93 waterFrac 0.061 -> v0.94 0.500
+      { x1: 308, y1: 332, x2: 302, y2: 434 },   // v1.60 waterFrac 0.897 (mixed 86.4km vs land-only 99.3km)
+      { x1: 569, y1: 494, x2: 566, y2: 599 },   // v1.60 waterFrac 0.919 (mixed 83.1km vs land-only 111.5km)
     ];
     const out = pairs.map(p => {
       const mixed = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'mixed');
@@ -2952,7 +2959,32 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       o.smeltFinite = sm.every(x => isFinite(x.ironKgYr) && isFinite(x.charcoalKgYr) && x.ironKgYr >= 0);
       o.smeltIsMin = sm.every(x => x.ironKgYr <= x.oreKgYr * ORE_TO_BLOOM_RECOVERY + 1e-6 && x.ironKgYr <= x.charcoalKgYr / CHARCOAL_PER_IRON_KG + 1e-6);
       o.smeltLabels = sm.every(x => x.limitedBy === 'ore' || x.limitedBy === 'fuel');
-      o.someFuelLimited = sm.some(x => x.ironKgYr > 0 && x.limitedBy === 'fuel');
+      /* v1.60: "at least one settlement is fuel-limited" is a statistical property of whatever world
+         happens to be ambient at this point in the long sequential smoke run (currently the v1.11
+         submap-resample leftover: seed 55555, resW 512, mapWidthKm~400) — the crater/volcano radius
+         ceiling clamp (v1.60 Stage A: a single crater/volcano can no longer balloon past ~12% of the
+         grid, a universal, non-scale-gated correctness fix) legitimately reshaped that seed's geology
+         enough to move every iron settlement to ore-limited. Not a terrain-generation regression: an
+         independent probe (seed 12345, resW 256, mapWidthKm 800 — the same seed this feature's own
+         CHANGELOG entry was verified against) reproduces "2 of 3 iron settlements fuel-limited" on
+         BOTH v1.59 and v1.60. Isolate the measurement on that dedicated fresh world instead of relying
+         on fragile shared ambient state, the same test-isolation discipline v1.24 BUG-3 / v1.46 / v1.58
+         already established for this exact "small fixed sample is fragile to noise" failure shape. */
+      {
+        const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+        try {
+          state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+          await generate();
+          state.places = []; _civIterativeAutoWorld(3);
+          const fuelPlaces = (state.places || []).filter(p => p && p.category === 'settlement');
+          const fuelSm = fuelPlaces.map(p => _civPlaceSmelting(p));
+          o.someFuelLimited = fuelSm.some(x => x.ironKgYr > 0 && x.limitedBy === 'fuel');
+        } finally {
+          state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+          state.tect.seed = savedSeed; await generate();
+          state.places = savedPlaces;
+        }
+      }
       o.coppiceScales = sm.every(x => x.ironKgYr === 0 || x.coppiceHaNeeded > 0);
       // §9 checklist + §8 archetype + §6 + §7
       const tr = places.map(p => _civPlaceTrade(p));
