@@ -12,6 +12,59 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.63 — Journey Planner: an impossible load is finally flagged, not silently crawled at 45%; Small Caravan gets its own +20% back
+
+Owner supplied a research prompt (`74285d8c-fixloadandcoordinationfactorsprompt.md`) diagnosing two
+Journey Planner findings from a fresh audit of the load-penalty/coordination chain, plus three
+lower-priority items to confirm and two to flag as unverified. Civ-layer only (`jpLoadPenalty`,
+`jpCalcLand`, `JP_GROUP_CLASSES`) — hash vs v1.62 **ALL IDENTICAL**.
+
+- **Finding 1 — `jpLoadPenalty`'s curve floored at a flat 0.45 for ANY ratio past 1.50, with no upper
+  bound.** A stage checked against a badly-mismatched carrying capacity (e.g. pure human-porter
+  capacity on a leg whose cargo was sized for a completely different stage of the same journey — a
+  ship's hold, a wagon leg) at 22×-166× rated capacity got the identical "45% speed, keep going"
+  verdict as one at 1.51×. No historical party departs at 22× capacity; it cannot depart at all, not
+  "depart slowly." Per the doc's own instruction, the fix is NOT a new load curve (there is no sourced
+  data for "how slow is 22× capacity") — it's recognizing the existing curve already has a top
+  boundary. **`JP_LOAD_INVALID_RATIO=1.50`** reuses that boundary (where "Near immobile" already
+  begins) as an invalidation cutoff: `jpCalcLand` now checks it against the UN-iterated `ratio0`
+  (before the convergence loop, which only redistributes food/water — cargo, the term actually driving
+  an extreme overload, never shrinks) and returns `blocked` above it, exactly the way
+  `jpAssessResupply` already flags "over capacity" rather than silently computing a slow-but-valid
+  number. Every graduated band at or below 1.50 (Well loaded → Near immobile) is untouched — a
+  moderately overloaded stage still returns a real, merely-penalized speed.
+- **Finding 2 — Small Caravan (≤10) carried a neutral `coordMod:1.00`.** v1.43 read
+  `docs/research/travel-speeds.md` §5's "+15-25% advantage for a small unescorted party" as license to
+  make that band the zero-point everything else is penalized against, rather than giving it the bonus
+  §5 actually describes. The owner's follow-up asked for the literal reading: **`coordMod:1.00→1.20`**
+  (mid-band of 1.15-1.25). Individual (solo travel, no coordination overhead to speed up from) and the
+  three tiers above Small Caravan are explicitly unchanged — the doc was explicit this isn't asked to
+  extend further.
+- **Three items confirmed, not changed**: `JP_GRAZING`'s speedMod scale (None 1.00 > Partial 0.93 >
+  Full 0.85) is correctly ordered — it prices grazing time DURING travel, not a reward for skipping
+  fodder, so it decreases as more grazing happens on the move; `_jpDeriveStages`' sea-leg weather/biome
+  linkage is intentional, not a bug; the sea-leg chain (`jpCalcWater`) was confirmed to need no changes
+  and was left untouched per the doc's own instruction.
+- **Two items flagged unverified in code comments, not changed**: `JP_TERRAIN.land["Snow / Ice"]`
+  (0.55) and the Galleon's cruise speed in `JP_SHIPS` (13 km/h) — the doc could not source either
+  against a reference and asked only for a disclosure comment, not a recalibration.
+- **Fixing this surfaced a cascade of pre-existing smoke-test scenarios that were themselves
+  accidentally overloaded** — synthetic Walking/zero-animal test plans inheriting a `cargoKg` sized
+  for a different (animal-carried) baseline plan, now correctly caught by the new invalidation check
+  where they previously just returned an unflagged, heavily-penalized number. Fixed by giving each
+  scenario a baseline it can actually carry (matching the v1.49 fix's own precedent), not by loosening
+  the new check.
+- **Tests**: 7 new smoke assertions (`R.v163`) — Small Caravan's bonus lands in [1.15,1.25]; the other
+  four tiers are byte-unchanged; the bonus is measurably present in the composed daily speed (A/B vs a
+  neutral tier); `JP_LOAD_INVALID_RATIO` is exactly the curve's own existing 1.50 boundary; an extreme
+  overload (22×-166×) is now blocked instead of silently computing 45%; a moderate overload (≤1.50×)
+  still returns a valid, merely-penalized speed; `JP_GRAZING`'s scale is confirmed correctly ordered.
+  1016 / 852 green; hash battery ALL IDENTICAL; 531 smoke green (up from 524 — 7 new plus fixes to
+  pre-existing v1.43/v1.49/v1.51/v1.52/v1.56 scenarios the new check correctly started catching).
+- **Known scope cuts**: no new load curve above 1.50× (the doc's own explicit instruction — the honest
+  answer is "infeasible," not an invented number); Snow/Ice and Galleon speed stay unverified,
+  disclosed in code comments rather than guessed at; the sea-leg chain is untouched by design.
+
 ### v1.62 — settlements no longer land on top of each other, even across opposing factions
 
 Owner report: "settlements being created on top of each other even from oposing factions now."

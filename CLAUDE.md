@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.62**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.63**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.62.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.61.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.63.html` | **Current** unified tool (~28.7k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.62.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,45 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Journey Planner: a load-penalty ceiling, and Small Caravan's own bonus restored (v1.63)
+
+Owner supplied a research prompt diagnosing two findings from a fresh audit of the load-penalty/
+coordination chain, plus three lower-priority confirmations and two unverified-value flags. Civ-layer
+only (`jpLoadPenalty`, `jpCalcLand`, `JP_GROUP_CLASSES`). Hash vs v1.62 ALL IDENTICAL.
+
+- **`jpLoadPenalty`'s curve floored at a flat 0.45 for ANY ratio past 1.50, with no upper bound** — a
+  stage at 22×-166× rated capacity (a genuine mismatch, e.g. a leg checked against pure human-porter
+  capacity while carrying cargo sized for a different leg of the same journey) read identically to one
+  at 1.51×: "keep going at 45%." No historical party departs at 22× capacity. Per the doc's own
+  instruction, the fix is not a new load curve (no sourced data exists for "how slow is 22×") — it's
+  recognizing the existing curve already has a top boundary. **`JP_LOAD_INVALID_RATIO=1.50`** reuses
+  that boundary as an invalidation cutoff, checked on the UN-iterated `ratio0` (before the convergence
+  loop, which only redistributes food/water — cargo, the term actually driving an extreme overload,
+  never shrinks), the same way `jpAssessResupply` already flags "over capacity" instead of silently
+  computing a slow-but-valid number. Every graduated band at or below 1.50 is untouched.
+- **Small Caravan (≤10) carried a neutral `coordMod:1.00`.** v1.43 read travel-speeds.md §5's
+  "+15-25% advantage for a small unescorted party" as license to make that band the zero-point other
+  tiers are penalized against, rather than giving it the bonus §5 describes. Set to **1.20** (mid-band
+  of 1.15-1.25) per the owner's literal reading. Individual and the three tiers above Small Caravan are
+  explicitly unchanged — not asked to extend further.
+- **Confirmed, not changed**: `JP_GRAZING`'s speedMod scale is correctly ordered (prices grazing time
+  during travel, not a fodder-skipping reward); `_jpDeriveStages`' sea-leg weather/biome linkage is
+  intentional; `jpCalcWater` needs no changes, confirmed and left untouched per the doc's instruction.
+- **Flagged unverified, not changed**: `JP_TERRAIN.land["Snow / Ice"]` (0.55) and the Galleon's cruise
+  speed in `JP_SHIPS` (13 km/h) — the doc could not source either; a code comment discloses this
+  rather than guessing at a recalibration.
+- **Fixing this surfaced a cascade of pre-existing smoke-test scenarios that were themselves
+  accidentally overloaded** — synthetic Walking/zero-animal plans inheriting a `cargoKg` sized for a
+  different (animal-carried) baseline, now correctly caught where they previously returned an
+  unflagged, heavily-penalized number. Fixed by giving each scenario a baseline it can actually carry
+  (the v1.49 fix's own precedent), not by loosening the new check. One instance (a 45/60-day
+  `supplyDays` sweep under Partial grazing) needed camels rather than more mules — under Partial
+  grazing a mule's own fodder for that long (5 kg/day × days × 0.5) exceeds its 110 kg capacity, so
+  adding mules made a long trip WORSE, the same divergent-fixed-point shape v1.48 already documented
+  for the pack-animal solver; camels break even at that duration (6 kg/day fodder vs. 300 kg capacity).
+- **Known scope cuts**: no new load curve above 1.50× (the doc's own explicit instruction); Snow/Ice
+  and Galleon speed stay unverified, disclosed rather than guessed; the sea-leg chain is untouched.
 
 ### Settlement overlap: the coastal-preference swap never checked its target (v1.62)
 

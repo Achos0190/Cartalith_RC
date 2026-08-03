@@ -3493,9 +3493,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const rank = t => JP_INFRA_TIERS.findIndex(x => x[1] === t);
     o.shortStageNotAmplified = tier(40, 1) === tier(150, 1);
     o.lengthStillDilutesAboveFloor = rank(tier(600, 1)) > rank(tier(150, 1));
-    // §5: a party of ≤10 is the reference; larger caravans carry the whole coordination spread
+    // §5: a party of ≤10 gets the whole +15-25% coordination advantage (v1.63: no longer just the
+    // neutral reference other tiers are penalized against — see v1.63's own CHANGELOG entry, which
+    // superseded this v1.43 comment's original "realised as the reference tier" design).
     o.small = jpGroupClass(6).coordMod; o.large = jpGroupClass(60).coordMod;
-    o.smallCaravanFavoured = o.small === 1 && o.large < 1 && (o.small / o.large) >= 1.15 && (o.small / o.large) <= 1.30;
+    o.smallCaravanFavoured = o.small >= 1.15 && o.small <= 1.25 && o.large < 1 && o.small > o.large;
     return o;
   });
 
@@ -3892,6 +3894,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       const p = _jpEnsurePlan(jn);
       p.transport = 'Baggage Train'; p.assetMode = 'auto'; p.cargoKg = 250; p.supplyDays = 7;
       p.grazing = 'Partial — graze at camp';
+      /* v1.63: assetMode:'auto' is a UI-flow label — it does not itself populate p.animals when
+         _jpPlan is called directly here (that only happens via the real auto-select UI path, not
+         exercised by this synthetic test), so a Baggage Train with zero animals and 250 kg cargo
+         against a 4-person party's 120 kg human-porter capacity was ALREADY ~267% overloaded before
+         this test's own deliberate overload step. v1.63's Finding-1.2 fix (an overload past 150% of
+         capacity is now flagged infeasible rather than silently crawling) turned that pre-existing,
+         accidentally-overloaded baseline into a blocked plan, which is not what "the normal case"
+         below is meant to represent. Two real pack mules make the baseline genuinely valid. */
+      p.animals.mule = 2;
 
       // ── verdict: shape, vocabulary, and that it NAMES its reasons (a verdict that can't say why
       //    is worse than none — the v1.35 `basis` lesson)
@@ -3903,12 +3914,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       o.verdictReasonsAreStrings = v.reasons.every(r => typeof r === 'string' && r.length > 0);
 
       // a deliberately overloaded party must escalate the verdict AND cite the overload by name
+      // (v1.63: 'blocked' is now also a valid, in fact the MOST escalated, outcome — Finding 1.2's
+      // fix correctly flags a genuinely impossible load as infeasible rather than merely "severe")
       p.assetMode = 'manual'; p.cargoKg = 40000;
       ['donkey','mule','camel','horse'].forEach(k => p.animals[k] = 0); p.carts = 0; p.wagons = 0;
       const vBad = _jpVerdict(_jpPlan(jn));
-      o.overloadEscalates = vBad.level === 'severe' || vBad.level === 'strained';
-      o.overloadNamed = vBad.reasons.some(r => /overload|capacit|resuppl/i.test(r));
-      p.cargoKg = 250; p.assetMode = 'auto';
+      o.overloadEscalates = vBad.level === 'severe' || vBad.level === 'strained' || vBad.level === 'blocked';
+      o.overloadNamed = vBad.reasons.some(r => /overload|capacit|resuppl/i.test(r)) ||
+        (vBad.level === 'blocked' && /overload|capacit/i.test(_jpPlan(jn).results?.[0]?.blocked || ''));
+      p.cargoKg = 250; p.assetMode = 'auto'; p.animals.mule = 2;
 
       // ── confidence: asymmetric (downside always larger), widens with duration, brackets the estimate
       const c = _jpConfidence(_jpPlan(jn));
@@ -4052,7 +4066,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
           // is correct behaviour but would make these assertions test the route rather than the fix.
           carts: 0, wagons: 0, travois: 0, sleds: 0
         });
-        p.animals = { donkey: 0, mule: 8, camel: 0, horse: 2 };
+        // v1.63: F2's own supplyDays sweep goes up to 45/60 days, and under Partial grazing every
+        // MULE's fodder for that long (5 kg/day x days x 0.5) exceeds its own 110 kg capacity — so
+        // more mules make a long trip WORSE, not better (the same divergent-fixed-point shape v1.48
+        // already documented for the pack-animal solver). Camels break even at 60 days (6 kg/day
+        // fodder vs 300 kg capacity), so 10 of them give this multi-week scenario real headroom
+        // without changing what F1-F5 are actually testing.
+        p.animals = { donkey: 0, mule: 8, camel: 10, horse: 2 };
         return p;
       };
 
@@ -4137,13 +4157,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       // the time the suite reaches here the world has been mutated by ~430 assertions and its route
       // may legitimately have freshwater throughout (dryKm 0), which would leave the mechanism
       // untested rather than failing it. Fixed inputs make this assert the arithmetic, not the map.
-      const noAnim = { donkey: 0, mule: 0, camel: 0, horse: 0 };
       const stD = Object.assign({}, stagesDry[0], { terrain: 'Deep Sand', biome: 'Hot Desert', dryKm: 300 });
       const stD2 = Object.assign({}, stD, { dryKm: 600 });
       // base() returns _jpEnsurePlan(jn) — the SAME object every call — so two "variants" built from
       // it are aliases and the second configuration silently wins for both. Clone before diverging.
+      // v1.63: JP_LOAD_INVALID_RATIO now blocks a stage whose UN-iterated ratio0 exceeds 1.50. base()'s
+      // inherited cargoKg:900 sized for its own 8-mule/2-horse party is far beyond what 12 Walking
+      // humans alone (360 kg porter capacity) can carry across a Hot Desert stage's water/food overhead
+      // — genuinely infeasible regardless of cargo, not merely heavy. A couple of camels (desert's own
+      // best-suited pack animal) plus a lighter cargo figure keeps this a real, non-blocked scenario
+      // without changing what the desert-water mechanism itself is testing.
       const variant = (over) => Object.assign(JSON.parse(JSON.stringify(base())),
-        { transport: 'Walking', animals: noAnim, carts: 0 }, over);
+        { transport: 'Walking', animals: { donkey: 0, mule: 0, camel: 2, horse: 0 }, carts: 0, cargoKg: 300 }, over);
       const pA = variant({ desertWater: 'auto' });
       const pM = variant({ desertWater: 'Sparse Wells' });
       const rA = jpCalcLand(stD, pA), rM = jpCalcLand(stD, pM);
@@ -4160,9 +4185,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
         && rA2.waterGapDays > rA.waterGapDays;   // auto follows the map, manual does not
 
       // ── F3: column length ──
+      // v1.63: cargoKg lowered from 900 (sized for base()'s own 8-mule/2-horse party) to 300 — at
+      // groupSize 30 with zero animals, 900kg trips JP_LOAD_INVALID_RATIO before column length is
+      // even reached; 300kg stays valid across the full [30,200,2000,100000] sweep this test needs.
       const sizes = [30, 200, 2000, 100000].map(n => {
         const p = base(); p.transport = 'Walking'; p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 };
-        p.carts = 0; p.groupSize = n; p.cargoKg = 900;
+        p.carts = 0; p.groupSize = n; p.cargoKg = 300;
         const st = Object.assign({}, _jpDeriveStages(jn, p)[0], { terrain: 'Dirt Track' });
         const r = jpCalcLand(st, p);
         return { n, kmday: r.dailyKm, colKm: r.colKm, colMod: r.colMod };
@@ -4173,9 +4201,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       o.caravanUnaffected = sizes.find(s => s.n === 30).colMod > 0.99;
 
       // ── F5: seasonal closure ──
+      // v1.63: cargoKg lowered from the inherited 900 to 300 — same reasoning as F3, since this test
+      // is asserting closure behaviour specifically and must not be confounded by an unrelated
+      // capacity block (closure is checked first in jpCalcLand so winterPassClosed is unaffected
+      // either way, but summerOpen/temperateOpen/plainsOpen need the stage to genuinely NOT block).
       const closureCase = (season, biome, terrain, override) => {
         const p = base(); p.season = season; p.transport = 'Walking';
-        p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 }; p.carts = 0;
+        p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 }; p.carts = 0; p.cargoKg = 300;
         if (override !== undefined) p.seasonalClosures = override;
         const st = Object.assign({}, _jpDeriveStages(jn, p)[0], { terrain, biome });
         return !!jpCalcLand(st, p).blocked;
@@ -4347,10 +4379,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       }
 
       // cost
-      const cp = mk({ cargoKg: 5000 });
+      // v1.63: JP_LOAD_INVALID_RATIO now blocks a stage whose load ratio exceeds 1.50 — this route's
+      // 8-mule/2-horse/12-person party caps out well under the old 5000/20000kg test cargo (measured
+      // capacity ~1480kg before overhead), so those figures are now genuinely infeasible rather than
+      // merely heavy. 1000/1500kg stay valid on every stage (max ratio ~1.36) while still scaling cost.
+      const cp = mk({ cargoKg: 1000 });
       const c = jpJourneyCost(cp);
       o.costSums = !!c && Math.abs(c.total - (c.carriage + c.wages + c.crew + c.upkeep + c.tolls + c.transship)) < 1e-9;
-      const c2 = jpJourneyCost(mk({ cargoKg: 20000 }));
+      const c2 = jpJourneyCost(mk({ cargoKg: 1500 }));
       o.costScales = !!c && !!c2 && c2.total > c.total && c2.carriage > c.carriage;
       o.costRatios = JP_COST_PER_TKM.land > JP_COST_PER_TKM.river && JP_COST_PER_TKM.river > JP_COST_PER_TKM.sea
         && (JP_COST_PER_TKM.land / JP_COST_PER_TKM.sea) > 20;
@@ -4697,11 +4733,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     o.explicitOverrideIgnoredOnNonDesert = !rOverrideNonDesert.blocked && !/Sparse Wells/.test(rOverrideNonDesert.formula);
 
     // (d) a genuine desert stage: explicit override still honored (unchanged regression check).
+    // v1.63: 4 Walking humans with zero animals (120 kg porter capacity) cannot carry Hot Desert's own
+    // water/food overhead alone (measured 220 kg needed) — genuinely infeasible regardless of the tiny
+    // 20kg cargo, so JP_LOAD_INVALID_RATIO now correctly blocks it. One camel (desert's own best pack
+    // animal, +300 kg capacity) keeps this a real, non-blocked scenario; the override/auto formula
+    // labels this test actually checks are unaffected by the animal's presence.
     const stDesert = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard',
       infra: 'Stable Settlements', biome: 'Hot Desert', dryKm });
-    const rDesertOverride = jpCalcLand(stDesert(50), overridePlan);
+    const desertPlan = Object.assign({}, basePlan, { animals: { donkey: 0, mule: 0, camel: 1, horse: 0 } });
+    const desertOverridePlan = Object.assign({}, desertPlan, { desertWater: 'Sparse Wells' });
+    const rDesertOverride = jpCalcLand(stDesert(50), desertOverridePlan);
     o.desertExplicitOverrideStillHonored = !rDesertOverride.blocked && /Sparse Wells/.test(rDesertOverride.formula);
-    const rDesertAuto = jpCalcLand(stDesert(50), basePlan);
+    const rDesertAuto = jpCalcLand(stDesert(50), desertPlan);
     o.desertAutoStillResolvesAndLabels = !rDesertAuto.blocked && /water crossing/.test(rDesertAuto.formula) && /auto — from map/.test(rDesertAuto.formula);
 
     return o;
@@ -5027,6 +5070,75 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       state.tect.seed = savedSeed; await generate();
       state.places = savedPlaces;
     }
+    return o;
+  });
+
+  // ---- v1.63 (owner-attached research prompt on the Journey Planner load-penalty mechanism and the
+  // small-caravan coordination bonus). Two confirmed fixes:
+  // Finding 2 (confident, sourced): Small Caravan (2-10) coordination was a neutral 1.00 — the
+  // research wants it to actually CARRY the +15-25% travel-day advantage, not just be the zero-point
+  // larger tiers are penalized against. Set to 1.20; other tiers untouched.
+  // Finding 1.2: jpLoadPenalty floored at a flat 0.45 for ANY ratio past 1.50 — a party at 22x rated
+  // capacity (root-caused to a portage stage checked against pure human-porter capacity while
+  // carrying cargo sized for a different leg of the same journey) got the same verdict as one at
+  // 1.51x and kept silently proceeding. Above JP_LOAD_INVALID_RATIO (1.50 — the curve's own existing
+  // top boundary, so every graduated band below it is untouched) the stage is now flagged infeasible
+  // instead of returning a slow-but-valid speed. ----
+  R.v163 = await page.evaluate(async () => {
+    const o = {};
+    const S = x => Object.assign({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest' }, x);
+    const P = x => Object.assign({ groupSize: 1, transport: 'Walking', pace: 'Standard Pace', hours: 8,
+      cargoKg: 10, supplyDays: 4, season: 'Spring', grazing: 'None — carry all fodder', foraging: 'None',
+      carryFood: true, desertWater: 'Established Caravan Route',
+      animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 },
+      x, { animals: Object.assign({ donkey: 0, mule: 0, camel: 0, horse: 0 }, (x && x.animals) || {}) });
+
+    // Finding 2: the tier table itself
+    o.smallCaravanBonus = jpGroupClass(6).coordMod;
+    o.smallCaravanInBand = o.smallCaravanBonus >= 1.15 && o.smallCaravanBonus <= 1.25;
+    o.individualUnchanged = jpGroupClass(1).coordMod === 1.00;
+    o.caravanUnchanged = jpGroupClass(11).coordMod === 0.88;
+    o.largeCaravanUnchanged = jpGroupClass(31).coordMod === 0.82;
+    o.columnUnchanged = jpGroupClass(101).coordMod === 0.76;
+
+    // Finding 2: the bonus actually reaches the composed speed (A/B against a monkeypatched neutral
+    // tier table, everything else — group size, terrain, supplies — held identical)
+    {
+      const st = S({}), pl = P({ groupSize: 6 });
+      const rBonus = jpCalcLand(Object.assign({}, st), Object.assign({}, pl));
+      const savedClasses = JP_GROUP_CLASSES.map(c => Object.assign({}, c));
+      JP_GROUP_CLASSES.find(c => c.label === 'Small Caravan').coordMod = 1.00;
+      const rNeutral = jpCalcLand(Object.assign({}, st), Object.assign({}, pl));
+      for (let i = 0; i < JP_GROUP_CLASSES.length; i++) Object.assign(JP_GROUP_CLASSES[i], savedClasses[i]);
+      o.bonusReachesSpeed = !rBonus.blocked && !rNeutral.blocked &&
+        Math.abs(rBonus.dailyKm / rNeutral.dailyKm - o.smallCaravanBonus) < 0.005;
+    }
+
+    // Finding 1.2: JP_LOAD_INVALID_RATIO reuses the curve's own existing top boundary
+    o.invalidRatioIsCurveBoundary = JP_LOAD_INVALID_RATIO === 1.50;
+
+    // Finding 1.2: an extreme overload (the reported ~22x shape — cargo sized for a different leg,
+    // no pack animals on this stage) is now flagged infeasible instead of silently crawling at 45%
+    {
+      const st = S({}), pl = P({ groupSize: 1, cargoKg: 5000, transport: 'Walking' });   // ~166x JP_HUMAN_PORTER(30)
+      const r = jpCalcLand(st, pl);
+      o.extremeOverloadBlocked = !!r.blocked;
+      o.extremeOverloadNamesOverload = !!r.blocked && /[Oo]verload/.test(r.blocked);
+    }
+
+    // The existing graduated bands (<=1.50) are untouched — a moderate overload still returns a
+    // valid, merely-penalized speed, not a block
+    {
+      const st = S({}), pl = P({ groupSize: 6, cargoKg: 220, supplyDays: 2 });   // sized to land inside 1.0-1.5x
+      const r = jpCalcLand(st, pl);
+      o.moderateOverloadStaysValid = !r.blocked && r.loadRatio > 1.0 && r.loadRatio <= 1.50 && r.dailyKm > 0;
+    }
+
+    // lower-priority confirmations (doc checklist): grazing scale direction, sea-stage weather/biome
+    o.grazingOrderedCorrectly = JP_GRAZING['None — carry all fodder'].speedMod > JP_GRAZING['Partial — graze at camp'].speedMod &&
+      JP_GRAZING['Partial — graze at camp'].speedMod > JP_GRAZING['Full — graze on route'].speedMod;
+
     return o;
   });
 
@@ -5630,6 +5742,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.62: no two settlements land within 3km of each other on any of the 4 seeds that reproduced the pre-fix bug', R.v162.noOverlapsAnySeed);
   A('v1.62: no cross-faction settlement overlaps either — the reported "even opposing factions" case', R.v162.noCrossFactionOverlapsAnySeed);
   A('v1.62: the overlap guard does not suppress placement outright — settlements are still placed normally', R.v162.settlementsStillPlaced);
+
+  A('v1.63: Small Caravan coordination is now a real +15-25% bonus (1.15-1.25), not neutral', R.v163.smallCaravanInBand);
+  A('v1.63: Individual/Caravan/Large Caravan/Column tiers are untouched', R.v163.individualUnchanged && R.v163.caravanUnchanged && R.v163.largeCaravanUnchanged && R.v163.columnUnchanged);
+  A('v1.63: the coordination bonus actually reaches the composed daily speed (A/B vs a neutral tier, all else equal)', R.v163.bonusReachesSpeed);
+  A('v1.63: JP_LOAD_INVALID_RATIO reuses the load curve\'s own existing top boundary (1.50) rather than inventing a new one', R.v163.invalidRatioIsCurveBoundary);
+  A('v1.63: an extreme overload (~22x-166x capacity) is now flagged infeasible instead of silently crawling at a flat 45%', R.v163.extremeOverloadBlocked && R.v163.extremeOverloadNamesOverload);
+  A('v1.63: the existing graduated load bands (<=1.50x) are untouched — a moderate overload still returns a valid, merely-penalized speed', R.v163.moderateOverloadStaysValid);
+  A('v1.63: grazing speedMod scale is confirmed correctly ordered (None > Partial > Full), not inverted', R.v163.grazingOrderedCorrectly);
 
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');

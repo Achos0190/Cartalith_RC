@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.62.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.63.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.63 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.61` are kept and never edited.
+  (v1.64 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.62` are kept and never edited.
+- **v1.63 — Journey Planner: an impossible load is finally flagged, not silently crawled at
+  45%; Small Caravan gets its own +20% back.** Owner supplied a research prompt diagnosing two
+  findings from a fresh audit of the load-penalty/coordination chain, plus three lower-priority
+  confirmations and two unverified-value flags. Civ-layer only. 1016 / 852 green; hash battery
+  ALL IDENTICAL; 531 smoke green; see CHANGELOG for the full writeup.
+  - **Finding 1**: `jpLoadPenalty`'s curve floored at a flat 0.45 for ANY ratio past 1.50 — a
+    22×-166× overloaded stage read identically to a 1.51× one. `JP_LOAD_INVALID_RATIO=1.50`
+    reuses the curve's own existing top boundary as an invalidation cutoff (checked on the
+    UN-iterated `ratio0`, before the convergence loop) — above it the stage is `blocked`, not
+    silently computed. Every graduated band at or below 1.50 is untouched.
+  - **Finding 2**: Small Caravan (≤10) carried a neutral `coordMod:1.00` instead of the
+    +15-25% bonus travel-speeds.md §5 actually describes. Set to 1.20. Individual and the three
+    tiers above Small Caravan are unchanged.
+  - Confirmed unchanged: `JP_GRAZING` scale ordering, sea-leg weather/biome linkage,
+    `jpCalcWater` needs no changes. Flagged unverified in code comments: Snow/Ice terrain
+    modifier (0.55), Galleon cruise speed (13 km/h).
+  - Fixing this surfaced several pre-existing smoke-test scenarios that were themselves
+    accidentally overloaded (synthetic test plans with a `cargoKg` sized for a different
+    baseline) — fixed by giving each a baseline it can actually carry, not by loosening the
+    new check.
 - **v1.62 — settlements no longer land on top of each other, even across opposing factions.**
   Owner: "settlements being created on top of each other even from oposing factions now."
   Root-caused by ablation (disable one candidate mechanism at a time, re-measure) before any fix.
@@ -2082,6 +2102,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **← next session: two items from the same owner message that shipped v1.63, not yet started.**
+  (1) "on parts of routes and ways, when applicable always follow them as they are optimized" —
+  ambiguous as written; needs clarification before building anything. Candidate readings: the
+  Route/Way drawing tool's existing infrastructure-discount cost grid (v1.53), the auto-generated
+  road network builder (`_civHierarchicalNetwork`/`_civMstRoutes`), or the Journey Planner's stage
+  derivation (`_jpDeriveStages`) preferring an existing `civWay` over a fresh line more strongly.
+  Ask the owner which behavior they're seeing before picking one. (2) "when a stage gives a bug
+  give a button to automate a fix" — extend the existing advisory-button pattern (v1.53's "Use
+  here" per-stage transport swap, v1.47's "Re-route for mode") to more `_stageTrouble`-classified
+  bug types (overload, seasonal closure, wheel-block) — needs a design pass on which bug types get
+  a one-click fix and what each fix actually does before implementing.
 - **Civilization menu reorder (v1.59) — shipped.** See CHANGELOG/above for the full writeup;
   `#civSubBar` now reads Factions → Generation → Settlements → Economy → Statistics, and
   `#civSubGeneration` is an explicit Step 1→2→3 sequence. Pure reorganization — no scope cuts, no
