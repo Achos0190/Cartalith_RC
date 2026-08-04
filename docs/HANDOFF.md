@@ -9,11 +9,27 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.81.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.82.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.82 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.80` are kept and never edited.
+  (v1.83 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.81` are kept and never edited.
+- **v1.82 — ocean current direction becomes heat-driven, not just wind-derived; windFx slowed
+  65%.** Owner: "check how heat in an ocean originates and how flow direction is dictated by it.
+  At the moment it just seems to base itself from right to left." Measured first: the meridional
+  current was set solely by Ekman-rotating the latitude-band wind, zero basin-position dependence
+  — ~94% of the equatorial trade band showed net-poleward flow, cold anomaly nearly absent,
+  contradicting the file's own docstring. Fixed with a western/eastern-boundary bend in
+  `computeOceanCurrent` (poleward pile-up on a basin's western edge — Gulf Stream-style; weaker
+  equatorward on the eastern edge — Peru/Benguela-style upwelling), reusing the existing coastal-
+  distance weights, zonal component untouched by construction. A single-pixel min/max test was
+  tried and rejected (the bend can locally cancel one outlier cell); robust aggregates show the
+  real improvement — mean-absolute SST anomaly 0.204→0.511, cold-cell fraction 4.5%→19.2%. windFx
+  particle speed `0.9→0.315` (35%, "slow down by 65%" taken literally), verified against the real
+  shipped function via rAF interception. Not bit-identical at defaults (`currents:true` feeds
+  `field` via `carveRiverValleys`) but isolated: with `currents=false`, hash is ALL IDENTICAL. One
+  test-isolation bug found and fixed during verification (a leaked debug-view/particle-loop state
+  breaking a later pre-existing v1.78 assertion). See CHANGELOG for the full writeup.
 - **v1.81 — wildlife-informed foraging gives a real water-range lever, not just food.** Owner:
   "any journey is only factually limited by the longest distance one is able to travers with the
   resources they can carry... we already have fauna information and therefore a good idea about
@@ -2495,11 +2511,34 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   re-derive it fresh since scratchpad files aren't committed.
 - **OPEN, found not fixed: two environmental smoke-suite failures, unrelated to any recent
   change.** `v0.92 follow-up fix: overview canvas is capped at 512px wide...` and `v0.87: LOD/atlas
-  mode fills the viewport...` both fail on this headless-Chromium harness as of v1.80/v1.81,
-  confirmed identical on both (so not a v1.81 regression) — likely viewport/canvas-sizing flakiness
-  in this environment rather than an app bug, but not root-caused. Worth a dedicated look if it
-  starts flagging more assertions or if a real canvas-sizing bug is ever reported matching either
-  description.
+  mode fills the viewport...` both fail on this headless-Chromium harness as of v1.80/v1.81/v1.82,
+  confirmed identical across all three (so not a regression) — likely viewport/canvas-sizing
+  flakiness in this environment rather than an app bug, but not root-caused. Worth a dedicated look
+  if it starts flagging more assertions or if a real canvas-sizing bug is ever reported matching
+  either description.
+- **OPEN, in progress: Journey Planner reports "impossible" too often for a Mounted Rider party.**
+  Owner pasted a real route with several `⛔ Carrying enough water...` blocks (up to 3659% over
+  capacity) and one `⛔ Overloaded 167%...` block, asking "Can you see what needs fixing?".
+  Diagnosed: the party's capacity was exactly `people*JP_HUMAN_PORTER` (30kg/person) — a "Mounted
+  Rider" transport gets ZERO extra capacity credit from actually being mounted, identical to
+  Walking, unless the SAME mounts are ALSO manually re-declared as pack animals in
+  `plan.animals` (the "Lone courier" preset's own undocumented convention:
+  `transport:"Mounted Rider", animals:{horse:1}`). A real horse can carry saddlebag cargo beyond
+  the flat porter rate; this is a genuine capacity-model gap, not the extreme-desert-crossing case
+  v1.81 already scoped (which correctly stays blocked — no reasonable mount credit rescues a
+  3659% overage). Fix in progress: credit `max(0, people - plan.animals[mount])` riders' worth of
+  saddlebag capacity automatically (`JP_ANIMALS[mount].cap * JP_MOUNT_SADDLEBAG_FRAC`), avoiding
+  double-count with any manually-declared matching pack animals (so "Lone courier" is unaffected —
+  its declared horse already gets full pack credit). Pick this up from task tracking if the session
+  ended before it shipped as v1.83.
+- **v1.82 shipped**: ocean current direction becomes heat-driven (a western/eastern-boundary bend
+  in `computeOceanCurrent`, reusing the existing coastal-distance weights — poleward pile-up on a
+  basin's western edge, weaker equatorward upwelling on its eastern edge) instead of a flat,
+  latitude-band-uniform Ekman drift; windFx particle speed slowed to 35% of its prior rate. Not
+  bit-identical at defaults (`currents:true` feeds `field` via `carveRiverValleys`) but isolated
+  and proven scoped: with `currents=false`, hash vs v1.81 is ALL IDENTICAL. See CHANGELOG for the
+  full writeup, including the single-pixel-min/max test design mistake caught and replaced with
+  robust aggregates, and the test-isolation bug found and fixed during verification.
 - **v1.81 shipped**: wildlife-informed foraging — a new `JP_BIOMES.waterForage` column plus real
   `currentWildlife()` regional richness feeding the existing Foraging dropdown, giving a
   well-provisioned, biome-appropriate party a genuine way to extend both food AND water range

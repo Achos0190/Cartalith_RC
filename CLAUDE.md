@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.81**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.82**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.81.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.80.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.82.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.81.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,39 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Ocean current direction becomes heat-driven, not just wind-derived (v1.82)
+
+Owner: "check how heat in an ocean originates and how flow direction is dictated by it. At the
+moment it just seems to base itself from right to left. (And slow down the arrows... by about
+65%)." Engine only (`computeOceanCurrent`, `_windFxStep`). Not bit-identical at defaults
+(`currents:true` by default feeds `field`/`temp`/`rain`/`flow` via `carveRiverValleys`) —
+deliberate, measured re-baseline; isolated: with `currents=false` on both sides, hash is ALL
+IDENTICAL.
+
+- **Measured first**: the meridional current component was set solely by Ekman-rotating the
+  latitude-band wind, with zero basin-position dependence — ~94% of the equatorial trade band
+  showed net-poleward flow, cold anomaly nearly absent (min -0.06), contradicting the file's own
+  docstring (western boundary = warm poleward, eastern = cold equatorward).
+- **`computeOceanCurrent` gained a western/eastern-boundary bend**, reusing the exact west/east
+  coastal-distance weights the existing speed boost already computes — poleward on a basin's
+  western edge (Sverdrup pile-up → Gulf Stream-style current), equatorward (weaker, 0.45×, more
+  coast-hugging) on its eastern edge (Ekman upwelling → Peru/Benguela-style current). `poleSign`
+  sampled per-row against `latOf`, not assumed. Zonal (`u`) component untouched by construction.
+- **A single-pixel min/max test was tried and rejected** — the bend can locally cancel an
+  already-extreme baseline value at one outlier cell (measured: coldest pixel went LESS extreme).
+  Robust aggregates tell the real story: mean-absolute SST anomaly 0.204→0.511 (2.5×), cold-anomaly
+  cell fraction 4.5%→19.2% (4×) — test the aggregate, not the outlier.
+- **windFx speed**: `_windFxStep`'s advection multiplier `0.9→0.315` (35% of original, a literal
+  reading of "slow down by 65%"). Verified against the real shipped function via rAF interception,
+  not a reimplementation.
+- **Tests**: 12 new smoke assertions. One test-isolation bug found and fixed during verification
+  (the new windFx test left `state.debug`/the particle loop live, breaking a later pre-existing
+  v1.78 assertion) — restored ambient state, the same discipline this file's CHANGELOG has hit
+  before.
+- **Known scope cuts**: `bendK`/eastern-weakening factor are reasoned, not independently
+  calibrated; still a heuristic distance-to-coast proxy for western intensification, not a solved
+  Sverdrup model; thermohaline circulation stays out of scope.
 
 ### Wildlife-informed foraging: a real water-range lever, not just food (v1.81)
 

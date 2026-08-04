@@ -12,6 +12,90 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.82 — Ocean current direction becomes heat-driven, not just wind-derived; slower streak animation
+
+Owner: *"For the ocean flow and heat distribution I think you should check how heat in an ocean
+originates and how flow direction is dictated by it. At the moment it just seems to base itself
+from right to left. (And slow down the arrows from the current animation speed by about 65%)."*
+Engine only (block 1, `computeOceanCurrent` + `_windFxStep`). **Not** bit-identical at defaults —
+a deliberate, measured re-baseline (same class as v1.36/v1.39/v1.46/v1.60/v1.78) because
+`state.climate.currents` is `true` by default (v0.80) and the SST anomaly it computes feeds
+`tempField`/`rainField` inside `refreshClimate()`, which downstream `carveRiverValleys()` carves
+into `field` — so `field`/`flow` legitimately differ too, not just `temp`/`rain`/`rgba`. 1017 / 852
+green; hash vs v1.81 diverges on every scenario; **isolated and proven scoped**: with
+`state.climate.currents=false` on both sides, `field`/`temp`/`rain`/`flow` are ALL IDENTICAL —
+confirming the divergence originates entirely inside the ocean-current pipeline and nowhere else.
+
+- **Measured before designing anything.** A live-world probe (`probe_ocean_current.js`) sampling
+  `currentOceanField()` at seed 12345/512px found the meridional (heat-carrying) current component
+  was set SOLELY by Ekman-rotating the latitude-band wind — **zero dependence on where a cell sits
+  within its own ocean basin**. In the equatorial trade band, 93.9% of ocean cells showed net
+  poleward flow and only 4.7% equatorward; the measured SST anomaly ranged only −0.06 to 0.7 (a
+  cold anomaly was essentially never present). This directly contradicts the file's own long-
+  standing docstring claim ("poleward flow carries warm water... equatorward flow carries cold
+  water... e.g. Benguela/Peru") — the mechanism to produce that two-limbed pattern never existed;
+  only a uniform, latitude-band-wide drift did. That uniform zonal dominance, un-varying across an
+  entire visible ocean, is exactly what reads as "just goes right to left."
+- **Root cause: heat (SST) was a pure OUTPUT of current direction, never an input to it.**
+  `oceanSSTAnomaly` derives its warm/cold sign from `computeOceanCurrent`'s own `v` component
+  after the fact — nothing in the reverse direction (real basin-position-dependent heat transport)
+  ever fed back into which way the current itself turns. Real subtropical gyres exist because
+  wind-driven Sverdrup transport piles warm surface water against a basin's WESTERN edge;
+  geostrophic balance turns that pile-up into a fast, narrow POLEWARD current (Gulf Stream/
+  Kuroshio/Agulhas) — the actual physical mechanism that carries equatorial heat poleward. A
+  basin's EASTERN edge instead sees persistent offshore Ekman transport draw cold water up from
+  depth (the real Peru/Benguela/California/Canary upwelling systems), whose broader, slower
+  geostrophic return flow runs EQUATORWARD.
+- **Fix: a western/eastern-boundary bend inside `computeOceanCurrent`'s existing western-
+  intensification pass**, reusing the EXACT west/east coastal-distance proximity weights the
+  pre-existing speed boost already computes (`wBend`/`eBend`, peak at their own coast with open
+  ocean beyond, ~0 everywhere else) — no new full-grid pass. `poleSign` is sampled directly against
+  `latOf` per row (not assumed), so it holds under both World mode's north-pole-at-y=0 convention
+  and a custom Region-mode `latN`/`latS` ordering. The bend adds `poleSign·bendK·(wBend−0.45·eBend)
+  ·|v|` to the meridional component only — **the zonal (east-west) component is untouched by
+  construction**, asserted directly. The eastern bend is deliberately weaker (0.45×) and more
+  coast-hugging than the western one, matching how much narrower real eastern boundary currents
+  are than western ones.
+- **Re-measured, and the improvement is real but the right statistic matters.** A first assertion
+  design checked whether the single COLDEST pixel got colder with the bend on — it got LESS
+  extreme (−1.92 → −0.91 on the reference seed), which looks like a regression but isn't: the bend
+  can partially cancel an already-extreme baseline value at one specific outlier cell without that
+  being representative of the overall distribution. The robust, aggregate statistics tell the real
+  story: mean-absolute SST anomaly across the whole ocean **0.204 → 0.511** (2.5×), and the
+  fraction of ocean cells showing a genuine cold anomaly **4.5% → 19.2%** (4×) — a real,
+  substantial two-sided signal where before there was almost none. Single-pixel extrema are noise;
+  whole-ocean aggregates are the trend — the same "test the aggregate, not the outlier" lesson this
+  file has learned before, applied here to a flow field instead of a placement score.
+- **windFx particle speed** (owner: *"slow down the arrows... by about 65%"*): `_windFxStep`'s
+  per-tick advection multiplier `0.9 → 0.315` (35% of the original rate), a direct, literal
+  reading of the request. Verified against the REAL shipped function (not a reimplementation): rAF
+  is intercepted so exactly one real `_windFxStep()` call can be driven and its actual displacement
+  compared to what the old and new multipliers would each predict from the same sampled `(u,v)` —
+  measured ratio 0.37 against a predicted 0.35 on a held-fixed field (the small residual is a
+  second-order path-divergence effect of a slower particle sampling a shorter, more locally
+  homogeneous stretch of flow, not a bug).
+- **A test-isolation bug found and fixed during verification, not shipped as a false regression.**
+  The new windFx-speed smoke assertion armed the Ocean debug view and started the particle loop
+  directly (bypassing a real `#debugSeg` click, to control the step count precisely) but didn't
+  restore `state.debug`/stop the loop afterward — leaking state into the pre-existing v1.78
+  assertion block that runs later in the same sequential suite and asserts the canvas starts
+  HIDDEN before it clicks anything. Fixed by resetting `state.debug='off'` and calling
+  `_windFxSync()` at the end of the new block — the same "restore ambient state you changed"
+  discipline this file's own CHANGELOG has hit before (v1.24 BUG-3, v1.78's fuel-limited-settlement
+  fix).
+- **Tests**: 12 new smoke assertions — the bend leaves `u` bit-identical (ablation via
+  `computeOceanCurrent`'s own `opts.bendK`, the same on/off technique v1.46/v1.62 already use); the
+  bend genuinely activates on a real fraction of this world's ocean cells; mean-absolute SST
+  anomaly and cold-cell fraction both increase with the bend on; the windFx displacement ratio
+  matches the new multiplier's prediction, not the old one's.
+- **Known scope cuts**: `bendK=0.9`/the `0.45` eastern-weakening factor are reasoned estimates in
+  the spirit of the file's existing `PORT_PREFERENCE_MULT`/`FEATURE_RADIUS_MAX_FRAC` class of
+  un-tuned constants, not independently calibrated against a real gyre-strength figure; this is
+  still a heuristic distance-to-coast proxy for western intensification (as the file's own v1.77
+  docstring already discloses), not a solved beta-plane/Sverdrup model; thermohaline (deep, salinity
+  -driven) circulation remains entirely out of scope, as it always has been — this is a surface,
+  wind/heat-proxy current model throughout.
+
 ### v1.81 — Wildlife-informed foraging extends the water/food range, not just the food range
 
 Owner: *"any journey is only factually limited by the longest distance one is able to travers

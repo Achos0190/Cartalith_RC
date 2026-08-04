@@ -851,6 +851,109 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
     return o;
   });
+  // v1.82 (owner: "check how heat in an ocean originates and how flow direction is dictated by
+  // it. At the moment it just seems to base itself from right to left"). Measured first: a live-
+  // world probe found the meridional (heat-carrying) current component was set SOLELY by Ekman-
+  // rotating the latitude-band wind, with zero dependence on where a cell sits within its ocean
+  // basin — net-poleward flow on ~99% of the equatorial trade band, essentially no cold anomaly
+  // anywhere, contradicting the file's own docstring (warm poleward on a western boundary, cold
+  // equatorward on an eastern one). Fix: a western/eastern-boundary bend in computeOceanCurrent,
+  // reusing the exact west/east coastal-distance proximity the existing speed boost already
+  // computes — poleward on a basin's western edge (Sverdrup pile-up -> Gulf Stream-style current),
+  // equatorward on its eastern edge (offshore Ekman upwelling -> Peru/Benguela-style current).
+  R.v182 = await page.evaluate(async () => {
+    const o = {};
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    const c = state.climate, sea = state.seaLevel;
+    const WW = Math.min(GW, 240), WH = Math.max(2, Math.round(WW * GH / GW)), N = WW * WH, wrapX = !!state.world, step = 3.0;
+    const fieldC = (x, y) => sampleArr(field, x / (WW - 1) * (GW - 1), y / (WH - 1) * (GH - 1)) - (geoidField ? sampleArr(geoidField, x / (WW - 1) * (GW - 1), y / (WH - 1) * (GH - 1)) : 0);
+    const latOf = y => state.world ? 90 - (y / Math.max(1, WH - 1)) * 180 : (c.latN + (y / Math.max(1, WH - 1)) * (c.latS - c.latN));
+    const tSeaAt = lat => c.poleTemp + (c.equatorTemp - c.poleTemp) * Math.max(0, Math.cos(lat * Math.PI / 180));
+    const tc = new Float32Array(N), elevC = new Float32Array(N);
+    for (let y = 0; y < WH; y++) { const ts = tSeaAt(latOf(y)); for (let x = 0; x < WW; x++) { elevC[y * WW + x] = fieldC(x, y); tc[y * WW + x] = ts; } }
+    const wx = new Float32Array(N), wy = new Float32Array(N);
+    buildWind(wx, wy, WW, WH, step, tc, 0, { elev: elevC });
+
+    // Ablation: the SAME wind/terrain input, bend on (default) vs bend off (opts.bendK:0) — the
+    // exact technique this file already uses (v1.46 coastal swap, v1.62 overlap fix, etc.).
+    const curBent = computeOceanCurrent(wx, wy, elevC, WW, WH, wrapX, sea, latOf, {});
+    const curFlat = computeOceanCurrent(wx, wy, elevC, WW, WH, wrapX, sea, latOf, { bendK: 0 });
+
+    let uIdentical = true;
+    for (let i = 0; i < N; i++) if (Math.abs(curBent.u[i] - curFlat.u[i]) > 1e-6) { uIdentical = false; break; }
+    o.uUnchangedByBend = uIdentical;
+
+    let vDiffCount = 0, oceanCount = 0;
+    for (let i = 0; i < N; i++) { if (!curBent.ocean[i]) continue; oceanCount++; if (Math.abs(curBent.v[i] - curFlat.v[i]) > 1e-5) vDiffCount++; }
+    o.oceanCount = oceanCount;
+    o.vBendFractionAffected = oceanCount > 0 ? vDiffCount / oceanCount : 0;
+
+    // v1.82 test note: a single-pixel min/max was tried first and rejected — it can be swung by
+    // one outlier cell where the bend happens to partially cancel an already-extreme baseline
+    // value (measured directly: min went LESS negative, -1.92 -> -0.91, on this seed, even though
+    // the overall distribution improved sharply). Aggregate statistics over every ocean cell are
+    // the robust, representative measure here, not an extremum.
+    function sstStats(cur) {
+      let sumAbs = 0, n = 0, negCount = 0;
+      for (let y = 0; y < WH; y++) {
+        const lat = latOf(y), aPole = Math.abs(lat), dWarm = tSeaAt(Math.max(0, aPole - 12)) - tSeaAt(lat);
+        for (let x = 0; x < WW; x++) {
+          const i = y * WW + x; if (!cur.ocean[i]) continue;
+          const vp = lat >= 0 ? -cur.v[i] : cur.v[i];
+          let a = (c.currentK == null ? 1 : c.currentK) * (vp / step) * dWarm; if (a > 8) a = 8; else if (a < -8) a = -8;
+          sumAbs += Math.abs(a); n++; if (a < -0.01) negCount++;
+        }
+      }
+      return { meanAbs: n > 0 ? sumAbs / n : 0, n, negFrac: n > 0 ? negCount / n : 0 };
+    }
+    const rBent = sstStats(curBent), rFlat = sstStats(curFlat);
+    o.bentMeanAbs = rBent.meanAbs; o.flatMeanAbs = rFlat.meanAbs;
+    o.bentNegFrac = rBent.negFrac; o.flatNegFrac = rFlat.negFrac;
+    o.bendStrengthensSignal = rBent.meanAbs > rFlat.meanAbs * 1.2;
+    o.bendProducesMoreColdCells = rBent.negFrac > rFlat.negFrac * 1.5;
+
+    return o;
+  });
+  // v1.82 windFx: "slow down the arrows from the current animation speed by about 65%" — measured
+  // directly against the REAL _windFxStep function (not a reimplementation): rAF is intercepted so
+  // exactly one real step can be driven, and the actual displacement is compared to what the new
+  // (0.315) and old (0.9) per-tick multipliers would each predict from the same sampled (u,v).
+  R.v182fx = await page.evaluate(async () => {
+    const o = {};
+    if (typeof _setupHide === 'function') _setupHide();
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    state.debug = 'ocean';
+    if (typeof render === 'function') render();
+    let pending = null;
+    const realRAF = window.requestAnimationFrame;
+    window.requestAnimationFrame = (cb) => { pending = cb; return 1; };
+    _windFxSync();
+    const field = _windFxField;
+    const before = _windFxParts.slice(0, 40).map(p => ({ x: p.x, y: p.y }));
+    const uv0 = before.map(p => _windFxSampleAt(field, p.x, p.y));
+    const cb = pending; pending = null; if (cb) cb();
+    const after = _windFxParts.slice(0, 40).map(p => ({ x: p.x, y: p.y }));
+    window.requestAnimationFrame = realRAF;
+    let sumActual = 0, sumPred315 = 0, sumPred90 = 0, n = 0;
+    for (let i = 0; i < before.length; i++) {
+      const [u, v] = uv0[i], speed = Math.hypot(u, v);
+      if (speed < 1e-6) continue;
+      const actual = Math.hypot(after[i].x - before[i].x, after[i].y - before[i].y);
+      if (actual > speed * 1.5) continue;   // exclude a same-step respawn (teleport), not a real advection step
+      sumActual += actual; sumPred315 += speed * 0.315; sumPred90 += speed * 0.9; n++;
+    }
+    o.n = n;
+    o.actualVsPredicted315 = n > 0 ? sumActual / sumPred315 : null;
+    o.actualVsPredicted90 = n > 0 ? sumActual / sumPred90 : null;
+    // test-isolation: this block armed the Ocean debug view and started the windFx loop directly
+    // (not through a real #debugSeg click) — leaving both live would make the v1.78fx block below
+    // (which asserts the canvas starts HIDDEN before it clicks anything) see stale state from here.
+    state.debug = 'off';
+    if (typeof _windFxSync === 'function') _windFxSync();
+    return o;
+  });
   // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
   // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
   // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
@@ -6820,6 +6923,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.81: a real generated+auto-populated world was built for the wildlife-integration check (the scenario is meaningful)', R.v181.genOk && R.v181.wildlifeReachable);
   A('v1.81: real route stages carry a real map coordinate (mx/my) for foraging to sample', R.v181.stagesCarryMx);
   A('v1.81: real per-region wildlife data is genuinely consulted end-to-end — the wildlife modifier is reachable and produces real values on a live world, not just in isolation', R.v181.wildlifeModVaried);
+
+  A('v1.82: the western/eastern-boundary bend leaves the zonal (east-west) current component untouched — it is a purely meridional correction', R.v182.uUnchangedByBend);
+  A('v1.82: the bend genuinely changes current direction on a real fraction of this world\'s ocean cells (the mechanism actually activates on real geometry, not just present in code)', R.v182.vBendFractionAffected > 0.02);
+  A('v1.82: with the bend on, the mean-absolute SST anomaly across the whole ocean is measurably stronger than with it off — heat distribution now genuinely differentiates by basin position, not latitude alone', R.v182.bendStrengthensSignal);
+  A('v1.82: with the bend on, meaningfully more of the ocean shows a real cold (upwelling) anomaly than with it off — a two-sided signal, not just a stronger one-sided warm drift', R.v182.bendProducesMoreColdCells);
+  A('v1.82: the wind/current streak particles genuinely advect at the new slower rate (~35% of the pre-v1.82 step), measured directly against the real _windFxStep function', R.v182fx.n > 0 && Math.abs(R.v182fx.actualVsPredicted315 - 1) < 0.25 && R.v182fx.actualVsPredicted90 < 0.6);
 
   A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
   A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);
