@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.80**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.81**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.80.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.79.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.81.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.80.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,53 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Wildlife-informed foraging: a real water-range lever, not just food (v1.81)
+
+Owner: "any journey is only factually limited by the longest distance one is able to travers with
+the resources they can carry... we already have fauna information and therefore a good idea about
+how foraging could extend a route/travel distance (if you can hunt a deer you clearly get more
+calories than when you're in a desert and have to hunt snakes and hope your portable dew trap gets
+you enough water)." Civ-layer only (`JP_BIOMES`, `jpForaging`, `_jpDeriveStages`, `jpCalcLand`).
+Hash vs v1.80 ALL IDENTICAL — the Journey Planner is interactive-only, never reached from
+`generate()`.
+
+- **Measured before designing, and the first hypothesis was only half right.** A broad sample
+  across real routes/presets found block rates dominated by terrain-legality and a Foot-traveller
+  preset bug, water rare (`probe_jp_impossible.js`/`probe_jp_impossible2.js`). A TARGETED synthetic
+  sweep (`probe_jp_drygap.js`, a well-provisioned camel caravan) found the real cliff: past
+  ~150-200 km of waterless desert, `jpAssessResupply` blocks with zero elasticity — 269%-506% over
+  capacity, binary, no lever to pull even for a rich biome.
+- **`jpForaging()` already discounted carried FOOD and had for versions; nothing analogous touched
+  WATER, and the food term only read a flat per-biome constant, not the real per-region wildlife
+  data `currentWildlife()` already computes.** Two design forks put to the owner via
+  `AskUserQuestion` before building: extend the existing Foraging dropdown (chosen, not a new
+  control) and wire in real `currentWildlife()` data (chosen, not the static table alone).
+- **`JP_BIOMES.waterForage`** (new column, much smaller than `forage`, steeply biome-dependent):
+  true desert near-zero (Hot Desert 0.01), wetlands/jungle richest (0.22/0.20).
+- **`_jpWildlifeForageMod(mx,my)`** samples `currentWildlife()`'s per-cell region richness and
+  compares it to the WORLD's own mean — never an absolute cutoff, this file's own repeatedly
+  re-learned discipline (v1.25/v1.30/v1.31/v1.34/v1.37/v1.46/v1.55/v1.58). No-ops to `1.0` when
+  data/position is unavailable; clamped `[0.5,1.8]`.
+- **`jpForaging` gained optional trailing `mx,my`** (v1.20's optional-trailing-arg precedent) and
+  returns a new `waterReduction`. Food is scaled by real wildlife richness when a coordinate is
+  supplied; water uses `waterForage` directly, deliberately NOT wildlife-modulated (fauna is a food
+  proxy, not a water proxy — water access is already covered by real hydrology via
+  `_jpStageDryKm`; this only covers the small biome-climate residual beyond that). `_jpDeriveStages`
+  now records each stage's own midpoint coordinate so foraging can sample it.
+  `plan.foraging="None"` is an exact no-op, asserted bit-identical to pre-v1.81.
+- **A real, disclosed finding, not fixed this pass: Active foraging's SPEED cost can outweigh its
+  consumption benefit on a single already-marginal carry stretch.** Measured directly, then
+  re-measured identically against unmodified v1.80 to confirm this pre-dates this version, not
+  introduced by it — this version's water term measurably improves the outcome without resolving
+  the deeper tension. Retuning `JP_FORAGING` speed multipliers is a materially larger change than
+  what was asked; disclosed rather than silently left for rediscovery.
+- **Tests**: 8 new smoke assertions (`R.v181`). Two pre-existing, environmental smoke-suite
+  failures (`v0.92`/`v0.87` canvas-sizing assertions) observed during verification — confirmed
+  unrelated by reproducing them identically against unmodified v1.80.
+- **Known scope cuts**: the Active-foraging speed/consumption tension above; `waterForage` values
+  are reasoned estimates, not independently historically sourced; wildlife richness scales only the
+  food term, never water.
 
 ### Wind/current streak animation never actually rendered (v1.80)
 

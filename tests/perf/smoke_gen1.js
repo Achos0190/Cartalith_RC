@@ -786,6 +786,71 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { connectorCount: conn.length, villageCount: villages.length, isolated, stuckInVillageOnly,
       villageToVillageEdges, siblingCloser, checked2 };
   });
+  // v1.81 (owner: "any journey is only factually limited by the longest distance one is able to
+  // traverse with the resources they can carry... the range can be extended by varying degrees of
+  // foraging... we already have fauna information and therefore a good idea about how foraging
+  // could extend a route/travel distance"). Measured before building (probe_jp_drygap.js): a
+  // well-provisioned 10-camel caravan hit a hard, zero-elasticity wall past ~150-200km of
+  // waterless desert (269%/387%/506% over capacity at 200/300/400km) — jpForaging() already
+  // reduced carried FOOD need but nothing touched WATER at all, and the flat JP_BIOMES.forage
+  // constant never consulted the real per-region wildlife data currentWildlife() already computes
+  // (species richness/biomass via a genuine NPP->trophic-cascade model, memoized). Two designs
+  // confirmed with the owner via AskUserQuestion before building: extend the existing Foraging
+  // control (no new UI) rather than a second dropdown, and use real wildlife data rather than a
+  // static table refinement.
+  R.v181 = await page.evaluate(async () => {
+    const o = {};
+    // JP_BIOMES.waterForage exists, is small, and is steeply biome-dependent (desert near-zero).
+    o.hotDesertWF = JP_BIOMES['Hot Desert']?.waterForage;
+    o.jungleWF = JP_BIOMES['Tropical Jungle']?.waterForage;
+    o.wetlandsWF = JP_BIOMES['Wetlands / Marshes']?.waterForage;
+
+    // foraging="None" is an exact no-op — bit-identical to pre-v1.81, regardless of mx/my/wildlife.
+    const r1 = jpForaging('None', 'Tropical Jungle', 'Forest Path', 'Summer', 6, 100, 100);
+    const r2 = jpForaging('None', 'Tropical Jungle', 'Forest Path', 'Summer', 6);
+    o.noneIsNoop = r1.reduction === 0 && r1.waterReduction === 0 &&
+      r1.reduction === r2.reduction && r1.waterReduction === r2.waterReduction && r1.move === r2.move;
+
+    // Active foraging genuinely reduces both food and water need, water by far less than food,
+    // and true desert reduces water by far less than a wet biome (the owner's own "dew trap"
+    // framing, checked directly rather than just trusting the table).
+    const desert = jpForaging('Active', 'Hot Desert', 'Desert Hardpack', 'Summer', 6);
+    const jungle = jpForaging('Active', 'Tropical Jungle', 'Forest Path', 'Summer', 6);
+    o.desertWaterReduction = desert.waterReduction;
+    o.jungleWaterReduction = jungle.waterReduction;
+    o.desertMuchDrierThanJungle = desert.waterReduction < jungle.waterReduction * 0.3;
+    o.waterReductionSmallerThanFoodReduction = jungle.waterReduction < jungle.reduction;
+
+    // Real per-world wildlife data is genuinely consulted: _jpDeriveStages threads a real stage
+    // midpoint (mx/my) through to jpForaging, which samples currentWildlife() there — not merely
+    // reachable in principle, exercised end-to-end on a live generated+auto-populated world.
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    let genOk = true; try { await generate(); } catch (e) { genOk = false; }
+    if (typeof _civIterativeAutoWorld === 'function') { try { state.places = []; _civIterativeAutoWorld(3); } catch (e) {} }
+    o.genOk = genOk;
+    const places = (state.places || []).filter(p => p && p.category === 'settlement' && !p.villageAddon);
+    o.wildlifeReachable = typeof currentWildlife === 'function';
+    let stagesWithMx = 0, wildlifeModVaried = false;
+    if (places.length >= 2 && typeof _civDijkstraPath === 'function') {
+      const a = places[0], b = places[places.length - 1];
+      const j = _civDijkstraPath(a.x, a.y, b.x, b.y, 'land');
+      if (j && j.pts && j.pts.length > 1) {
+        const jn = { pts: j.pts, km: j.km, brks: j.brks && j.brks.length ? j.brks : undefined, name: '', sea: false, groupSize: 6 };
+        const plan = _jpEnsurePlan(jn);
+        plan.foraging = 'Active';
+        const stages = _jpDeriveStages(jn, plan);
+        const mods = [];
+        for (const st of stages) {
+          if (st.mx != null && st.my != null) { stagesWithMx++; mods.push(_jpWildlifeForageMod(st.mx, st.my)); }
+        }
+        wildlifeModVaried = mods.length > 0 && (new Set(mods.map(m => m.toFixed(3))).size > 1 || mods.some(m => m !== 1.0));
+      }
+    }
+    o.stagesCarryMx = stagesWithMx > 0;
+    o.wildlifeModVaried = wildlifeModVaried;
+
+    return o;
+  });
   // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
   // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
   // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
@@ -6746,6 +6811,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.79: nearest-sibling-is-closer-than-actual-connection dropped well below the pre-fix 79.5% (measured ~36.5% post-fix; generous slack)', R.v179.siblingCloser / R.v179.checked2 < 0.5);
   A('v1.79: every village\'s connector chain, followed through however many village-to-village hops, still reaches a real settlement — no cluster left networked only among itself', R.v179.stuckInVillageOnly === 0);
   A('v1.79: villages left without a connector at all are still genuinely rare (a landmass-reachability edge case, not a regression)', R.v179.isolated <= R.v179.villageCount * 0.05);
+
+  A('v1.81: JP_BIOMES.waterForage exists and true desert is far smaller than a wet biome (a dew trap barely helps in the desert — the owner\'s own framing)', R.v181.hotDesertWF < R.v181.jungleWF * 0.2 && R.v181.hotDesertWF < R.v181.wetlandsWF * 0.2);
+  A('v1.81: foraging="None" is an exact no-op — bit-identical to pre-v1.81 regardless of position/wildlife data (the default, most-common case)', R.v181.noneIsNoop);
+  A('v1.81: Active foraging genuinely reduces carried water need in a real biome', R.v181.jungleWaterReduction > 0);
+  A('v1.81: true desert\'s water-foraging offset is far smaller than a lush biome\'s (near-zero, not a meaningful range extension in genuine desert)', R.v181.desertMuchDrierThanJungle);
+  A('v1.81: the water-foraging offset is deliberately smaller than the food offset (water is the harder resource to forage)', R.v181.waterReductionSmallerThanFoodReduction);
+  A('v1.81: a real generated+auto-populated world was built for the wildlife-integration check (the scenario is meaningful)', R.v181.genOk && R.v181.wildlifeReachable);
+  A('v1.81: real route stages carry a real map coordinate (mx/my) for foraging to sample', R.v181.stagesCarryMx);
+  A('v1.81: real per-region wildlife data is genuinely consulted end-to-end — the wildlife modifier is reachable and produces real values on a live world, not just in isolation', R.v181.wildlifeModVaried);
 
   A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
   A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);

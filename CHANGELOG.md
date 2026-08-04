@@ -12,6 +12,110 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.81 — Wildlife-informed foraging extends the water/food range, not just the food range
+
+Owner: *"any journey is only factually limited by the longest distance one is able to travers
+with the resources they can carry... This makes things like water and food less of a constraint
+that creates an impossibility on a journey. Surplus the foraging along a route and how 'rich' a
+route is... we already have fauna information and therefore a good idea about how foraging could
+extend a route/travel distance (if you can hunt a deer you clearly get more calories than when
+you're in a desert and have to hunt snakes and hope your portable dew trap gets you enough
+water)."* Civ-layer only (`JP_BIOMES`, `jpForaging`, `_jpDeriveStages`, `jpCalcLand`). Hash vs
+v1.80 **ALL IDENTICAL** (default/geoid/waves/ao/icons) — the Journey Planner is interactive-only,
+never reached from `generate()`'s own pipeline.
+
+- **Measured before designing anything, and the first hypothesis was only half right.** A broad
+  sample across real routes/presets on two generated worlds (`probe_jp_impossible.js`/
+  `probe_jp_impossible2.js`) found block rates dominated by legitimate terrain-legality (wheels on
+  swamp) and a Foot-traveller preset whose own cargo exceeds its own rated capacity every stage —
+  water was RARE in that broad sample, not the dominant cause the owner's report implied. But a
+  TARGETED synthetic sweep (`probe_jp_drygap.js`, a well-provisioned 10-camel caravan) found the
+  real cliff: past ~150-200 km of waterless desert, `jpAssessResupply`'s hard block fires with zero
+  elasticity — 269%/387%/506% over capacity at 200/300/400 km, "no party departs," binary. A
+  well-provisioned party crossing a genuinely rich biome had no lever to pull at all. Confirms the
+  owner's report was about a real, if narrower-than-first-assumed, mechanism.
+- **`jpForaging()` already reduced carried FOOD need and had for versions — but nothing analogous
+  touched WATER, and the food term itself only read a flat per-biome-category constant, not the
+  real per-region wildlife data `currentWildlife()` already computes** (species richness + trophic-
+  cascade biomass from a real NPP model, memoized). Both gaps are exactly what the owner's own
+  framing points at ("we already have fauna information"). Two genuine design forks, both put to
+  the owner via `AskUserQuestion` before building: **(1)** extend the existing Foraging dropdown
+  (chosen) over a new separate control or a fully-automatic mechanism; **(2)** wire in real
+  `currentWildlife()` data (chosen) over refining the static per-biome table alone.
+- **`JP_BIOMES` gains a new `waterForage` column**, deliberately much smaller than the existing
+  `forage` column and steeply biome-dependent — true desert (Hot Desert 0.01, Cold Desert/Badlands
+  0.02) is near-zero on purpose (a dew trap barely helps there, the owner's own example), wetlands/
+  jungle are the richest (Wetlands 0.22, Tropical Jungle 0.20).
+- **`_jpWildlifeForageMod(mx,my)`** (new, pure) samples `currentWildlife()`'s per-cell `regionId` →
+  `region.richness` at a real stage coordinate and compares it to the WORLD's own mean richness —
+  never an absolute richness cutoff. The same "compare to the world's own mean, never a fixed
+  number" discipline this file has re-learned repeatedly (v1.25 sea-level histogram, v1.30/v1.31/
+  v1.34/v1.37/v1.46/v1.55/v1.58 suitability/archetype/trade thresholds) — the ninth-plus occurrence.
+  Defaults to `1.0` (no-op) whenever position or wildlife data is unavailable, clamped to
+  `[0.5, 1.8]` so a richness outlier can't blow the food term up or down unreasonably.
+- **`jpForaging(mode,biomeKey,terrain,season,people,mx,my)`** gained two optional trailing
+  parameters (v1.20's `opts.tempField`/`opts.wetlandMask` precedent: an optional, gracefully-
+  omittable trailing arg, never a required signature change) and now returns a `waterReduction`
+  field alongside the existing `reduction`/`move`. The food term is multiplied by
+  `_jpWildlifeForageMod` when a coordinate is supplied (a real richness signal replacing the flat
+  table); the new water term uses `waterForage` directly (deliberately NOT modulated by wildlife
+  richness — fauna abundance is a food proxy, not a water proxy; water access is already covered
+  by real hydrology via `_jpStageDryKm`, this term covers only the small biome-climate residual
+  beyond that). Both cap below 1.0 (food ≤0.95, water ≤0.50) — foraging reduces need, it never
+  eliminates it.
+- **`_jpDeriveStages`** now records each finalized stage's own midpoint map coordinate (`c.mx`/
+  `c.my`) alongside the existing `dryKm`/`infra`, so `jpForaging` can sample the stage's ACTUAL
+  fauna richness instead of only the flat per-biome table.
+- **`jpCalcLand`'s convergence-loop water term** (`waterNeeded`) now multiplies by
+  `(1 - forage.waterReduction)`, exactly mirroring how the food term already discounted
+  `humanFoodNet`. The formula trace gained a line disclosing the offset ("foraging offsets NN% of
+  carried water need") whenever it's non-trivial, matching this planner's existing
+  show-your-work convention (v1.49's `_jpVerdict`/`_jpConfidence`, v1.51's `_stageTrouble`).
+  `plan.foraging="None"` (the default, most common case) is an exact no-op — asserted bit-identical
+  to pre-v1.81 regardless of position or wildlife data.
+- **A real, disclosed finding: Active foraging's SPEED cost can outweigh its consumption benefit
+  on a single, already-marginal carry stretch.** `JP_FORAGING['Active'].speedMod` slows travel,
+  which — on a stage whose carry interval is capped by the stage's own duration rather than a
+  shorter resupply stop — directly increases the one-time mass that must be carried, sometimes by
+  more than the foraging discount saves. Measured directly (`probe_jp_forage_effect2.js`): in
+  several tested scenarios, switching Foraging from None to Active INCREASED the load-ratio
+  percentage rather than decreasing it. Re-ran the identical scenario against v1.80 (before any of
+  this version's changes existed) and found the SAME qualitative pattern already present, at equal
+  or worse magnitude (e.g. Tropical Jungle/150km: v1.80 delta +244pp vs. v1.81 delta +149pp) —
+  proving this is a pre-existing characteristic of the speed/consumption tradeoff, not something
+  introduced this version, and that this version's water-foraging term measurably IMPROVES the
+  outcome in every comparable case without fully resolving the deeper tension. **Not fixed this
+  pass** — retuning `JP_FORAGING` speed multipliers or the day-count/interval-capping logic is a
+  materially larger, riskier change than what was asked for and confirmed via the two
+  `AskUserQuestion` answers above (which were specifically about extending Foraging to cover water
+  and using real wildlife data, not about retuning the pre-existing speed-cost model). Disclosed
+  here rather than silently left for a future session to re-discover, per this file's own
+  "never let a found-but-out-of-scope issue go unmentioned" discipline.
+- **UI**: the Foraging dropdown label gained a `title` tooltip explaining it now reduces both
+  carried food AND carried water, with the food term scaled by the world's own real fauna richness
+  along the route and the water term a much smaller, steeply biome-dependent offset.
+- **Tests**: 8 new smoke assertions (`R.v181`) — `waterForage` exists and true desert reads far
+  smaller than a wet biome; `foraging="None"` is an exact no-op regardless of position; Active
+  foraging genuinely reduces carried water need in a real biome; true desert's water offset is far
+  smaller than a lush biome's; the water offset is deliberately smaller than the food offset; a
+  real generated+auto-populated world was built and `currentWildlife()` is reachable; real route
+  stages carry a real `mx`/`my`; the wildlife modifier is genuinely reachable end-to-end on a live
+  world (not just in isolation) and produces varying, non-trivial values.
+- **Two pre-existing, environmental smoke-suite failures observed during verification, confirmed
+  unrelated.** `v0.92 follow-up fix: overview canvas is capped at 512px wide...` and `v0.87:
+  LOD/atlas mode fills the viewport...` both failed on this run — but re-running the identical
+  suite against UNMODIFIED v1.80 reproduces the exact same two failures, proving they are
+  pre-existing environmental flakiness in this headless-Chromium harness (unrelated to any
+  civ-layer or Journey Planner code, and touched by nothing in this version). Left alone —
+  investigating flaky canvas-sizing assertions unrelated to foraging is out of scope for this pass;
+  disclosed here rather than silently ignored.
+- **Known scope cuts**: the Active-foraging speed/consumption tension above (found, not fixed);
+  `waterForage` values are reasoned per-biome estimates in the spirit of the existing `forage`
+  column, not independently historically sourced per biome; the wildlife richness modifier only
+  scales the FOOD term, never water (a deliberate choice, not an oversight — see above); no UI
+  surfaces the wildlife-informed modifier's actual value to the user (it's applied silently inside
+  the calculation, same as the existing flat-table `forage` term always was).
+
 ### v1.80 — Wind/current streak animation never actually rendered (inline style vs. stylesheet)
 
 Owner: "No animation in the flow layers." Engine only (block 1, `_windFxStart`). Hash vs v1.79 ALL

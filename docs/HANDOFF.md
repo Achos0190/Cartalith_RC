@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.80.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.81.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.81 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.79` are kept and never edited.
+  (v1.82 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.80` are kept and never edited.
+- **v1.81 — wildlife-informed foraging gives a real water-range lever, not just food.** Owner:
+  "any journey is only factually limited by the longest distance one is able to travers with the
+  resources they can carry... we already have fauna information and therefore a good idea about
+  how foraging could extend a route/travel distance." Measured before designing: a broad sample
+  found terrain-legality/preset-bug dominated blocks (water rare); a TARGETED synthetic sweep
+  (well-provisioned camel caravan, waterless desert) found the real cliff — `jpAssessResupply`
+  blocks with zero elasticity past ~150-200 km, 269-506% over capacity, no lever to pull. Two
+  design forks resolved via `AskUserQuestion`: extend the existing Foraging dropdown (not a new
+  control), wire in real `currentWildlife()` regional richness (not the flat table alone). New
+  `JP_BIOMES.waterForage` column (steeply biome-dependent, near-zero in true desert);
+  `_jpWildlifeForageMod` compares a stage's sampled richness to the world's own mean (never an
+  absolute cutoff); `jpForaging` gained optional trailing `mx,my` and a `waterReduction` return;
+  `_jpDeriveStages` now carries each stage's own midpoint coordinate. `foraging="None"` stays an
+  exact no-op. **Disclosed, not fixed this pass**: Active foraging's speed cost can outweigh its
+  consumption benefit on an already-marginal single-carry stretch — measured, confirmed
+  pre-existing (reproduces identically on unmodified v1.80), this version's water term improves it
+  without resolving it; deferred as a materially larger change than what was asked. Two
+  pre-existing environmental smoke-suite failures (`v0.92`/`v0.87` canvas-sizing) observed during
+  verification, confirmed unrelated by reproducing identically against unmodified v1.80. Hash vs
+  v1.80 ALL IDENTICAL. See CHANGELOG for the full writeup.
 - **v1.80 — the wind/current streak animation (v1.78) never actually rendered.** Owner: "No
   animation in the flow layers." Root cause: `_windFxStart()` cleared the canvas's INLINE
   `display` style to `''`, expecting that to reveal it — but the CSS stylesheet rule for
@@ -2458,32 +2478,35 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **OPEN, in progress: Journey Planner water range has zero elasticity past a hard ceiling.**
-  Owner: "any journey is only factually limited by the longest distance one is able to traverse
-  with the resources they can carry... the range can be extended by varying degrees of foraging...
-  we already have fauna information and therefore a good idea about how foraging could extend a
-  route/travel distance." Measured (not assumed) before designing anything:
-  `probe_jp_impossible.js`/`probe_jp_impossible2.js` sampled real routes over two generated worlds
-  and found broad block rates dominated by legitimate terrain-legality (wheels on swamp) and one
-  preset-tuning issue (Foot traveller's cargo exceeds its own rated capacity every stage,
-  independent of terrain — a separate small bug worth a follow-up fix), NOT water — genuine
-  water-driven blocks were rare in that broad sample. But a TARGETED synthetic sweep
-  (`probe_jp_drygap.js`, a well-provisioned 10-camel caravan) found the real cliff the owner is
-  describing: past ~150-200km of waterless desert, `jpAssessResupply`'s hard block fires with zero
-  elasticity — 269%/387%/506% over capacity at 200/300/400km, "no party departs in this state,"
-  binary. `jpForaging()` already exists and already reduces FOOD need (`forage.reduction`, used in
-  `jpCalcLand`'s convergence loop) — but nothing analogous touches WATER at all, and the existing
-  `JP_BIOMES[key].forage` is a flat per-biome-category constant, not the real per-region wildlife
-  data `currentWildlife()` already computes (species richness/biomass via a real NPP → trophic-
-  cascade model) — exactly what the owner is pointing at. Design direction: (1) a water-foraging
-  term mirroring the existing food term but much smaller and steeply biome-dependent (dew traps in
-  true desert barely help, as the owner's own example says), (2) route the FOOD term through real
-  `currentWildlife()` regional richness instead of only the flat table, (3) keep
-  `JP_LOAD_INVALID_RATIO` itself as the genuine "impossible" ceiling — the fix is giving a
-  well-provisioned, biome-appropriate party a legitimate way to not hit it, not loosening the
-  ceiling. Two open forks (UI surface, wildlife-informed scope) — deferred to a design check-in
-  with the owner before building. See CHANGELOG "known scope cuts" discipline — do not skip the
-  measurement step already done here if picking this back up.
+- **OPEN, found not fixed: Active foraging's speed cost can outweigh its consumption benefit on a
+  single, already-marginal carry stretch.** Found while verifying v1.81 (below) —
+  `probe_jp_forage_effect2.js` measured several scenarios where switching Foraging from None to
+  Active INCREASED the load-ratio percentage rather than decreasing it, because
+  `JP_FORAGING['Active'].speedMod` slows travel, which on a stage whose carry interval is capped by
+  the stage's own duration (not a shorter resupply stop) directly increases the one-time mass that
+  must be carried — sometimes by more than the foraging discount saves. Confirmed pre-existing (not
+  introduced by v1.81) by re-running the identical scenario against unmodified v1.80 and finding
+  the same pattern at equal-or-worse magnitude. v1.81's new water-foraging term measurably improves
+  the outcome in every comparable case but doesn't resolve the underlying tension. Not fixed —
+  retuning `JP_FORAGING` speed multipliers or the day-count/interval-capping logic is a materially
+  larger, riskier change than v1.81's actual ask (extend Foraging to cover water; wire in real
+  wildlife data), confirmed via two `AskUserQuestion` answers that didn't cover this. Pick this up
+  as its own scoped pass — start from `probe_jp_forage_effect2.js` in the scratchpad convention,
+  re-derive it fresh since scratchpad files aren't committed.
+- **OPEN, found not fixed: two environmental smoke-suite failures, unrelated to any recent
+  change.** `v0.92 follow-up fix: overview canvas is capped at 512px wide...` and `v0.87: LOD/atlas
+  mode fills the viewport...` both fail on this headless-Chromium harness as of v1.80/v1.81,
+  confirmed identical on both (so not a v1.81 regression) — likely viewport/canvas-sizing flakiness
+  in this environment rather than an app bug, but not root-caused. Worth a dedicated look if it
+  starts flagging more assertions or if a real canvas-sizing bug is ever reported matching either
+  description.
+- **v1.81 shipped**: wildlife-informed foraging — a new `JP_BIOMES.waterForage` column plus real
+  `currentWildlife()` regional richness feeding the existing Foraging dropdown, giving a
+  well-provisioned, biome-appropriate party a genuine way to extend both food AND water range
+  instead of hitting `jpAssessResupply`'s binary block with zero elasticity. Two design forks
+  resolved via `AskUserQuestion` (extend the existing dropdown; wire in real wildlife data). Hash
+  vs v1.80 ALL IDENTICAL. See CHANGELOG for the full writeup, including the two OPEN items found
+  during verification (above) and disclosed rather than silently fixed or dropped.
 - **v1.80 shipped**: the v1.78 wind/current streak animation never actually rendered — a CSS
   `display:none` stylesheet rule silently defeated the `style.display=''` reveal, so the particle
   loop ran perfectly into an invisible 0×0 canvas. Fixed with an explicit `display='block'`; the
