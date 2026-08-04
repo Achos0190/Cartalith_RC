@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.75**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.76**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.75.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.74.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.76.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.75.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,52 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Village connectors: an unnecessary `.reverse()`, not a terrain problem (v1.76)
+
+Owner: *"let's check how ways are done for the recently added Villages (suitability-weighted,
+road-biased) option. At the moment it seems like a loopy bundle of spaghetti which is not how
+roads historically formed."* Root-caused by generating a real world (seed 31337/512px) with
+Villages on and measuring the drawn geometry, cost, and terrain of the worst offenders before
+writing any fix. Civ-layer only (`_civConnectVillageAddons`). Hash vs v1.75 ALL IDENTICAL.
+
+- **The terrain-avoidance hypothesis was wrong, and disproving it found the real bug.** Median
+  connector circuity (path km ÷ straight-line km) measured 2.62x, worst 3.35x, 54/199 self-
+  intersecting. Disabling `_CIV_EXISTING_WAY_DISCOUNT` only dropped the median to 2.21x — partial,
+  not the explanation. The clincher: the worst connector's own path cost, recomputed from the exact
+  cost grid Dijkstra used, was **2.8x more expensive than the straight line** despite the straight
+  line crossing near-flat terrain (height 0.58→0.63, no water, no cliff). A "shortest path" costing
+  3x a straight line on flat ground isn't a shortest path — it's a bug.
+- **Root cause: the Dijkstra `prev[]` walk already builds `raw` in VILLAGE→…→SOURCE order** (`cur`
+  starts at the village's cell, pushed first; the loop follows `prev[]` toward decreasing distance,
+  so the settlement is pushed last) — exactly the `aIdx`(village)→`bIdx`(settlement) order every
+  consumer already assumes. The shipped code called an unnecessary `raw.reverse()` right after,
+  flipping to SOURCE-first/VILLAGE-last, then overwrote the endpoints as if it hadn't — `raw[0]`
+  (now the source end) forced to the village pin, `raw[raw.length-1]` (now the village end) to the
+  settlement pin. That corrupts the whole path, not just its labels: it leaves the village, jumps
+  near the settlement (the true second cell of the reversed, source-side walk), retraces the entire
+  real route backward almost to the village, then jumps to the settlement again. That's the loop,
+  and why it self-intersects.
+- **`aIdx`/`bIdx` were never wrong** — `cur` already held the correct source cell going into
+  `settleAt.get(cur)`, independent of array order. Only the drawn geometry was corrupted, which is
+  why v1.71's own `villageEndsMatchPin`/`settlementEndsMatchPin` smoke checks never caught it: every
+  connector still reported real, valid, correctly-paired endpoints.
+- **Fix: delete `raw.reverse()`, leave the two endpoint overwrites exactly as written** (`raw[0]` ←
+  village pin, `raw[raw.length-1]` ← settlement pin — correct once the walk isn't reordered).
+  Re-measured: median circuity 1.12x, max 1.86x, zero self-intersecting connectors.
+- **First cut shipped the wrong half of this fix**: swapping which coordinate each overwrite
+  targets (instead of removing the reverse) produces identical path geometry but writes it in
+  SOURCE-first/VILLAGE-last order, silently breaking v1.71's own `pts[0]`-is-the-village convention
+  that `villageEndsMatchPin`/`settlementEndsMatchPin` assert. Caught by the full smoke run (605/606
+  passed) before shipping — "the geometry is correct" and "the codebase's own point-ordering
+  convention is preserved" are different claims, and only re-running the suite catches a violation
+  of the second.
+- **Tests**: 3 new smoke assertions (`R.v176`) — connectors exist and were checked; max circuity
+  under a generous 2.2x bound; zero self-intersections.
+- **Known scope cuts**: none — the reported symptom had one fully-explained root cause. The
+  "roads should share a trunk near the destination" aesthetic question was investigated as a
+  secondary hypothesis but not pursued: with circuity near-direct and zero loops, the fan-in
+  pattern (mean 5.85, max 16 per settlement) reads as an ordinary spoke pattern, not spaghetti.
 
 ### `_civAutoRoutes` stamped way indices from two different arrays (v1.75)
 

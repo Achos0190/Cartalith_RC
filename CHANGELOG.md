@@ -12,6 +12,65 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.76 — Village connectors: an unnecessary `.reverse()`, not a terrain problem
+
+Owner: *"let's check how ways are done for the recently added Villages (suitability-weighted,
+road-biased) option. At the moment it seems like a loopy bundle of spaghetti which is not how
+roads historically formed."* Root-caused by direct measurement — generating a real world (seed
+31337/512px) with Villages on and inspecting the drawn geometry, cost, and terrain of the worst
+offenders — before writing any fix, per this file's own working-rules discipline. Civ-layer only
+(`_civConnectVillageAddons`). Hash vs v1.75 **ALL IDENTICAL** (village connectors are opt-in,
+default off, and touch no field/temp/rain/flow data).
+
+- **First hypothesis (terrain avoidance / the existing-way discount pulling routes off course) was
+  wrong, and disproving it is what found the real bug.** Median circuity (path km ÷ straight-line
+  km) across 199 connectors measured 2.62x, worst case 3.35x, with 54 connectors self-intersecting.
+  Disabling the `_CIV_EXISTING_WAY_DISCOUNT` entirely only dropped the median to 2.21x — a
+  meaningful but partial effect, not the explanation. The clincher: recomputing the WORST
+  connector's own path cost from the exact cost grid `_civConnectVillageAddons` used showed it was
+  **2.8x more expensive than the straight line** despite the straight line crossing near-flat
+  terrain (height 0.58→0.63 over the whole route, no water, no cliff). A "shortest path" that costs
+  3x more than a straight line on flat ground is not a shortest path — it's a bug.
+- **Root cause: the Dijkstra `prev[]` walk already builds `raw` in VILLAGE→…→SOURCE order** (`cur`
+  starts at the village's own cell and is pushed FIRST; the loop follows `prev[]` toward decreasing
+  distance, so the settlement cell is necessarily pushed LAST) — exactly the `aIdx`(village)→
+  `bIdx`(settlement) reading every consumer already assumes. The shipped code called an unnecessary
+  `raw.reverse()` right after, flipping that to SOURCE-first/VILLAGE-last, and then overwrote the
+  endpoints as if it hadn't — forcing index 0 (now the source end) to the village's own coordinate
+  and the last index (now the village end) to the settlement's. That doesn't just mislabel the ends
+  — it corrupts the entire drawn path. Tracing one captured raw path end to end: point 0 is the
+  village (correct value, wrong position), point 1 lands almost exactly at the SETTLEMENT (the true
+  second cell of the reversed, source-side walk), points 2 through N-2 retrace the ENTIRE real route
+  backward, ending back almost exactly at the village's own position, and the final point jumps to
+  the settlement again. A path that leaves home, appears at the destination, walks the whole way
+  back near-home, then jumps to the destination a second time is exactly what "loopy bundle of
+  spaghetti" looks like on screen — and exactly why it self-intersects.
+- **`aIdx`/`bIdx` (what `_civNetworkMetrics` reads) were never wrong** — `cur` already held the
+  correct source cell going into `settleAt.get(cur)`, independent of the array-order bug. Only the
+  drawn GEOMETRY was corrupted, which is why the v1.71 smoke coverage never caught this: every
+  connector still reported real, valid, non-isolated, correctly-paired endpoints.
+- **Fix: delete the `raw.reverse()` call and leave the two endpoint overwrites exactly as
+  originally written** (`raw[0]` ← village pin, `raw[raw.length-1]` ← settlement pin) — now correct
+  because the walk was never out of order to begin with. Re-measured on the identical world: median
+  circuity 1.12x, max 1.86x, zero self-intersecting connectors (down from 54/199).
+- **First cut of the fix shipped, then a smoke-suite run caught it: swapping WHICH coordinate each
+  overwrite targets (instead of removing the reverse) produces identical path geometry but writes it
+  in SOURCE-first/VILLAGE-last order** — silently breaking the pre-existing v1.71
+  `villageEndsMatchPin`/`settlementEndsMatchPin` checks, which assert `pts[0]` sits on the `aIdx`
+  (village) pin. Caught by the full smoke run (605 passed, 1 failed) before shipping, not by
+  inspection — a reminder that "the geometry is now correct" and "the codebase's own ordering
+  convention is preserved" are different claims, and only re-running the suite catches a violation
+  of the second. Re-verified after switching to the reverse-removal fix: 606/606.
+- **Tests**: 3 new smoke assertions (`R.v176`) — connectors exist and were checked (the scenario is
+  meaningful); max circuity stays under a generous 2.2x bound (was 3.35x); zero connectors
+  self-intersect (was 54).
+- **Known scope cuts**: none identified — the reported symptom had a single, fully-explained root
+  cause. The broader "roads should share a trunk near the destination instead of 200 independently-
+  computed spurs" aesthetic question (real road networks converge) was investigated as a secondary
+  hypothesis but not pursued: with circuity now near-direct (1.12x median) and zero loops, the
+  fan-in pattern (mean 5.85, max 16 connectors per settlement) reads as an ordinary spoke/star
+  pattern, not spaghetti — the bug was the whole explanation.
+
 ### v1.75 — `_civAutoRoutes` stamped way indices from two different arrays
 
 HANDOFF-flagged latent defect from the v1.72 bug hunt: *"`_civAutoRoutes` builds way `aIdx`/`bIdx`

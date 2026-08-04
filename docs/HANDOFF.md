@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.75.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.76.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.76 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.74` are kept and never edited.
+  (v1.77 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.75` are kept and never edited.
+- **v1.76 — village connectors: an unnecessary `.reverse()`, not a terrain problem.** Owner:
+  *"how ways are done for the recently added Villages... it seems like a loopy bundle of spaghetti
+  which is not how roads historically formed."* Root-caused by measurement, not inspection: median
+  connector circuity was 2.62x straight-line, 54/199 self-intersected, and the worst offender's own
+  path cost — recomputed from the same cost grid Dijkstra used — was 2.8x more expensive than the
+  straight line despite near-flat terrain, proving the "shortest path" wasn't actually one. The
+  Dijkstra `prev[]` walk already builds `raw` in village→…→settlement order, matching `aIdx`/`bIdx`
+  — but `_civConnectVillageAddons` called an unnecessary `raw.reverse()` right after, flipping to
+  settlement-first/village-last, then overwrote the endpoints as if it hadn't, corrupting every
+  connector into "jump toward the destination, retrace the whole route backward almost to the
+  village, then jump to the destination again." `aIdx`/`bIdx` were never wrong (only the drawn
+  geometry), which is why existing endpoint-value smoke checks never caught it. Fix: delete the
+  reverse — the two endpoint overwrites were already correct as originally written. (A first cut
+  swapped which coordinate each overwrite targets instead; that produces the same geometry but the
+  wrong point order, silently breaking the v1.71 `pts[0]`-is-the-village convention — caught by a
+  full smoke run before shipping, not by inspection.) Re-measured: median circuity 1.12x, zero
+  self-intersections (was 54). Civ-layer only; hash ALL IDENTICAL; +3 smoke assertions. See
+  CHANGELOG for the full writeup.
 - **v1.75 — `_civAutoRoutes` stamped way indices from two different arrays.** The HANDOFF-flagged
   latent defect left open by the v1.72 pass: `_civAutoRoutes`'s trunk-road ways carried
   `aIdx`/`bIdx` positions into its own filtered `settles` array while its village-connector ways
@@ -2342,6 +2360,9 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
     started. When picked up, root-cause/measure current `buildWind()`/`applyOceanCurrents()`
     behaviour before writing any new solver code, per this file's own working-rules discipline, and
     confirm the wrap-aware design with a probe before committing to it.
+- **v1.76 shipped**: village connector "spaghetti" root-caused to an unnecessary `.reverse()` in
+  `_civConnectVillageAddons`, not a terrain/discount issue — median circuity 2.62x→1.12x, self-
+  intersections 54→0. See CHANGELOG for the full writeup.
 - **v1.75 shipped**: `_civAutoRoutes` aIdx/bIdx index-base divergence (the v1.72 HANDOFF follow-up)
   fixed — trunk-road ways now remap their `settles`-local indices to `state.places` positions before
   joining the village-connector ways in `civWays`. See CHANGELOG for the full writeup.

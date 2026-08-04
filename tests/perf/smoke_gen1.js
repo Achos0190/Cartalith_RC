@@ -666,6 +666,57 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillages;
     return { defaultChecked, on, off };
   });
+  // v1.76 (owner: village connectors read as "a loopy bundle of spaghetti, which is not how roads
+  // historically formed"): _civConnectVillageAddons walks the Dijkstra prev[] chain from a village
+  // to its nearest settlement, builds raw = [village,...,source], then .reverse()s it — leaving
+  // raw[0] as the SOURCE end and raw[last] as the VILLAGE end. The two endpoint overwrites had this
+  // backwards (raw[0] forced to the village pin, raw[last] to the settlement pin), which doesn't
+  // just mislabel the ends — it draws a path that leaves the village, jumps near the settlement,
+  // retraces the WHOLE real route backward almost to the village, then jumps to the settlement
+  // again. Measured on seed 31337/512px before fixing: median circuity 2.62x, 54/199 connectors
+  // self-intersecting, and the worst offender's own path cost — recomputed from the identical cost
+  // grid Dijkstra used — was 2.8x more expensive than the straight line despite near-flat terrain,
+  // proving it was never actually the shortest path. Fixed by swapping which end each overwrite
+  // targets; same measurement afterward: median circuity 1.12x, zero self-intersections.
+  R.v176 = await page.evaluate(() => {
+    state.places = []; civWays = [];
+    _civVillages = true; _civMetropolis = false;
+    _civAutoWorld();
+    const conn = civWays.filter(w => w.villageAddon);
+    const kmPerCell = (state.mapWidthKm || 800) / GW;
+
+    function segIntersect(p1, p2, p3, p4) {
+      const d1 = (p4[0]-p3[0])*(p1[1]-p3[1]) - (p4[1]-p3[1])*(p1[0]-p3[0]);
+      const d2 = (p4[0]-p3[0])*(p2[1]-p3[1]) - (p4[1]-p3[1])*(p2[0]-p3[0]);
+      const d3 = (p2[0]-p1[0])*(p3[1]-p1[1]) - (p2[1]-p1[1])*(p3[0]-p1[0]);
+      const d4 = (p2[0]-p1[0])*(p4[1]-p1[1]) - (p2[1]-p1[1])*(p4[0]-p1[0]);
+      return ((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0));
+    }
+    function selfIntersects(pts) {
+      for (let i = 1; i < pts.length; i++) for (let j = i+2; j < pts.length; j++) {
+        if (i === 0 && j === pts.length-1) continue;
+        if (segIntersect(pts[i-1], pts[i], pts[j-1], pts[j])) return true;
+      }
+      return false;
+    }
+
+    let maxCircuity = 0, selfXingCount = 0, checked = 0;
+    for (const w of conn) {
+      if (w.aIdx == null || w.bIdx == null) continue;
+      const a = state.places[w.aIdx], b = state.places[w.bIdx];
+      if (!a || !b) continue;
+      const straight = Math.hypot(a.x - b.x, a.y - b.y) * kmPerCell;
+      if (straight > 0.01) { checked++; const c = w.km / straight; if (c > maxCircuity) maxCircuity = c; }
+      if (selfIntersects(w.pts)) selfXingCount++;
+    }
+
+    state.places = []; civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+
+    return { connectorCount: conn.length, checked, maxCircuity, selfXingCount };
+  });
   // v1.72 bug-hunt: three defects in the v1.71 village-connector layer, each measured before fixing.
   // A: the way serialization whitelist dropped `villageAddon`, so a save→reload turned every deep-zoom
   //    connector back into an ordinary 'ancient' way visible from zoom 0.7 while its village stayed
@@ -6499,6 +6550,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
   A('v1.75: _civAutoRoutes builds trunk-road ways, and at least one land way with aIdx/bIdx set is produced (the scenario is meaningful)', R.v175.landWaysChecked > 0);
   A('v1.75: every land way\'s aIdx/bIdx resolves to a real, non-addon settlement in state.places — not a POI inserted ahead of the settlements in the array (the settles-vs-state.places index-base divergence flagged in v1.72\'s HANDOFF entry)', R.v175.allResolveToRealSettlements);
+
+  A('v1.76: village connectors exist and were checked (the scenario is meaningful)', R.v176.connectorCount > 0 && R.v176.checked > 0);
+  A('v1.76: no village connector loops — path length stays within a sane multiple of the straight-line distance between its own endpoints (was 3.35x pre-fix, generous slack above the measured 1.86x post-fix)', R.v176.maxCircuity < 2.2);
+  A('v1.76: no village connector self-intersects (was 54/199 pre-fix — the endpoint-overwrite bug that "jump near destination, retrace the route backward, jump to destination again")', R.v176.selfXingCount === 0);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
