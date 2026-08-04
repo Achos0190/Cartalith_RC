@@ -721,6 +721,21 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (typeof renderNow === 'function') renderNow();
     return o;
   });
+  // v1.73 (bug hunt): v1.28 added trait-badge clearance to the label DRAW path but not to v1.12's
+  // label-collision RESERVATION, so a 'below' label on a trait-bearing settlement painted outside
+  // the box it reserved. _civTraitDrop is now the single definition both sides read.
+  R.v173 = await page.evaluate(() => {
+    const sz = 8, sc = 1.5;
+    const bare = { name: 'X', traits: [] };
+    const withT = { name: 'X', traits: ['port'] };
+    const expected = Math.max(2.2, sz * 0.42) * 2 + 1.2 * sc;   // the literal v1.28 draw formula
+    return {
+      zeroWithoutTraits: _civTraitDrop(bare, sz, sc) === 0 && _civTraitDrop(null, sz, sc) === 0,
+      positiveWithTraits: _civTraitDrop(withT, sz, sc) > 0,
+      matchesDrawnFormula: Math.abs(_civTraitDrop(withT, sz, sc) - expected) < 1e-9,
+      scalesWithSize: _civTraitDrop(withT, 20, sc) > _civTraitDrop(withT, 4, sc),
+    };
+  });
   // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
   //        populate, confirm the readout shows a number, then restore clean civ state.
   R.popAuto = await page.evaluate(() => {
@@ -5778,6 +5793,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.72 BUG-B: Generate Roads does not rebuild the trunk network over addon villages', R.v172.B_noTrunkWayTouchesAVillage);
   A('v1.72 BUG-C: the way list is no longer flooded by auto connectors', R.v172.C_listNotFlooded && R.v172.C_connectorCount > 0);
   A('v1.72 BUG-C: connectors live in a collapsed disclosure and stay fully reachable', R.v172.C_disclosureExists && R.v172.C_disclosureStartsClosed && R.v172.C_connectorsStillReachable);
+
+  A('v1.73: _civTraitDrop returns 0 for a trait-less place and a positive clearance for a trait-bearing one', R.v173.zeroWithoutTraits && R.v173.positiveWithTraits);
+  A('v1.73: the clearance the label-collision pass reserves is the SAME number _civDrawSettlementPin draws at (one definition, no drift)', R.v173.matchesDrawnFormula);
+  A('v1.73: the drop scales with pin size, so it stays correct at every zoom', R.v173.scalesWithSize);
   A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
   A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
   A('v0.82 recovery: a city collapses into a fortified ruin under Survival + tier-from-population is sane', R.recovery && R.recovery.demoted && R.recovery.tierFn);

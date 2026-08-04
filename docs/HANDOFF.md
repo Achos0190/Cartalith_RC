@@ -9,11 +9,23 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.72.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.73.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
   (v1.73 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.71` are kept and never edited.
+- **v1.73 — label collision reserved one box and drew in another.** Bug-hunt continuation past
+  the village layer. v1.28 added trait-badge clearance to the label DRAW path
+  (`_civDrawSettlementPin` pushes a 'below' label clear of the badges) but not to v1.12's
+  label-collision RESERVATION, so such a label painted outside its own reserved box and through a
+  neighbour's. `_civTraitDrop()` is now the single definition both sides read; only the 'below'
+  candidate moves and it returns 0 for a trait-less place, so everything else reserves exactly what
+  it did before. Measured: one real overlap at deep zoom on the reference world, gone after the fix.
+  1016 green; hash ALL IDENTICAL; +3 smoke assertions.
+  - Ruled out during the same hunt (don't re-chase): the label WIDTH heuristic is conservative
+    (never under-reserved across 35 labels, worst ratio 0.935); `jn.stops` is dropped on save but
+    nothing reads it back; `_civBakeKey` omits civ state deliberately (separate overlay canvas);
+    v1.71's connectors do render at their reveal zoom (14,840 px across 199).
 - **v1.72 — bug hunt: three v1.71 village-connector defects, all one missing tag.** A
   deliberate hunt over the v1.68–v1.71 village layer, each defect measured on a real world
   before fixing. Civ-layer only. 1016 / 852 green; hash ALL IDENTICAL; smoke green (+7 new).
@@ -2255,6 +2267,8 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **v1.73 shipped**: label-collision draw/reserve mismatch (trait-badge clearance) unified behind
+  `_civTraitDrop()`. See CHANGELOG for the four leads investigated and ruled out in the same pass.
 - **v1.72 shipped**: bug-hunt pass fixing three v1.71 connector defects (save/load flag loss,
   Generate Roads destroying + re-creating connectors as trunk roads, way-list flooding). See
   CHANGELOG. **Open follow-up left by that pass**: the `aIdx`/`bIdx` index-base divergence between

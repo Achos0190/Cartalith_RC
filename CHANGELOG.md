@@ -12,6 +12,36 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.73 — Label collision reserved one box and drew in another (trait-badge clearance)
+
+Continuation of the v1.72 bug hunt, widening past the village layer into the label renderer. Found by
+reading the two halves of the label pipeline against each other, then confirmed by measurement.
+Civ-layer only. Hash vs v1.72 **ALL IDENTICAL** (the civ overlay is a separate canvas; the hash
+battery's scenarios have no placed settlements).
+
+- **v1.28 added trait-badge clearance to the label DRAW path but never to v1.12's label-collision
+  RESERVATION.** `_civDrawSettlementPin` pushes a `'below'` label down by `traitDrop` so it clears
+  the trait badges under the pin; `drawCivLayer`'s candidate loop reserved the *undropped* box. So a
+  below-placed label on a trait-bearing settlement painted up to `traitDrop` px outside the box it
+  had claimed — straight through space a neighbouring label had legitimately reserved. Measured on
+  the reference world (seed 31337): one such collision at deep zoom, and re-running the same
+  placement with the corrected box eliminates it.
+- **Fix: `_civTraitDrop(place,sz,sc)` is now the single definition**, read by the drawer (which paints
+  at that offset) and by the collision pass (which reserves it). Only the `'below'` candidate moves,
+  and it returns 0 for a trait-less place — so every other candidate, every trait-less settlement and
+  every POI reserves byte-for-byte the box it did before. The umpteenth instance of this file's own
+  "two functions answering one question WILL drift" rule, this time across a *draw/reserve* pair
+  rather than two computations.
+- **Tests**: 3 new smoke assertions on `_civTraitDrop` (zero without traits, positive with, matches
+  v1.28's literal draw formula to the bit, scales with pin size so it stays correct at every zoom).
+- **Investigated and ruled out, not shipped as findings** (recorded so a later pass doesn't re-chase
+  them): the label *width* reservation is a character-count heuristic (`name.length*fsz*0.62`) rather
+  than `measureText`, but measured **conservative on all 35 labels** (worst real/estimated ratio
+  0.935 — it never under-reserves), so it is not a defect; `jn.stops` is dropped by the journey
+  serialization whitelist but line 18939 already documents that nothing reads it back; `_civBakeKey`
+  omits civ state by design because the civ layer is a separate overlay canvas; and the v1.71
+  connectors, though faint, do render at their reveal zoom (measured 14,840 px across 199).
+
 ### v1.72 — Three v1.71 village-connector defects found by bug hunt (roads to invisible settlements)
 
 A deliberate bug-hunt pass over the v1.68–v1.71 village layer. All three defects were **measured on a

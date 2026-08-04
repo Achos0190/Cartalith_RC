@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.72**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.73**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.72.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.71.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.73.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.72.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,22 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Label collision: reserved one box, drew in another (v1.73)
+
+Bug-hunt continuation past the village layer. **`_civTraitDrop()` is the single definition of the
+trait-badge clearance under a pin — the label DRAWER and the label-COLLISION pass must both read it.**
+v1.28 added the drop to `_civDrawSettlementPin` (so a 'below' label clears the badges) but not to
+v1.12's candidate-box reservation in `drawCivLayer`, so such a label painted outside its own reserved
+box and through a neighbour's. Only the 'below' candidate moves; the helper returns 0 for a
+trait-less place, so everything else reserves exactly what it did before. Measured: one real overlap
+at deep zoom on the reference world, gone after the fix. A draw/reserve pair is just another way for
+"two functions answering one question" to drift.
+
+Ruled out during the same hunt (don't re-chase): the label WIDTH heuristic
+(`name.length*fsz*0.62`) is conservative — measured never under-reserving across 35 labels (worst
+ratio 0.935); `jn.stops` is dropped on save but nothing reads it back (documented at its own site);
+`_civBakeKey` omits civ state deliberately (separate overlay canvas).
 
 ### Bug hunt: three v1.71 connector defects, all one missing tag (v1.72)
 
