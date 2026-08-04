@@ -736,6 +736,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       scalesWithSize: _civTraitDrop(withT, 20, sc) > _civTraitDrop(withT, 4, sc),
     };
   });
+  /* v1.74 — LOD zoom freeze. Three claims, each asserted on the mechanism the owner actually feels:
+     (1) a colorized tile is a STATIC image, so nothing that leaves _lodRenderKey unchanged may cause a
+         re-colorization — the cache must be big enough to hold the pixels of every tile whose heightmap
+         we are still holding;
+     (2) rapid camera input must coalesce to one composite per animation frame, not one per event;
+     (3) an interactive frame is budgeted (so it can never block for seconds) while a direct renderNow()
+         still composites the whole view in one go for non-interactive callers.
+     Runs entirely on the pure/queryable surface — the tile pixels themselves are canvas work, which this
+     file's own headless carve-out leaves to manual verification. */
+  R.v174 = await page.evaluate(async () => {
+    const prevTile = _lodTile, prevOn = _lodOn, prevZoom = _lodZoom;
+    // (1) cache sizing — budget by pixels so the cap tracks _lodTile instead of costing 16x more at 2048
+    _lodTile = 1024; const cap1024 = lodTileCanvasMax();
+    _lodTile = 2048; const cap2048 = lodTileCanvasMax();
+    _lodTile = 512; const cap512 = lodTileCanvasMax();
+    _lodTile = 65536; const capHuge = lodTileCanvasMax();   // absurd tile size must still leave a usable floor
+    _lodTile = prevTile;
+
+    // (2) coalescing: many requests inside one tick must produce exactly ONE composite
+    _lodOn = true;
+    let composites = 0, budgetsSeen = [];
+    const realDraw = window.drawLODView;
+    window.drawLODView = function () { composites++; budgetsSeen.push(_lodFrameBudget); return true; };
+    for (let i = 0; i < 25; i++) requestLodRender();
+    const pendingFlagSet = _lodRafPending === true;
+    const compositesBeforeFrame = composites;
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const compositesAfterOneFrame = composites;
+
+    // (3) an interactive frame carries a budget; a direct renderNow() does not
+    const interactiveBudget = budgetsSeen.length ? budgetsSeen[0] : null;
+    const clearedAfterFrame = _lodFrameBudget === null;
+    composites = 0; budgetsSeen = [];
+    renderNow();
+    const directBudget = budgetsSeen.length ? budgetsSeen[0] : 'no-composite';
+
+    window.drawLODView = realDraw;
+    _lodOn = prevOn; _lodZoom = prevZoom; _lodTile = prevTile;
+    return {
+      capAt1024MatchesDataCache: cap1024 === _lodCacheMax,
+      capTracksTileSize: cap2048 < cap1024 && cap512 > cap1024,
+      capHasFloor: capHuge >= 6,
+      // the static-image invariant, asserted on the key rather than on pixels: zoom/pan must not be in it
+      renderKeyIgnoresCamera: (() => { const a = _lodRenderKey(); _lodZoom = prevZoom * 4; _lodCx += 5; const b = _lodRenderKey(); _lodZoom = prevZoom; _lodCx -= 5; return a === b; })(),
+      renderKeyCoversVisualState: (() => {
+        const a = _lodRenderKey(); const s = state.seaLevel; state.seaLevel = s + 0.01;
+        const b = _lodRenderKey(); state.seaLevel = s; return a !== b;
+      })(),
+      coalescedNotImmediate: compositesBeforeFrame === 0 && pendingFlagSet,
+      exactlyOneCompositePerFrame: compositesAfterOneFrame === 1,
+      interactiveFrameIsBudgeted: typeof interactiveBudget === 'number' && interactiveBudget > 0,
+      budgetClearedAfterFrame: clearedAfterFrame,
+      directRenderNowUnbudgeted: directBudget === null,
+    };
+  });
   // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
   //        populate, confirm the readout shows a number, then restore clean civ state.
   R.popAuto = await page.evaluate(() => {
@@ -6400,6 +6455,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.67: the fix reuses the SAME v1.63 JP_LOAD_INVALID_RATIO constant, not a new separate threshold', R.v167.reusesSharedConstant);
   A('v1.67: a journey mixing a fine stage and the reported-bug stage blocks the WHOLE plan (blockedIdx precedent) with a capacity-naming message', R.v167.planBlocked && R.v167.planBlockedMsgNamesCapacity && R.v167.badStageIsTheBlockedOne);
   A('v1.67: plan.totalDays is nulled on a block, but the fine stage\'s own per-stage result is still a real computed number', R.v167.planTotalDaysNull && R.v167.fineStageStillComputedInPlan);
+
+  A('v1.74: the tile-canvas cache holds pixels for every tile whose heightmap we still hold (cap === _lodCacheMax at the default 1024 tile)', R.v174.capAt1024MatchesDataCache);
+  A('v1.74: the cap is a PIXEL budget, so it tracks _lodTile (2048 → fewer entries, 512 → more) instead of costing 16x more memory at 2048', R.v174.capTracksTileSize);
+  A('v1.74: an absurd _lodTile still leaves a usable floor rather than a zero-entry cache', R.v174.capHasFloor);
+  A('v1.74: _lodRenderKey deliberately excludes zoom/pan — a colorized tile is a static image across a whole zoom gesture', R.v174.renderKeyIgnoresCamera);
+  A('v1.74: _lodRenderKey does still change when something visual changes (sea level), so a real edit invalidates the pixels', R.v174.renderKeyCoversVisualState);
+  A('v1.74: requestLodRender() defers instead of compositing inline — 25 calls in one tick draw nothing yet', R.v174.coalescedNotImmediate);
+  A('v1.74: those 25 requests collapse to exactly ONE composite on the next frame (was one full composite per wheel event)', R.v174.exactlyOneCompositePerFrame);
+  A('v1.74: an interactive frame runs with a positive per-frame tile-colorization budget, and the budget is cleared again afterwards', R.v174.interactiveFrameIsBudgeted && R.v174.budgetClearedAfterFrame);
+  A('v1.74: a direct renderNow() (settle refine, generate, export grab, this harness) still composites unbudgeted — the whole view in one frame', R.v174.directRenderNowUnbudgeted);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.73**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.74**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.73.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.72.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.74.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.73.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,41 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### A colorized LOD tile is a static image; one composite per frame (v1.74)
+
+Owner: "repeated quick zoom in-out actions cause a browser to freeze and become unresponsive."
+Measured before fixing (real wheel events, populated 1024px world): worst rAF frame **13.2 s**, 35
+frames over 500 ms, `renderBiomeTileRGBA` 491 calls / 243 s. Two scheduling defects; nothing about
+WHAT is drawn changed. **Rule: a tile's pixels are a pure function of its heightmap and
+`_lodRenderKey` — the canvas key `z/col/row/tileSize/baked|rk` carries NO zoom or pan term, so the
+same tile at zoom 4 and zoom 8 is byte-identical. Any re-colorization is eviction, never
+invalidation.**
+
+- **The derived-pixel cache must not be smaller than the source-data cache it derives from.** We kept
+  48 tile heightmaps (`_lodCacheMax`) and 24 canvases, so zooming back onto a level whose data we
+  still held threw its pixels away: **364 misses / 2100 hits, pinned at the cap**, for ~30 distinct
+  tiles. The decisive measurement is the repeat pass — replaying the identical gesture with
+  `_lodRenderKey()` unchanged still ran **263 colorizations costing 135 s**; the correct count is
+  zero. `lodTileCanvasMax()` now budgets by **pixels** (`LOD_TILE_CANVAS_MAX_PX`), so the cap tracks
+  `_lodTile` (which the user can change, and at which a fixed entry count costs 16× more at 2048 than
+  at 512) and equals `_lodCacheMax` at the 1024 default.
+- **A high-frequency input handler must never composite inline.** Wheel/pinch/pan-drag/joystick/
+  sculpt-stroke each called `renderNow()` per event — 350 composites for 128 wheel ticks. `requestLodRender()`
+  coalesces to one per animation frame; the drawn frame is pixel-identical, and the yield between
+  frames is what turns "unresponsive" into "chuggy but interactive". **Resolve `renderNow` lazily
+  INSIDE the rAF callback** — blocks 1 and 2 both wrap and reassign it (v1.24), so capturing it drops
+  the civ layer.
+- **`_lodFrameBudget` (12 ms) is set ONLY around the rAF-driven render**, so `drawLODView`'s
+  per-frame colorization cap applies to interactive navigation only; a direct `renderNow()`
+  (`generate()`, an export grab, the harnesses, the two `withBusy()` refine buttons) still
+  composites the whole view. It always colorizes ≥1 tile so N tiles converge in N frames, and
+  requests a follow-up frame when it defers. The debounced settle refine IS budgeted — it hands the
+  compositor a full viewport of fresh un-colorized tiles, so unbudgeted it is the same stall merely
+  relocated to the moment the user stops scrolling.
+- **Ruled out by measurement, don't re-chase**: v0.93's stretch fast path works (streak peaked at 1
+  of 4); overview rebuilds were only 127 calls / 21.7 s of 243 s; `pyramidTile` ran **0 times** (not
+  tile generation); `sharedSeaFields()` is properly cached.
 
 ### Label collision: reserved one box, drew in another (v1.73)
 

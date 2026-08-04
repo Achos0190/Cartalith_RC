@@ -12,6 +12,85 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.74 — Tiled LOD: a colorized tile is a static image, and one composite per frame
+
+Owner: *"Keep hunting, particularly to smooth LOD tiling and detail rendering. repeated quick zoom
+in-out actions cause a browser to freeze and become unresponsive."* Reproduced with real
+`page.mouse.wheel` events on a populated 1024px world, then root-caused by instrumenting the actual
+call counts before writing any fix. Two independent defects, **both in scheduling — neither in what
+gets drawn**. Engine pipeline untouched; hash battery unaffected (LOD is opt-in, default off).
+
+**Baseline (v1.73, seed 31337 / 800km / 1024px, two identical 64-tick wheel gestures):** worst rAF
+frame **13,217 ms**, p99 8,880 ms, 35 frames over 500 ms; `drawLODView` 350 calls / 226,950 ms;
+`renderBiomeTileRGBA` 491 calls / 243,382 ms, split **364 full tiles at ~609 ms each** and 127
+overview rebuilds at ~171 ms. A 3-second gesture took **119 seconds** of wall time.
+
+- **Defect 1 — the colorized-tile cache was undersized against its own source data.** The canvas key
+  is `z/col/row/tileSize/baked|rk` and deliberately carries **no zoom or pan term**, so a tile's
+  pixels are a pure function of its heightmap and `_lodRenderKey` — the same tile at zoom 4 and zoom
+  8 is byte-identical. But the LRU kept 48 tile **heightmaps** (`_lodCacheMax`) and only 24 of their
+  derived **canvases** (`LOD_TILE_CANVAS_MAX=24`), so zooming back onto a pyramid level whose source
+  data we were *still holding* threw the pixels away and recomputed them identically. Measured **364
+  misses against 2100 hits with the cache pinned at 24 the entire time**, for a sweep touching ~30
+  distinct tiles — roughly 7 of every 8 colorizations were redundant, ≈222 s of the 243 s.
+  - The sharpest evidence is the repeat-gesture pass: replaying the *identical* gesture, with
+    `_lodRenderKey()` provably unchanged and every tile already colorized once, still ran **263 more
+    colorizations costing 135,364 ms**. The correct count there is zero.
+  - **Fix: `lodTileCanvasMax()` budgets by PIXELS, not entries** (`LOD_TILE_CANVAS_MAX_PX =
+    48 MPx`), so the cap tracks `_lodTile` — which the user can change, and at which a fixed entry
+    count costs 16× more memory at 2048 than at 512. At the default 1024 tile it yields exactly
+    `_lodCacheMax` entries, making the invariant explicit: **never evict a tile's pixels while we
+    still hold its heightmap.** 12 entries at 2048, 192 at 512, with a 6-entry floor so an absurd
+    tile size still leaves a usable cache.
+- **Defect 2 — every high-frequency camera input called `renderNow()` INLINE, once per event.** The
+  wheel handler, the pinch `touchmove`, the LOD pan `pointermove`, the v1.19 joystick loop and the
+  sculpt-stroke `pointermove` each composited synchronously per event. A composite is an overview
+  blit plus up to 9 tile colorizations plus the vector overlays, so once events arrived faster than a
+  composite finished they queued on the main thread and the page stopped answering anything —
+  **350 composites for 128 wheel ticks (2.7× over-render)** and a 13.2 s worst frame.
+  - **Fix: `requestLodRender()` coalesces to one composite per animation frame.** Strictly a
+    scheduling change — the frame that *is* drawn is pixel-identical; we simply stop drawing
+    intermediate frames nobody sees, and the browser regains a yield point between them (which is
+    what turns "unresponsive" into "chuggy but interactive"). `renderNow` is resolved lazily *inside*
+    the rAF callback because blocks 1 and 2 both wrap and reassign it (the v1.24 reassignment-wrapper
+    note) — capturing it would pin the unwrapped version and silently drop the civ layer.
+  - Also routed through it: `lodZoomStep` and the zoom-reset button. Neither is high-frequency, but a
+    doubling step lands on a whole new pyramid level where *every* tile is un-colorized — the worst
+    unbudgeted case.
+- **Per-frame colorization budget (`LOD_FRAME_BUDGET_MS = 12`), interactive path only.** Even with a
+  right-sized cache, the first visit to a pyramid level must colorize its tiles, and 9 × 609 ms in one
+  frame is still a multi-second block. `drawLODView` now stops colorizing once past the budget and
+  lets the overview show through — exactly what the loop already does one line earlier for a tile
+  whose *height data* isn't ready. The file already treated tile data as async/pooled/debounced while
+  treating its colorization as mandatory-and-synchronous; that was an inconsistency, not a
+  requirement. It **always colorizes at least one** tile (N tiles ⇒ N frames, guaranteed progress) and
+  requests a follow-up frame whenever it skipped any.
+  - Gated on `_lodFrameBudget`, which is set **only** around the rAF-driven render. A direct
+    `renderNow()` — `generate()`, an export grab, the headless/smoke harnesses, and the two EXPLICIT
+    refine paths ("Refine detail" and the `lodChk` auto-sharpen, both under `withBusy()` with a
+    progress overlay) — still composites the whole view in one go, exactly as before.
+  - The **debounced settle** refine (`scheduleLodRefine`) does go through the budgeted path:
+    `refineVisibleTiles()` has just handed it a full viewport of brand-new, un-colorized tiles, so an
+    unbudgeted composite there is the same multi-second stall merely relocated to the moment the user
+    stops scrolling. Budgeted, the sharp tiles fade in over the next few frames instead.
+- **Confirmed NOT the cause, so don't re-chase it:** v0.93's stretch-the-overview fast path is
+  working correctly — `_lodOverviewStretchStreak` peaked at 1 against its cap of 4, so the
+  synchronous overview rebuild was never the streak-cap fallback, and overview rebuilds were only
+  127 calls at ~171 ms (21.7 s of 243 s). `pyramidTile` ran **0 times** during the gesture, so this
+  was never tile *generation*. `sharedSeaFields()` is properly cached on `_fieldGen` +
+  `sunAz|exag`. `refineVisibleTiles` returned in ~0 ms (async, correctly).
+- **Tests**: 9 new smoke assertions (`R.v174`) — the cache cap equals `_lodCacheMax` at the default
+  tile and tracks `_lodTile` in both directions with a floor; `_lodRenderKey` ignores zoom/pan but
+  still reacts to a real visual change (sea level); 25 `requestLodRender()` calls in one tick draw
+  nothing and then collapse to exactly one composite on the next frame; an interactive frame carries
+  a positive budget and clears it afterwards; a direct `renderNow()` is unbudgeted.
+- **Known scope cuts**: `LOD_TILE_CANVAS_MAX_PX = 48 MPx` and `LOD_FRAME_BUDGET_MS = 12` are reasoned
+  values confirmed against measurement, not independently tuned across devices; the ~609 ms cost of a
+  single 1024px `renderBiomeTileRGBA` is unchanged (this version stops running it redundantly and
+  stops running many of them in one frame — it does not make one cheaper); the v1.29-disclosed
+  per-tile seam residue is untouched. All of this is canvas/pointer behaviour under this file's own
+  headless carve-out and still wants an on-device pass.
+
 ### v1.73 — Label collision reserved one box and drew in another (trait-badge clearance)
 
 Continuation of the v1.72 bug hunt, widening past the village layer into the label renderer. Found by
