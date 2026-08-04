@@ -866,16 +866,23 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // v1.78: animated wind/current particle streaks (owner-requested PoC parity — "animated streaks").
   // #windFxCanvas is a self-contained overlay, own rAF loop, self-terminating on state.debug leaving
   // wind/ocean — started/stopped via the SAME #debugSeg click path a real user takes.
+  // v1.80 (owner: "no animation in the flow layers"): this block originally checked cv.style.display
+  // (the INLINE style) rather than the actual rendered/COMPUTED style — _windFxStart() cleared the
+  // inline style to '' expecting that to reveal the canvas, but the #windFxCanvas CSS rule itself sets
+  // display:none, so '' just falls back to the stylesheet and the canvas stayed invisible. `'' !==
+  // 'none'` was still true, so this exact assertion passed while the animation was genuinely broken —
+  // confirmed by real-screenshot frame-diffing (zero byte-diff across 5 frames) before fixing. Now
+  // reads getComputedStyle(cv).display, the only thing that actually reflects on-screen visibility.
   R.v178fx = await page.evaluate(async () => {
     const o = {};
     const cv = document.getElementById('windFxCanvas');
     o.canvasExists = !!cv;
-    o.hiddenByDefault = cv ? cv.style.display === 'none' : null;
+    o.hiddenByDefault = cv ? getComputedStyle(cv).display === 'none' : null;
     o.runningBeforeClick = _windFxRunning;
     document.querySelector('#debugSeg button[data-d="wind"]').click();
     await new Promise(r => setTimeout(r, 60));   // let the first rAF tick land
     o.runningOnWind = _windFxRunning;
-    o.visibleOnWind = cv.style.display !== 'none';
+    o.visibleOnWind = getComputedStyle(cv).display !== 'none';
     o.hasParticlesOnWind = _windFxParts.length > 0;
     document.querySelector('#debugSeg button[data-d="ocean"]').click();
     await new Promise(r => setTimeout(r, 60));
@@ -884,7 +891,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     document.querySelector('#debugSeg button[data-d="off"]').click();
     await new Promise(r => setTimeout(r, 60));
     o.stoppedOnOff = !_windFxRunning;
-    o.hiddenOnOff = cv.style.display === 'none';
+    o.hiddenOnOff = getComputedStyle(cv).display === 'none';
     return o;
   });
   // v1.72 bug-hunt: three defects in the v1.71 village-connector layer, each measured before fixing.

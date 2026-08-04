@@ -12,6 +12,36 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.80 — Wind/current streak animation never actually rendered (inline style vs. stylesheet)
+
+Owner: "No animation in the flow layers." Engine only (block 1, `_windFxStart`). Hash vs v1.79 ALL
+IDENTICAL — the bug lived entirely inside an interactive-only function never reached from
+`generate()`.
+
+- **Root cause, confirmed by real-screenshot frame-diffing before touching any code.** The v1.78
+  streak feature's `_windFxStart()` set `windFxCanvas.style.display=''` expecting that to reveal
+  the canvas — but the CSS rule `#windFxCanvas{...;display:none}` in the stylesheet ALREADY sets
+  `display:none`, and clearing an element's *inline* style to `''` does not override a stylesheet
+  rule, it just falls back to it. So the canvas box stayed 0×0 on screen every time, while the
+  particle loop underneath ran completely correctly (spawned particles, advected them, no errors)
+  — animating into an invisible element. Confirmed with a Playwright probe capturing 5 consecutive
+  animation-frame screenshots: zero byte-diff across all of them pre-fix (`windFxCanvas box:
+  {width:0, height:0, display:"none"}` even with `_windFxRunning:true`); after the fix, the same
+  probe shows a correctly-sized box and ~90-95k bytes of diff per frame pair (particles genuinely
+  moving), on both the Wind and Ocean views.
+- **Fix**: `windFxCanvas.style.display='block'` — an explicit value, the same idiom every other
+  CSS-default-hidden element in this file already uses to reveal itself (e.g. v0.67's
+  `view3d.style.display='block'`).
+- **The real test gap, not just the bug.** The v1.78 smoke assertion for this exact behaviour
+  checked `cv.style.display !== 'none'` — the INLINE style, which read `''` after the buggy code,
+  and `'' !== 'none'` is `true`, so the assertion passed while the animation was genuinely broken.
+  Rewritten to check `getComputedStyle(cv).display`, the only property that actually reflects
+  on-screen visibility — this is what should have caught the v1.78 bug and will catch a recurrence.
+- **Tests**: no new assertion count change — the existing `R.v178fx` block (4 assertions) was
+  corrected in place rather than duplicated, since it already covered exactly this behaviour and
+  simply asked the wrong DOM question.
+- **Known scope cuts**: none — a single, fully root-caused, fully verified display bug.
+
 ### v1.79 — Addon villages now cluster with nearby siblings (growing-forest connector rebuild)
 
 Owner, mid-session right after the v1.78 climate work was requested: "the roads from the deeper

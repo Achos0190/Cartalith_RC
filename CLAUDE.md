@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.79**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.80**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.79.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.78.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.80.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.79.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,19 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Wind/current streak animation never actually rendered (v1.80)
+
+Owner: "No animation in the flow layers." Confirmed via real-screenshot frame-diffing before
+touching code: `_windFxStart()` set `windFxCanvas.style.display=''` to reveal the canvas, but the
+CSS rule `#windFxCanvas{...;display:none}` already sets that — clearing an INLINE style to `''`
+falls back to the stylesheet, it doesn't override it, so the canvas box stayed 0×0 while the
+particle loop ran perfectly underneath (spawned/advected particles, zero errors) into an invisible
+element. Fix: explicit `display='block'`, the idiom every other CSS-default-hidden element here
+already uses (v0.67's `view3d.style.display='block'`). The v1.78 smoke assertion for this exact
+path checked `cv.style.display !== 'none'` — the inline value, `''`, which is `!== 'none'` and so
+passed despite the real bug; rewritten to `getComputedStyle(cv).display`, the only thing that
+reflects actual visibility. Hash vs v1.79 ALL IDENTICAL (interactive-only).
 
 ### Addon villages cluster with nearby siblings, not just the closest big settlement (v1.79)
 

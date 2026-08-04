@@ -9,11 +9,22 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.79.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.80.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.80 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.78` are kept and never edited.
+  (v1.81 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.79` are kept and never edited.
+- **v1.80 — the wind/current streak animation (v1.78) never actually rendered.** Owner: "No
+  animation in the flow layers." Root cause: `_windFxStart()` cleared the canvas's INLINE
+  `display` style to `''`, expecting that to reveal it — but the CSS stylesheet rule for
+  `#windFxCanvas` already sets `display:none`, and an empty inline value falls back to the
+  stylesheet rather than overriding it, so the canvas stayed 0×0 on screen while the particle
+  loop ran perfectly (and invisibly) underneath. Confirmed via real-screenshot frame-diffing
+  (zero byte-diff across 5 animation frames pre-fix; ~90-95k bytes of diff per frame pair after).
+  Fixed with an explicit `display='block'`. The v1.78 smoke assertion for this exact path checked
+  the wrong DOM property (`cv.style.display`, not `getComputedStyle(cv).display`) and so passed
+  despite the real bug — corrected in place. Hash vs v1.79 ALL IDENTICAL. See CHANGELOG for the
+  full writeup.
 - **v1.79 — addon villages now cluster with nearby siblings instead of each one individually
   beelining to the closest big settlement.** Owner, mid-session: *"the roads from the deeper
   settlement layers dont connect to their nearest siblings and individually connect to the
@@ -2447,6 +2458,38 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, in progress: Journey Planner water range has zero elasticity past a hard ceiling.**
+  Owner: "any journey is only factually limited by the longest distance one is able to traverse
+  with the resources they can carry... the range can be extended by varying degrees of foraging...
+  we already have fauna information and therefore a good idea about how foraging could extend a
+  route/travel distance." Measured (not assumed) before designing anything:
+  `probe_jp_impossible.js`/`probe_jp_impossible2.js` sampled real routes over two generated worlds
+  and found broad block rates dominated by legitimate terrain-legality (wheels on swamp) and one
+  preset-tuning issue (Foot traveller's cargo exceeds its own rated capacity every stage,
+  independent of terrain — a separate small bug worth a follow-up fix), NOT water — genuine
+  water-driven blocks were rare in that broad sample. But a TARGETED synthetic sweep
+  (`probe_jp_drygap.js`, a well-provisioned 10-camel caravan) found the real cliff the owner is
+  describing: past ~150-200km of waterless desert, `jpAssessResupply`'s hard block fires with zero
+  elasticity — 269%/387%/506% over capacity at 200/300/400km, "no party departs in this state,"
+  binary. `jpForaging()` already exists and already reduces FOOD need (`forage.reduction`, used in
+  `jpCalcLand`'s convergence loop) — but nothing analogous touches WATER at all, and the existing
+  `JP_BIOMES[key].forage` is a flat per-biome-category constant, not the real per-region wildlife
+  data `currentWildlife()` already computes (species richness/biomass via a real NPP → trophic-
+  cascade model) — exactly what the owner is pointing at. Design direction: (1) a water-foraging
+  term mirroring the existing food term but much smaller and steeply biome-dependent (dew traps in
+  true desert barely help, as the owner's own example says), (2) route the FOOD term through real
+  `currentWildlife()` regional richness instead of only the flat table, (3) keep
+  `JP_LOAD_INVALID_RATIO` itself as the genuine "impossible" ceiling — the fix is giving a
+  well-provisioned, biome-appropriate party a legitimate way to not hit it, not loosening the
+  ceiling. Two open forks (UI surface, wildlife-informed scope) — deferred to a design check-in
+  with the owner before building. See CHANGELOG "known scope cuts" discipline — do not skip the
+  measurement step already done here if picking this back up.
+- **v1.80 shipped**: the v1.78 wind/current streak animation never actually rendered — a CSS
+  `display:none` stylesheet rule silently defeated the `style.display=''` reveal, so the particle
+  loop ran perfectly into an invisible 0×0 canvas. Fixed with an explicit `display='block'`; the
+  v1.78 smoke assertion that should have caught this checked the wrong DOM property (inline style,
+  not computed) and was corrected too. Hash vs v1.79 ALL IDENTICAL. See CHANGELOG for the full
+  writeup, including the frame-diffing verification technique.
 - **v1.79 shipped**: addon-village connectors now grow as a batched Prim-style forest (settlements
   ∪ already-joined villages), so a village can attach to a nearby sibling instead of always
   beelining to the closest big settlement. Measured before and after (mean connector 21.8→14.5 km,
