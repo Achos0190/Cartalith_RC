@@ -9,11 +9,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.74.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.75.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.75 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.73` are kept and never edited.
+  (v1.76 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.74` are kept and never edited.
+- **v1.75 — `_civAutoRoutes` stamped way indices from two different arrays.** The HANDOFF-flagged
+  latent defect left open by the v1.72 pass: `_civAutoRoutes`'s trunk-road ways carried
+  `aIdx`/`bIdx` positions into its own filtered `settles` array while its village-connector ways
+  (same call, `_civConnectVillageAddons`) carried positions into full `state.places` — two bases in
+  one `civWays` list. Confirmed latent (the sole reader, `_civNetworkMetrics`, never consumes this
+  particular output) but a real trap for any future/test reader. Fixed with a four-line remap
+  (`settles.map(p=>state.places.indexOf(p))`) applied to the trunk ways right after they're built.
+  Civ-layer only; hash ALL IDENTICAL; +2 smoke assertions using a deliberately-inserted POI to force
+  the two index bases to collide and prove the remap (not just the absence of a crash). See
+  CHANGELOG for the full writeup.
 - **v1.74 — Tiled LOD zoom freeze: a colorized tile is a static image, and one composite per
   frame.** Owner: *"repeated quick zoom in-out actions cause a browser to freeze and become
   unresponsive."* Reproduced with real wheel events and root-caused by instrumenting call counts
@@ -2332,6 +2342,9 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
     started. When picked up, root-cause/measure current `buildWind()`/`applyOceanCurrents()`
     behaviour before writing any new solver code, per this file's own working-rules discipline, and
     confirm the wrap-aware design with a probe before committing to it.
+- **v1.75 shipped**: `_civAutoRoutes` aIdx/bIdx index-base divergence (the v1.72 HANDOFF follow-up)
+  fixed — trunk-road ways now remap their `settles`-local indices to `state.places` positions before
+  joining the village-connector ways in `civWays`. See CHANGELOG for the full writeup.
 - **v1.74 shipped**: Tiled LOD zoom freeze — a colorized tile is a static image, one composite per
   frame. Owner: "repeated quick zoom in-out actions cause a browser to freeze and become
   unresponsive." Three scheduling defects (undersized/mis-measured tile-canvas cache, every camera
@@ -2343,10 +2356,8 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   `_civTraitDrop()`. See CHANGELOG for the four leads investigated and ruled out in the same pass.
 - **v1.72 shipped**: bug-hunt pass fixing three v1.71 connector defects (save/load flag loss,
   Generate Roads destroying + re-creating connectors as trunk roads, way-list flooding). See
-  CHANGELOG. **Open follow-up left by that pass**: the `aIdx`/`bIdx` index-base divergence between
-  `_civAutoRoutes` (filtered `settles`) and `_civIterativeAutoWorld`/`_civConnectVillageAddons`
-  (full `state.places`) — latent today because `_civNetworkMetrics` is only ever called from the
-  latter path, but it should be unified before anything else starts reading those indices.
+  CHANGELOG. The `aIdx`/`bIdx` index-base divergence that pass flagged and left open was fixed in
+  v1.75, above.
 - **v1.71 shipped**: addon villages now get a low-tier 'ancient' way connecting each to its nearest
   real settlement, deep-zoom-gated together with the village (`_civConnectVillageAddons`). See
   CHANGELOG for the full writeup and the self-loop bug the first cut (connect to nearest ROAD

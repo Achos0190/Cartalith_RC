@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.74**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.75**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.74.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.73.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.75.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.74.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,36 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### `_civAutoRoutes` stamped way indices from two different arrays (v1.75)
+
+Bug-hunt pass per the active goal, closing a HANDOFF-flagged latent defect from the v1.72 pass:
+*"`_civAutoRoutes` builds way `aIdx`/`bIdx` against its filtered `settles` array while
+`_civIterativeAutoWorld`/`_civConnectVillageAddons` use full-`state.places` indices... Picking one
+canonical index base is a wider refactor than a fix pass should take on speculatively."* Civ-layer
+only. Hash vs v1.74 ALL IDENTICAL — pure index bookkeeping.
+
+- **`_civHierarchicalNetwork` stamps `aIdx`/`bIdx` as positions in whatever `places` array it's
+  called with.** `_civAutoRoutes` ("Generate Roads") calls it with `settles` (`state.places`
+  filtered to exclude POIs and `villageAddon` places, per v1.72 BUG-B) for the trunk MST, then calls
+  `_civConnectVillageAddons(state.places, …)` — correctly, since a village's own index only exists
+  there — for the connector ways. Both sets land in the same `civWays` list carrying indices from
+  two different bases.
+- **Confirmed latent, not live, before fixing.** `_civNetworkMetrics`, the sole `aIdx`/`bIdx`
+  reader, is only ever called from inside `_civIterativeAutoWorld` with its own internally-
+  consistent `places`/`ways` pair — never on `_civAutoRoutes`'s output. But a `settles`-local index
+  is frequently *also* a valid, *different* `state.places` index, so a future or naive
+  `state.places[w.aIdx]` reader gets a wrong-but-plausible place, not a crash — the same failure
+  shape v1.35/v1.72 already document surviving several versions unnoticed.
+- **Fix**: a four-line remap in `_civAutoRoutes`, right after `landWays` is built —
+  `settles.map(p=>state.places.indexOf(p))` (element identity is shared between the two arrays) —
+  applied to every land way's `aIdx`/`bIdx` before `_civPreferSeaRoutes` runs.
+  `_civConnectVillageAddons`'s own ways are untouched; they were already correct.
+- **Tests**: 2 new smoke assertions (`R.v175`), the second forcing the two index bases to collide —
+  a POI inserted ahead of the settlements in `state.places` — and confirming every land way's
+  `aIdx`/`bIdx` resolves to a real, non-addon settlement, not the inserted POI.
+- **Known scope cuts**: none — this is exactly the HANDOFF-described fix, no wider index-base
+  unification attempted.
 
 ### A colorized LOD tile is a static image; one composite per frame (v1.74)
 

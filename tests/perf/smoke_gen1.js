@@ -793,6 +793,34 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       directRenderNowUnbudgeted: directBudget === null,
     };
   });
+  // v1.75 (bug hunt, HANDOFF-flagged latent issue from v1.72): _civHierarchicalNetwork stamps a
+  // way's aIdx/bIdx as positions in whatever `places` array it was called with; _civAutoRoutes
+  // called it with the settles-FILTERED array while _civConnectVillageAddons (same function, a
+  // few lines later) uses the FULL state.places array — two index bases landing in one civWays
+  // list. Force a genuine divergence rather than hope for one: insert POIs AHEAD of the real
+  // settlements in state.places, so a settles-local index misread as a state.places index
+  // deterministically resolves to a POI (kind not in CIV_SETTLE_KEYS) instead of silently landing
+  // on some other settlement that would make the bug invisible.
+  R.v175 = await page.evaluate(() => {
+    state.places = []; civWays = [];
+    _civVillages = false;
+    _civAutoWorld();
+    const realSettlementCount = state.places.length;
+    const pois = [0, 1, 2, 3, 4].map(i => ({ kind: 'landmark', name: 'POI' + i, x: 5 + i, y: 5 + i, traits: [] }));
+    state.places = [...pois, ...state.places];
+    _civAutoRoutes();
+    const landWays = civWays.filter(w => !w.sea && w.aIdx != null && w.bIdx != null);
+    const allResolveToRealSettlements = landWays.length > 0 && landWays.every(w => {
+      const a = state.places[w.aIdx], b = state.places[w.bIdx];
+      return a && b && CIV_SETTLE_KEYS.has(a.kind) && CIV_SETTLE_KEYS.has(b.kind) && !a.villageAddon && !b.villageAddon;
+    });
+    const out = { landWaysChecked: landWays.length, allResolveToRealSettlements, poisCount: pois.length, realSettlementCount };
+    state.places = []; civWays = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+    return out;
+  });
   // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
   //        populate, confirm the readout shows a number, then restore clean civ state.
   R.popAuto = await page.evaluate(() => {
@@ -6468,6 +6496,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.74: those 25 requests collapse to exactly ONE composite on the next frame (was one full composite per wheel event)', R.v174.exactlyOneCompositePerFrame);
   A('v1.74: an interactive frame runs with a positive per-frame tile-colorization budget, and the budget is cleared again afterwards', R.v174.interactiveFrameIsBudgeted && R.v174.budgetClearedAfterFrame);
   A('v1.74: a direct renderNow() (settle refine, generate, export grab, this harness) still composites unbudgeted — the whole view in one frame', R.v174.directRenderNowUnbudgeted);
+
+  A('v1.75: _civAutoRoutes builds trunk-road ways, and at least one land way with aIdx/bIdx set is produced (the scenario is meaningful)', R.v175.landWaysChecked > 0);
+  A('v1.75: every land way\'s aIdx/bIdx resolves to a real, non-addon settlement in state.places — not a POI inserted ahead of the settlements in the array (the settles-vs-state.places index-base divergence flagged in v1.72\'s HANDOFF entry)', R.v175.allResolveToRealSettlements);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -12,6 +12,47 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.75 — `_civAutoRoutes` stamped way indices from two different arrays
+
+HANDOFF-flagged latent defect from the v1.72 bug hunt: *"`_civAutoRoutes` builds way `aIdx`/`bIdx`
+against its filtered `settles` array while `_civIterativeAutoWorld`/`_civConnectVillageAddons` use
+full-`state.places` indices. Divergent when a POI exists... Picking one canonical index base is a
+wider refactor than a fix pass should take on speculatively."* Bug-hunt pass per the active goal;
+civ-layer only. Hash battery vs v1.74 **ALL IDENTICAL** — pure index bookkeeping, no placement,
+routing, or rendering logic changed.
+
+- **Root cause**: `_civAutoRoutes` ("Generate Roads") builds `settles` — `state.places` filtered to
+  exclude POIs and `villageAddon` places (v1.72 BUG-B's own fix) — and calls
+  `_civHierarchicalNetwork(settles, …)` for the trunk MST. `_civHierarchicalNetwork` stamps every
+  way's `aIdx`/`bIdx` as **positions in whatever `places` array it was called with** — here,
+  `settles`. A few lines later, the same function calls `_civConnectVillageAddons(state.places, …)`
+  for the village-connector ways, correctly using `state.places` (a village's own index only exists
+  there). Both sets of ways land in the same `civWays` list carrying indices from two different
+  bases — the exact "two functions/copies answering one question WILL drift" shape this file has
+  hit repeatedly (v1.30/v1.33/v1.35/v1.37/v1.46/v1.53/v1.56/v1.60/v1.64…).
+- **Confirmed latent, not live, before fixing.** `_civNetworkMetrics` — the sole reader of
+  `aIdx`/`bIdx` — is only ever called from inside `_civIterativeAutoWorld` with its own
+  internally-consistent `places`/`ways` pair, never on `_civAutoRoutes`'s output, so nothing
+  misreads it today. But a `settles`-local index is frequently *also* a valid, *different*
+  `state.places` index (whenever a POI or addon village sits earlier in `state.places` than the
+  settlement a way's endpoint names), so a future reader — or a naive `state.places[w.aIdx]`
+  lookup — gets a wrong-but-plausible-looking place, not a crash. Exactly the shape that survives
+  several versions unnoticed, per this file's own v1.35/v1.72 precedent for that failure mode.
+- **Fix**: a four-line remap in `_civAutoRoutes`, right after `landWays` is built and before
+  `_civPreferSeaRoutes` runs — `settles.map(p=>state.places.indexOf(p))` builds the position map
+  (element identity is shared between the two arrays, so `indexOf` finds the true global position),
+  then every land way's `aIdx`/`bIdx` is remapped through it. `_civConnectVillageAddons`'s ways are
+  untouched — they were already correct.
+- **Tests**: 2 new smoke assertions (`R.v175`) — real `_civAutoRoutes()` run confirms it produces at
+  least one land way with `aIdx`/`bIdx` set (the scenario is meaningful), then a deterministic
+  reproduction: a POI inserted ahead of the settlements in `state.places` (so a `settles`-local
+  index and the POI's own `state.places` index collide) confirms every land way's `aIdx`/`bIdx`
+  resolves to a real, non-addon settlement — not the inserted POI — proving the remap and not just
+  the absence of a crash.
+- **Known scope cuts**: none — this is exactly the fix HANDOFF described, no wider index-base
+  unification attempted (the HANDOFF entry's own "wider refactor" caveat still stands for
+  `_civIterativeAutoWorld`'s internal consistency, which was never broken).
+
 ### v1.74 — Tiled LOD: a colorized tile is a static image, and one composite per frame
 
 Owner: *"Keep hunting, particularly to smooth LOD tiling and detail rendering. repeated quick zoom
