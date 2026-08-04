@@ -9,11 +9,56 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.76.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.77.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.77 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.75` are kept and never edited.
+  (v1.78 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.76` are kept and never edited.
+- **v1.77 — terrain-coupled wind & ocean currents, ported from the owner's PoC.** Owner: *"let's
+  do the climate engine port"* — the go-ahead for work scoped in a prior session (via
+  `AskUserQuestion`) to wind/current terrain-coupling + gyre/western-intensification, deferring the
+  PoC's fuller moisture/cloud/snowpack/seasonal-ITCZ system, with two binding constraints: the world
+  wrap must stay correct, and the new mechanic must genuinely feed rain/climate, not sit decoratively
+  beside it. Opt-in (`state.climate.terrainWind`, default `false`) — bit-identical at defaults.
+  - **Root cause, confirmed by reading the code before porting anything**: `buildWind` had zero
+    direct terrain-blocking mechanism — wind blew straight through mountains, only reacting to
+    temperature (itself only indirectly elevation-aware via lapse rate). `oceanSSTAnomaly` derived
+    its sign/magnitude by reading `buildWind`'s own meridional component `wy` directly as a proxy
+    for ocean current — no Ekman rotation, no distinct 2D current field, no gyre structure. Both gaps
+    match exactly what the PoC's own method notes describe as missing from a naive wind-only model.
+  - **New pure primitives**: `deflectFlow(u0,v0,block0,WW,WH,wrapX,opts)` (generic terrain
+    deflection — damps the into-block flow component and redirects tangentially along the local
+    block contour, iterated with blending; gap/strait acceleration from the block field's Laplacian;
+    reuses the existing wrap-aware `blurCoarse` rather than re-implementing smoothing) and
+    `computeOceanCurrent(wx,wy,elevC,WW,WH,wrapX,sea,latOf,opts)` (Ekman-rotated current run through
+    the same `deflectFlow` against a hard coastline, plus shelf friction and a wrap-aware
+    western-intensification scan — the PoC's own version wasn't wrap-aware since its demo domain
+    never wraps, so this scan was rewritten using a two-pass priming technique for `westDist` and
+    modulo-indexed `eastDist`).
+  - **Wired into the real pipeline, not bolted beside it**: `buildWind` gained an optional `opts`
+    param — when `terrainWind` is on and elevation is supplied, it runs `deflectFlow` against a
+    land/mountain block field derived from real elevation, then blends the result back in damped by
+    height (so high peaks deflect more than gentle slopes). `oceanSSTAnomaly` and `simulateWeather`
+    (the actual rain-producing pass — semi-Lagrangian moisture advection along wind, orographic lift
+    from real height gradients) both now pass real elevation through, so a real `refreshClimate()`
+    pass measurably changes `rainField`/`tempField` when the toggle is on — not a debug-view-only
+    field.
+  - **Measured before shipping**: near-ridge deflection 3.7x the far-field effect (proves it's
+    localized to terrain, not a global reweighting); World-mode wrap seam diff exactly zero when the
+    test ridge is kept off the seam (the seam sitting AT a ridge peak legitimately splits flow —
+    that's not a wrap bug, and the first version of this test conflated the two before being
+    corrected); `rainField`/`tempField` mean deltas 0.040/0.268 through a real `refreshClimate()`
+    pass (proves the "must feed the simulation" constraint, not decorative).
+  - **A test-harness mistake caught before it became a false alarm**: an early probe pre-filled
+    `wx`/`wy` with a synthetic uniform wind and expected `buildWind` to preserve/build on it — but
+    `buildWind` always computes its own latitude-band base wind from scratch and overwrites whatever
+    was pre-filled, so the apparent "wind reversal" was just the physically-correct trade-wind
+    direction at that latitude, not a bug. Caught by diffing `buildWind`'s own off-vs-on output
+    directly instead of trusting a pre-filled input to survive.
+  - New UI checkbox "Terrain-coupled wind & currents" beside the existing "Ocean currents" toggle.
+    `currentWindField()`/`currentOceanField()` debug-view functions deliberately left unwired to the
+    new mechanism (disclosed scope cut). 1016 / 852 green; hash ALL IDENTICAL at defaults; +6 smoke
+    assertions. See CHANGELOG for the full writeup.
 - **v1.76 — village connectors: an unnecessary `.reverse()`, not a terrain problem.** Owner:
   *"how ways are done for the recently added Villages... it seems like a loopy bundle of spaghetti
   which is not how roads historically formed."* Root-caused by measurement, not inspection: median
@@ -2334,32 +2379,15 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **QUEUED (not started) — terrain-coupled wind/current engine, middle scope.** Owner supplied a
-  standalone PoC (`terrain_coupled_flow_poc_2.html`, uploaded, not in this repo) demonstrating a
-  terrain-deflection wind solver + Ekman-rotated ocean currents on a flat non-wrapping grid, and
-  asked for it ported into Cartalith. Full spec asked for a 12-stage GCM-lite (pressure-relaxation
-  solver, dynamic gyres, full moisture/cloud/snowpack cycle, seasonal ITCZ migration); presented
-  the owner three scope options via `AskUserQuestion` given the size and the risk to invariants 3/12
-  (coarse-grid CPU-only blur, synchronous `generate()`). **Owner picked the middle scope**: wind +
-  current terrain-coupling AND gyre/western-intensification behaviour, explicitly deferring the full
-  moisture/cloud/snowpack/seasonal system. Two owner constraints for whenever this is built, NOT
-  optional simplifications:
-  - **The world wraps in X (World mode, `state.world`).** The PoC's `deflect()` solver and its
-    Laplacian gap-acceleration term are unwrapped-grid math (`x>0?x-1:0` clamps at the edges, same
-    idiom the engine's OWN gradient/blur helpers use in Region mode) — every consumer of a
-    wrap-aware field in this file already branches on `wrapX`/`state.world` (`bilC`, `gaussBlur`,
-    `oceanSSTAnomaly`'s own `WW,WH,wrapX,step` signature). The ported solver needs the same
-    treatment or a World-mode wind/current field will show a seam at the antimeridian.
-  - **This must actually feed climate, not just render prettily.** `applyOceanCurrents()` already
-    writes SST anomaly into `tempField` and nudges `rainField` at the coast — the owner's own
-    phrasing ("this addition should inform the current simulation") means the deflected wind field
-    and the coupled currents must replace/refine `buildWind`'s INPUT to the existing moisture-
-    transport pass (`satCap`/the orographic rain code), not sit beside it as a separate decorative
-    layer the way the standalone PoC does.
-  - Sequencing: owner chose to **finish the active bug-hunt goal first** — this is queued, not
-    started. When picked up, root-cause/measure current `buildWind()`/`applyOceanCurrents()`
-    behaviour before writing any new solver code, per this file's own working-rules discipline, and
-    confirm the wrap-aware design with a probe before committing to it.
+- **v1.77 shipped**: terrain-coupled wind & ocean currents, ported from the owner's PoC
+  (`terrain_coupled_flow_poc_2.html`) at the previously-agreed middle scope (wind/current
+  terrain-coupling + gyre/western-intensification; full moisture/cloud/snowpack/seasonal-ITCZ system
+  still deferred). New `deflectFlow`/`computeOceanCurrent` primitives, wired into `buildWind`/
+  `oceanSSTAnomaly`/`simulateWeather` behind opt-in `state.climate.terrainWind` (default off — bit-
+  identical at defaults). Both owner constraints verified by measurement: World-mode wrap seam diff
+  exactly zero (wrap-aware), and a real `refreshClimate()` pass shows real `rainField`/`tempField`
+  deltas with the toggle on (genuinely feeds the simulation, not decorative). See CHANGELOG for the
+  full writeup, including a self-caught test-harness mistake during validation.
 - **v1.76 shipped**: village connector "spaghetti" root-caused to an unnecessary `.reverse()` in
   `_civConnectVillageAddons`, not a terrain/discount issue — median circuity 2.62x→1.12x, self-
   intersections 54→0. See CHANGELOG for the full writeup.

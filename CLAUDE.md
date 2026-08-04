@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.76**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.77**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.76.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.75.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.77.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.76.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,81 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Terrain-coupled wind & ocean currents, ported from the owner's PoC (v1.77)
+
+Owner: *"let's do the climate engine port."* The go-ahead for work scoped in a prior session (via
+`AskUserQuestion`) against an owner-supplied standalone PoC (`terrain_coupled_flow_poc_2.html`, not
+in this repo) demonstrating a terrain-deflection wind solver plus Ekman-rotated ocean currents on a
+flat, non-wrapping grid. Scoped to the **middle option**: wind/current terrain-coupling and
+gyre/western-intensification behaviour, explicitly deferring the PoC's fuller moisture/cloud/
+snowpack/seasonal-ITCZ system. Two binding owner constraints carried over from the scoping session:
+the world's X-wrap (`state.world`) must stay correct, and the new mechanic must genuinely feed
+rain/climate, not sit decoratively beside it ("this addition should inform the current
+simulation"). Opt-in (`state.climate.terrainWind`, default `false`) — bit-identical at defaults.
+1016 / 852 green; hash ALL IDENTICAL at defaults; +6 smoke assertions.
+
+- **Root cause, confirmed by reading the existing pipeline before porting anything.** `buildWind`
+  had no direct terrain-blocking mechanism at all — wind blew straight through mountains, reacting
+  only to temperature (itself only indirectly elevation-aware via lapse rate). `oceanSSTAnomaly`
+  derived its sign/magnitude by reading `buildWind`'s own meridional component `wy` directly, as if
+  it were an ocean current — no Ekman rotation, no distinct 2D current field, no gyre structure.
+  Both gaps are exactly what the PoC's own method notes describe as missing from a naive
+  wind-only model — the port target was real, not assumed.
+- **Two new pure primitives**, both placed just before `circulationCells()`/`buildWind`:
+  - **`deflectFlow(u0,v0,block0,WW,WH,wrapX,opts)`** — generic terrain deflection. Damps the
+    "into-block" component of flow and redirects it tangentially along the local block-field
+    contour, iterated with blending (0.7/0.3, matching the PoC); gap/strait acceleration comes from
+    the block field's own Laplacian (a pinch between two blocked cells speeds flow up, the real
+    venturi-like effect a strait produces). Reuses the file's existing wrap-aware `blurCoarse`
+    (which mutates its input in place) for both block-field presmoothing and per-iteration flow
+    blending, rather than re-implementing smoothing — inherits its wrap correctness for free.
+  - **`computeOceanCurrent(wx,wy,elevC,WW,WH,wrapX,sea,latOf,opts)`** — Ekman-rotated current (25°
+    rotation, hemisphere-sign-dependent) run through the SAME `deflectFlow` against a hard
+    coastline, plus continental-shelf friction and a western-intensification heuristic. **The PoC's
+    own western-intensification scan is not wrap-aware** — its demo domain never wraps, so it just
+    walks west/east from each cell. Rewritten here using a two-pass priming technique for `westDist`
+    plus modulo-indexed `eastDist` scanning, so a World-mode current field has no seam.
+- **Wired into the pipeline that actually produces rain, not bolted on beside it.** `buildWind`
+  gained an optional `opts` parameter: its early-return guard became a non-early-return so a new,
+  separate `terrainWind` block can still run even when the pressure-gradient term is off. When
+  `state.climate.terrainWind` is true and `opts.elev` is supplied, it builds a land/mountain block
+  field from real elevation, runs `deflectFlow` against it, then blends the deflected wind back in
+  damped by height (gentle slopes barely redirect wind; real peaks redirect it fully).
+  `oceanSSTAnomaly` and `simulateWeather` — the latter is the ACTUAL rain-producing pass
+  (semi-Lagrangian moisture advection along wind, orographic lift from real height gradients
+  upwind) — both now thread real elevation through to `buildWind`/`computeOceanCurrent` instead of
+  the old `wy`-as-current-proxy shortcut, so a real `refreshClimate()` pass with the toggle on
+  measurably changes `rainField`/`tempField`, not just a debug-view field.
+- **Measured before shipping, not assumed correct because it compiled.** Near-ridge deflection
+  measured 3.7x the far-field effect on the same synthetic ridge (proves the mechanism is
+  LOCALIZED to terrain, not a global reweighting — the same v1.30 "a term that isn't ~zero almost
+  everywhere is reweighting the whole map" check, applied here to a flow field instead of a
+  suitability score). World-mode wrap-seam diff measured exactly zero, with the test ridge kept off
+  the seam — the first version of this test placed the ridge AT the seam, where legitimate
+  flow-splitting at a ridge peak produced a nonzero diff that could have been misread as a wrap bug;
+  moving the ridge into the domain interior isolates the real question. A real `refreshClimate()`
+  pass measured mean `rainField`/`tempField` deltas of 0.040/0.268 between the toggle off and on —
+  proof the "must feed the simulation" constraint holds, not merely that the code path executes.
+- **A test-harness mistake, caught and disclosed rather than shipped as a false alarm.** An early
+  probe pre-filled `wx`/`wy` with a synthetic uniform wind before calling `buildWind`, expecting the
+  function to preserve/build on it. `buildWind` always computes its own latitude-band base wind from
+  scratch and OVERWRITES whatever was pre-filled — so the apparent "wind reversal" the probe first
+  measured was just the physically-correct trade-wind direction at that latitude (band 0 near the
+  equator carries `zx=-1`), not a defect in `deflectFlow`. Confirmed by testing `deflectFlow` in
+  total isolation (correct, small, localized deflection in both wrap and non-wrap modes) and by
+  diffing `buildWind`'s own off-vs-on output directly — the correct isolation technique when a
+  function is known to overwrite its own inputs.
+- **UI**: new "Terrain-coupled wind & currents" checkbox beside the existing "Ocean currents"
+  toggle, wired through `syncUI()` and a change listener mirroring the `currents` checkbox's own
+  `withBusy('updating climate…', …)` pattern. `loadZip` gained the matching compat-guard default.
+- **Known scope cuts, disclosed**: the PoC's fuller moisture/cloud/snowpack/seasonal-ITCZ-migration
+  system remains deferred, per the original scoping decision — this port is wind/current
+  terrain-coupling and gyre/western-intensification only. `currentWindField()`/`currentOceanField()`
+  (the existing debug-view functions) are deliberately left unwired to the new mechanism — they
+  still show the pre-existing fields, not the terrain-coupled ones. Far-field diffusion behaviour is
+  inherited unmodified from the PoC's own design. Western intensification is the PoC's own
+  heuristic scan, not a solved geostrophic model.
 
 ### Village connectors: an unnecessary `.reverse()`, not a terrain problem (v1.76)
 

@@ -667,17 +667,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return { defaultChecked, on, off };
   });
   // v1.76 (owner: village connectors read as "a loopy bundle of spaghetti, which is not how roads
-  // historically formed"): _civConnectVillageAddons walks the Dijkstra prev[] chain from a village
-  // to its nearest settlement, builds raw = [village,...,source], then .reverse()s it — leaving
-  // raw[0] as the SOURCE end and raw[last] as the VILLAGE end. The two endpoint overwrites had this
-  // backwards (raw[0] forced to the village pin, raw[last] to the settlement pin), which doesn't
-  // just mislabel the ends — it draws a path that leaves the village, jumps near the settlement,
-  // retraces the WHOLE real route backward almost to the village, then jumps to the settlement
-  // again. Measured on seed 31337/512px before fixing: median circuity 2.62x, 54/199 connectors
-  // self-intersecting, and the worst offender's own path cost — recomputed from the identical cost
-  // grid Dijkstra used — was 2.8x more expensive than the straight line despite near-flat terrain,
-  // proving it was never actually the shortest path. Fixed by swapping which end each overwrite
-  // targets; same measurement afterward: median circuity 1.12x, zero self-intersections.
+  // historically formed"): the Dijkstra prev[] walk already builds raw in VILLAGE→…→SOURCE order
+  // (cur starts at the village's own cell, pushed first; the settlement is necessarily pushed
+  // last) — matching aIdx(village)→bIdx(settlement). An unnecessary raw.reverse() flipped that to
+  // SOURCE-first/VILLAGE-last, then the endpoint overwrites corrupted the whole path (not just the
+  // labels): it left the village, jumped near the settlement, retraced the WHOLE real route
+  // backward almost to the village, then jumped to the settlement again. Measured on seed
+  // 31337/512px before fixing: median circuity 2.62x, 54/199 connectors self-intersecting, and the
+  // worst offender's own path cost — recomputed from the identical cost grid Dijkstra used — was
+  // 2.8x more expensive than the straight line despite near-flat terrain, proving it was never
+  // actually the shortest path. Fixed by deleting the reverse() (the two endpoint overwrites were
+  // already correct as written); measured afterward: median circuity 1.12x, zero self-intersections.
   R.v176 = await page.evaluate(() => {
     state.places = []; civWays = [];
     _civVillages = true; _civMetropolis = false;
@@ -716,6 +716,75 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (typeof renderNow === 'function') renderNow();
 
     return { connectorCount: conn.length, checked, maxCircuity, selfXingCount };
+  });
+  // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
+  // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
+  // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
+  // blocking (wind blew straight through mountains); oceanSSTAnomaly used the WIND's own y-
+  // component directly AS a "current" — no Ekman rotation, no distinct 2D current field, no gyre
+  // structure. deflectFlow (ported from the PoC's deflect()) steers a flow field away from a
+  // blocking scalar field; computeOceanCurrent Ekman-rotates the (possibly deflected) wind and
+  // deflects it again against a hard coastline + shelf friction + western-intensification. Both
+  // opt-in via state.climate.terrainWind (default false ⇒ bit-identical — proven at the file level
+  // by hash_gen1.js's default/geoid/waves/ao/icons battery, all ALL IDENTICAL).
+  R.v177 = await page.evaluate(() => {
+    const o = {};
+    const chk = document.getElementById('terrainWind');
+    o.checkboxExists = !!chk;
+    o.defaultUnchecked = chk ? !chk.checked : null;
+    o.stateDefaultFalse = state.climate.terrainWind === false;
+
+    // synthetic north-south ridge on a coarse working grid, isolated from pressK/decl so only the
+    // terrain-deflection term is being measured
+    const WW = 240, WH = 120, sea = state.seaLevel;
+    const elev = new Float32Array(WW * WH);
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const dx = Math.abs(x - WW / 2);
+      elev[y * WW + x] = sea + 0.05 + (dx < 12 ? (12 - dx) / 12 * 0.5 : 0);
+    }
+    const tc = new Float32Array(WW * WH); for (let i = 0; i < tc.length; i++) tc[i] = 10;
+    const savedWorld = state.world, savedPressK = state.climate.pressK;
+    state.world = true; state.climate.pressK = 0;
+
+    const wxOff = new Float32Array(WW * WH), wyOff = new Float32Array(WW * WH);
+    buildWind(wxOff, wyOff, WW, WH, 3.0, tc, 0, null);
+    state.climate.terrainWind = true;
+    const wxOn = new Float32Array(WW * WH), wyOn = new Float32Array(WW * WH);
+    buildWind(wxOn, wyOn, WW, WH, 3.0, tc, 0, { elev });
+    state.climate.terrainWind = false;
+    state.world = savedWorld; state.climate.pressK = savedPressK;
+
+    let nearRidgeDiff = 0, nearN = 0, farDiff = 0, farN = 0;
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const i = y * WW + x, d = Math.hypot(wxOn[i] - wxOff[i], wyOn[i] - wyOff[i]);
+      const dx = Math.abs(x - WW / 2);
+      if (dx < 15) { nearRidgeDiff += d; nearN++; } else if (dx > 60) { farDiff += d; farN++; }
+    }
+    o.nearRidgeMeanDiff = nearRidgeDiff / nearN;
+    o.farMeanDiff = farDiff / farN;
+
+    // world-wrap seam continuity: ridge kept away from the seam, so x=0/x=WW-1 sit in flat terrain
+    // and a wrap bug (vs. legitimate ridge-crest flow-splitting) would show up as a real discontinuity
+    let seamDiff = 0;
+    for (let y = 0; y < WH; y++) seamDiff += Math.hypot(wxOn[y*WW+0]-wxOn[y*WW+(WW-1)], wyOn[y*WW+0]-wyOn[y*WW+(WW-1)]);
+    o.seamMeanDiff = seamDiff / WH;
+
+    // must genuinely feed rain/temp, not sit decoratively beside them — compare a real refreshClimate() pass
+    state.climate.terrainWind = false; state.climate.currents = true;
+    refreshClimate();
+    const rainOffArr = rainField.slice(), tempOffArr = tempField.slice();
+    state.climate.terrainWind = true;
+    refreshClimate();
+    let rainDiff = 0, tempDiff = 0;
+    for (let i = 0; i < rainOffArr.length; i++) { rainDiff += Math.abs(rainField[i]-rainOffArr[i]); tempDiff += Math.abs(tempField[i]-tempOffArr[i]); }
+    o.meanRainDiff = rainDiff / rainOffArr.length;
+    o.meanTempDiff = tempDiff / tempOffArr.length;
+
+    // restore defaults
+    state.climate.terrainWind = false;
+    refreshClimate();
+
+    return o;
   });
   // v1.72 bug-hunt: three defects in the v1.71 village-connector layer, each measured before fixing.
   // A: the way serialization whitelist dropped `villageAddon`, so a save→reload turned every deep-zoom
@@ -6554,6 +6623,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.76: village connectors exist and were checked (the scenario is meaningful)', R.v176.connectorCount > 0 && R.v176.checked > 0);
   A('v1.76: no village connector loops — path length stays within a sane multiple of the straight-line distance between its own endpoints (was 3.35x pre-fix, generous slack above the measured 1.86x post-fix)', R.v176.maxCircuity < 2.2);
   A('v1.76: no village connector self-intersects (was 54/199 pre-fix — the endpoint-overwrite bug that "jump near destination, retrace the route backward, jump to destination again")', R.v176.selfXingCount === 0);
+
+  A('v1.77: the Terrain-coupled wind & currents checkbox exists and defaults unchecked', R.v177.checkboxExists && R.v177.defaultUnchecked === true);
+  A('v1.77: state.climate.terrainWind defaults to false', R.v177.stateDefaultFalse);
+  A('v1.77: terrain deflection is real and LOCALIZED — near-ridge effect measurably exceeds the far-field effect', R.v177.nearRidgeMeanDiff > R.v177.farMeanDiff * 1.5);
+  A('v1.77: World-mode wrap seam is continuous with terrainWind on (ridge kept away from the seam — a wrap bug would show as a real discontinuity, not legitimate ridge-crest flow-splitting)', R.v177.seamMeanDiff < 0.05);
+  A('v1.77: turning terrainWind on genuinely changes rainField through a real refreshClimate() pass — not a decorative debug-view-only field', R.v177.meanRainDiff > 0.001);
+  A('v1.77: turning terrainWind on genuinely changes tempField through a real refreshClimate() pass', R.v177.meanTempDiff > 0.001);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

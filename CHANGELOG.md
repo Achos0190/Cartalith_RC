@@ -12,6 +12,96 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.77 — Terrain-coupled wind & ocean currents (middle scope)
+
+Owner supplied a standalone PoC (`terrain_coupled_flow_poc_2.html`, not in this repo) demonstrating
+terrain-deflected wind and wind-derived ocean currents, and asked for it ported into `buildWind`/
+`applyOceanCurrents`. Scope narrowed via `AskUserQuestion` in a prior session: **middle scope** —
+wind/current terrain-coupling and gyre/western-intensification behaviour only, explicitly deferring
+the PoC's fuller moisture/cloud/snowpack/seasonal-ITCZ system — with two binding constraints: the
+World-mode horizontal wrap must never show a seam, and the result must genuinely feed
+`tempField`/`rainField`, not sit beside them as a decorative overlay. Queued behind the active
+bug-hunt goal (v1.75/v1.76 shipped first per the owner's own sequencing instruction), then picked up
+here. Engine only (script block 1). Opt-in via new `state.climate.terrainWind` (default **false**)
+⇒ hash vs v1.76 **ALL IDENTICAL** (default/geoid/waves/ao/icons all pass).
+
+- **Root-caused the CURRENT engine first, per this file's own working-rules discipline, before
+  writing any new solver code.** `buildWind` was purely latitude-band circulation plus a
+  temperature-driven pressure/Coriolis perturbation — genuinely elevation-aware only *indirectly*
+  (via lapse-rate-derived temperature), never by literally redirecting the wind vector around a
+  mountain. `oceanSSTAnomaly` (the function that has driven the "Ocean currents" checkbox, on by
+  default since v0.80) had no distinct current field at all — it read `buildWind`'s own meridional
+  wind component (`wy`) directly and called it a current, no Ekman rotation, no gyre structure, no
+  coastline deflection. This is exactly the "missing correlation" the source PoC's own method notes
+  flag — confirmed to genuinely exist in this codebase, not assumed.
+- **`deflectFlow(u,v,block,WW,WH,wrapX,opts)`** (new pure primitive) — ports the PoC's `deflect()`:
+  the component of flow pointing INTO a rising "blocking" field is reduced and redirected
+  tangentially along the block's local contour, iterated with light blending so deflection
+  propagates upstream of a ridge/coastline rather than only appearing on top of it (linearised
+  hill-flow theory, Jackson & Hunt 1975). Gap/strait acceleration comes from the block field's own
+  Laplacian — a cheap streamline-convergence proxy (Overland & Walter 1981 for gap winds; the same
+  continuity argument accelerates ocean straits). Reuses this file's own `blurCoarse` for both the
+  block-field presmoothing and the per-iteration flow blend — inherits its wrapX handling rather
+  than duplicating it, so the World-mode seam constraint is satisfied by construction, not by a
+  bolted-on special case.
+- **`computeOceanCurrent(wx,wy,elevC,WW,WH,wrapX,sea,latOf,opts)`** (new pure primitive) — a real 2D
+  current vector field: Ekman-rotates the (possibly terrain-deflected) wind ~25° right of wind in
+  the N hemisphere, left in the S (Ekman 1905), runs it through `deflectFlow` again against a HARD
+  coastline (impermeable, vs. wind's soft elevation ramp) plus continental-shelf friction (shallow
+  water damps flow), then a western-intensification heuristic (subtropical gyres pile up transport
+  on a basin's western edge — Sverdrup 1947 / Stommel 1948) via a wrap-aware west/east coast-
+  distance scan — disclosed as a distance-to-coast proxy, not a solved beta-plane model, per the
+  source PoC's own honest framing.
+- **`buildWind` gained an `opts` parameter** (`{elev}` — a coarse elevation array); when
+  `state.climate.terrainWind` is on AND a caller supplies `elev`, the finished wind vector is run
+  through `deflectFlow` against a land/mountain blocking field plus an elevation-band damping term
+  (thin high-altitude air slows near-surface flow). The early `return` that used to skip the rest of
+  the function when `pressK<=0` was converted to an `if` guard so the new terrain step still runs
+  even with pressure influence off — every pre-v1.77 call site omits `opts`, so this is a pure
+  addition, not a behavioural change to the existing pressure/Coriolis path.
+- **`oceanSSTAnomaly` now derives its anomaly from the REAL current's meridional component**
+  (`computeOceanCurrent`) instead of the wind's raw `wy`, when the flag is on — closing the
+  "missing correlation." `simulateWeather` (the actual rain-producing pass) threads its own
+  already-computed coarse elevation array (`eh`) straight into `buildWind`'s new `opts.elev`, so
+  wind genuinely bends around real terrain in the SAME pass that advects moisture and computes
+  orographic rain — not a second, decorative computation.
+- **Measured, not assumed, before shipping**: a synthetic north-south ridge (World mode, wrap on)
+  shows a real, LOCALIZED deflection signature — mean per-cell wind-vector change near the ridge
+  (dx<15 cells) is **3.7× the mean change far from it** (dx>60 cells), with the expected physical
+  direction (speed drops approaching the ridge, tangential component rises) — not a uniform,
+  domain-wide effect. A genuine `refreshClimate()` pass with the flag toggled shows non-trivial mean
+  `rainField`/`tempField` deltas (0.040 / 0.268 respectively, seed 12345/256px) — proving the second
+  binding constraint (feeds the simulation, not decorative). The World-mode seam (ridge kept away
+  from x=0/x=WW-1, so the seam sits in flat terrain) shows **zero** discontinuity — a real wrap bug
+  would show up there distinctly from the ridge's own legitimate flow-splitting at its crest, which
+  was deliberately excluded from this measurement to avoid conflating the two.
+- **One test-harness mistake caught before it became a false alarm**: an early probe pre-filled
+  `wx`/`wy` with a synthetic uniform wind and called `buildWind` expecting it to be preserved —
+  `buildWind` always computes its own latitude-band base from scratch, discarding any caller-
+  supplied input, so the probe's "wind reversed across the whole domain" reading was just the
+  correct equatorial trade-wind direction at that latitude, not a solver bug. Caught by directly
+  diffing `buildWind`'s own off-vs-on output (the correct isolation technique) before concluding
+  anything was wrong.
+- **UI**: new "Terrain-coupled wind & currents" checkbox next to "Ocean currents" in the Climate
+  panel, off by default, wired through the same `withBusy(...); refreshClimate(); render();`
+  pattern every other climate checkbox already uses. Only meaningful with Ocean currents also on.
+- **Tests**: 6 new smoke assertions (`R.v177`) — checkbox exists/defaults unchecked, state defaults
+  false, near-ridge deflection measurably exceeds far-field (the localization proof), World-mode
+  seam continuity, and non-trivial rain/temp deltas through a real `refreshClimate()` call (the
+  "feeds the simulation" proof).
+- **Known scope cuts** (disclosed, matching the owner-approved middle scope): the PoC's fuller
+  moisture/cloud/snowpack cycle and seasonal ITCZ migration were explicitly deferred, not
+  attempted. The debug-view-only functions `currentWindField`/`currentOceanField` (Wind/Ocean debug
+  overlays) are **not** wired to the new terrain-deflected path — they still show the pre-v1.77
+  latitude+SST-anomaly view even with the flag on; the real, load-bearing path
+  (`simulateWeather`/`oceanSSTAnomaly`, which actually produce `rainField`/`tempField`) is the one
+  that matters and is fully wired. The far-field diffusion characteristic (deflection reaches
+  measurably, if diminishingly, beyond the immediate terrain feature) is inherited from the source
+  PoC's own iteration/blur design — not independently re-tuned, since narrowing it further would be
+  redesigning the approved reference algorithm rather than porting it. The western-intensification
+  term is a distance-to-coast heuristic, not a solved beta-plane model, exactly as the source PoC
+  itself discloses.
+
 ### v1.76 — Village connectors: an unnecessary `.reverse()`, not a terrain problem
 
 Owner: *"let's check how ways are done for the recently added Villages (suitability-weighted,
