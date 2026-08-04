@@ -2306,6 +2306,39 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **QUEUED (not started) — terrain-coupled wind/current engine, middle scope.** Owner supplied a
+  standalone PoC (`terrain_coupled_flow_poc_2.html`, uploaded, not in this repo) demonstrating a
+  terrain-deflection wind solver + Ekman-rotated ocean currents on a flat non-wrapping grid, and
+  asked for it ported into Cartalith. Full spec asked for a 12-stage GCM-lite (pressure-relaxation
+  solver, dynamic gyres, full moisture/cloud/snowpack cycle, seasonal ITCZ migration); presented
+  the owner three scope options via `AskUserQuestion` given the size and the risk to invariants 3/12
+  (coarse-grid CPU-only blur, synchronous `generate()`). **Owner picked the middle scope**: wind +
+  current terrain-coupling AND gyre/western-intensification behaviour, explicitly deferring the full
+  moisture/cloud/snowpack/seasonal system. Two owner constraints for whenever this is built, NOT
+  optional simplifications:
+  - **The world wraps in X (World mode, `state.world`).** The PoC's `deflect()` solver and its
+    Laplacian gap-acceleration term are unwrapped-grid math (`x>0?x-1:0` clamps at the edges, same
+    idiom the engine's OWN gradient/blur helpers use in Region mode) — every consumer of a
+    wrap-aware field in this file already branches on `wrapX`/`state.world` (`bilC`, `gaussBlur`,
+    `oceanSSTAnomaly`'s own `WW,WH,wrapX,step` signature). The ported solver needs the same
+    treatment or a World-mode wind/current field will show a seam at the antimeridian.
+  - **This must actually feed climate, not just render prettily.** `applyOceanCurrents()` already
+    writes SST anomaly into `tempField` and nudges `rainField` at the coast — the owner's own
+    phrasing ("this addition should inform the current simulation") means the deflected wind field
+    and the coupled currents must replace/refine `buildWind`'s INPUT to the existing moisture-
+    transport pass (`satCap`/the orographic rain code), not sit beside it as a separate decorative
+    layer the way the standalone PoC does.
+  - Sequencing: owner chose to **finish the active bug-hunt goal first** — this is queued, not
+    started. When picked up, root-cause/measure current `buildWind()`/`applyOceanCurrents()`
+    behaviour before writing any new solver code, per this file's own working-rules discipline, and
+    confirm the wrap-aware design with a probe before committing to it.
+- **v1.74 shipped**: Tiled LOD zoom freeze — a colorized tile is a static image, one composite per
+  frame. Owner: "repeated quick zoom in-out actions cause a browser to freeze and become
+  unresponsive." Three scheduling defects (undersized/mis-measured tile-canvas cache, every camera
+  input compositing inline, and the overview-rebuild's own completion callback compositing
+  unbudgeted) — nothing about what's drawn changed. Worst rAF frame 13.2 s → 1.4 s (9.6×). See
+  CHANGELOG for the full writeup, including the follow-up commit that fixed the overview-rebuild
+  call site and a stale `VERSION` constant the smoke suite caught.
 - **v1.73 shipped**: label-collision draw/reserve mismatch (trait-badge clearance) unified behind
   `_civTraitDrop()`. See CHANGELOG for the four leads investigated and ruled out in the same pass.
 - **v1.72 shipped**: bug-hunt pass fixing three v1.71 connector defects (save/load flag loss,
