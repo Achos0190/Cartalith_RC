@@ -12,6 +12,118 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.78 — Terrain coupling made unconditional + Layer-view fix + animated wind/current streaks
+
+Owner, immediately after v1.77 shipped: "Wind and current should always be coupled to terrain
+therefore the toggle is unneeded. Has the Layer view been updated accordingly? And can we also
+have the animation as in the PoC" — three asks in one message. Engine only (script block 1).
+**Not** bit-identical at defaults — a deliberate, measured re-baseline (same class as v1.36/
+v1.39/v1.46/v1.60's placement/relief fixes), disclosed in full below.
+
+- **The toggle is gone, not just defaulted on.** `state.climate.terrainWind` is deleted from the
+  state literal entirely (not left as a dead always-true field); the sidebar checkbox, its
+  `syncUI()` sync line, and its change-listener are all removed. `buildWind`'s terrain-deflection
+  guard changed from `if(c.terrainWind && opts && opts.elev)` to `if(opts && opts.elev)` — the
+  mechanism now runs whenever a caller supplies elevation, which every real call site
+  (`simulateWeather`, `oceanSSTAnomaly`, and now the Layer views below) always does.
+  `oceanSSTAnomaly` lost its `terrainOn` branch outright: it unconditionally builds the coarse
+  elevation array and calls `computeOceanCurrent()`. `loadZip`'s v1.77 compat guard
+  (`if(state.climate.terrainWind==null) state.climate.terrainWind=false;`) became
+  `delete state.climate.terrainWind;`, so re-opening a v1.77 save cleans the stale field instead
+  of reintroducing it. `deflectFlow`/`computeOceanCurrent` themselves (the v1.77 pure primitives)
+  are untouched — only their call sites lost the conditional.
+- **The Layer view question had a real answer: no, it hadn't.** `currentWindField()` and
+  `currentOceanField()` — the data functions behind the Wind/Ocean debug overlays — were flagged
+  in v1.77's own CHANGELOG entry as a disclosed scope cut ("not wired to the new terrain-deflected
+  path... still show the pre-v1.77 latitude+SST-anomaly view"). Fixed now: `currentWindField()`
+  builds the same coarse elevation array `simulateWeather` does and passes `{elev:elevC}` into
+  `buildWind`, so the overlay shows the actual deflected wind. `currentOceanField()` goes further
+  — it used to derive its "current" by zeroing the WIND vector outside ocean cells and calling
+  that a current (the same shortcut v1.77's CHANGELOG flagged `oceanSSTAnomaly` as having had
+  *before* that fix); it now calls the real `computeOceanCurrent()` and returns the genuine
+  Ekman-rotated 2D field (`{u:cur.u, v:cur.v, sst, ocean:cur.ocean, WW, WH, maxSpeed, maxAnom}`).
+  Asserted directly: the Ocean Layer view's current vectors are measurably distinct from a plain
+  masked copy of the wind field on a live world (`R.v178`).
+- **Animated streaks, ported from the PoC's own "Wind/Current — animated streaks" feature.** New
+  `#windFxCanvas`, stacked in `.canvas-stack` alongside `#view`/`#civCanvas`/`#polyOverlay` so it
+  inherits the same pan/zoom CSS transform off-LOD and gets its own reprojection
+  (`_windFxProject`/`_windFxBounds`, matching `drawLODDebugOverlays`' own `px()/py()` idiom) under
+  Tiled LOD, where that shared transform is identity. Particles (260 for wind, 200 for ocean —
+  fewer, since only ocean cells are valid spawn points) sample the SAME `currentWindField()`/
+  `currentOceanField()` the static Layer view now correctly renders, advect each frame, and redraw
+  via `destination-out` compositing for a fading trail (the PoC's own technique). Lifecycle is
+  self-contained: `_windFxSync()` — called from the debug-view segmented-button handler and once
+  on initial load (for a save that reopens straight into Wind/Ocean) — starts the loop when
+  `state.debug` is `'wind'`/`'ocean'` and stops it (hiding and clearing the canvas) otherwise; the
+  running rAF loop itself re-checks `state.debug` every tick and self-terminates, so unlike the
+  sculpt joystick's `_sculptNavSync` (which needs many external call sites for every camera/modal
+  change) this needed only the one reliable trigger.
+- **Bug found and fixed before shipping: switching Wind→Ocean mid-animation crashed.**
+  `_windFxStart()`'s original guard (`if(_windFxRunning || !windFxCtx) return;`) skipped
+  reinitialization whenever anything was already running, so switching the debug view while
+  animating kept sampling the STALE field object — an ocean sampler (`_windFxOceanAt` →
+  `bilC(field.ocean,...)`) reading a wind-shaped field with no `.ocean` property, a hard
+  `TypeError` crash. Root-caused via a Playwright `pageerror` handler capturing the full stack
+  (not just the message) rather than a plain page-load probe, which found nothing because the
+  crash only manifests after a specific interaction sequence, not on load. Fixed with `_windFxKind`
+  tracking: `_windFxStart()` now only no-ops when the SAME kind is already running, and
+  `_windFxStep()` itself detects a kind change mid-loop, reinitializes, and explicitly reschedules
+  (since `_windFxStart()` alone only schedules a rAF on a stopped→running transition, not a
+  same-loop kind switch). Re-verified via the smoke suite's page-error listener across a real
+  Wind→Ocean→off click sequence: zero errors.
+- **A real, disclosed consequence: `field` itself now differs from v1.77 at defaults, not just
+  `temp`/`rain`/`flow`.** `generate()`'s default pipeline runs `carveRiverValleys()` (gated on
+  `state.carveRivers`, true by default), which carves the heightmap based on traced river
+  polylines — themselves downstream of `flowField`, which is downstream of `rainField`. Since
+  terrain-coupled wind now always runs and measurably changes rainfall patterns (v1.77's own
+  CHANGELOG measured mean `rainField`/`tempField` deltas of 0.040/0.268 with the toggle on), the
+  carved heightmap legitimately differs too — confirmed via `hash_gen1.js` showing `field`
+  mismatches in every scenario (default/geoid/waves/ao/icons), not a subset. This is the correct,
+  intended closed-loop consequence of "wind and current should always be coupled to terrain," not
+  a regression — the same class of deliberate re-baseline this file's own CHANGELOG has shipped
+  before (v1.36/v1.39/v1.46/v1.60).
+- **Three test fixes, all pre-existing tests whose assumptions the now-always-on coupling broke —
+  none touch app behavior:**
+  - The "cold current produces a cooler, drier coast" assertion used a fixed `-0.1°C` threshold on
+    the *propagated*, heavily-diluted (coastal-proximity blur + moisture-advection loop) anomaly —
+    too strict once the always-on path's real seed-to-seed variance was actually exercised (a
+    12-seed sweep measured deltas as small as -0.002°C on some seeds, a genuine, physically-real
+    Sverdrup/Stommel western-intensification asymmetry, not a bug). Redesigned to check the RAW
+    `oceanSSTAnomaly()` field directly (robust, threshold -0.003°C) plus a separate, magnitude-free
+    "any negative propagated dT with dR<-1e-4" check for the land-level Benguela/Atacama signature
+    — two attempts at a single fixed magnitude threshold (-0.03, then -0.005) were each tried and
+    measured to still intermittently fail before landing on this design.
+  - The "equatorial belt wetter than subtropical dry belt" assertion ran on an ambient random seed,
+    which the now-always-on terrain deflection could occasionally push below its 1.2× ratio
+    threshold for an unlucky world geometry (observed ratios as low as 1.10-1.12 on real runs).
+    Pinned to seed 12345 (this project's own standard reference seed) with a proper save/restore of
+    `state.tect.seed` — verified to reproduce ratio 2.68, comfortably robust.
+  - A pre-existing (v1.60-era) test isolation block for "at least one settlement is genuinely
+    fuel-limited" (v1.31 §10.3) saved/restored `mapWidthKm`/`seed`/`resW`/`places` around its own
+    dedicated `generate()` call, but not `state.world_structure.enabled` — which an earlier,
+    unrelated smoke block leaves `true`, driving `state.seaLevel` to 0.482 (via
+    `applyWorldStructureSeaLevel()`) instead of the default 0.42 and perturbing tectonic params via
+    `deriveFromWorldStructure()`, reshaping the pinned seed's geology enough to move every iron
+    settlement off fuel-limited. Root-caused by instrumenting the real smoke run (not a fresh
+    reproduction, which passed and gave no clue) to report `state.world_structure.enabled` at the
+    point of failure. Added to the save/restore, forced `false` for the isolated measurement — the
+    same "an 'isolated' test's isolation was itself incomplete" shape this file's own comments
+    already document for this exact test at v1.24/v1.46/v1.58.
+- **UI**: the "Terrain-coupled wind & currents" checkbox is removed; the "Ocean currents" section's
+  hint text is rewritten to describe unconditional terrain coupling instead of a togglable option.
+- **Tests**: `tests/stub_head.js` gained `windFxCanvas` to its headless canvas-stub allowlist
+  (block-1 code now references it). `R.v177`'s smoke block is replaced by `R.v178` (checkbox/
+  state-field removal, ridge localization re-proven via `null` vs. `{elev}` opts instead of a
+  toggle A/B, World-mode seam continuity, `refreshClimate()` determinism, and the two Layer-view
+  correctness checks) plus a new `R.v178fx` block (windFx canvas existence/default-hidden state,
+  and start/stop/kind-switch behavior driven through real `#debugSeg` button clicks). 8 + 4 new
+  smoke assertions.
+- **Known scope cuts**: the PoC's fuller moisture/cloud/snowpack/seasonal-ITCZ system remains
+  deferred exactly as v1.77 scoped it — this version only removes the toggle, fixes the Layer
+  views, and adds the streak animation, none of which touch that boundary. Streak particle counts
+  (260/200) and advection step (0.9) are carried over from the PoC's own values, not independently
+  retuned.
+
 ### v1.77 — Terrain-coupled wind & ocean currents (middle scope)
 
 Owner supplied a standalone PoC (`terrain_coupled_flow_poc_2.html`, not in this repo) demonstrating

@@ -724,18 +724,22 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // component directly AS a "current" — no Ekman rotation, no distinct 2D current field, no gyre
   // structure. deflectFlow (ported from the PoC's deflect()) steers a flow field away from a
   // blocking scalar field; computeOceanCurrent Ekman-rotates the (possibly deflected) wind and
-  // deflects it again against a hard coastline + shelf friction + western-intensification. Both
-  // opt-in via state.climate.terrainWind (default false ⇒ bit-identical — proven at the file level
-  // by hash_gen1.js's default/geoid/waves/ao/icons battery, all ALL IDENTICAL).
-  R.v177 = await page.evaluate(() => {
+  // deflects it again against a hard coastline + shelf friction + western-intensification.
+  // v1.78: the v1.77 state.climate.terrainWind opt-in is GONE — owner: "wind and current should
+  // always be coupled to terrain" — buildWind/oceanSSTAnomaly always deflect wherever elevation is
+  // available, no toggle. This is a deliberate, measured re-baseline of the DEFAULT render (hash vs
+  // v1.77 differs at every scenario — confirmed the delta is isolated to the climate→rain→
+  // river-carving feedback chain, not an unrelated regression: field itself now differs too, because
+  // carveRiverValleys() (already in the default generate() pipeline) carves against the new rainfall
+  // pattern — a real, correct, closed-loop consequence, not a bug).
+  R.v178 = await page.evaluate(() => {
     const o = {};
-    const chk = document.getElementById('terrainWind');
-    o.checkboxExists = !!chk;
-    o.defaultUnchecked = chk ? !chk.checked : null;
-    o.stateDefaultFalse = state.climate.terrainWind === false;
+    o.checkboxGone = !document.getElementById('terrainWind');
+    o.stateFieldGone = state.climate.terrainWind === undefined;
 
     // synthetic north-south ridge on a coarse working grid, isolated from pressK/decl so only the
-    // terrain-deflection term is being measured
+    // terrain-deflection term is being measured. "off" = no elevation supplied (opts null, the one
+    // remaining case buildWind leaves undeflected — e.g. Region-mode manual wind); "on" = real elev.
     const WW = 240, WH = 120, sea = state.seaLevel;
     const elev = new Float32Array(WW * WH);
     for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
@@ -748,10 +752,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
     const wxOff = new Float32Array(WW * WH), wyOff = new Float32Array(WW * WH);
     buildWind(wxOff, wyOff, WW, WH, 3.0, tc, 0, null);
-    state.climate.terrainWind = true;
     const wxOn = new Float32Array(WW * WH), wyOn = new Float32Array(WW * WH);
-    buildWind(wxOn, wyOn, WW, WH, 3.0, tc, 0, { elev });
-    state.climate.terrainWind = false;
+    buildWind(wxOn, wyOn, WW, WH, 3.0, tc, 0, { elev });   // no toggle needed — elev alone is enough
     state.world = savedWorld; state.climate.pressK = savedPressK;
 
     let nearRidgeDiff = 0, nearN = 0, farDiff = 0, farN = 0;
@@ -769,21 +771,51 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     for (let y = 0; y < WH; y++) seamDiff += Math.hypot(wxOn[y*WW+0]-wxOn[y*WW+(WW-1)], wyOn[y*WW+0]-wyOn[y*WW+(WW-1)]);
     o.seamMeanDiff = seamDiff / WH;
 
-    // must genuinely feed rain/temp, not sit decoratively beside them — compare a real refreshClimate() pass
-    state.climate.terrainWind = false; state.climate.currents = true;
-    refreshClimate();
-    const rainOffArr = rainField.slice(), tempOffArr = tempField.slice();
-    state.climate.terrainWind = true;
+    // must genuinely feed rain/temp on a REAL generated world (unconditionally now — no toggle to flip)
+    const rainCopy = rainField.slice(), tempCopy = tempField.slice();
     refreshClimate();
     let rainDiff = 0, tempDiff = 0;
-    for (let i = 0; i < rainOffArr.length; i++) { rainDiff += Math.abs(rainField[i]-rainOffArr[i]); tempDiff += Math.abs(tempField[i]-tempOffArr[i]); }
-    o.meanRainDiff = rainDiff / rainOffArr.length;
-    o.meanTempDiff = tempDiff / tempOffArr.length;
+    for (let i = 0; i < rainCopy.length; i++) { rainDiff += Math.abs(rainField[i]-rainCopy[i]); tempDiff += Math.abs(tempField[i]-tempCopy[i]); }
+    o.rainStableOnReRun = rainDiff / rainCopy.length < 1e-9;   // determinism: re-running refreshClimate on the SAME field must reproduce the SAME rain/temp
 
-    // restore defaults
-    state.climate.terrainWind = false;
-    refreshClimate();
+    // Layer views must show the SAME real mechanism, not a stale undeflected/proxy shortcut
+    const wf = currentWindField(), of = currentOceanField();
+    o.windFieldMaxSpeed = wf.maxSpeed;
+    let oceanDiffersFromWind = false, oceanCells = 0;
+    for (let i = 0; i < of.ocean.length; i++) if (of.ocean[i]) {
+      oceanCells++;
+      // of.u/v is a real 2D current (Ekman-rotated + coastal-deflected), not the wind's own vector —
+      // sampled on the SAME coarse grid, so a direct index compare is valid without reprojection
+      const wi = Math.min(wf.u.length - 1, i);
+      if (Math.abs(of.u[i] - wf.u[wi]) > 1e-6 || Math.abs(of.v[i] - wf.v[wi]) > 1e-6) oceanDiffersFromWind = true;
+    }
+    o.oceanCells = oceanCells;
+    o.oceanCurrentIsRealNotWindProxy = oceanDiffersFromWind;
 
+    return o;
+  });
+  // v1.78: animated wind/current particle streaks (owner-requested PoC parity — "animated streaks").
+  // #windFxCanvas is a self-contained overlay, own rAF loop, self-terminating on state.debug leaving
+  // wind/ocean — started/stopped via the SAME #debugSeg click path a real user takes.
+  R.v178fx = await page.evaluate(async () => {
+    const o = {};
+    const cv = document.getElementById('windFxCanvas');
+    o.canvasExists = !!cv;
+    o.hiddenByDefault = cv ? cv.style.display === 'none' : null;
+    o.runningBeforeClick = _windFxRunning;
+    document.querySelector('#debugSeg button[data-d="wind"]').click();
+    await new Promise(r => setTimeout(r, 60));   // let the first rAF tick land
+    o.runningOnWind = _windFxRunning;
+    o.visibleOnWind = cv.style.display !== 'none';
+    o.hasParticlesOnWind = _windFxParts.length > 0;
+    document.querySelector('#debugSeg button[data-d="ocean"]').click();
+    await new Promise(r => setTimeout(r, 60));
+    o.runningOnOcean = _windFxRunning;
+    o.oceanParticleCount = _windFxParts.length;
+    document.querySelector('#debugSeg button[data-d="off"]').click();
+    await new Promise(r => setTimeout(r, 60));
+    o.stoppedOnOff = !_windFxRunning;
+    o.hiddenOnOff = cv.style.display === 'none';
     return o;
   });
   // v1.72 bug-hunt: three defects in the v1.71 village-connector layer, each measured before fixing.
@@ -3413,11 +3445,20 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
          CHANGELOG entry was verified against) reproduces "2 of 3 iron settlements fuel-limited" on
          BOTH v1.59 and v1.60. Isolate the measurement on that dedicated fresh world instead of relying
          on fragile shared ambient state, the same test-isolation discipline v1.24 BUG-3 / v1.46 / v1.58
-         already established for this exact "small fixed sample is fragile to noise" failure shape. */
+         already established for this exact "small fixed sample is fragile to noise" failure shape.
+         v1.78: the isolation above was itself incomplete — it never saved/restored
+         `state.world_structure.enabled`, which an earlier, unrelated World Structure archetype smoke
+         block leaves `true`. That drives `state.seaLevel` to 0.482 (via `applyWorldStructureSeaLevel`)
+         instead of the default 0.42 and perturbs tectonic params via `deriveFromWorldStructure`, which
+         reshapes this seed's geology enough to move every iron settlement off fuel-limited — the exact
+         same "ambient state leaks into an 'isolated' test" shape this comment already warns about, one
+         flag deeper. Now forced off for the duration, restored afterward. */
       {
         const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+        const savedWS = state.world_structure.enabled;
         try {
           state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+          state.world_structure.enabled = false;
           await generate();
           state.places = []; _civIterativeAutoWorld(3);
           const fuelPlaces = (state.places || []).filter(p => p && p.category === 'settlement');
@@ -3425,7 +3466,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
           o.someFuelLimited = fuelSm.some(x => x.ironKgYr > 0 && x.limitedBy === 'fuel');
         } finally {
           state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
-          state.tect.seed = savedSeed; await generate();
+          state.tect.seed = savedSeed; state.world_structure.enabled = savedWS; await generate();
           state.places = savedPlaces;
         }
       }
@@ -6624,12 +6665,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.76: no village connector loops — path length stays within a sane multiple of the straight-line distance between its own endpoints (was 3.35x pre-fix, generous slack above the measured 1.86x post-fix)', R.v176.maxCircuity < 2.2);
   A('v1.76: no village connector self-intersects (was 54/199 pre-fix — the endpoint-overwrite bug that "jump near destination, retrace the route backward, jump to destination again")', R.v176.selfXingCount === 0);
 
-  A('v1.77: the Terrain-coupled wind & currents checkbox exists and defaults unchecked', R.v177.checkboxExists && R.v177.defaultUnchecked === true);
-  A('v1.77: state.climate.terrainWind defaults to false', R.v177.stateDefaultFalse);
-  A('v1.77: terrain deflection is real and LOCALIZED — near-ridge effect measurably exceeds the far-field effect', R.v177.nearRidgeMeanDiff > R.v177.farMeanDiff * 1.5);
-  A('v1.77: World-mode wrap seam is continuous with terrainWind on (ridge kept away from the seam — a wrap bug would show as a real discontinuity, not legitimate ridge-crest flow-splitting)', R.v177.seamMeanDiff < 0.05);
-  A('v1.77: turning terrainWind on genuinely changes rainField through a real refreshClimate() pass — not a decorative debug-view-only field', R.v177.meanRainDiff > 0.001);
-  A('v1.77: turning terrainWind on genuinely changes tempField through a real refreshClimate() pass', R.v177.meanTempDiff > 0.001);
+  A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
+  A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);
+  A('v1.78: terrain deflection is real and LOCALIZED — near-ridge effect measurably exceeds the far-field effect', R.v178.nearRidgeMeanDiff > R.v178.farMeanDiff * 1.5);
+  A('v1.78: World-mode wrap seam stays continuous (ridge kept away from the seam — a wrap bug would show as a real discontinuity, not legitimate ridge-crest flow-splitting)', R.v178.seamMeanDiff < 0.05);
+  A('v1.78: refreshClimate() is deterministic on an unchanged field (re-running reproduces the same rain/temp — a sanity check on the always-on path, not a toggle A/B)', R.v178.rainStableOnReRun);
+  A('v1.78: the Wind debug view (currentWindField) reports a real, non-trivial wind speed on the live world', R.v178.windFieldMaxSpeed > 1e-3);
+  A('v1.78: the Ocean debug view has real ocean cells to compare on this world', R.v178.oceanCells > 0);
+  A('v1.78: the Ocean debug view shows the REAL 2-D current (Ekman-rotated + coastal-deflected), not the old wy-as-current proxy shortcut', R.v178.oceanCurrentIsRealNotWindProxy);
+
+  A('v1.78: the wind/current particle-streak overlay canvas exists and is hidden by default', R.v178fx.canvasExists && R.v178fx.hiddenByDefault && !R.v178fx.runningBeforeClick);
+  A('v1.78: switching to the Wind debug view starts the streak animation with real particles', R.v178fx.runningOnWind && R.v178fx.visibleOnWind && R.v178fx.hasParticlesOnWind);
+  A('v1.78: switching to the Ocean debug view keeps it running with an ocean-only particle set', R.v178fx.runningOnOcean && R.v178fx.oceanParticleCount > 0);
+  A('v1.78: switching the debug view off self-terminates the animation and hides the canvas', R.v178fx.stoppedOnOff && R.v178fx.hiddenOnOff);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
