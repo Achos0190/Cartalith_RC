@@ -775,7 +775,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     window.drawLODView = realDraw;
     _lodOn = prevOn; _lodZoom = prevZoom; _lodTile = prevTile;
     return {
-      capAt1024MatchesDataCache: cap1024 === _lodCacheMax,
+      // 68 = the measured distinct-tile working set of the reported 1->17.81 gesture (probe_distinct.js)
+      capCoversMeasuredWorkingSet: cap1024 >= 68,
+      capExceedsDataCache: cap1024 > _lodCacheMax,
       capTracksTileSize: cap2048 < cap1024 && cap512 > cap1024,
       capHasFloor: capHuge >= 6,
       // the static-image invariant, asserted on the key rather than on pixels: zoom/pan must not be in it
@@ -6456,7 +6458,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.67: a journey mixing a fine stage and the reported-bug stage blocks the WHOLE plan (blockedIdx precedent) with a capacity-naming message', R.v167.planBlocked && R.v167.planBlockedMsgNamesCapacity && R.v167.badStageIsTheBlockedOne);
   A('v1.67: plan.totalDays is nulled on a block, but the fine stage\'s own per-stage result is still a real computed number', R.v167.planTotalDaysNull && R.v167.fineStageStillComputedInPlan);
 
-  A('v1.74: the tile-canvas cache holds pixels for every tile whose heightmap we still hold (cap === _lodCacheMax at the default 1024 tile)', R.v174.capAt1024MatchesDataCache);
+  A('v1.74: the tile-canvas cap covers the MEASURED 68-tile working set of the reported zoom gesture (a 48-entry cap still thrashed)', R.v174.capCoversMeasuredWorkingSet);
+  A('v1.74: the pixel cache is deliberately larger than the heightmap cache — pixels are what a zoom-back re-costs, and they are never invalidated by camera motion', R.v174.capExceedsDataCache);
   A('v1.74: the cap is a PIXEL budget, so it tracks _lodTile (2048 → fewer entries, 512 → more) instead of costing 16x more memory at 2048', R.v174.capTracksTileSize);
   A('v1.74: an absurd _lodTile still leaves a usable floor rather than a zero-entry cache', R.v174.capHasFloor);
   A('v1.74: _lodRenderKey deliberately excludes zoom/pan — a colorized tile is a static image across a whole zoom gesture', R.v174.renderKeyIgnoresCamera);

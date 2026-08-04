@@ -2064,7 +2064,7 @@ details.cat-acc[open]>summary{color:var(--accent)}
  *   Pillar 3 — optical water shading: Beer–Lambert depth transport + flow-map UV, after Premože & Ashikhmin
  *     (Stanford, "Rendering Natural Waters").
  * ===================================================================================================== */
-const VERSION='1.73';   /* v1.30: this had drifted — it is export/atlas metadata only (never gated on), and was still reading 1.24 six versions later.
+const VERSION='1.74';   /* v1.30: this had drifted — it is export/atlas metadata only (never gated on), and was still reading 1.24 six versions later.
    v1.52: drifted AGAIN, two versions after that fix-comment — v1.51 and this file both still read '1.50', which is what the header
    chip (id="verTag", set from VERSION at line ~13033, overwriting the HTML span's own hardcoded text on load) was showing in a
    verification screenshot. Confirmed harmless to every hashed/tested field (nothing reads VERSION except display + export
@@ -10377,13 +10377,20 @@ async function refineVisibleTiles(){
    byte-identical pixels. But we kept 48 tile HEIGHTMAPS (_lodCacheMax) and only 24 of their derived
    canvases, guaranteeing a re-colorize the moment the user zooms back onto a level whose source data
    we were still holding.
-   Budget by PIXELS rather than entries so the cap tracks _lodTile (which the user can change): at the
-   default 1024px tile this yields exactly _lodCacheMax entries — the coherent invariant is "never
-   evict a tile's pixels while we're still holding its heightmap" — while a 2048px tile is bounded to
-   12 and a 512px tile gets 192, all at the same fixed memory ceiling instead of a fixed count whose
-   cost varies 16x with tile size. The floor keeps a single viewport's worth cached at any tile size. */
+   Budget by PIXELS rather than entries so the cap tracks _lodTile (which the user can change) at one
+   fixed memory ceiling, instead of a fixed count whose cost varies 16x between a 512 and a 2048 tile.
+   The size itself comes from the measured working set — see LOD_TILE_CANVAS_MAX_PX below. The floor
+   keeps a viewport's worth cached even at an absurd tile size. */
 let _lodTileCanvasCache=new Map();
-const LOD_TILE_CANVAS_MAX_PX=48*1024*1024;   /* ~48 MPx of canvas backing (≈192MB at 4B/px) */
+/* Sized from a MEASURED working set, not an estimate. An analytic sweep of the reported gesture's own
+   zoom trajectory (1 → 17.81 at a 1024px world, `probe_distinct.js`) enumerates **68 distinct tiles**
+   across the 5 pyramid levels it crosses — and up to **16 visible at once**, not the 4 a centred view
+   shows, because right after each level change the viewport straddles a tile boundary in both axes.
+   A first cut at 48 (matching _lodCacheMax) was still below that and still thrashed: the repeat-gesture
+   pass measured 155 colorizations where the correct answer is 0. 72 MPx covers all 68 at the default
+   1024 tile. Accounting uses ts*ts, a deliberate over-estimate — real tiles are clipped to world
+   aspect (1024x655 here), so the true footprint is ~1.56x smaller than this budget reserves. */
+const LOD_TILE_CANVAS_MAX_PX=72*1024*1024;   /* ~72 MPx of canvas budget; at the real 1024x655 tile that is ~182MB for the full 68-tile working set */
 function lodTileCanvasMax(){ const ts=Math.max(1,_lodTile); return Math.max(6, Math.floor(LOD_TILE_CANVAS_MAX_PX/(ts*ts))); }
 /* v1.74: declared here with the rest of the LOD render state (not beside requestLodRender, which lives
    near the input handlers ~2600 lines below) so they are initialised the moment this block runs —
@@ -10451,7 +10458,13 @@ function _lodScheduleOverviewRebuild(rk,v,span,spanY,OVW,OVH){
     const octx=_lodOverviewPrev.canvas.getContext('2d'); octx.clearRect(0,0,OVW,OVH); octx.drawImage(_lodScratch,0,0);
     Object.assign(_lodOverviewPrev,{x0:v.x0,y0:v.y0,x1:v.x1,y1:v.y1,z:v.z,key:rk,fieldGen:fg});
     _lodOverviewStretchStreak=0;   // a real rebuild landed — subsequent ticks can stretch from a fresh baseline again
-    renderNow();
+    /* v1.74: requestLodRender, NOT renderNow. This fires from a setTimeout(0) after EVERY landed
+       overview rebuild — 122 times during a single measured wheel gesture — and an unbudgeted
+       composite here re-colorizes every un-cached visible tile in one go. It was the single largest
+       surviving stall after the first v1.74 pass: total composite time had already dropped 2.4x, yet
+       the worst frame stayed at 12.2s (drawLODViewMaxMs 11,162ms ~ 18 tiles at ~621ms) because this
+       one caller still ran with _lodFrameBudget null. */
+    requestLodRender();
   },0);
 }
 function _lodRenderKey(){

@@ -25,6 +25,25 @@ frame **13,217 ms**, p99 8,880 ms, 35 frames over 500 ms; `drawLODView` 350 call
 `renderBiomeTileRGBA` 491 calls / 243,382 ms, split **364 full tiles at ~609 ms each** and 127
 overview rebuilds at ~171 ms. A 3-second gesture took **119 seconds** of wall time.
 
+**Result (same probe, v1.74):**
+
+| | v1.73 | v1.74 |
+|---|---|---|
+| worst rAF frame | 13,217 ms | **1,381 ms** (9.6×) |
+| p99 frame | 8,880 ms | **983 ms** (9.0×) |
+| `drawLODView` max / total | 13,192 / 226,950 ms | **1,077 / 41,514 ms** (12.2× / 5.5×) |
+| tile colorizations | 364 (221,666 ms) | **64** (39,548 ms) |
+| canvas-cache peak / cap | 24 / 24 (pinned) | **68 / 72** (working set fits) |
+| repeat-gesture canvas misses | 200 | **15** |
+| repeat-gesture colorization time | 135,364 ms | **14,832 ms** (9.1×) |
+
+Two effects are honestly the other way and worth knowing: **frames over 500 ms rose 35 → 55**, and p95
+293 → 658 ms, because the work is now *spread* across frames instead of concentrated into a few
+catastrophic ones — that is the intended trade, not a regression. And a single 1024×655 colorization
+measures ~618 ms on this headless swiftshader box, which is the floor for any frame that colorizes at
+all: the budget cannot preempt mid-tile. Real GPU-backed hardware should be several times faster, but
+that is an expectation, not something this harness demonstrates.
+
 - **Defect 1 — the colorized-tile cache was undersized against its own source data.** The canvas key
   is `z/col/row/tileSize/baked|rk` and deliberately carries **no zoom or pan term**, so a tile's
   pixels are a pure function of its heightmap and `_lodRenderKey` — the same tile at zoom 4 and zoom
@@ -36,12 +55,19 @@ overview rebuilds at ~171 ms. A 3-second gesture took **119 seconds** of wall ti
   - The sharpest evidence is the repeat-gesture pass: replaying the *identical* gesture, with
     `_lodRenderKey()` provably unchanged and every tile already colorized once, still ran **263 more
     colorizations costing 135,364 ms**. The correct count there is zero.
-  - **Fix: `lodTileCanvasMax()` budgets by PIXELS, not entries** (`LOD_TILE_CANVAS_MAX_PX =
-    48 MPx`), so the cap tracks `_lodTile` — which the user can change, and at which a fixed entry
-    count costs 16× more memory at 2048 than at 512. At the default 1024 tile it yields exactly
-    `_lodCacheMax` entries, making the invariant explicit: **never evict a tile's pixels while we
-    still hold its heightmap.** 12 entries at 2048, 192 at 512, with a 6-entry floor so an absurd
-    tile size still leaves a usable cache.
+  - **Fix: `lodTileCanvasMax()` budgets by PIXELS, not entries**, so the cap tracks `_lodTile` —
+    which the user can change, and at which a fixed entry count costs 16× more memory at 2048 than at
+    512 — at one fixed memory ceiling.
+  - **The budget is sized from a MEASURED working set, and getting that wrong cost a whole extra
+    pass.** A first cut set it to 48 MPx, i.e. `_lodCacheMax` entries at the default tile, on my own
+    back-of-envelope estimate of "~30 distinct tiles per sweep". Re-measuring found the truth:
+    `probe_distinct.js` enumerates the gesture's own zoom trajectory analytically and reports **68
+    distinct tiles** across the 5 pyramid levels it crosses, with up to **16 visible at once** (not
+    the 4 a centred view shows — right after each level change the viewport straddles a tile boundary
+    in both axes). 48 was still under the working set and still thrashed: the repeat pass measured
+    155 colorizations. At **72 MPx** the cache peaks at 68 against a cap of 72 and repeat-gesture
+    canvas misses drop 200 → **15**. Same lesson this file keeps relearning: *measure the
+    distribution, don't assume it.*
 - **Defect 2 — every high-frequency camera input called `renderNow()` INLINE, once per event.** The
   wheel handler, the pinch `touchmove`, the LOD pan `pointermove`, the v1.19 joystick loop and the
   sculpt-stroke `pointermove` each composited synchronously per event. A composite is an overview
@@ -57,6 +83,16 @@ overview rebuilds at ~171 ms. A 3-second gesture took **119 seconds** of wall ti
   - Also routed through it: `lodZoomStep` and the zoom-reset button. Neither is high-frequency, but a
     doubling step lands on a whole new pyramid level where *every* tile is un-colorized — the worst
     unbudgeted case.
+  - **The single largest surviving stall wasn't a camera-input handler at all.**
+    `_lodScheduleOverviewRebuild`'s own `setTimeout(0)` completion callback carried its own inline
+    `renderNow()` — fired **128 times** in one measured gesture, once per landed overview rebuild —
+    and each one re-composited every un-cached visible tile in a single unbudgeted call. Coalescing
+    the four input paths alone cut total colorization work 2.4× but left the worst frame unchanged at
+    12.2 s, because this fifth call site was still reaching `drawLODView` with `_lodFrameBudget` null;
+    routing it through `requestLodRender()` too is what actually moved the worst frame (11,162 ms →
+    1,077 ms `drawLODView` max). Grep for every `renderNow()` call reachable from an LOD-camera-adjacent
+    path before declaring a scheduling fix complete — an async completion callback is as much a
+    high-frequency trigger as a `pointermove` if it fires once per rebuild during a fast gesture.
 - **Per-frame colorization budget (`LOD_FRAME_BUDGET_MS = 12`), interactive path only.** Even with a
   right-sized cache, the first visit to a pyramid level must colorize its tiles, and 9 × 609 ms in one
   frame is still a multi-second block. `drawLODView` now stops colorizing once past the budget and

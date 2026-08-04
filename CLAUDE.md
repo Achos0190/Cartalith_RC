@@ -1008,20 +1008,36 @@ WHAT is drawn changed. **Rule: a tile's pixels are a pure function of its height
 same tile at zoom 4 and zoom 8 is byte-identical. Any re-colorization is eviction, never
 invalidation.**
 
-- **The derived-pixel cache must not be smaller than the source-data cache it derives from.** We kept
-  48 tile heightmaps (`_lodCacheMax`) and 24 canvases, so zooming back onto a level whose data we
-  still held threw its pixels away: **364 misses / 2100 hits, pinned at the cap**, for ~30 distinct
-  tiles. The decisive measurement is the repeat pass — replaying the identical gesture with
-  `_lodRenderKey()` unchanged still ran **263 colorizations costing 135 s**; the correct count is
-  zero. `lodTileCanvasMax()` now budgets by **pixels** (`LOD_TILE_CANVAS_MAX_PX`), so the cap tracks
-  `_lodTile` (which the user can change, and at which a fixed entry count costs 16× more at 2048 than
-  at 512) and equals `_lodCacheMax` at the 1024 default.
+**Result: worst frame 13.2 s → 1.4 s (9.6×); repeat-gesture colorizations 263 → 72, canvas misses
+200 → 15.** A single 1024×655 colorization still costs ~618 ms on this headless box (the floor for
+any frame that colorizes at all — the budget can't preempt mid-tile).
+
+- **The derived-pixel cache must not be smaller than the source-data cache it derives from, AND its
+  size must come from measurement, not an estimate.** We kept 48 tile heightmaps (`_lodCacheMax`)
+  and only 24 canvases, so zooming back onto a level whose data we still held threw its pixels away:
+  **364 misses / 2100 hits, pinned at the cap**, for a working set my own back-of-envelope guessed at
+  ~30 tiles. `lodTileCanvasMax()` budgets by **pixels** (`LOD_TILE_CANVAS_MAX_PX`) so the cap tracks
+  `_lodTile` — but a first cut at 48 MPx (= `_lodCacheMax` entries at the default tile) STILL
+  thrashed, because `probe_distinct.js`'s analytic sweep of the gesture's own zoom trajectory found
+  the real working set is **68 distinct tiles**, up to **16 visible at once** (not the 4 a centred
+  view shows — right after a level change the viewport straddles a tile boundary in both axes). At
+  72 MPx the cache peaks at 68/72 and repeat-gesture misses drop 200→15. The decisive measurement
+  either way is the repeat pass: replaying the identical gesture with `_lodRenderKey()` unchanged,
+  the correct colorization count is zero.
 - **A high-frequency input handler must never composite inline.** Wheel/pinch/pan-drag/joystick/
   sculpt-stroke each called `renderNow()` per event — 350 composites for 128 wheel ticks. `requestLodRender()`
   coalesces to one per animation frame; the drawn frame is pixel-identical, and the yield between
   frames is what turns "unresponsive" into "chuggy but interactive". **Resolve `renderNow` lazily
   INSIDE the rAF callback** — blocks 1 and 2 both wrap and reassign it (v1.24), so capturing it drops
   the civ layer.
+- **The single largest surviving stall was not a pointer/wheel handler at all.**
+  `_lodScheduleOverviewRebuild`'s own async completion callback (`setTimeout(0)`) carried its own
+  inline `renderNow()`, firing 128 times in one gesture. Coalescing every INPUT handler (above) cut
+  total colorization work 2.4× but left the worst frame unchanged at 12.2 s until this fifth call
+  site was routed through `requestLodRender()` too — that is what actually dropped `drawLODView`'s
+  max from 11,162 ms to 1,077 ms. **Grep every `renderNow()` reachable from an LOD-camera-adjacent
+  path before declaring a scheduling fix complete** — an async completion callback that fires once
+  per landed rebuild during a fast gesture is as much a high-frequency trigger as a `pointermove`.
 - **`_lodFrameBudget` (12 ms) is set ONLY around the rAF-driven render**, so `drawLODView`'s
   per-frame colorization cap applies to interactive navigation only; a direct `renderNow()`
   (`generate()`, an export grab, the harnesses, the two `withBusy()` refine buttons) still

@@ -17,31 +17,42 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 - **v1.74 — Tiled LOD zoom freeze: a colorized tile is a static image, and one composite per
   frame.** Owner: *"repeated quick zoom in-out actions cause a browser to freeze and become
   unresponsive."* Reproduced with real wheel events and root-caused by instrumenting call counts
-  before writing any fix. Two scheduling defects; nothing about WHAT is drawn changed. 1016 / 852
-  green; +9 smoke assertions.
-  - **Baseline measured (seed 31337 / 800km / 1024px, two identical 64-tick gestures):** worst rAF
+  before writing any fix. Three scheduling defects; nothing about WHAT is drawn changed. 1016 / 852
+  green; hash ALL IDENTICAL; +9 smoke assertions.
+  - **Baseline measured (seed 31337 / 800km / 1024px, 64-tick wheel gesture):** worst rAF
     frame **13,217 ms**, p99 8,880 ms, 35 frames over 500 ms; `drawLODView` 350 calls / 226,950 ms;
     `renderBiomeTileRGBA` 491 calls / 243,382 ms (364 full tiles at ~609 ms + 127 overviews at
     ~171 ms). A 3-second gesture took 119 s of wall time.
+  - **Result: worst frame 13,217 ms → 1,381 ms (9.6×); repeat-gesture colorizations 263 → 72,
+    canvas misses 200 → 15.** A single 1024×655 colorization still costs ~618 ms on this headless
+    box (the floor for any frame that colorizes at all — the budget can't preempt mid-tile); real
+    GPU hardware should be faster.
   - **Defect 1 — the derived-pixel cache was smaller than the source-data cache.** 48 tile
-    heightmaps kept, 24 canvases. Since the canvas key carries no zoom/pan term, a re-colorization
-    is always eviction, never invalidation: **364 misses / 2100 hits, pinned at the 24 cap**, for
-    ~30 distinct tiles. The decisive number is the repeat-gesture pass — identical gesture,
-    `_lodRenderKey()` unchanged, every tile already colorized, and it still ran **263 colorizations
-    costing 135,364 ms**. `lodTileCanvasMax()` now budgets by PIXELS so the cap tracks `_lodTile`
-    and equals `_lodCacheMax` at the 1024 default.
+    heightmaps kept, only 24 canvases. Since the canvas key carries no zoom/pan term, a
+    re-colorization is always eviction, never invalidation. **`lodTileCanvasMax()` budgets by
+    PIXELS**, sized from a MEASURED working set — a first cut at 48 MPx (my own back-of-envelope
+    ~30-tile estimate) still thrashed; `probe_distinct.js`'s analytic sweep of the gesture's own
+    zoom trajectory found the truth: **68 distinct tiles**, up to **16 visible at once** (not the 4
+    a centred view shows). At 72 MPx the cache peaks at 68/72 and repeat-gesture misses drop to 15.
   - **Defect 2 — every high-frequency camera input composited inline**, one `renderNow()` per event
     (wheel / pinch / pan-drag / joystick / sculpt stroke): 350 composites for 128 wheel ticks.
     `requestLodRender()` coalesces to one per animation frame — pixel-identical output, plus a yield
     point between frames.
+  - **Defect 3 — the single largest surviving stall wasn't a camera-input handler.**
+    `_lodScheduleOverviewRebuild`'s own async completion callback carried its own inline
+    `renderNow()`, firing 128 times in one gesture. Fixing Defects 1+2 alone cut total work 2.4× but
+    left the worst frame at 12.2 s until this fifth call site was routed through
+    `requestLodRender()` too — THAT is what actually moved `drawLODView`'s max from 11,162 ms to
+    1,077 ms. Grep every `renderNow()` reachable from an LOD-camera-adjacent path, not just the
+    obvious pointer handlers.
   - **Per-frame colorization budget (12 ms) on the interactive path only.** `drawLODView` stops
     colorizing past budget and lets the overview show through (what it already does for a tile whose
     height data isn't ready), always doing ≥1 so it converges. A direct `renderNow()` still
     composites the whole view. The debounced settle refine IS budgeted; the two `withBusy()` refine
     buttons are not.
   - **Ruled out by measurement — don't re-chase:** v0.93's stretch fast path works (streak peaked at
-    1 of 4); overview rebuilds were 127 calls / 21.7 s of 243 s; `pyramidTile` ran **0 times** (not
-    tile generation); `sharedSeaFields()` is properly cached.
+    1 of 4); `pyramidTile` ran **0 times** (not tile generation); `sharedSeaFields()` is properly
+    cached.
 - **v1.73 — label collision reserved one box and drew in another.** Bug-hunt continuation past
   the village layer. v1.28 added trait-badge clearance to the label DRAW path
   (`_civDrawSettlementPin` pushes a 'below' label clear of the badges) but not to v1.12's
