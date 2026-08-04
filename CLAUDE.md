@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.78**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.79**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.78.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.77.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.79.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.78.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,49 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Addon villages cluster with nearby siblings, not just the closest big settlement (v1.79)
+
+Owner, mid-session: *"the roads from the deeper settlement layers dont connect to their nearest
+siblings and individually connect to the closest big settlement. They probably just connected to
+the closest main road by the most efficient route."* Civ-layer only (`_civConnectVillageAddons`).
+Hash vs v1.78 ALL IDENTICAL (interactive-only, never reached from `generate()`).
+
+- **Measured before fixing** (`probe_villageconn.js`, seed 31337/512px): v1.71-v1.78's target set
+  was `places.filter(p=>!p.villageAddon)` — a village's search could ONLY terminate at a real
+  settlement, never another village. Mean connector 21.8 km vs. mean nearest-sibling distance
+  14.0 km; 79.5% of villages had a nearer sibling than the settlement they actually connected to.
+- **Three designs put to the owner via `AskUserQuestion`**: single-shot Dijkstra with villages as
+  extra valid targets (simplest, no connectivity guarantee); tap into the nearest existing road
+  point (shortest, but reintroduces the v1.71 self-loop shape and doesn't address siblings at all);
+  a genuine growing forest (Prim-style). **Growing forest chosen** — the only one that lets a
+  village prefer a close sibling while still guaranteeing every reachable village traces back to a
+  real settlement through the tree.
+- **Batched Prim, not literal Prim.** True Prim's (one full-grid Dijkstra rerun per village, up to
+  200) is exactly the "full extra order of magnitude" v1.71's own comment already measured as too
+  slow (removing 200 villages from the trunk network's per-place Dijkstra treatment took Generate
+  Roads from 3919ms to 397ms). Instead each round runs ONE shared multi-source Dijkstra from the
+  current network (settlements ∪ already-joined villages), ranks unconnected villages by distance
+  to it, and attaches the cheapest `BATCH=max(4,⌈villages/25⌉)` before regrowing — round count stays
+  roughly constant (~25) regardless of village count, at the cost of two villages in the SAME batch
+  not considering each other as targets until the next round.
+- **A village-to-village edge is still a PLACE-to-PLACE edge with two distinct indices** — doesn't
+  reintroduce the v1.71 self-loop bug. Reachability is unchanged by construction: grid connectivity
+  doesn't depend on which cells are sources, so a village unreachable in round 1 stays unreachable
+  in every later round, and the existing "leave it isolated" behaviour is preserved exactly.
+- **The v1.64 existing-infrastructure discount now also covers a village's own freshly-drawn track
+  within the same pass** — a sibling processed in a later round can fork off an earlier round's
+  track instead of cutting its own parallel line. A `discounted` cell set guarantees the ×0.25
+  multiplier applies exactly once per cell across rounds.
+- **Re-measured**: mean connector 21.8→14.5 km (now near the nearest-sibling floor);
+  nearest-sibling-closer share 79.5%→36.5%; sibling-under-half-distance 33.5%→2.5%. A separate chain
+  probe (3 seeds) confirmed every reachable village still traces back to a real settlement — zero
+  clusters networked only among themselves — with isolated-village counts matching v1.78 exactly.
+  Build-time overhead +11-14% on `_civIterativeAutoWorld` at 200 villages.
+- **Tests**: 5 new smoke assertions (`R.v179`).
+- **Known scope cuts**: `BATCH`'s formula bounds round count, not independently tuned against a
+  "correct" cluster size; `_civAutoRoutes` alone still regenerates connectors from scratch each run,
+  unchanged from v1.71-v1.78.
 
 ### Terrain coupling made unconditional + Layer-view fix + animated streaks (v1.78)
 

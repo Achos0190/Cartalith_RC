@@ -717,6 +717,75 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
     return { connectorCount: conn.length, checked, maxCircuity, selfXingCount };
   });
+  // v1.79 (owner: "the roads from the deeper settlement layers dont connect to their nearest
+  // siblings and individually connect to the closest big settlement... they probably just connected
+  // to the closest main road by the most efficient route"). Measured before fixing (probe_
+  // villageconn.js, seed 31337/512px): v1.71-v1.78's target set was every real settlement and NEVER
+  // another village, so 79.5% of villages had a nearer sibling than the settlement they actually
+  // connected to, and mean connector length was 21.8km vs. a 14.0km mean nearest-sibling distance.
+  // Fixed with a batched growing-forest (Prim-style) build: the network starts as the real
+  // settlements and grows to include each village as it joins, so a village can attach to a close
+  // sibling just as readily as to a settlement, while every reachable village still traces back to a
+  // real settlement through the tree (verified below via a village-to-village adjacency BFS, not
+  // assumed). Design choice (this vs. a single-shot nearest-of-either Dijkstra vs. tapping into the
+  // nearest existing road point) confirmed with the owner via AskUserQuestion before building.
+  R.v179 = await page.evaluate(() => {
+    state.places = []; civWays = [];
+    _civVillages = true; _civMetropolis = false;
+    _civAutoWorld();
+    const places = state.places, conn = civWays.filter(w => w.villageAddon);
+    const villages = places.filter(p => p && p.villageAddon);
+    const kmPerCell = (state.mapWidthKm || 800) / GW;
+
+    // every village's connector chain (following village-way edges only) must eventually reach a
+    // real, non-village place — no cluster of villages left networked only among itself.
+    const adj = new Map();
+    for (const w of conn) {
+      if (w.aIdx == null || w.bIdx == null) continue;
+      if (!adj.has(w.aIdx)) adj.set(w.aIdx, []);
+      if (!adj.has(w.bIdx)) adj.set(w.bIdx, []);
+      adj.get(w.aIdx).push(w.bIdx); adj.get(w.bIdx).push(w.aIdx);
+    }
+    let stuckInVillageOnly = 0, isolated = 0, villageToVillageEdges = 0;
+    for (const w of conn) { if (w.bIdx != null && places[w.bIdx] && places[w.bIdx].villageAddon) villageToVillageEdges++; }
+    for (const v of villages) {
+      const vi = places.indexOf(v);
+      if (!adj.has(vi)) { isolated++; continue; }
+      const seen = new Set([vi]), queue = [vi]; let found = false;
+      while (queue.length) {
+        const cur = queue.shift(), p = places[cur];
+        if (p && !p.villageAddon) { found = true; break; }
+        for (const nb of (adj.get(cur) || [])) if (!seen.has(nb)) { seen.add(nb); queue.push(nb); }
+      }
+      if (!found) stuckInVillageOnly++;
+    }
+
+    // sibling-preference measurement, same technique as the standalone probe this fix was
+    // root-caused with: for each connected village, is its nearest SIBLING closer than the place it
+    // actually connected to?
+    let siblingCloser = 0, checked2 = 0;
+    for (const v of villages) {
+      const vi = places.indexOf(v);
+      const w = conn.find(w2 => w2.aIdx === vi || w2.bIdx === vi);
+      if (!w) continue;
+      const otherIdx = w.aIdx === vi ? w.bIdx : w.aIdx, other = places[otherIdx];
+      if (!other) continue;
+      const connDist = Math.hypot(v.x - other.x, v.y - other.y);
+      let nearestSib = Infinity;
+      for (const v2 of villages) { if (v2 === v) continue; const d = Math.hypot(v.x - v2.x, v.y - v2.y); if (d < nearestSib) nearestSib = d; }
+      if (!isFinite(nearestSib)) continue;
+      checked2++;
+      if (nearestSib < connDist) siblingCloser++;
+    }
+
+    state.places = []; civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+
+    return { connectorCount: conn.length, villageCount: villages.length, isolated, stuckInVillageOnly,
+      villageToVillageEdges, siblingCloser, checked2 };
+  });
   // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
   // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
   // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
@@ -6664,6 +6733,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.76: village connectors exist and were checked (the scenario is meaningful)', R.v176.connectorCount > 0 && R.v176.checked > 0);
   A('v1.76: no village connector loops — path length stays within a sane multiple of the straight-line distance between its own endpoints (was 3.35x pre-fix, generous slack above the measured 1.86x post-fix)', R.v176.maxCircuity < 2.2);
   A('v1.76: no village connector self-intersects (was 54/199 pre-fix — the endpoint-overwrite bug that "jump near destination, retrace the route backward, jump to destination again")', R.v176.selfXingCount === 0);
+
+  A('v1.79: village connectors exist and were checked (the scenario is meaningful)', R.v179.connectorCount > 0 && R.v179.villageCount > 0);
+  A('v1.79: at least one village actually connects to a SIBLING village, not just to real settlements (the reported bug is genuinely exercised and fixed, not just theoretically possible)', R.v179.villageToVillageEdges > 0);
+  A('v1.79: nearest-sibling-is-closer-than-actual-connection dropped well below the pre-fix 79.5% (measured ~36.5% post-fix; generous slack)', R.v179.siblingCloser / R.v179.checked2 < 0.5);
+  A('v1.79: every village\'s connector chain, followed through however many village-to-village hops, still reaches a real settlement — no cluster left networked only among itself', R.v179.stuckInVillageOnly === 0);
+  A('v1.79: villages left without a connector at all are still genuinely rare (a landmass-reachability edge case, not a regression)', R.v179.isolated <= R.v179.villageCount * 0.05);
 
   A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
   A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);

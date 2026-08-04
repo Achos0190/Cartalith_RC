@@ -12,6 +12,81 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.79 — Addon villages now cluster with nearby siblings (growing-forest connector rebuild)
+
+Owner, mid-session right after the v1.78 climate work was requested: "the roads from the deeper
+settlement layers dont connect to their nearest siblings and individually connect to the closest
+big settlement. They probably just connected to the closest main road by the most efficient
+route." Civ-layer only (`_civConnectVillageAddons`). Hash vs v1.78 **ALL IDENTICAL** (default/
+geoid/waves/ao/icons) — this function is interactive-only, never reached from `generate()`'s own
+pipeline.
+
+- **Measured before writing any fix** (`probe_villageconn.js`, seed 31337/512px, 200 villages):
+  v1.71–v1.78's target set was `places.filter(p=>!p.villageAddon)` — every village's search could
+  ONLY terminate at a real settlement, never another village, exactly the reported behaviour. Mean
+  connector length 21.8 km vs. mean nearest-SIBLING distance 14.0 km; **79.5%** of villages had a
+  nearer sibling than the settlement they actually connected to; 33.5% had a sibling at under half
+  that distance.
+- **Three designs were weighed and put to the owner via `AskUserQuestion`** before building: (1) a
+  single-shot Dijkstra seeded with both settlements AND villages as valid targets (simplest, but no
+  guarantee a village cluster's chain ever reaches a real settlement); (2) tapping a connector into
+  the nearest existing ROAD point instead of a settlement pin (shortest connectors, but reintroduces
+  the exact v1.71 self-loop shape — a bare road junction isn't a graph vertex — and doesn't address
+  the actual complaint, which is about siblings, not roads); (3) a genuine growing forest
+  (Prim-style). **Growing forest chosen** — the only option that lets a village prefer a close
+  sibling AND still guarantees every reachable village traces back to a real settlement through the
+  tree.
+- **Batched, not literal, Prim's algorithm.** True Prim's (attach the single globally-cheapest
+  unconnected node each step — the same technique `_civHierarchicalNetwork`'s own Pass 1 already
+  uses for the base road MST) needs one full-grid Dijkstra rerun PER VILLAGE, up to 200 — exactly
+  the "full extra order of magnitude" v1.71's own comment already measured as too slow at this scale
+  (removing 200 villages from the trunk network's per-place Dijkstra treatment was what took
+  Generate Roads from 3919ms to 397ms in that pass). Instead, each round runs ONE shared
+  multi-source Dijkstra from the current network (real settlements ∪ every village that has already
+  joined), ranks every still-unconnected village by distance to THAT network, and attaches the
+  cheapest batch before growing the source set and re-running. `BATCH=max(4, ⌈villages/25⌉)` keeps
+  the round count roughly constant (~25) regardless of village count — an approximation of Prim's
+  ordering (two villages attached in the SAME batch don't get to consider each other as targets
+  until the next round) traded for a small, bounded Dijkstra-call count.
+- **A village-to-village edge is still a PLACE-to-PLACE edge with two distinct indices**, so it
+  doesn't reintroduce the v1.71 self-loop bug (`_civNetworkMetrics` only recognises PLACE-to-PLACE
+  edges via `aIdx`/`bIdx`, with no concept of a bare road junction as a graph vertex — a village
+  is a real place regardless of whether its neighbour is a settlement or another village).
+- **Reachability is unchanged by construction.** Whether a village is reachable from the network
+  depends only on grid connectivity, not on which cells happen to be sources — a village unreachable
+  in round 1 stays unreachable in every later round too (adding more sources within the same
+  reachable component can't open a new one), so `!ranked.length` correctly identifies a genuinely
+  stranded remainder and stops, exactly like the old per-village `!isFinite(dist[ci])` check did.
+- **The v1.64 "ride existing infrastructure" discount now also applies to a village's own
+  newly-drawn track within the same pass** (not just pre-existing roads) — once a village's track is
+  committed, a sibling processed in a LATER round can fork off that fresh track instead of cutting
+  its own parallel line, reinforcing the "beads on a string, forking local lane" shape rather than
+  independent parallel spurs. A `discounted` cell set (seeded from pre-existing ways, extended as
+  each new track lands) guarantees the ×0.25 multiplier is applied exactly once per cell, never
+  re-multiplied across rounds.
+- **v1.76's point-ordering discipline is preserved unchanged**: the Dijkstra walk still builds `raw`
+  in village→…→target order (no `.reverse()`), and the endpoint-pin snap works identically whether
+  the target is a settlement or an already-joined village.
+- **Re-measured after the fix** (same seed/scenario): mean connector length 21.8 km → **14.5 km**
+  (now essentially matching the theoretical nearest-sibling floor); nearest-sibling-closer share
+  79.5% → **36.5%**; sibling-under-half-distance share 33.5% → **2.5%**. A separate chain-integrity
+  probe (`probe_villagechain.js`, 3 seeds) confirmed every reachable village's connector chain,
+  followed through however many village-to-village hops, still lands on a real settlement — zero
+  villages left networked only among themselves — and isolated-village counts matched v1.78 exactly
+  on all 3 seeds (no reachability regression). Measured build-time overhead: +11–14% on
+  `_civIterativeAutoWorld` at 200 villages (3.5s→4.0s at 512px, 9.4s→10.5s at 768px), the accepted
+  cost of the batched rebuild versus a single Dijkstra pass.
+- **Tests**: 5 new smoke assertions (`R.v179`) — connectors exist and were checked; at least one
+  genuine village-to-village edge exists (the fix is actually exercised, not just theoretically
+  possible); nearest-sibling-closer share is well below the pre-fix 79.5%; every village's chain
+  reaches a real settlement (BFS over village-way adjacency); isolated-village count stays a rare
+  landmass-reachability edge case, not a regression.
+- **Known scope cuts**: `BATCH`'s formula is a reasoned bound on round count, not independently
+  tuned against a "correct" cluster size; two villages landing in the same batch don't benefit from
+  each other as targets until the following round (a one-round-delayed approximation of true Prim
+  ordering, not a correctness issue); `_civAutoRoutes` ("Generate Roads" alone, without a full
+  Auto-populate) still regenerates connectors from scratch each run, unchanged from v1.71–v1.78.
+
 ### v1.78 — Terrain coupling made unconditional + Layer-view fix + animated wind/current streaks
 
 Owner, immediately after v1.77 shipped: "Wind and current should always be coupled to terrain

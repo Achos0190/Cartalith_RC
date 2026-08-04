@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.78.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.79.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.79 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.77` are kept and never edited.
+  (v1.80 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.78` are kept and never edited.
+- **v1.79 — addon villages now cluster with nearby siblings instead of each one individually
+  beelining to the closest big settlement.** Owner, mid-session: *"the roads from the deeper
+  settlement layers dont connect to their nearest siblings and individually connect to the
+  closest big settlement. They probably just connected to the closest main road by the most
+  efficient route."* Civ-layer only (`_civConnectVillageAddons`). Measured first (seed 31337/
+  512px): v1.71-v1.78 could only ever target a real settlement, never another village — 79.5% of
+  villages had a nearer sibling than the settlement they actually connected to, mean connector
+  21.8 km vs. mean nearest-sibling distance 14.0 km. Three designs (single-shot Dijkstra with
+  villages as extra targets; tap into the nearest road point; a genuine growing forest) were put
+  to the owner via `AskUserQuestion` — growing forest chosen, the only one guaranteeing every
+  village still traces back to a real settlement. Rebuilt as a BATCHED Prim's algorithm (one
+  shared multi-source Dijkstra per round from settlements ∪ already-joined villages, attaching the
+  cheapest batch before regrowing) rather than one Dijkstra per village, which v1.71's own comment
+  already measured as a full extra order of magnitude too slow at 200 villages. Re-measured: mean
+  connector 21.8→14.5 km, nearest-sibling-closer share 79.5%→36.5%; a separate chain-integrity
+  probe confirmed zero villages left networked only among themselves. Hash vs v1.78 ALL IDENTICAL
+  (interactive-only). See CHANGELOG for the full writeup.
 - **v1.78 — terrain coupling made unconditional + Layer-view fix + animated wind/current
   streaks.** Owner, immediately after v1.77 shipped: *"Wind and current should always be coupled
   to terrain therefore the toggle is unneeded. Has the Layer view been updated accordingly? And
@@ -2430,21 +2447,14 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **OPEN, not started: addon-village connectors attach to the nearest full settlement instead of
-  the nearest sibling village or the nearest road.** Owner, mid-session right after the v1.78
-  climate work was requested: "the roads from the deeper settlement layers dont connect to their
-  nearest siblings and individually connect to the closest big settlement. They probably just
-  connected to the closest main road by the most efficient route." This is a report against
-  `_civConnectVillageAddons` (v1.71, refined v1.72/v1.76) — it currently routes every addon
-  village individually to its nearest REAL SETTLEMENT (a deliberate v1.71 design choice at the
-  time, made because routing to the nearest WAY cell instead produced self-loop bugs — see the
-  v1.71 CHANGELOG/HANDOFF entry). The owner is asking whether it should instead prefer a nearby
-  sibling village, or the nearest point on an existing road via the most efficient route. Not yet
-  investigated — deferred until after v1.78 shipped per this project's "finish one thing before
-  starting the next" rule. Next session: generate a real world with villages on, measure the
-  actual connector topology (this file's own "measure before fixing" discipline — the same
-  approach that found v1.71's self-loop bug and v1.76's `.reverse()` bug), and root-cause before
-  writing any fix. Likely v1.79.
+- **v1.79 shipped**: addon-village connectors now grow as a batched Prim-style forest (settlements
+  ∪ already-joined villages), so a village can attach to a nearby sibling instead of always
+  beelining to the closest big settlement. Measured before and after (mean connector 21.8→14.5 km,
+  nearest-sibling-closer share 79.5%→36.5%); a chain-integrity probe confirmed every village still
+  traces back to a real settlement, zero village-only clusters. Three designs were put to the owner
+  via `AskUserQuestion` before building (see CHANGELOG for all three and why growing-forest won).
+  Known scope cut: `BATCH`'s round-count formula is reasoned, not independently tuned against a
+  "correct" cluster size — a candidate follow-up if the clustering ever reads as too coarse/fine.
 - **v1.78 shipped**: terrain coupling made unconditional (the `state.climate.terrainWind` toggle
   is gone — deflection now runs unconditionally wherever elevation is supplied), the Wind/Ocean
   Layer views fixed to actually show the terrain-deflected/Ekman-rotated fields (a disclosed
