@@ -12,6 +12,62 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.83 — A Mounted Rider party's own mounts now carry saddlebag capacity
+
+Owner pasted a real Journey Planner route with several `⛔ Carrying enough water for this stretch
+pushes the load to...` blocks (up to 3659% over capacity) and one `⛔ Overloaded 167% of
+capacity (500 kg carried vs 300 kg rated)` block, asking *"Can you see what needs fixing?"*
+Civ-layer only (`jpCapacity`). Hash vs v1.82 **ALL IDENTICAL** — the Journey Planner is
+interactive-only, never reached from `generate()`'s own pipeline.
+
+- **Diagnosed, not assumed.** The reported 300 kg capacity is exactly `10 people ×
+  JP_HUMAN_PORTER(30kg)` — a "Mounted Rider" party got **zero extra capacity credit from actually
+  being mounted**, identical to a Walking party of the same size. The only way to credit a mount's
+  own carrying capacity was to separately re-declare the SAME animal in the Animals section
+  (`plan.animals`) — a convention that already existed but only implicitly, via the "Lone courier"
+  preset's own shape (`transport:"Mounted Rider", mountAnimal:"horse", animals:{horse:1}`),
+  never documented and never applied automatically for a hand-configured party.
+- **A real horse can carry saddlebag cargo beyond the flat porter rate** — this is a genuine
+  capacity-model gap, not the extreme-desert-crossing scenario v1.81 already scoped and correctly
+  leaves blocked (foraging alone, capped ~50%, was never meant to rescue a >150%-over-capacity
+  crossing; that ceiling, `JP_LOAD_INVALID_RATIO`, is untouched by this fix).
+- **`jpCapacity` gains `mountCredit`**: for a `transport==="Mounted Rider"` party,
+  `Math.max(0, people − plan.animals[mount]) × JP_ANIMALS[mount].cap × JP_MOUNT_SADDLEBAG_FRAC`
+  (0.3, a reasoned estimate — rider + tack already claims most of a mount's real carrying margin,
+  disclosed as un-sourced, the same class of constant as `PORT_PREFERENCE_MULT`/
+  `FEATURE_RADIUS_MAX_FRAC` elsewhere in this file). The `max(0, people − declared)` term is what
+  prevents double-counting: a rider whose mount is ALSO already declared as a full pack animal
+  (the "Lone courier" preset's own shape) gets zero extra credit for that mount, since it's already
+  earning the full `ac(mount)` pack-animal rate. A partial declaration (some riders' mounts
+  declared, others not) blends both credits correctly.
+- **Verified against all four shapes, not just the happy path**: the reported 10-rider case
+  (300kg → 660kg, `mountCredit=360`); a Walking party of identical size/cargo (completely
+  unaffected, still 300kg — the credit is Mounted-Rider-only); the "Lone courier" preset itself
+  (`mountCredit=0`, capacity unchanged at 138kg — no double-count regression on the one existing
+  configuration that already relied on the old convention); and a partial declaration (4 of 10
+  horses also declared as pack animals: 4 full pack credits + 6 riders' worth of saddlebag credit,
+  never 10 of either alone).
+- **This does NOT rescue a genuinely extreme water-driven overload** — verified directly: a
+  400 km waterless desert crossing for the same 10-rider party still correctly blocks with
+  `⛔ Carrying enough water...`, just measured against the new, larger (660kg) capacity baseline.
+  The fix helps a real capacity-model gap; it does not, and should not, make an unsurvivable
+  crossing survivable.
+- **A test-writing mistake caught before shipping, not after.** The first cut of the smoke
+  assertion for the extreme-overload case passed plan fields directly on the object given to
+  `_jpEnsurePlan(jn)`, which actually expects journey-level fields on `jn` and plan fields nested
+  under `jn.plan` — the mismatch silently defaulted `transport` back to `"Walking"` (derived from
+  `jn.sea`), so the test wasn't exercising a Mounted Rider party at all. Caught by directly
+  inspecting the returned plan's `transport` field rather than trusting the assertion result;
+  fixed by following the file's own established call convention (`_jpEnsurePlan(jn)` then
+  `Object.assign(p, {...})`, the same pattern already used at several existing call sites).
+- **Tests**: 6 new smoke assertions (`R.v183`) — the reported case's exact before/after capacity
+  numbers; Walking-party non-interference; Lone-courier zero-double-count; partial-declaration
+  blend arithmetic; the extreme-overload case still blocks with the water-specific message.
+- **Known scope cuts**: `JP_MOUNT_SADDLEBAG_FRAC=0.3` is a reasoned estimate, not independently
+  historically sourced; no UI change (no new field, no display line — the credit flows through
+  purely via the existing `cap.capacity`/block messages); mount credit is Mounted-Rider-only —
+  Baggage Train's own pack-animal accounting is untouched and was already correct.
+
 ### v1.82 — Ocean current direction becomes heat-driven, not just wind-derived; slower streak animation
 
 Owner: *"For the ocean flow and heat distribution I think you should check how heat in an ocean

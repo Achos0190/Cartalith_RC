@@ -954,6 +954,61 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (typeof _windFxSync === 'function') _windFxSync();
     return o;
   });
+  // v1.83 (owner pasted a real route with several "Carrying enough water..." blocks up to 3659%
+  // over capacity and one "Overloaded 167%" block: "Can you see what needs fixing?"). Diagnosed:
+  // the party's capacity was exactly people*JP_HUMAN_PORTER (30kg/person) — a "Mounted Rider"
+  // party got ZERO extra capacity credit from actually being mounted, identical to Walking, unless
+  // the SAME mounts were ALSO manually re-declared as pack animals (the "Lone courier" preset's own
+  // undocumented convention: transport:"Mounted Rider", animals:{horse:1}). jpCapacity now credits
+  // a rider's own mount with saddlebag capacity automatically, without double-counting a mount the
+  // user already declared as a full pack animal.
+  R.v183 = await page.evaluate(() => {
+    const o = {};
+    const base = {
+      pace: 'Standard Pace', hours: 8, cargoKg: 500, supplyDays: 7, season: 'Summer',
+      grazing: 'Partial — graze at camp', foraging: 'Active', carryFood: true, desertWater: 'auto',
+      carts: 0, wagons: 0, travois: 0, sleds: 0
+    };
+    // the owner's own reported shape: 10 Mounted Riders — Horse, no separately-declared pack animals
+    const mounted = Object.assign({}, base, { groupSize: 10, transport: 'Mounted Rider', mountAnimal: 'horse', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+    const capMounted = jpCapacity(mounted, 'Ruined Wastes', 'Summer');
+    o.mountedCapacity = capMounted.capacity;
+    o.mountCredit = capMounted.mountCredit;
+    o.mountedNowUnderReportedCargo = capMounted.capacity > 500;   // was 300kg vs 500kg cargo = the reported 167% block
+
+    // a Walking party of the same size/cargo must be completely unaffected (mount credit is Mounted-Rider-only)
+    const walking = Object.assign({}, mounted, { transport: 'Walking' });
+    o.walkingCapacityUnaffected = jpCapacity(walking, 'Ruined Wastes', 'Summer').capacity === 300;
+
+    // "Lone courier" preset's own shape — mount ALREADY declared as a full pack animal — must see
+    // zero extra credit (no double-counting the same physical horse twice)
+    const loneCourier = Object.assign({}, base, { groupSize: 1, transport: 'Mounted Rider', mountAnimal: 'horse', pace: 'Haste', hours: 10, cargoKg: 5, supplyDays: 2, grazing: 'Full — graze on route', foraging: 'None', animals: { donkey: 0, mule: 0, camel: 0, horse: 1 } });
+    const capLone = jpCapacity(loneCourier, 'Temperate Forest', 'Summer');
+    o.loneCourierMountCreditIsZero = capLone.mountCredit === 0;
+
+    // a partial declaration (4 of 10 horses also declared as pack animals) must blend correctly:
+    // 4 full pack-animal credits + 6 riders' worth of saddlebag credit, never 10 of either alone
+    const partial = Object.assign({}, mounted, { animals: { donkey: 0, mule: 0, camel: 0, horse: 4 } });
+    const capPartial = jpCapacity(partial, 'Ruined Wastes', 'Summer');
+    const acHorse = JP_ANIMALS.horse.cap * (JP_SEASONAL_ANIMAL.Summer.horse.cap);
+    const expectedPartial = 4 * acHorse + 10 * JP_HUMAN_PORTER + 6 * JP_ANIMALS.horse.cap * JP_MOUNT_SADDLEBAG_FRAC;
+    o.partialBlendCorrect = Math.abs(capPartial.capacity - expectedPartial) < 0.01;
+
+    // a genuinely extreme water-driven overload (the owner's other reported blocks, up to 3659%)
+    // must NOT be silently rescued by this fix — that would be a real regression, not a fix. Model
+    // a stage with a very long dry run so the water-need term dwarfs the new capacity credit.
+    const plan = _jpEnsurePlan({ pts: [[0, 0], [1, 0]], km: 400, name: '', sea: false, groupSize: 10 });
+    // cargoKg kept small and deliberately separate from the mounted-capacity test above — this
+    // scenario isolates the WATER-driven block specifically (not a cargo overload, which the new
+    // mount credit can legitimately fix), so a low cargo keeps ratio0 well under the "Overloaded"
+    // threshold and lets the extreme 400km dry stretch trip the water-specific block instead.
+    Object.assign(plan, { transport: 'Mounted Rider', mountAnimal: 'horse', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, cargoKg: 20, supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'Active', carryFood: true, desertWater: 'auto', pace: 'Standard Pace', hours: 8 });
+    const extremeSt = { km: 400, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard', infra: 'Sparse Settlements', biome: 'Hot Desert', dryKm: 400 };
+    const rExtreme = jpCalcLand(extremeSt, plan);
+    o.extremeGapStillBlocked = !!rExtreme.blocked && /Carrying enough water/.test(rExtreme.blocked);
+
+    return o;
+  });
   // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
   // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
   // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
@@ -6929,6 +6984,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.82: with the bend on, the mean-absolute SST anomaly across the whole ocean is measurably stronger than with it off — heat distribution now genuinely differentiates by basin position, not latitude alone', R.v182.bendStrengthensSignal);
   A('v1.82: with the bend on, meaningfully more of the ocean shows a real cold (upwelling) anomaly than with it off — a two-sided signal, not just a stronger one-sided warm drift', R.v182.bendProducesMoreColdCells);
   A('v1.82: the wind/current streak particles genuinely advect at the new slower rate (~35% of the pre-v1.82 step), measured directly against the real _windFxStep function', R.v182fx.n > 0 && Math.abs(R.v182fx.actualVsPredicted315 - 1) < 0.25 && R.v182fx.actualVsPredicted90 < 0.6);
+
+  A('v1.83: a Mounted Rider party now gets real saddlebag capacity from its own mounts (300kg -> 660kg for the owner\'s reported 10-rider case)', R.v183.mountedCapacity === 660 && R.v183.mountCredit === 360);
+  A('v1.83: the owner\'s reported 500kg-cargo/167%-overloaded case is now genuinely under capacity, not just numerically different', R.v183.mountedNowUnderReportedCargo);
+  A('v1.83: a Walking party of the identical size/cargo is completely unaffected — the mount credit is Mounted-Rider-only', R.v183.walkingCapacityUnaffected);
+  A('v1.83: the "Lone courier" preset (mount already declared as a full pack animal) gets zero extra credit — no double-counting the same physical horse', R.v183.loneCourierMountCreditIsZero);
+  A('v1.83: a partial declaration (some riders\' mounts also declared as pack animals) blends full pack-animal credit and saddlebag credit correctly, never double- or under-counting', R.v183.partialBlendCorrect);
+  A('v1.83: a genuinely extreme water-driven overload (400km waterless desert) still correctly blocks — the fix helps a real capacity gap, it does not rescue an unsurvivable crossing', R.v183.extremeGapStillBlocked);
 
   A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
   A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);

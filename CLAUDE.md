@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.82**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.83**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.82.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.81.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.83.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.82.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,31 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### A Mounted Rider party's own mounts now carry saddlebag capacity (v1.83)
+
+Owner pasted a real route with several `⛔ Carrying enough water...` blocks (up to 3659% over)
+and one `⛔ Overloaded 167%...` block: "Can you see what needs fixing?" Civ-layer only
+(`jpCapacity`). Hash vs v1.82 ALL IDENTICAL (JP is interactive-only).
+
+- **Diagnosed**: reported capacity was exactly `people*JP_HUMAN_PORTER` — a "Mounted Rider" party
+  got zero extra capacity from being mounted, identical to Walking, unless the SAME mounts were
+  ALSO manually re-declared as pack animals (the "Lone courier" preset's own undocumented
+  convention).
+- **`jpCapacity` gains `mountCredit`**: `max(0, people − plan.animals[mount]) × JP_ANIMALS[mount]
+  .cap × JP_MOUNT_SADDLEBAG_FRAC(0.3)` — the `max(0, ...)` term prevents double-counting a mount
+  already declared as a full pack animal.
+- **Verified all four shapes**: reported case 300kg→660kg; Walking party unaffected; Lone courier
+  preset unchanged (zero extra credit); partial declaration blends both credit types correctly.
+- **Does not rescue a genuine extreme overload** — a 400km waterless-desert crossing for the same
+  party still correctly blocks, verified directly against the new capacity baseline.
+- **Tests**: 6 new smoke assertions. One test-writing mistake caught before shipping: the first
+  assertion passed plan fields directly on `_jpEnsurePlan`'s argument instead of nesting them
+  under `.plan` per the file's own call convention — silently defaulted transport back to
+  Walking, caught by inspecting the returned plan directly.
+- **Known scope cuts**: `JP_MOUNT_SADDLEBAG_FRAC` is a reasoned, not independently sourced,
+  estimate; no UI change (flows through existing capacity/block messages); Baggage Train's own
+  pack-animal accounting is untouched.
 
 ### Ocean current direction becomes heat-driven, not just wind-derived (v1.82)
 

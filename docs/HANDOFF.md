@@ -9,11 +9,24 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.82.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.83.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.83 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.81` are kept and never edited.
+  (v1.84 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.82` are kept and never edited.
+- **v1.83 — a Mounted Rider party's own mounts now carry saddlebag capacity.** Owner pasted a
+  real route with several `⛔ Carrying enough water...` blocks (up to 3659% over) and one
+  `⛔ Overloaded 167%...` block: "Can you see what needs fixing?" Diagnosed: the reported 300kg
+  capacity was exactly `people*JP_HUMAN_PORTER` — a Mounted Rider party got zero extra capacity
+  from being mounted, identical to Walking, unless the same mounts were ALSO manually re-declared
+  as pack animals (the "Lone courier" preset's own undocumented convention). `jpCapacity` now
+  credits `max(0, people - plan.animals[mount]) * JP_ANIMALS[mount].cap *
+  JP_MOUNT_SADDLEBAG_FRAC(0.3)`, avoiding double-count by construction. Verified against all four
+  shapes: reported case 300kg→660kg; Walking party unaffected; Lone courier preset unchanged;
+  partial declaration blends correctly. Does NOT rescue a genuine extreme water overload — a
+  400km waterless-desert crossing for the same party still correctly blocks, verified directly.
+  Hash vs v1.82 ALL IDENTICAL. See CHANGELOG for the full writeup, including a test-writing
+  mistake (wrong `_jpEnsurePlan` calling convention) caught and fixed before shipping.
 - **v1.82 — ocean current direction becomes heat-driven, not just wind-derived; windFx slowed
   65%.** Owner: "check how heat in an ocean originates and how flow direction is dictated by it.
   At the moment it just seems to base itself from right to left." Measured first: the meridional
@@ -2516,21 +2529,13 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   flakiness in this environment rather than an app bug, but not root-caused. Worth a dedicated look
   if it starts flagging more assertions or if a real canvas-sizing bug is ever reported matching
   either description.
-- **OPEN, in progress: Journey Planner reports "impossible" too often for a Mounted Rider party.**
-  Owner pasted a real route with several `⛔ Carrying enough water...` blocks (up to 3659% over
-  capacity) and one `⛔ Overloaded 167%...` block, asking "Can you see what needs fixing?".
-  Diagnosed: the party's capacity was exactly `people*JP_HUMAN_PORTER` (30kg/person) — a "Mounted
-  Rider" transport gets ZERO extra capacity credit from actually being mounted, identical to
-  Walking, unless the SAME mounts are ALSO manually re-declared as pack animals in
-  `plan.animals` (the "Lone courier" preset's own undocumented convention:
-  `transport:"Mounted Rider", animals:{horse:1}`). A real horse can carry saddlebag cargo beyond
-  the flat porter rate; this is a genuine capacity-model gap, not the extreme-desert-crossing case
-  v1.81 already scoped (which correctly stays blocked — no reasonable mount credit rescues a
-  3659% overage). Fix in progress: credit `max(0, people - plan.animals[mount])` riders' worth of
-  saddlebag capacity automatically (`JP_ANIMALS[mount].cap * JP_MOUNT_SADDLEBAG_FRAC`), avoiding
-  double-count with any manually-declared matching pack animals (so "Lone courier" is unaffected —
-  its declared horse already gets full pack credit). Pick this up from task tracking if the session
-  ended before it shipped as v1.83.
+- **v1.83 shipped**: a Mounted Rider party's own mounts now carry saddlebag capacity —
+  `jpCapacity` credits `max(0, people - plan.animals[mount]) * JP_ANIMALS[mount].cap *
+  JP_MOUNT_SADDLEBAG_FRAC(0.3)`, closing a real gap (a mounted party's capacity was previously
+  identical to Walking's unless the mount was ALSO manually re-declared as a pack animal) without
+  double-counting or rescuing a genuinely unsurvivable water-driven crossing (verified directly).
+  Hash vs v1.82 ALL IDENTICAL. See CHANGELOG for the full writeup, including a test-writing
+  mistake (wrong `_jpEnsurePlan` calling convention) caught and fixed before shipping.
 - **v1.82 shipped**: ocean current direction becomes heat-driven (a western/eastern-boundary bend
   in `computeOceanCurrent`, reusing the existing coastal-distance weights — poleward pile-up on a
   basin's western edge, weaker equatorward upwelling on its eastern edge) instead of a flat,
