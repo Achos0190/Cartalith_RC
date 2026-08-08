@@ -1115,25 +1115,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       o.rotationMonotonicDecreasing = rots.every((k, i) => i === 0 || k < rots[i - 1]);
       o.rotationReusesCirculationCellsOmega = rotationContrastK.toString().includes('24') && circulationCells.toString().includes('rotationHours');
 
-      // live, end-to-end: computeTemperature() on the ALREADY-generated world (whatever it is at
-      // this point in the shared suite — no GW/resW/allocate/generate() touched, so nothing here can
-      // leak into later tests, the same restraint currentWindField/refreshClimate checks elsewhere in
-      // this suite already rely on) must diverge from the default in the PREDICTED direction at max
-      // tilt (colder, since equatorTemp>poleTemp in this world's defaults and K<1 at 45° tilt
-      // flattens the contrast toward the poleTemp anchor).
-      const tempBefore = tempField.slice();
-      state.planet.axialTiltDeg = 23.4; state.planet.rotationHours = 24; computeTemperature();
+      // live, end-to-end: refreshClimate() — the SAME full pipeline stage generate() itself uses,
+      // not just the raw computeTemperature() sub-step — on the ALREADY-generated world (whatever
+      // it is at this point in the shared suite; no GW/resW/allocate/generate() touched, so nothing
+      // here can leak into later tests, the same restraint currentWindField/refreshClimate checks
+      // elsewhere in this suite already rely on). Using the full pipeline (not just
+      // computeTemperature alone) matters for the restore check below: generate()'s own tempField
+      // already has applyOceanCurrents()'s SST anomaly folded in, which a bare computeTemperature()
+      // call doesn't reproduce — comparing against that with only computeTemperature() re-run would
+      // report a false "leak" that's really just skipping a pipeline stage, not a real one.
+      const tempBefore = tempField.slice(), rainBefore = rainField.slice();
+      state.planet.axialTiltDeg = 23.4; state.planet.rotationHours = 24; refreshClimate();
       let tSumDefault = 0; for (let i = 0; i < tempField.length; i++) tSumDefault += tempField[i];
       const tMeanDefault = tSumDefault / tempField.length;
 
-      state.planet.axialTiltDeg = 45; state.planet.rotationHours = 24; computeTemperature();
+      state.planet.axialTiltDeg = 45; state.planet.rotationHours = 24; refreshClimate();
       let tSumMaxTilt = 0; for (let i = 0; i < tempField.length; i++) tSumMaxTilt += tempField[i];
       const tMeanMaxTilt = tSumMaxTilt / tempField.length;
       o.liveGenerateRespondsToTilt = tMeanMaxTilt < tMeanDefault - 1;   // real, correctly-signed divergence
 
-      state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; computeTemperature();
+      state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; refreshClimate();
       let restoreDiff = 0; for (let i = 0; i < tempField.length; i++) restoreDiff += Math.abs(tempField[i] - tempBefore[i]);
-      o.tempFieldFullyRestored = (restoreDiff / tempField.length) < 1e-6;   // leaves no trace for downstream tests
+      let rainRestoreDiff = 0; for (let i = 0; i < rainField.length; i++) rainRestoreDiff += Math.abs(rainField[i] - rainBefore[i]);
+      o.tempFieldFullyRestored = (restoreDiff / tempField.length) < 1e-6 && (rainRestoreDiff / rainField.length) < 1e-6;   // leaves no trace for downstream tests
     } finally { state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; }
     return o;
   });
