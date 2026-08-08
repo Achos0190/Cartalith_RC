@@ -12,6 +12,136 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.85 — Ocean heating grounded in axial tilt + rotation (a real solar-energy budget); confirms climate→rendering interconnection
+
+Owner: *"For the climate modeling, now that water and wind are influenced by topology I want to make
+sure this all interconnect to map rendering aswell. (so rainfall etc should be informed by it) we
+also have sliders for gravity, axial tilt and how long days are on the world all these things inform
+how much energy a sun sets in a world and how much it keeps (eg. The heating if the ocean and flow of
+it are influenced) let's always assume a sun like star and quantify this in a simple way. All I want
+is that the heating of the ocean and resulting ocean currents and subsequent wind are all based in
+grounded values."* Engine (block 1). Full design/derivation/measurements:
+`docs/research/solar-energy-budget.md`.
+
+- **Part 1 (measurement, no code): confirmed the terrain-coupled wind/current work already reaches
+  map rendering.** `simulateWeather()` — the actual rain-producing pass — calls `oceanSSTAnomaly()`
+  (which calls `computeOceanCurrent()`, the v1.82 heat-driven-bend current field) *before* building
+  its own wind field, and folds the SST anomaly into the sea temperature that drives `buildWind`'s
+  pressure gradient. `docs/research/system-coupling-audit.md`'s documented "Loop 2," shipped since
+  v0.067, reinforced (not newly built) by this session's own v1.77–v1.82 work.
+- **Part 2 (the real gap): the base equator-pole temperature gradient — `tSea = poleTemp +
+  (equatorTemp−poleTemp)·shape(lat)`, independently reimplemented at six JS call sites plus the GPU
+  shader's `uEqT`/`uPoT` uniforms — was completely unconnected to `state.planet`'s gravity/axial-tilt/
+  rotation sliders**, even though those sliders already drive real physics elsewhere
+  (`circulationCells()`'s cell count, `buildWind`'s Coriolis term, `computeTemperature`'s g-scaled
+  lapse rate, the seasonal declination shift). This is the value that actually sets the ocean's SST
+  baseline feeding the loop confirmed in Part 1, so it's the correct, narrow target.
+- **Axial tilt → `insolationContrastK()`**: the 2nd-order (Legendre P₂) energy-balance-model
+  approximation of annual-mean insolation vs. latitude/obliquity (North & Coakley 1979). The
+  equator-pole contrast coefficient `s2(ε)=3sin²ε−2` is negative for Earth-like tilt, crosses zero at
+  the real, documented critical obliquity **ε=arccos(1/√3)≈54.7356°** (Rose, Cronin & Bitz 2017, *ApJ*
+  846:28 — the tilt past which a planet's annual-mean insolation gradient reverses and poles receive
+  more sun over a year than the equator), and is positive beyond it. Normalized to 1.0 at this file's
+  own 23.4° Earth default. The UI's own tilt slider caps at 45°, short of the reversal — a real,
+  meaningful, monotonic, correctly-signed adjustment (K≈1.31 at 0°, K≈0.33 at the 45° cap) across the
+  slider's entire reachable range.
+- **Rotation (day length) → `rotationContrastK()`**: a slower rotator's weaker Coriolis constraint
+  permits more direct meridional overturning, transporting heat poleward more efficiently and
+  flattening the gradient (the qualitative direction reported for slow planetary rotators in
+  circulation studies, e.g. Merlis & Schneider 2010; the same direction already motivates
+  `circulationCells()`'s "slow rotators collapse to one giant Hadley cell"). Reuses the SAME
+  Ω=24/rotationHours already driving `circulationCells()` and `buildWind`'s Coriolis term — not a new,
+  unrelated constant — raised to a small, disclosed, not-independently-fitted exponent (0.25).
+- **Gravity deliberately gets no additional direct term.** Its established roles are already
+  implemented (lapse rate Γ~g since G1; circulation-cell count/Coriolis strength via
+  `circulationCells()`'s √g term) — a further direct gravity→ocean-heating link has no equally simple,
+  equally citable closed form without inventing an atmosphere-composition model this tool doesn't
+  have. Left alone and disclosed, not padded with an invented formula.
+- **One function, seven call sites redirected**: `climEffectiveEquatorTemp()` centralizes
+  `poleTemp + (equatorTemp−poleTemp)·insolationContrastK()·rotationContrastK()`; every one of the six
+  duplicate `tSea`/`tSeaAt` formulas (`computeTemperature`, `oceanSSTAnomaly`, `simulateWeather`,
+  `computeTempInto`, `currentWindField`, `currentOceanField`) plus the GPU shader's `uEqT` uniform now
+  read it instead of raw `state.climate.equatorTemp` — one source of truth instead of this file's own
+  repeatedly-diagnosed "N functions answering one question" drift. The GPU shader itself needed no
+  GLSL change — it already computes `tSea` from its uniforms, so passing an already-scaled `uEqT`
+  produces the identical grounded result.
+- **Both multipliers are exactly 1.0 at Earth defaults (g=1, 24h, 23.4°) by construction** — the
+  CLAUDE.md bit-identical invariant holds without a special-cased branch. Verified directly:
+  `node tests/perf/hash_gen1.js v1.84 v1.85` → **ALL IDENTICAL** at defaults, across every scenario.
+- **Measured live, end-to-end**, not just correct in isolation: a real `generate()`+`refreshClimate()`
+  at max tilt (45°) drops mean tempField from 14.9°C (defaults) to −16.2°C, in the predicted
+  direction and a magnitude consistent with the pure-function calculation; zero tilt raises it to
+  29.2°C; slow rotation (96h) cools to 1.4°C, fast rotation (6h) warms to 34.1°C. `currents=true` vs
+  `currents=false` at max tilt still shows the expected small SST-anomaly perturbation riding on top
+  of the new, much larger grounded baseline — the pre-existing ocean-current toggle keeps working
+  correctly on the new foundation.
+- **Tests**: still 1017/1017 on `tests/run.sh` (bit-identical at defaults, confirmed by both the
+  headless suite and a targeted `hash_gen1.js` A/B); 852/852 `tests/run_um.sh` (block 4 untouched); 6
+  new smoke assertions (`R.v185`) — defaults-are-exactly-1, the critical-obliquity zero-crossing
+  matches the documented value, tilt/rotation monotonicity across the UI's own slider ranges, and a
+  live `generate()` divergence check.
+- **Known scope cuts**: no new stellar-type slider (Sun-like/G-type assumed throughout, per the
+  owner's own framing); no absolute top-of-atmosphere energy quantity (W/m², total absorbed power) is
+  computed or exposed — this tool has no albedo-integral/atmosphere-composition model to make one
+  meaningful, so the grounding is specifically the equator-pole insolation *contrast*, the one
+  quantity the existing temperature model actually uses; gravity gets no new direct term (disclosed
+  above); **not** bit-identical away from Earth defaults — any world with non-23.4° tilt or non-24h
+  day now has a deliberately, measurably different temperature/rainfall/ocean-current baseline than
+  v1.84 produced for the same seed, the same class of disclosed re-baseline as v1.36/v1.60.
+
+### v1.84 — Journey Planner: water only counts as carried weight in arid biomes
+
+Owner: *"For the travel planner I thimk water should only become an actual weight in arid
+biomes/climates (when there is little rainfall or just little available water) for other journeys it
+should technically not be counted. Water is usually abundant and always collectable in meaningful
+quantities."* Civ-layer only (`jpCapacity`/`jpCalcLand`/`jpAutoPickTransport`/`_jpPlan`). Hash vs
+v1.83 **ALL IDENTICAL** — the Journey Planner is interactive-only, never reached from `generate()`'s
+own pipeline.
+
+- **Root cause: humans already carried water everywhere, just less of it outside a desert.**
+  `humanWaterCarryDays` was `biome?.desertLike ? min(supplyDays,4) : min(supplyDays,2)` at three
+  independent call sites — a non-desert biome still silently carried 2 days of water as mass.
+  Animals already had this right (`animalWaterCarryDays` was already `desertLike?...:0`) — humans
+  never matched. `desertLike` (Hot Desert / Cold Desert-Badlands only, of 12 `JP_BIOMES`) is this
+  file's existing, already-per-biome aridity signal — the natural gate for the new rule.
+- **New shared helper, three duplicate sites redirected**: `jpHumanWaterCarryDays(biome,supplyDays)`
+  returns `desertLike ? min(supplyDays,4) : 0`, called from `jpCapacity` and both
+  `jpAutoPickTransport` branches (Walking, Baggage Train) instead of each reimplementing the same
+  ternary — the exact "N functions answering one question" pattern this file's own CLAUDE.md flags
+  repeatedly (v1.30/v1.32/v1.35/v1.72/v1.75).
+- **`jpCalcLand`'s convergence-loop `waterNeeded` term is now `isDesert ? (...) : 0`** — outside a
+  desert biome, water contributes zero mass to the load regardless of how severe the stage's own
+  measured dry run (`dryKm`/`waterGapDays`) happens to be. This **reverts v1.56's "the AUTO
+  water-crossing tier applies to any biome, not just desert" widening** back to desert-only, per this
+  direct new owner instruction — a deliberate revision of a prior version's own design decision, the
+  same class of change as v1.63's revision of v1.56's Small-Caravan bonus.
+- **Consistency sweep, not just the headline term**: `jpAssessResupply`'s `dryKm`/`waterGapDays`
+  arguments are gated to `0`/`Infinity` for a non-desert stage at all three call sites, so a
+  non-desert overload can never be mislabeled `cause:'water'`; the hard-block message wording forks on
+  `isDesert` ("Carrying enough water..." vs "Supplies for this stretch..."); the formula trace's water
+  line now reads `assumed abundant in this biome — not counted as carried weight` for non-desert
+  instead of a raw (and now-meaningless) dry-run distance; the Info panel's "Water" finding
+  (`worstDry`) is filtered to `isDesert` stages only; and `_jpPlan`'s route-summary `waterL` total —
+  which reads `cap.humanWaterRate` **directly**, not through the gated `cap.breakdown.humanWater` —
+  gets its own explicit `isDesert` check, the one site that would have silently kept reporting a
+  non-zero water figure for a non-desert stage otherwise.
+- **`jpCalcWater` (sea/river vessels) is deliberately untouched** — a ship's hold mid-passage cannot
+  detour to a stream the way a land party can, a genuinely different physical reality, so vessels keep
+  carrying real potable water regardless of the land biomes they pass.
+- **Desert-stage behavior is byte-identical to v1.83** throughout, by construction — every gated
+  branch reduces to its old formula exactly when `isDesert===true`.
+- **Tests**: 3 of `R.v156`'s 8 existing smoke assertions rewritten to assert the reverted, desert-only
+  behavior instead of the widened one (the other 5 — the drinking-flow divisor, the explicit-override-
+  stays-desert-only case, and the genuine-desert-stage regression checks — were already correct and
+  untouched) + 8 new smoke assertions (`R.v184`) — zero water weight for a non-desert
+  biome vs. real water for desert, capacity itself unaffected by biome, the animal-count solver still
+  runs cleanly, the convergence loop's zero-water claim, the trace's "assumed abundant" wording, the
+  desert trace staying real, and the route-summary `waterL` fix specifically.
+- **Known scope cuts**: no new UI control — the change is a modeling-assumption revision, not a new
+  toggle; `desertLike` (Hot Desert / Cold Desert-Badlands) remains the sole aridity signal — a
+  biome-level rainfall/moisture threshold was considered and rejected as an unrequested, much larger
+  redesign of `JP_BIOMES`.
+
 ### v1.83 — A Mounted Rider party's own mounts now carry saddlebag capacity
 
 Owner pasted a real Journey Planner route with several `⛔ Carrying enough water for this stretch

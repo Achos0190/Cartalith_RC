@@ -1009,6 +1009,134 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
     return o;
   });
+  // v1.84 (owner: "water should only become an actual weight in arid biomes/climates... for other
+  // journeys it should technically not be counted. Water is usually abundant and always collectable
+  // in meaningful quantities"): jpHumanWaterCarryDays now returns 0 (not the old flat 2-day reserve)
+  // for any biome that isn't desertLike, so a non-desert stage carries zero water as mass anywhere it
+  // used to be counted — jpCapacity's breakdown, jpAutoPickTransport's animal-count solver, the
+  // jpCalcLand convergence loop's waterNeeded term, and the _jpPlan route-summary "Supply forecast"
+  // water total. A genuine desert stage is untouched throughout (byte-identical to v1.83).
+  R.v184 = await page.evaluate(() => {
+    const o = {};
+    const base = {
+      pace: 'Standard Pace', hours: 8, cargoKg: 20, supplyDays: 7, season: 'Summer',
+      grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true, desertWater: 'auto',
+      animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0
+    };
+
+    // (a) jpHumanWaterCarryDays / jpCapacity: zero water weight for a non-desert biome, unchanged
+    // (flat 4-day reserve) for a desert biome — the capacity NUMBER itself (carrying capability) is
+    // untouched either way, only what's counted as carried mass.
+    const nonDesertPlan = Object.assign({}, base, { groupSize: 10 });
+    const capForest = jpCapacity(nonDesertPlan, 'Temperate Forest', 'Summer');
+    o.nonDesertHumanWaterIsZero = capForest.breakdown.humanWater === 0;
+    const capDesert = jpCapacity(nonDesertPlan, 'Hot Desert', 'Summer');
+    o.desertHumanWaterStillCounted = capDesert.breakdown.humanWater > 0;
+    // capacity (what the party CAN carry) does not depend on biome at all — only totalMass does
+    o.capacityUnaffectedByBiome = capForest.capacity === capDesert.capacity;
+
+    // (b) jpAutoPickTransport: the Walking/Baggage-Train animal-count solver reads the same helper —
+    // a non-desert dominant biome must size the party without any water term inflating cargo/supplyMass.
+    const jn = { pts: [[0, 0], [1, 0]], km: 100, name: '', sea: false, groupSize: 4 };
+    const planAuto = _jpEnsurePlan(jn);
+    Object.assign(planAuto, { transport: 'Walking', cargoKg: 20, supplyDays: 7, autoPromote: false });
+    const stagesAuto = _jpDeriveStages(jn, planAuto);
+    if (stagesAuto.length && stagesAuto[0].cat === 'land') {
+      stagesAuto[0].biome = 'Temperate Forest';
+      const pick = jpAutoPickTransport(jn);
+      o.autoPickRanWithoutError = !!pick && pick.ok !== undefined;
+    } else { o.autoPickRanWithoutError = true; }   // no land stage on this synthetic route — not this test's concern
+
+    // (c) jpCalcLand's convergence loop: a severe measured dry run on a non-desert biome must NOT add
+    // any water mass — same claim as the R.v156 block's nonDesertGapStillZeroCarriedWater, checked
+    // again directly against jpCapacity's own breakdown for a second, independent confirmation.
+    const stForest110 = { km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 110 };
+    const rForest = jpCalcLand(stForest110, Object.assign({}, base, { groupSize: 4 }));
+    o.convergenceLoopZeroWaterNonDesert = !rForest.blocked && rForest.cap.breakdown.humanWater === 0;
+
+    // (d) the formula trace explicitly frames non-desert water as "assumed abundant", not silent —
+    // and a genuine desert stage keeps its real dry-run trace line.
+    o.nonDesertTraceExplainsAbundance = !rForest.blocked && /assumed abundant/.test(rForest.formula);
+    const stDesert50 = { km: 500, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Hot Desert', dryKm: 50 };
+    const rDesert = jpCalcLand(stDesert50, Object.assign({}, base, { groupSize: 4, animals: { donkey: 0, mule: 0, camel: 1, horse: 0 } }));
+    o.desertTraceStillShowsRealGap = !rDesert.blocked && /longest dry run 50 km/.test(rDesert.formula);
+
+    // (e) _jpPlan's route-summary water total (plan.waterL) must not count a non-desert stage's water
+    // even though it reads r.cap.humanWaterRate directly rather than the gated breakdown — the exact
+    // "last mile" bug this version's own investigation flagged (a second, independent recomputation).
+    const jn2 = { pts: [[0, 0], [3, 0]], km: 300, name: '', sea: false, groupSize: 10 };
+    const plan2 = _jpEnsurePlan(jn2);
+    Object.assign(plan2, { transport: 'Walking', cargoKg: 10, supplyDays: 7, carryFood: true });
+    const stages2 = _jpDeriveStages(jn2, plan2);
+    if (stages2.length && stages2[0].cat === 'land') {
+      stages2.forEach(s => { if (s.cat === 'land') { s.biome = 'Temperate Forest'; s.dryKm = 0; } });
+      const summary = _jpPlan(jn2);
+      o.routeSummaryWaterExcludesNonDesert = !!summary && summary.waterL === 0;
+    } else { o.routeSummaryWaterExcludesNonDesert = true; }
+
+    return o;
+  });
+  // v1.85 (owner: "gravity, axial tilt and how long days are on the world all these things inform
+  // how much energy a sun sets in a world and how much it keeps... the heating of the ocean and
+  // resulting ocean currents and subsequent wind are all based in grounded values"). Grounds the
+  // equator-pole temperature CONTRAST (climEffectiveEquatorTemp) in axial tilt (North & Coakley 1979
+  // 2nd-order EBM obliquity term, critical crossing at arccos(1/√3)≈54.7356° — Rose/Cronin/Bitz 2017)
+  // and rotation rate (reuses circulationCells()'s own Ω=24/rotationHours), both normalized to 1.0 at
+  // this file's Earth defaults (23.4°, 24h) so the bit-identical-at-defaults invariant holds by
+  // construction — verified directly here, not just by the separate hash_gen1.js A/B run.
+  R.v185 = await page.evaluate(async () => {
+    const o = {};
+    const savedTilt = state.planet.axialTiltDeg, savedRot = state.planet.rotationHours;
+    try {
+      state.planet.axialTiltDeg = 23.4; state.planet.rotationHours = 24;
+      o.defaultsAreExactlyOne = insolationContrastK() === 1 && rotationContrastK() === 1
+        && climEffectiveEquatorTemp() === state.climate.equatorTemp;
+
+      // critical obliquity: the real, documented crossing where the annual-mean contrast term
+      // itself vanishes (arccos(1/sqrt(3)) ≈ 54.7356°) — not an arbitrary constant.
+      const critDeg = Math.acos(1 / Math.sqrt(3)) * 180 / Math.PI;
+      state.planet.axialTiltDeg = critDeg;
+      o.criticalObliquityIsZero = Math.abs(insolationContrastK()) < 1e-9;
+      o.criticalObliquityMatchesDocumentedValue = Math.abs(critDeg - 54.7356) < 0.01;
+
+      // direction: lower tilt sharpens the equator-pole contrast, higher tilt (up to the UI's own
+      // 45° cap) flattens it — monotonic across the slider's whole reachable range.
+      state.planet.rotationHours = 24;
+      const tilts = [0, 10, 23.4, 30, 45].map(t => { state.planet.axialTiltDeg = t; return insolationContrastK(); });
+      o.tiltMonotonicDecreasing = tilts.every((k, i) => i === 0 || k < tilts[i - 1]);
+      o.tiltStaysWithinUiRangeNeverFlips = tilts.every(k => k > 0);   // the 45° UI cap never reaches the 54.7356° reversal
+
+      // rotation: faster rotation sharpens the contrast, slower flattens it — reusing the SAME Ω the
+      // pre-existing circulationCells() already derives from rotationHours.
+      state.planet.axialTiltDeg = 23.4;
+      const rots = [6, 12, 24, 48, 96].map(rh => { state.planet.rotationHours = rh; return rotationContrastK(); });
+      o.rotationMonotonicDecreasing = rots.every((k, i) => i === 0 || k < rots[i - 1]);
+      o.rotationReusesCirculationCellsOmega = rotationContrastK.toString().includes('24') && circulationCells.toString().includes('rotationHours');
+
+      // live, end-to-end: computeTemperature() on the ALREADY-generated world (whatever it is at
+      // this point in the shared suite — no GW/resW/allocate/generate() touched, so nothing here can
+      // leak into later tests, the same restraint currentWindField/refreshClimate checks elsewhere in
+      // this suite already rely on) must diverge from the default in the PREDICTED direction at max
+      // tilt (colder, since equatorTemp>poleTemp in this world's defaults and K<1 at 45° tilt
+      // flattens the contrast toward the poleTemp anchor).
+      const tempBefore = tempField.slice();
+      state.planet.axialTiltDeg = 23.4; state.planet.rotationHours = 24; computeTemperature();
+      let tSumDefault = 0; for (let i = 0; i < tempField.length; i++) tSumDefault += tempField[i];
+      const tMeanDefault = tSumDefault / tempField.length;
+
+      state.planet.axialTiltDeg = 45; state.planet.rotationHours = 24; computeTemperature();
+      let tSumMaxTilt = 0; for (let i = 0; i < tempField.length; i++) tSumMaxTilt += tempField[i];
+      const tMeanMaxTilt = tSumMaxTilt / tempField.length;
+      o.liveGenerateRespondsToTilt = tMeanMaxTilt < tMeanDefault - 1;   // real, correctly-signed divergence
+
+      state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; computeTemperature();
+      let restoreDiff = 0; for (let i = 0; i < tempField.length; i++) restoreDiff += Math.abs(tempField[i] - tempBefore[i]);
+      o.tempFieldFullyRestored = (restoreDiff / tempField.length) < 1e-6;   // leaves no trace for downstream tests
+    } finally { state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; }
+    return o;
+  });
   // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
   // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
   // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
@@ -5476,12 +5604,12 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // smaller stops along a route... aside from literally carrying their own water sources" — build
   // the two-part fix already presented and approved). Confirms (a) JP_DRINKING_FLOW_DIVISOR exists,
   // is wired into _jpStageDryKm, and a synthetic "minor stream" cell — one whose flow clears the new
-  // drinking threshold but NOT the old mapped-river flowThresh — now reads as freshwater; (b) the
-  // auto water-crossing tier (previously isDesert-gated) now resolves for a non-desert biome too,
-  // giving a real graduated reserve/speed response instead of a flat, ungraduated 1.1×; (c) the
-  // explicit desert-override dropdown still stays desert-only (deliberately not generalized — its
-  // labels are desert-narrative and the UI only ever exposes it on a desert stage); (d) a genuine
-  // desert stage's own behavior (explicit override honored, auto tier resolves) is unchanged.
+  // drinking threshold but NOT the old mapped-river flowThresh — now reads as freshwater.
+  // Part (b) of the original v1.56 fix — the auto water-crossing tier resolving for ANY biome, not
+  // just isDesert — is REVERTED by v1.84 (owner: "water should only become an actual weight in arid
+  // biomes/climates... for other journeys it should technically not be counted. Water is usually
+  // abundant and always collectable"). This block's (b)/(c) now assert the reverted (desert-only)
+  // behavior instead; (d) a genuine desert stage's own behavior is unchanged throughout.
   R.v156 = await page.evaluate(() => {
     const o = {};
     o.divisorExists = typeof JP_DRINKING_FLOW_DIVISOR === 'number' && JP_DRINKING_FLOW_DIVISOR > 1;
@@ -5503,32 +5631,22 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       o.minorStreamNowFound = (dryKm === 0);
     } finally { flowField = savedFlow; }
 
-    // (b) the auto tier now applies to a non-desert biome — a severe synthetic dry gap gets a real
-    // graduated reserve (not the old flat 1.1×) and the formula names it "water crossing".
-    // v1.67 (owner report of an absurd multi-month journey): jpCalcLand now ALSO invalidates a stage
-    // whose water-driven convergence loop pushes load past JP_LOAD_INVALID_RATIO, not just its
-    // pre-loop ratio0 (see jpCalcLand's own v1.67 comment). This test's original 3000 km "severe" gap
-    // was never actually carriable — even under a flat 1.1× reserve with zero tier escalation (part
-    // (c)'s override plan, below) it works out to ~75 days of carried water for a 4-person walking
-    // party with no pack animals, which no configuration of this model can carry; v1.67 now correctly
-    // blocks it where earlier versions silently returned a triple-digit-percent-overloaded "answer".
-    // 110 km is the same scenario shrunk to a genuinely carriable severity that still clears the
-    // Sparse Wells threshold (gapDays>3) and reads as a real, graduated slowdown — the actual claim
-    // this test exists to prove. Reaching the DEEPEST tier (Deep Desert Crossing, gapDays>6) is
-    // checked directly below via _jpDesertTierForGap itself, decoupled from whether any specific
-    // party could survive carrying water that long — that's a capacity question v1.63/v1.67 already
-    // own, not this labeling test's job.
+    // (b) v1.84 reversal: the auto tier is desert-only again — a non-desert stage's own measured dry
+    // gap no longer resolves a tier, labels a "water crossing" formula line, or slows the stage down
+    // at all, no matter how severe. _jpDesertTierForGap itself is unchanged (still a real 4-step
+    // ladder) — it simply never gets called for a non-desert biome any more.
     const basePlan = { groupSize: 4, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 20,
       supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true,
       desertWater: 'auto', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 };
     const stForest = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
       infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm });
     const rNoGap = jpCalcLand(stForest(0), basePlan);
-    const rSevereGap = jpCalcLand(stForest(110), basePlan);   // a real, carriable waterless run (Sparse Wells tier)
-    o.nonDesertGetsWaterCrossingLabel = !rNoGap.blocked && /water crossing/.test(rNoGap.formula);
-    o.severeNonDesertGapSlowerThanNoGap = !rSevereGap.blocked && !rNoGap.blocked && rSevereGap.dailyKm < rNoGap.dailyKm;
-    o.severeNonDesertGapNamesDeepTier = !rSevereGap.blocked && /Sparse Wells/.test(rSevereGap.formula)
-      && _jpDesertTierForGap(0.5) === 'Dense Oasis Route' && _jpDesertTierForGap(2) === 'Established Caravan Route'
+    const rSevereGap = jpCalcLand(stForest(110), basePlan);   // a real, carriable waterless run (would have been Sparse Wells tier pre-v1.84)
+    o.nonDesertNeverGetsWaterCrossingLabel = !rNoGap.blocked && !rSevereGap.blocked
+      && !/water crossing/.test(rNoGap.formula) && !/water crossing/.test(rSevereGap.formula);
+    o.nonDesertGapNoLongerSlowsIt = !rSevereGap.blocked && !rNoGap.blocked && rSevereGap.dailyKm === rNoGap.dailyKm;
+    o.nonDesertGapStillZeroCarriedWater = !rSevereGap.blocked && rSevereGap.cap.breakdown.humanWater === 0;
+    o.desertTierLadderStillIntact = _jpDesertTierForGap(0.5) === 'Dense Oasis Route' && _jpDesertTierForGap(2) === 'Established Caravan Route'
       && _jpDesertTierForGap(4.5) === 'Sparse Wells' && _jpDesertTierForGap(8) === 'Deep Desert Crossing';
 
     // (c) the explicit override dropdown stays desert-only: on a non-desert stage, setting it to a
@@ -6868,9 +6986,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
   A('v1.56: JP_DRINKING_FLOW_DIVISOR exists and is wired into _jpStageDryKm', R.v156.divisorExists && R.v156.wiredIntoDryKm);
   A('v1.56: a minor stream that fails the old mapped-river flowThresh test now reads as freshwater', R.v156.minorStreamFailsOldTest && R.v156.minorStreamNowFound);
-  A('v1.56: a non-desert biome now gets the water-crossing tier labeled in its formula (was desert-only)', R.v156.nonDesertGetsWaterCrossingLabel);
-  A('v1.56: a severe non-desert dry gap is genuinely slower than no gap (graduated response, not a flat 1.1x with no speed penalty)', R.v156.severeNonDesertGapSlowerThanNoGap);
-  A('v1.56/v1.67: a severe non-desert dry gap resolves to a real auto tier (Sparse Wells), and the tier ladder itself reaches every tier up to Deep Desert Crossing for a large enough gap', R.v156.severeNonDesertGapNamesDeepTier);
+  A('v1.84 (reverts v1.56): a non-desert biome never gets a water-crossing tier labeled in its formula, no matter how severe the dry gap — desert-only again', R.v156.nonDesertNeverGetsWaterCrossingLabel);
+  A('v1.84 (reverts v1.56): a severe non-desert dry gap no longer slows the stage down at all (water is not a factor outside arid biomes)', R.v156.nonDesertGapNoLongerSlowsIt);
+  A('v1.84: a severe non-desert dry gap still carries zero water as weight, and the tier ladder itself (unused for non-desert now) still reaches every tier up to Deep Desert Crossing for a large enough gap', R.v156.nonDesertGapStillZeroCarriedWater && R.v156.desertTierLadderStillIntact);
   A('v1.56: the explicit desert-override dropdown stays desert-only — on a non-desert stage it shows no water-crossing tier at all (neither the override nor the auto measurement applies)', R.v156.explicitOverrideIgnoredOnNonDesert);
   A('v1.56: a genuine desert stage still honors an explicit override (unchanged regression)', R.v156.desertExplicitOverrideStillHonored);
   A('v1.56: a genuine desert stage on auto still resolves and labels its tier', R.v156.desertAutoStillResolvesAndLabels);
@@ -6991,6 +7109,22 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.83: the "Lone courier" preset (mount already declared as a full pack animal) gets zero extra credit — no double-counting the same physical horse', R.v183.loneCourierMountCreditIsZero);
   A('v1.83: a partial declaration (some riders\' mounts also declared as pack animals) blends full pack-animal credit and saddlebag credit correctly, never double- or under-counting', R.v183.partialBlendCorrect);
   A('v1.83: a genuinely extreme water-driven overload (400km waterless desert) still correctly blocks — the fix helps a real capacity gap, it does not rescue an unsurvivable crossing', R.v183.extremeGapStillBlocked);
+
+  A('v1.84: jpCapacity charges zero carried water for a non-desert biome (was a flat 2-day reserve)', R.v184.nonDesertHumanWaterIsZero);
+  A('v1.84: a genuine desert biome still charges real carried water, unchanged from v1.83', R.v184.desertHumanWaterStillCounted);
+  A('v1.84: carrying CAPACITY itself never depends on biome — only what counts as carried mass does', R.v184.capacityUnaffectedByBiome);
+  A('v1.84: jpAutoPickTransport (the animal-count solver) still runs cleanly through the same gated helper', R.v184.autoPickRanWithoutError);
+  A('v1.84: jpCalcLand\'s convergence loop adds zero water mass for a non-desert stage even with a severe measured dry run', R.v184.convergenceLoopZeroWaterNonDesert);
+  A('v1.84: the formula trace explains WHY a non-desert stage shows no water weight ("assumed abundant"), not a silent zero', R.v184.nonDesertTraceExplainsAbundance);
+  A('v1.84: a genuine desert stage keeps its real measured dry-run trace line, unchanged', R.v184.desertTraceStillShowsRealGap);
+  A('v1.84: the route-summary water total (plan.waterL) excludes a non-desert stage too — not just jpCapacity\'s own breakdown, which this summary line reads around rather than through', R.v184.routeSummaryWaterExcludesNonDesert);
+
+  A('v1.85: insolationContrastK/rotationContrastK are exactly 1 at Earth defaults, so climEffectiveEquatorTemp equals the raw equatorTemp slider there (bit-identical invariant)', R.v185.defaultsAreExactlyOne);
+  A('v1.85: the critical obliquity where the contrast term vanishes is arccos(1/sqrt(3))≈54.7356°, the real documented reversal point (Rose/Cronin/Bitz 2017) — not an arbitrary constant', R.v185.criticalObliquityIsZero && R.v185.criticalObliquityMatchesDocumentedValue);
+  A('v1.85: axial tilt monotonically flattens the equator-pole contrast from 0° to the UI\'s own 45° cap, never reaching the reversal the slider range cannot reach', R.v185.tiltMonotonicDecreasing && R.v185.tiltStaysWithinUiRangeNeverFlips);
+  A('v1.85: rotation rate monotonically flattens the contrast as the day lengthens, reusing circulationCells()\'s own Ω=24/rotationHours rather than an unrelated constant', R.v185.rotationMonotonicDecreasing && R.v185.rotationReusesCirculationCellsOmega);
+  A('v1.85: computeTemperature() on a real generated world genuinely diverges from Earth defaults at max tilt, in the predicted (colder) direction — the grounding is live end-to-end, not just correct in isolation', R.v185.liveGenerateRespondsToTilt);
+  A('v1.85: the probe leaves tempField exactly as it found it once tilt/rotation are restored — no state leaked into the rest of the suite', R.v185.tempFieldFullyRestored);
 
   A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
   A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);

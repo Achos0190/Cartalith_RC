@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.83**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.85**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.83.html` | **Current** unified tool (~29.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.82.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.85.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.84.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,78 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Ocean heating grounded in axial tilt + rotation; confirms climate→rendering interconnection (v1.85)
+
+Owner: "gravity, axial tilt and how long days are on the world all these things inform how much
+energy a sun sets in a world and how much it keeps (eg. the heating of the ocean and flow of it are
+influenced) let's always assume a sun like star and quantify this in a simple way. All I want is that
+the heating of the ocean and resulting ocean currents and subsequent wind are all based in grounded
+values." Also asked to confirm the terrain-coupled wind/current work reaches map rendering. Engine
+only. Full derivation/measurements: `docs/research/solar-energy-budget.md`.
+
+- **Part 1 (measurement, no code): confirmed.** `simulateWeather()` calls `oceanSSTAnomaly()` (which
+  calls `computeOceanCurrent()`) *before* building its own wind field, folding the SST anomaly into
+  the sea temperature that drives `buildWind`'s pressure gradient — `system-coupling-audit.md`'s
+  documented "Loop 2," shipped since v0.067, reinforced (not newly built) by v1.77–v1.82.
+- **Part 2, the real gap**: the base equator-pole gradient (`tSea=poleTemp+(equatorTemp-poleTemp)
+  ·shape(lat)`, duplicated at six JS sites + the GPU shader's `uEqT`/`uPoT`) was completely
+  disconnected from `state.planet`'s gravity/tilt/rotation sliders, even though those sliders already
+  drive `circulationCells()`, `buildWind`'s Coriolis term, and the g-scaled lapse rate elsewhere.
+- **Axial tilt → `insolationContrastK()`**: 2nd-order (P₂) energy-balance-model obliquity term (North
+  & Coakley 1979). Contrast coefficient `s2(ε)=3sin²ε−2`, zero at the real critical obliquity
+  `ε=arccos(1/√3)≈54.7356°` (Rose, Cronin & Bitz 2017 — the documented annual-mean insolation
+  reversal point), normalized to 1.0 at this file's 23.4° default. The UI's 45° tilt cap stays short
+  of the reversal — a real, monotonic, correctly-signed effect across the whole slider range.
+- **Rotation → `rotationContrastK()`**: slower rotation → weaker Coriolis constraint → more efficient
+  poleward heat transport → flatter gradient (qualitative GCM result). Reuses the SAME
+  Ω=24/rotationHours already in `circulationCells()`, raised to a small disclosed exponent (0.25).
+- **Gravity deliberately gets no new term** — its established roles (lapse rate ~g, circulation-cell
+  count) are already implemented; no equally simple, citable closed form exists for a further direct
+  gravity→ocean-heating link without inventing an atmosphere model. Disclosed scope cut.
+- **One function, seven call sites**: `climEffectiveEquatorTemp()` centralizes both multipliers; every
+  duplicate `tSea` formula (CPU + GPU shader) now reads it instead of raw `equatorTemp` — one source
+  of truth, not another instance of this file's own recurring duplication drift.
+- **Bit-identical at Earth defaults by construction** (both multipliers = 1.0 exactly there) —
+  confirmed via `hash_gen1.js` v1.84→v1.85 ALL IDENTICAL. Measured live (real `generate()`+
+  `refreshClimate()`): max tilt (45°) drops mean tempField 14.9°C→−16.2°C; zero tilt raises it to
+  29.2°C; slow rotation (96h) cools to 1.4°C, fast (6h) warms to 34.1°C — all in the predicted
+  direction, confirming the wiring is live end-to-end, not just correct in isolation.
+- **Tests**: 1017/1017 (`run.sh`, bit-identical at defaults), 852/852 (`run_um.sh`, block 4
+  untouched), 6 new smoke assertions (`R.v185`).
+- **Known scope cuts**: no stellar-type slider (Sun-like assumed); no absolute W/m² energy quantity —
+  the grounding is specifically the equator-pole insolation *contrast*, the one quantity this file's
+  temperature model actually uses; not bit-identical away from Earth defaults (deliberate, disclosed).
+
+### Journey Planner: water only counts as carried weight in arid biomes (v1.84)
+
+Owner: "water should only become an actual weight in arid biomes/climates... for other journeys it
+should technically not be counted. Water is usually abundant and always collectable in meaningful
+quantities." Civ-layer only (`jpCapacity`/`jpCalcLand`/`jpAutoPickTransport`/`_jpPlan`). Hash vs v1.83
+ALL IDENTICAL (JP is interactive-only).
+
+- **Root cause**: `humanWaterCarryDays` was `desertLike?min(supplyDays,4):min(supplyDays,2)` at three
+  duplicate call sites — a non-desert biome still silently carried 2 days of water as mass. Animals
+  already had this right (`0` for non-desert) — humans never matched.
+- **New shared helper `jpHumanWaterCarryDays(biome,supplyDays)`** (`desertLike?min(supplyDays,4):0`)
+  redirects `jpCapacity` and both `jpAutoPickTransport` branches — one function, not three drifting
+  copies.
+- **`jpCalcLand`'s convergence-loop `waterNeeded` term is now `isDesert?(...):0`**, and this
+  **reverts v1.56's "auto water-crossing tier applies to any biome" widening** back to desert-only, a
+  deliberate revision of a prior version's own design decision per this direct new instruction.
+- **Consistency sweep**: `jpAssessResupply`'s `dryKm`/`waterGapDays` args gated to `0`/`Infinity` for
+  non-desert (so an overload can never be mislabeled `cause:'water'`); hard-block wording forks on
+  `isDesert`; the formula trace reads "assumed abundant in this biome — not counted as carried
+  weight" for non-desert; the Info panel's "Water" finding filters to desert stages; and `_jpPlan`'s
+  `waterL` route-summary total — which reads `cap.humanWaterRate` **directly**, bypassing the gated
+  `cap.breakdown.humanWater` — gets its own explicit `isDesert` check, the one site that would have
+  silently kept reporting non-zero water for a non-desert stage otherwise.
+- **`jpCalcWater` (sea/river vessels) deliberately untouched** — a ship can't detour to a stream
+  mid-passage the way a land party can; genuinely different physical reality.
+- **Tests**: `R.v156` rewritten to assert the reverted (desert-only) behavior instead of the widened
+  one; 8 new smoke assertions (`R.v184`).
+- **Known scope cuts**: no new UI control (a modeling-assumption revision, not a toggle); `desertLike`
+  remains the sole aridity signal.
 
 ### A Mounted Rider party's own mounts now carry saddlebag capacity (v1.83)
 
@@ -2792,6 +2864,15 @@ via `materialWeights` (Σ=1), multi-scale hillshade, opt-in NPR styles, LOD/atla
 (IndexedDB-backed baking), Strahler/Rosgen river network. Export/import: `exportZip()`/`loadZip()`
 — `params.json` + f32 fields + PNG layers + Cartalith-loadable `biome_baked.bin`/
 `terrain_baked.bin`/`cartalith_grid.json` (+ optional atlas/asset-library entries).
+
+`state.planet` (`g`, `rotationHours`, `axialTiltDeg`, `radiusRel`) grounds several real physics
+channels, all normalized to a no-op at Earth defaults (g=1, 24h, 23.4°): `circulationCells()`'s
+Hadley/Ferrel/Polar band count (`N_c=√(ΩR/√(gH))`), `buildWind`'s Coriolis term (`Ω=24/rotationHours`),
+`computeTemperature`'s g-scaled lapse rate, the seasonal declination shift, and — v1.85 —
+`climEffectiveEquatorTemp()`'s axial-tilt (`insolationContrastK`, a 2nd-order EBM obliquity term) and
+rotation (`rotationContrastK`) scaling of the equator-pole temperature *contrast* that seeds ocean SST
+(`oceanSSTAnomaly`/`computeOceanCurrent`) and, through it, wind. See `docs/research/gravity-influence.md`
+and `docs/research/solar-energy-budget.md`.
 
 Per-version details for everything above: `CHANGELOG.md`. Per-parameter reference:
 `docs/GENERATOR_PARAMETERS.md`.

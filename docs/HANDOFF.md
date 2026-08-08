@@ -9,11 +9,48 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.83.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.85.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.84 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.82` are kept and never edited.
+  (v1.86 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.84` are kept and never edited.
+- **v1.85 — ocean heating grounded in axial tilt + rotation; confirms climate→rendering
+  interconnection.** Owner: "gravity, axial tilt and how long days are on the world all these
+  things inform how much energy a sun sets in a world and how much it keeps (eg. the heating of
+  the ocean and flow of it are influenced)... let's always assume a sun like star and quantify
+  this in a simple way. All I want is that the heating of the ocean and resulting ocean currents
+  and subsequent wind are all based in grounded values." Also asked to confirm the terrain-
+  coupled wind/current work (v1.77–v1.82) reaches map rendering — confirmed by direct inspection,
+  no code needed: `simulateWeather()` calls `oceanSSTAnomaly()`/`computeOceanCurrent()` before
+  building its own wind field, the documented "Loop 2" shipped since v0.067. The real gap: the
+  base equator-pole temperature gradient (six duplicate `tSea` formulas + the GPU shader) was
+  completely disconnected from `state.planet`'s gravity/tilt/rotation sliders. New
+  `climEffectiveEquatorTemp()` scales the equator-pole CONTRAST by two grounded, disclosed
+  multipliers — axial tilt via the real North & Coakley (1979) 2nd-order energy-balance-model
+  obliquity term (critical reversal at arccos(1/√3)≈54.7356°, Rose/Cronin/Bitz 2017), rotation via
+  the SAME Ω=24/rotationHours `circulationCells()` already uses — both normalized to exactly 1.0
+  at Earth defaults (23.4°, 24h), so the bit-identical invariant holds by construction (confirmed:
+  `hash_gen1.js` v1.84→v1.85 ALL IDENTICAL at defaults). Gravity deliberately gets no new term —
+  its established roles (lapse rate ~g, circulation-cell count) are already implemented, and no
+  equally simple, citable formula exists for a further direct link. Measured live: real
+  `generate()`+`refreshClimate()` at max tilt (45°) drops mean tempField 14.9°C→−16.2°C, in the
+  predicted direction. Full derivation: `docs/research/solar-energy-budget.md`. See CHANGELOG for
+  the full writeup.
+- **v1.84 — Journey Planner: water only counts as carried weight in arid biomes.** Owner: "water
+  should only become an actual weight in arid biomes/climates... for other journeys it should
+  technically not be counted. Water is usually abundant and always collectable in meaningful
+  quantities." Root cause: `humanWaterCarryDays` still charged a flat 2-day water reserve for
+  ANY non-desert biome (animals already correctly charged zero there) — fixed with a new shared
+  `jpHumanWaterCarryDays(biome,supplyDays)` helper redirecting three duplicate call sites, and
+  `jpCalcLand`'s convergence-loop water term gated to `isDesert?(...):0`, which also **reverts
+  v1.56's "auto water-crossing tier applies to any biome" widening** back to desert-only per this
+  direct new instruction. Swept for consistency: `jpAssessResupply`'s cause-attribution, the
+  hard-block wording, the formula trace ("assumed abundant... not counted as carried weight"),
+  the Info panel's Water finding, and `_jpPlan`'s `waterL` route-summary total (which reads
+  `cap.humanWaterRate` directly, bypassing the gated breakdown — the one site that would have
+  silently kept reporting non-zero water for a non-desert stage). `jpCalcWater` (sea/river
+  vessels) deliberately untouched — a ship can't detour to a stream mid-passage. Hash vs v1.83 ALL
+  IDENTICAL (JP is interactive-only). See CHANGELOG for the full writeup.
 - **v1.83 — a Mounted Rider party's own mounts now carry saddlebag capacity.** Owner pasted a
   real route with several `⛔ Carrying enough water...` blocks (up to 3659% over) and one
   `⛔ Overloaded 167%...` block: "Can you see what needs fixing?" Diagnosed: the reported 300kg
@@ -2529,6 +2566,21 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   flakiness in this environment rather than an app bug, but not root-caused. Worth a dedicated look
   if it starts flagging more assertions or if a real canvas-sizing bug is ever reported matching
   either description.
+- **v1.85 shipped**: ocean heating grounded in axial tilt + rotation via new `climEffectiveEquatorTemp()`
+  (North & Coakley 1979 obliquity term + rotation-rate term, both normalized to 1.0 at Earth
+  defaults), redirecting the six duplicate `tSea` formulas + the GPU shader to one source of truth;
+  also confirmed (measurement, no code) that the terrain-coupled wind/current pipeline already
+  reaches map rendering via `simulateWeather()`'s internal `oceanSSTAnomaly()` call. Bit-identical
+  at defaults (`hash_gen1.js` v1.84→v1.85 ALL IDENTICAL); measured live divergence at non-default
+  tilt/rotation. Gravity deliberately left without a new term (disclosed scope cut — see
+  `docs/research/solar-energy-budget.md`). See CHANGELOG for the full writeup.
+- **v1.84 shipped**: Journey Planner water is now zero carried weight outside `desertLike` biomes
+  (new `jpHumanWaterCarryDays` helper; `jpCalcLand`'s water term gated to `isDesert`, reverting
+  v1.56's "any biome" widening back to desert-only per direct new owner instruction); swept
+  `jpAssessResupply`, block/trace wording, the Info panel, and `_jpPlan`'s `waterL` route-summary
+  total (a second independent recomputation that needed its own gate) for consistency. Desert-stage
+  behavior stays byte-identical throughout. Hash vs v1.83 ALL IDENTICAL. See CHANGELOG for the full
+  writeup.
 - **v1.83 shipped**: a Mounted Rider party's own mounts now carry saddlebag capacity —
   `jpCapacity` credits `max(0, people - plan.animals[mount]) * JP_ANIMALS[mount].cap *
   JP_MOUNT_SADDLEBAG_FRAC(0.3)`, closing a real gap (a mounted party's capacity was previously
