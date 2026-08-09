@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.95**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.96**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.95.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.94.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.96.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.95.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,44 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### A full-grid faction-aggregate pass ran on every generate(), into a hidden panel (v1.96)
+
+Owner: "check for optimisation. However small every ms I'll take it. Without degrading the fidelity
+of the data." Measure-first CPU profile over v1.95. **Root-causes the OPEN item v1.92 logged and
+could not explain** (`buildResourcePotentials` self-time inside a PLAIN `generate()`). Hash vs v1.95
+ALL IDENTICAL — nothing about *what* is computed changed, only *when* and *whether*.
+
+- **`_civSubTab` defaults to `'factions'` (v1.55), and `generate()`'s civ wrapper calls
+  `_civRenderPlaceEditor()` → `_civRefreshActiveSubPage()` BEFORE `_origGenerate`.** The Factions
+  branch reaches `_civFactionAggregates()`, which unconditionally builds
+  `currentResourcePotentials()`/`currentPopulationDensity()`/`buildBiomeRaster()`/
+  `_civOceanDistField()` plus a full `GW·GH × CIV_RESOURCE_KEYS` accumulation — against the world
+  about to be destroyed, into a panel that is `display:none`, with every filled cache nulled moments
+  later by `generate()` itself. **686 ms per generate() at 1024px, with zero settlements and zero
+  territory to aggregate.**
+- **`_civSubPageVisible()` reads `#genCiv`'s inline `style.display`** — the exact property
+  `#genSubBar`'s handler toggles — so the check is exact and costs no `getComputedStyle`/layout
+  flush (it sits on the per-place-mutation path). Paired with a **refresh-on-reveal** in that
+  handler, which also fixes real pre-existing staleness: it never refreshed on open, so the
+  hidden-panel render was the only thing keeping the page current.
+- **A visibility gate must not swallow state resets, and "it only renders" is a claim to verify,
+  not assume.** The first cut put the gate at the top of `_civRefreshActiveSubPage()`, with that
+  reasoning written into the comment as fact. False — the Factions branch opens with
+  `_civCloseFactionsModal()`/`_civCloseFactionDrawer()`, and **`#civFactionsModal` is a
+  full-viewport overlay OUTSIDE `#genCiv`**, so it can be open while the panel is hidden. v1.55/
+  v1.57's tab-re-entry assertions went red (683/4 vs the 685/2 baseline). Those resets are now
+  unconditional above the gate.
+- **`computeFlow()` read the module-global `state.world` INSIDE its D8 neighbour loop** (~21M
+  lookups at 2048px, twice per generate). Hoisted — pure read-motion, same class as v1.92's D8
+  `Math.hypot` hoist in this very loop. Every other D8 loop was checked; this was the only one.
+- **Measured**: alternating-order A/B, fresh page/cold cache per trial, 1024px — `generate()`
+  median **8227 ms → 7830 ms (−4.8%)**; the clean trials (3-5, after a concurrent `run.sh` stopped
+  competing for CPU) are tight and non-overlapping at ≈ **−430 ms**.
+- **Deliberately not touched**: `flexure` (3816 ms) is one `gaussBlur` → `GPU.blurArr`, i.e.
+  SwiftShader `readPixels` — v1.89's documented needs-a-real-device item; the per-pixel colour loop
+  (v1.87 profiled clean, only lever left is a fidelity-trading LUT); `computeResistance`'s per-cell
+  `plates[…].base` deref (51.5 ms, and flattening turns an out-of-range throw into a silent NaN).
 
 ### Duplicate-logic sweep: seven "two functions answering one question" instances consolidated (v1.95)
 

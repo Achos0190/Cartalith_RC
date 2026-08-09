@@ -12,6 +12,65 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.96 — A full-grid faction-aggregate pass ran on every generate(), into a hidden panel
+
+Owner: "analyse the full code base again and check for optimisation. However small every ms I'll
+take it. Without degrading the fidelity of the data." Measure-first CPU-profile pass over v1.95 at
+2048px. The headline find **root-causes the OPEN item v1.92 logged and could not explain**
+(`buildResourcePotentials` showing ~500ms of self-time inside a PLAIN `generate()` — no civ tab
+visited, no settlements, `state.debug==='off'`). Hash vs v1.95 **ALL IDENTICAL** — the fidelity
+constraint is met exactly, nothing about what is computed changed, only *when* and *whether*.
+1031/1031, 852/852, 685/687 smoke (the 2 shortfalls are the long-standing pre-existing v0.92/v0.87
+environmental canvas-sizing failures, reconfirmed unrelated).
+
+- **Root cause, confirmed by probe rather than inference.** `_civSubTab` defaults to `'factions'`
+  (v1.55 made Factions the landing sub-page). `generate()`'s civ-layer wrapper calls
+  `_civRenderPlaceEditor()` → `_civRefreshActiveSubPage()` → the Factions branch →
+  `_civFactionAggregates()`, which unconditionally builds `currentResourcePotentials()`,
+  `currentPopulationDensity()`, `buildBiomeRaster()` and `_civOceanDistField()`, then runs a full
+  `GW·GH × CIV_RESOURCE_KEYS` accumulation. That call sits **before** `_origGenerate` in the
+  wrapper, so it ran against the world about to be destroyed, and every cache it filled was nulled
+  moments later by `generate()`'s own invalidation. Measured on a default page load at 1024px:
+  **686 ms**, with `places: 0` and `hasTerritory: false` — nothing to aggregate — into `#genCiv`,
+  whose computed style is `display:none` until the user selects the Civilization sub-tab.
+- **Fix**: new `_civSubPageVisible()` reads `#genCiv`'s inline `style.display` — the exact property
+  `#genSubBar`'s own handler toggles between `''` and `'none'`, so the check is exact and costs no
+  `getComputedStyle` and no forced layout flush (it sits on the per-place-mutation path).
+  `_civRefreshActiveSubPage()` early-returns on it. Paired with a **refresh-on-reveal** in the
+  `#genSubBar` handler, which also closes a real pre-existing staleness bug: that handler never
+  refreshed the page on open, so a hidden-panel background render was in fact the ONLY thing
+  keeping the Factions page current — and it was stale after any `generate()`.
+- **A first cut of that gate was wrong, and the smoke suite caught it.** The gate was placed at the
+  very top of `_civRefreshActiveSubPage()` on the reasoning, written into the comment as fact, that
+  "nothing here computes state — it only renders." False: the Factions branch opens with
+  `_civCloseFactionsModal()`/`_civCloseFactionDrawer()`, which are **state resets**, and
+  `#civFactionsModal` is a full-viewport overlay that lives OUTSIDE `#genCiv` — it can be open
+  while the sub-panel itself is hidden. v1.55's and v1.57's own tab-re-entry assertions went red
+  (683/4 vs the 685/2 baseline). Those two resets are now unconditional above the gate; only the
+  genuinely expensive re-render work is gated. The corrected reasoning is recorded at the site.
+- **`computeFlow()`'s `state.world` hoist.** The wrap branch read the module-global `state.world`
+  INSIDE the D8 neighbour loop — up to n×8 property lookups (~21M at 2048px) on a function that
+  runs twice per default `generate()`. It cannot change mid-loop, so hoisting it to a local is pure
+  read-motion, bit-identical by construction — the same class as v1.92's D8 `Math.hypot` hoist,
+  which this exact loop already carries. Every other D8 neighbour loop in the file was checked for
+  the same shape; `computeFlow` was the only one reading a module global inline.
+- **Measured**: controlled alternating-order A/B, fresh page and cold cache per trial, 1024px —
+  `generate()` median **8227.4 ms → 7830.0 ms (−4.8%)**. The first two trial pairs were
+  contaminated by a concurrently-running `tests/run.sh` competing for CPU and are disclosed as such;
+  trials 3-5 ran clean and are tight and non-overlapping (v1.95: 8227/8195/8193, v1.96:
+  7813/7830/7683 ≈ **−430 ms**).
+- **Investigated and deliberately NOT changed**: `flexure` is the 3rd-largest stage (3816 ms) but no
+  `flexure` frame appears in the self-time list — it is one `gaussBlur(raw, blurR*3)` call that
+  routes to `GPU.blurArr`, so its cost here is SwiftShader's `readPixels` (8542 ms of total
+  self-time, the single largest line item), which this environment cannot measure meaningfully and
+  v1.89 already documented as needing real-device access. The per-pixel colour loop
+  (`materialWeights`/`landColorCore`) was re-confirmed as v1.87 left it: no redundant computation,
+  and the only remaining lever is a LUT approximation, which would trade exactly the fidelity this
+  request ruled out. `computeResistance`'s per-cell `plates[plateId[i]].base` object deref matches
+  v1.92's `assignPlates` pattern but is only 51.5 ms of stage time, and flattening it into a typed
+  array changes the out-of-range failure mode from a throw to a silent NaN — not worth it for the
+  gain, so it was left alone rather than shipped as a plausible-looking micro-win.
+
 ### v1.95 — Duplicate-logic sweep: seven "two functions answering one question" instances consolidated
 
 Owner: audit the codebase for "functions that should logically either be standard-on or can be

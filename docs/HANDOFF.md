@@ -9,11 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.95.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.96.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.96 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.94` are kept and never edited.
+  (v1.97 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.95` are kept and never edited.
+- **v1.96 — a full-grid faction-aggregate pass ran on every `generate()`, into a hidden panel.**
+  Owner: "check for optimisation. However small every ms I'll take it. Without degrading the
+  fidelity of the data." Measure-first CPU profile; **root-causes the OPEN item v1.92 logged and
+  could not explain** (see the resolved entry under Next/open). `_civSubTab` defaults to
+  `'factions'` (v1.55) and `generate()`'s civ wrapper calls `_civRenderPlaceEditor()` →
+  `_civRefreshActiveSubPage()` BEFORE `_origGenerate`, so `_civFactionAggregates()` built
+  resource potentials + population density + biome raster + ocean DT and ran a full
+  `GW·GH × CIV_RESOURCE_KEYS` accumulation against the world about to be destroyed, into a
+  `display:none` panel, with every cache nulled moments later — **686 ms per generate() at 1024px
+  with zero settlements and zero territory**. Fixed with a `_civSubPageVisible()` gate (reads
+  `#genCiv`'s inline `style.display`, exact and layout-flush-free) plus a refresh-on-reveal in
+  `#genSubBar`'s handler, which also closes a real pre-existing staleness bug (that handler never
+  refreshed the page on open). **A first cut of the gate was wrong and the smoke suite caught it**:
+  it swallowed `_civCloseFactionsModal()`/`_civCloseFactionDrawer()`, which are STATE RESETS, and
+  `#civFactionsModal` is a full-viewport overlay OUTSIDE `#genCiv` — those now sit unconditionally
+  above the gate. Also hoisted `computeFlow()`'s module-global `state.world` read out of its D8
+  neighbour loop (~21M lookups at 2048px, twice per generate; same class as v1.92's hoist in that
+  same loop). Measured: `generate()` median 8227→7830 ms (−4.8%) at 1024px, clean trials ≈ −430 ms.
+  Hash vs v1.95 ALL IDENTICAL. 1031/1031, 852/852, 685/687 smoke. See CHANGELOG for the full
+  writeup incl. what was investigated and deliberately left alone (GPU `readPixels`, the per-pixel
+  colour loop, `computeResistance`).
 - **v1.95 — duplicate-logic sweep: seven "two functions answering one question" instances
   consolidated.** Owner: audit for functions that should be standard-on or merged, then "Fix all
   7" of a dedicated agent sweep's findings — this file's own recurring lesson (v1.30 on) hit
@@ -2835,17 +2856,20 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
-- **OPEN, considered not done: `buildResourcePotentials` costs ~500ms at 2048px inside a PLAIN
-  `generate()`'s own trailing render call.** Found during the v1.92 CPU-profile audit — a
-  `profile_generate.js` run against a script-block-1-only page (no civ tab visited, no settlements,
-  `state.debug==='off'` default) still showed `buildResourcePotentials` in the top-40 self-time
-  list, which is unexpected: `currentResourcePotentials()` (its only documented consumer inside a
-  plain render) should only run for the `dbg==='rsrc'` debug view, not the default path. Not
-  root-caused this pass — small relative to the two fixes actually shipped (the giants were 10-25×
-  bigger), so time went to those instead. If revisited: check whether block 2's `renderNow` wrapper
-  (`_civBakeRN`/`drawCivLayer`, monkey-patched onto EVERY page load regardless of whether the civ
-  tab is ever opened) unconditionally reads something that lazily triggers it, even with zero
-  settlements/ways on the map.
+- **RESOLVED in v1.96** (was: "`buildResourcePotentials` costs ~500ms at 2048px inside a PLAIN
+  `generate()`"). The v1.92 guess — block 2's `renderNow` wrapper lazily triggering it — was wrong.
+  The real path is `generate()`'s civ-layer **wrapper**, not its render: it calls
+  `_civRenderPlaceEditor()` → `_civRefreshActiveSubPage()` → (Factions, the v1.55 default sub-tab)
+  → `_civFactionAggregates()`, which unconditionally builds `currentResourcePotentials()`,
+  `currentPopulationDensity()`, `buildBiomeRaster()` and `_civOceanDistField()` plus a full
+  `GW·GH × CIV_RESOURCE_KEYS` accumulation — **before** `_origGenerate` runs, against the world
+  about to be destroyed, into `#genCiv` which is `display:none` until the user opens the
+  Civilization sub-tab, with every cache it filled nulled moments later by `generate()`'s own
+  invalidation. Measured 686 ms at 1024px with zero settlements and zero territory. Fixed with a
+  `_civSubPageVisible()` gate on the expensive render half (state resets stay unconditional — see
+  CHANGELOG for the regression that taught us the difference) plus a refresh-on-reveal in
+  `#genSubBar`'s handler. See CLAUDE.md's "A full-grid faction-aggregate pass ran on every
+  generate(), into a hidden panel (v1.96)".
 - **OPEN, considered not done: the Library→runtime bridge still has no `dropTextures`/`dropBiomes`/
   `dropTerrains`/`dropStructures` tracking.** Found during the v1.91 asset-pack-persistence pass.
   v1.27 added `dropIcons`/`dropCustom` ownership tracking so deleting a Library-owned icon/custom
