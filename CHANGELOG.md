@@ -12,6 +12,82 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.92 — Generation-chain speed pass: a redundant Math.hypot() in every D8 neighbour loop, and plate-array object access in assignPlates()
+
+Owner: "Check the full génération chain and rendering chain function by function and see if we can
+optimise." A genuine function-by-function CPU-profile audit of `generate()` and the render chain at
+2048px (CDP Profiler self-time + direct wall-clock A/B, this file's own established methodology —
+see v1.87/v1.89), not a repeat of ground those two passes already covered (`buildWaterBodies`'s
+MinHeap, `streamPowerKernel`/`glacialKernel`'s MinHeap + incision-coefficient hoist, the per-pixel
+colour loop, `roadDijkstra`'s heap which regressed and was correctly reverted). Engine only. Hash vs
+v1.91 **ALL IDENTICAL** in every scenario — both fixes are pure access-pattern/hoisting changes, not
+reformulations, so no output bit can move.
+
+- **Finding 1: `Math.hypot(dx,dy)` recomputed fresh on every (cell, neighbour) pair across every D8
+  (8-neighbour, `dx,dy∈{-1,0,1}`) loop in the terrain/hydrology pipeline, even though it only ever
+  takes 2 distinct values (1 for the four orthogonal neighbours, `Math.SQRT2` for the four
+  diagonals) and depends solely on `(dx,dy)`, never on the cell being visited.** Found by cross-
+  referencing every `Math.hypot(dx,dy)`-shaped call site against every fixed `±1`-offset D8 loop in
+  the file — 7 sites across 4 functions: `streamPowerKernel` (4 separate D8 loops — priority-flood
+  heap seed, steepest-descent receiver, and both passes of the multiple-flow-direction area
+  computation), `glacialKernel` (priority-flood heap seed), `computeFlow` (the D8 flow-accumulation
+  loop, run TWICE per default `generate()`), and `buildRiverNetwork` (the Tarboton D∞ receiver
+  selection, run on every channelized cell). Every other `Math.hypot(dx,dy)`-shaped call in the file
+  was checked too and correctly left alone — droplet/velocity erosion kernels, brush-radius loops,
+  and settlement-distance calculations all pass genuinely *varying* `dx,dy` (continuous velocities,
+  variable radii, real coordinates), so there is nothing to hoist there.
+- **Fix: a 9-entry lookup table (`D8[(dy+1)*3+(dx+1)]`), built ONCE per function call by calling
+  `Math.hypot` with the exact same integer arguments the inline call would have used**, then indexed
+  instead of recomputed inside the hot loop. This is a pure hoist, not a reformulation — the SAME
+  function call with the SAME arguments produces the SAME float64 bits whether it runs once and gets
+  cached or runs fresh every iteration, so there is zero risk of the kind of precision drift v1.89's
+  own CHANGELOG entry had to catch and fix (that case cached a *newly-computed* coefficient into a
+  narrower type; this case only caches an *already-full-precision* result of the exact same
+  function). Kept as a LOCAL const inside each function (not a module global) in
+  `streamPowerKernel`/`glacialKernel` specifically to preserve invariant 11 — both are worker-thread
+  kernels the test suite rebuilds via `.toString()` and must stay fully self-contained.
+- **Finding 2: `assignPlates()`'s Jump-Flood-Algorithm Voronoi rasterisation (already an
+  O(N log N) algorithm, replacing an older brute-force pass per its own docstring) dereferences
+  `plates[p].x`/`plates[p].y` — object property access on an array of plain objects — inside its
+  innermost loop, run for every cell × up to 8 neighbours × `log2(max(GW,GH))` JFA passes.** Hoisted
+  `plates[p].x`/`.y` into flat `Float64Array`s (`PX`/`PY`) built once at the top of the function and
+  read by index inside the hot loop instead — again a pure access-pattern change (`PX[p]===
+  plates[p].x` by construction), not a reformulation. `plates` itself, and every other reader of it
+  elsewhere in the file, is untouched.
+- **Measured, not assumed — direct wall-clock A/B (fresh page load, alternating file order across 2
+  rounds, first trial of each round discarded as JIT warmup, this file's own established
+  methodology since v1.87/v1.89's own hard-learned lesson that profiler self-time can overstate a
+  fix's real impact):**
+  - `generate()` total at 2048px: **39438.8ms → 33912.8ms median, a 14.0% reduction** (10 measured
+    trials per side; the two distributions don't even overlap — v1.92's worst trial, 37979ms, is
+    still faster than v1.91's median).
+  - `assignPlates()` alone (isolated, 7 measured trials per side after generate() has populated a
+    real `plates[]`/`warpX`/`warpY`): **3489.6ms → 3185.0ms median, an 8.7% reduction**, again with
+    fully non-overlapping trial ranges.
+- **Render chain: audited, no fix shipped.** A separate CPU profile of the hot-cache
+  `renderNow()`/`drawCivLayer()` interactive path (30 repeated calls on a real 41-settlement/
+  71-way populated world — the actual per-frame cost of panning/clicking/placing with civ content
+  on screen, since the terrain-bake cache means most interactive redraws skip the expensive
+  per-pixel loop entirely) measured under 1ms/call at 1024px — already comfortably within a 60fps
+  budget, with no redundant-computation pattern found. The per-pixel colour loop itself was
+  re-confirmed clean, consistent with v1.87's own conclusion.
+- **Considered, not pursued this pass** (logged in `docs/HANDOFF.md`'s "Next / open" for a future
+  session): GPU `readPixels` synchronous-readback cost (the single largest CPU-profile self-time
+  line item by a wide margin) — still not independently actionable per v1.89's own disclosure, since
+  this headless test environment's SwiftShader software rasterizer can't represent real-GPU
+  behaviour, and nothing here changed that constraint; `buildResourcePotentials` showing nonzero
+  cost inside a plain `generate()`'s own trailing render call — a real but small (~500ms at 2048px)
+  loose end whose trigger wasn't tracked down this pass, flagged rather than guessed at.
+- **Tests**: `tests/run.sh` 1031/1031, `tests/run_um.sh` 852/852 (block 4 untouched),
+  `hash_gen1.js` ALL IDENTICAL, `smoke_gen1.js` matches the v1.91 baseline exactly (674/676; the 2
+  failures are the same pre-existing environmental canvas-sizing issues, unrelated). No new smoke
+  assertions — this pass changes performance characteristics only, not behaviour, so there is
+  nothing new for a smoke test to assert beyond the existing bit-identity/functional coverage.
+- **Known scope cuts**: no further D8-loop audit beyond the 7 sites found (a second pass would need
+  to re-run the same cross-reference after any future hydrology/erosion code addition, not assumed
+  exhaustive forever); `glacialKernel`'s fix only benefits the manual Glacial-erosion button and its
+  worker path, not default `generate()`; the GPU-readback and `buildResourcePotentials` items above.
+
 ### v1.91 — A directly-imported asset pack silently vanished on save/reload; the Splat-texture Library bridge was never wired
 
 Owner: "Make sure all shown functions in saving and loading assets are functional. And that saving

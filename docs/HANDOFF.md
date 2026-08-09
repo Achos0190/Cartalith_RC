@@ -9,11 +9,43 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.91.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.92.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.92 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.90` are kept and never edited.
+  (v1.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.91` are kept and never edited.
+- **v1.92 — generation-chain speed pass: a redundant Math.hypot() in every D8 neighbour loop,
+  and plate-array object access in assignPlates().** Owner: "Check the full génération chain and
+  rendering chain function by function and see if we can optimise." A genuine function-by-
+  function CPU-profile audit at 2048px (CDP Profiler self-time + direct wall-clock A/B, the same
+  methodology v1.87/v1.89 established), deliberately not re-chasing ground those two passes
+  already covered (`buildWaterBodies`'s MinHeap, `streamPowerKernel`/`glacialKernel`'s MinHeap +
+  incision-coefficient hoist, the per-pixel colour loop, `roadDijkstra`'s heap which regressed
+  and was reverted). Found two real, fixable redundancies: (1) `Math.hypot(dx,dy)` recomputed
+  fresh on every (cell, neighbour) pair across 7 D8 (`dx,dy∈{-1,0,1}`) loop sites in 4 functions
+  (`streamPowerKernel` ×4, `glacialKernel` ×1, `computeFlow` ×1 — run twice per default
+  `generate()` — `buildRiverNetwork` ×1), even though it only ever takes 2 distinct values;
+  hoisted into a 9-entry lookup built once per call via the SAME `Math.hypot` call the inline
+  version used (a pure hoist, bit-identical by construction — not a reformulation, so no risk of
+  the precision drift v1.89 had to catch). Every OTHER `Math.hypot(dx,dy)`-shaped call in the
+  file was checked and correctly left alone (droplet/velocity kernels, brush radii, settlement
+  distances all pass genuinely varying dx,dy — nothing to hoist). (2) `assignPlates()`'s
+  already-O(N log N) Jump-Flood-Algorithm Voronoi rasterisation dereferenced
+  `plates[p].x`/`plates[p].y` (object property access) inside its innermost loop; hoisted into
+  flat `Float64Array`s built once at function entry, `plates` itself untouched elsewhere.
+  Measured via direct wall-clock A/B (profiler self-time alone is known to overstate real
+  impact — v1.87/v1.89's own lesson): `generate()` total at 2048px **39438.8ms → 33912.8ms
+  median (−14.0%)**, non-overlapping trial distributions across 10 trials/side;
+  `assignPlates()` alone **3489.6ms → 3185.0ms median (−8.7%)**, also non-overlapping. The
+  render chain was separately audited (a CPU profile of the hot-cache `renderNow()`/
+  `drawCivLayer()` interactive path on a real 41-settlement/71-way populated world) and found
+  already fast — under 1ms/call at 1024px, no redundant computation, no fix needed. Hash vs
+  v1.91 ALL IDENTICAL. 1031/1031, 852/852, smoke suite matches the v1.91 baseline exactly (no
+  new assertions — a performance-only change has nothing new to assert). Two items considered
+  but not pursued, logged below in "Next / open": GPU `readPixels` cost (still the single
+  largest CPU-profile self-time line item, still not independently actionable in this
+  SwiftShader-only environment) and a small `buildResourcePotentials` cost inside `generate()`'s
+  own trailing render whose trigger wasn't tracked down this pass.
 - **v1.91 — asset pack persistence + the Splat-texture Library bridge.** Owner: "Make sure all
   shown functions in saving and loading assets are functional. And that saving a map saves
   everything ways, settlements, assetpack, painting everything." Audited every save/load surface
@@ -2708,6 +2740,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, considered not done: `buildResourcePotentials` costs ~500ms at 2048px inside a PLAIN
+  `generate()`'s own trailing render call.** Found during the v1.92 CPU-profile audit — a
+  `profile_generate.js` run against a script-block-1-only page (no civ tab visited, no settlements,
+  `state.debug==='off'` default) still showed `buildResourcePotentials` in the top-40 self-time
+  list, which is unexpected: `currentResourcePotentials()` (its only documented consumer inside a
+  plain render) should only run for the `dbg==='rsrc'` debug view, not the default path. Not
+  root-caused this pass — small relative to the two fixes actually shipped (the giants were 10-25×
+  bigger), so time went to those instead. If revisited: check whether block 2's `renderNow` wrapper
+  (`_civBakeRN`/`drawCivLayer`, monkey-patched onto EVERY page load regardless of whether the civ
+  tab is ever opened) unconditionally reads something that lazily triggers it, even with zero
+  settlements/ways on the map.
 - **OPEN, considered not done: the Library→runtime bridge still has no `dropTextures`/`dropBiomes`/
   `dropTerrains`/`dropStructures` tracking.** Found during the v1.91 asset-pack-persistence pass.
   v1.27 added `dropIcons`/`dropCustom` ownership tracking so deleting a Library-owned icon/custom

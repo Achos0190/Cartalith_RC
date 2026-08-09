@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.91**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.92**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.91.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.90.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.92.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.91.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,41 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Generation-chain speed pass: D8-neighbour Math.hypot hoist + assignPlates flattening (v1.92)
+
+Owner: "Check the full génération chain and rendering chain function by function and see if we can
+optimise." A genuine function-by-function CPU-profile audit (CDP Profiler self-time + direct
+wall-clock A/B, not repeating v1.87/v1.89's already-covered ground). Engine only. Hash vs v1.91 ALL
+IDENTICAL — both fixes are pure access-pattern/hoisting changes, never a reformulation.
+
+- **`Math.hypot(dx,dy)` was recomputed fresh on every (cell, neighbour) pair across 7 D8-loop sites
+  in 4 functions** (`streamPowerKernel` ×4, `glacialKernel` ×1, `computeFlow` ×1 — run twice per
+  default `generate()` — and `buildRiverNetwork` ×1) even though `dx,dy∈{-1,0,1}` only ever produces
+  2 distinct values. Fixed with a 9-entry lookup (`D8[(dy+1)*3+(dx+1)]`) built once per call via the
+  SAME `Math.hypot` call the inline version used — a pure hoist, bit-identical by construction. Kept
+  local (not a module global) inside the two worker kernels to preserve invariant 11's
+  self-containment requirement. Every OTHER `Math.hypot(dx,dy)`-shaped call site in the file was
+  checked and correctly left alone (droplet/velocity kernels, brush radii, settlement distances all
+  pass genuinely varying dx,dy).
+- **`assignPlates()`'s JFA Voronoi rasterisation dereferenced `plates[p].x`/`.y` (object property
+  access) inside its innermost loop** (per-cell × up to 8 neighbours × log2(dim) JFA passes).
+  Hoisted into flat `Float64Array`s (`PX`/`PY`) built once at function entry; `plates` itself and
+  every other reader elsewhere in the file is untouched.
+- **Measured via direct wall-clock A/B** (this file's own v1.87/v1.89 methodology — profiler
+  self-time alone is known to overstate real impact): `generate()` total at 2048px
+  **39438.8ms → 33912.8ms median (−14.0%)**, non-overlapping trial distributions; `assignPlates()`
+  alone **3489.6ms → 3185.0ms median (−8.7%)**, also non-overlapping.
+- **Render chain audited, no fix shipped**: a CPU profile of the hot-cache `renderNow()`/
+  `drawCivLayer()` interactive path (30 calls on a real 41-settlement/71-way world) measured under
+  1ms/call at 1024px — already well within budget, no redundant computation found; the per-pixel
+  colour loop was re-confirmed clean, matching v1.87's own conclusion.
+- **Considered, not pursued** (logged in HANDOFF's "Next / open"): GPU `readPixels` cost (still the
+  single largest self-time line item, still not actionable in this SwiftShader-only environment per
+  v1.89's own disclosure); a small (~500ms at 2048px) `buildResourcePotentials` cost inside
+  `generate()`'s own trailing render whose trigger wasn't tracked down this pass.
+- 1031/1031, 852/852, hash ALL IDENTICAL, smoke suite matches the v1.91 baseline (no new assertions
+  — a performance-only change has nothing new to assert beyond existing bit-identity coverage).
 
 ### Asset pack persistence + the Splat-texture Library bridge (v1.91)
 
