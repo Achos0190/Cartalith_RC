@@ -12,6 +12,99 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.89 — Simulation-speed pass: erosion kernels' priority-flood heap, and a redundant per-iteration coefficient in stream-power incision
+
+Owner: "Again search for optimisation in the simulation, rendering, LOD, and way/route/
+PathFinding.js systems" (no separate PathFinding.js file exists — the in-file route/Dijkstra logic
+is what's meant). Continuation of the v1.87 rendering-speed pass, this time targeting `generate()`
+itself — the earlier `perf_gen1.js` baseline had already shown `carveRivers` (18s) and
+`plates+stress`/`flexure` (6s/3s) dwarfing anything touched in v1.87 at 2048px. Engine only
+(block 1). Hash vs v1.88 **ALL IDENTICAL**.
+
+- **Measured, not assumed, at every step** — this pass shipped two real fixes and found one real
+  regression that was caught and reverted before shipping, all via direct A/B measurement rather
+  than trusting a CPU profile's self-time numbers (which turned out to be substantially distorted
+  by sampling-profiler overhead on these specific hot loops — see below).
+- **Fix 1: `streamPowerKernel`'s priority-flood heap** (the same `MinHeap` shape as `buildWaterBodies`
+  — v1.87's own fix, applied here verbatim). This kernel runs **synchronously on the main thread
+  inside `carveRiverValleys()`, i.e. on every default `generate()` call** (`state.carveRivers` is
+  true by default), not just the manual Stream-power erosion button — so its own heap cost is paid
+  on every regenerate. Same preallocated `Float32Array`/`Int32Array` storage, identical sift-up/
+  sift-down comparisons, bit-identical output by construction (every cell enqueued at most once, a
+  known upper bound `n=W·H`). `glacialKernel` (the manual Glacial-erosion button's own kernel, same
+  self-contained shape per invariant 11) got the identical fix alongside it.
+- **Fix 2: the implicit stream-power incision loop was recomputing an invariant every iteration.**
+  `carveRiverValleys` runs this loop `P.iters` times (9 by default for its own lighter pass). Each
+  iteration recomputed `C = Ki·dt·Math.pow(area[i],m)/L` per cell — but **every input to that
+  expression (`P.resist`, `resist[i]`, `K`, `ck`, `rain[i]`, `area[i]`, `m`, `dt`, `rdist[i]`) is
+  fixed before the loop even starts**; nothing inside the loop ever mutates any of them. The
+  original was doing the identical `Math.pow()`-driven computation up to 9× more than necessary,
+  per cell, across millions of cells. Precomputed once into a **`Float64Array`** (not `Float32Array`
+  — `C` was a plain JS number, i.e. full float64 precision, in the original; caching it in a 32-bit
+  array was tried first and correctly caught by `hash_gen1.js` as a real mismatch — `field`/`temp`/
+  `rain` differed while `flow`/`rgba` coincidentally still agreed, which is exactly why the full
+  scenario battery matters and not just one field). The genuinely iterative part of the loop
+  (`fld[i]=(fld[i]+dt*U[i]+C*fld[r])/(1+C)`, which reads the *previous* iteration's `fld[r]`) is
+  untouched — same formula, same operands, same order of operations, evaluated once instead of
+  `P.iters` times. Measured (non-profiled, direct per-line timing): this loop was **~59% of
+  `streamPowerKernel`'s own cost**, ahead of the priority-flood heap.
+- **A real regression, found and reverted: `roadDijkstra`'s heap.** Same MinHeap shape again (used
+  by `buildRoadNetwork`'s per-settlement Dijkstra, called from `_civHierarchicalNetwork`/"Generate
+  Roads"), so the identical technique was tried here too — and **measured WORSE**, not better, on a
+  realistic "Generate Roads" run (36 settlements): a preallocate-at-`n` version cost 453ms→551ms
+  (-22%); a grow-from-small-capacity version cost 431ms→610ms (-41%, and with visibly increasing
+  variance across repeated trials, consistent with GC pressure). Root cause: `roadDijkstra`
+  allocates a **fresh heap per settlement** (called once per place, not once per whole run like the
+  other three kernels) — the allocation/copy overhead of either typed-array strategy, repeated
+  dozens of times per "Generate Roads" click, outweighed V8's own already-well-tuned growth
+  strategy for a plain numeric array in this specific per-call-allocation usage pattern. **Reverted
+  to the original plain-array heap**, with the measured numbers left in a code comment so this
+  isn't re-attempted blind. This is the exact discipline the render-speed pass (v1.87) already
+  established — ship what measurably helps, disclose and revert what doesn't, regardless of how
+  "obviously" the same technique should transfer.
+- **CPU profiling itself was measured to be misleading here, not just noisy.** An early CDP
+  `Profiler`-based pass attributed `MinHeap.pop`/`streamPowerKernel` costs that implied a much
+  larger win than a clean, non-profiled A/B (alternating fresh browser launches, `generate()`
+  timed directly) actually showed — the profiler's own sampling overhead on these specific
+  millions-of-iterations hot loops inflates their apparent self-time disproportionately. **Every
+  number in this entry is from a direct wall-clock A/B, not a profiler self-time reading** — the
+  profiler was used only to *locate* candidate hot spots, never to *quantify* the fix.
+- **LOD and the per-pixel render loop were investigated and left untouched.** A profiled zoom/pan
+  session under Tiled LOD showed `renderBiomeTileRGBA` dominated by the same `landColorCore`/
+  `materialWeights`/`vnoise`/`fbm` machinery already investigated (and left alone) in v1.87 — no
+  redundant computation found, the cost is the genuine price of the feature set. `fbm` itself is a
+  standard, already-tight 6-octave noise function. `assignPlates` (Jump Flooding Algorithm) and
+  `computeStress` were also read for the same MinHeap/redundant-Math.pow patterns that paid off
+  elsewhere in this pass — neither showed one; JFA is already the efficient algorithm choice here,
+  and `computeStress`'s per-cell allocation is a small, bounded array, not the same shape of
+  defect. Not fixed, not attempted further — the `plates+stress`/`flexure` stages' remaining cost
+  is disclosed as inherent CPU work, or GPU-offload territory (a much larger, riskier change, and
+  this headless test environment's own SwiftShader software-GPU path makes "GPU vs CPU" timing
+  comparisons here unreliable for judging real-device behavior — see CLAUDE.md's own existing
+  caveat on `perf_gen1.js`'s GPU-adjacent numbers).
+- **Net measured effect** (2048px, clean A/B, `carveRiverValleys`'s own `PERF.gen` stage time):
+  streamPowerKernel heap fix alone ≈5% off `carveRivers`; heap fix + incision-loop hoist together
+  ≈12% off `carveRivers`, ≈4–5% off total `generate()` wall time. Modest, not dramatic — the
+  remaining cost is the genuine per-cell numerical work of a multi-pass implicit solver over
+  millions of cells, the same "already-tight, no further redundant computation found" conclusion
+  v1.87 reached for the render pixel loop.
+- **Tests**: `tests/run.sh` 1021/1021 (invariant 11's own worker-kernel bit-identity re-derivation
+  from `toString()` catches any kernel-shape regression), `tests/run_um.sh` 852/852 (block 4
+  untouched), `hash_gen1.js` ALL IDENTICAL (5 scenarios), `smoke_gen1.js` matches the v1.88
+  baseline. `roadDijkstra` has no dedicated bit-identity coverage in `test_tail.js` beyond a basic
+  reachability smoke check, so its revert was verified directly: 5 hand-built scenarios (small
+  random grid, the exact v0.70-documented uniform-cost stress case, world-wrap on, multi-source
+  array input, and a larger grid) hashed identically against unmodified v1.88 both before AND after
+  the revert.
+- **Known scope cuts**: `dropletKernel`/`velocityErodeKernel` (the other two worker kernels) were
+  read and show no MinHeap or comparable redundant-computation pattern — not touched. GPU-path
+  timing (`GPU.blurArr`/`GPU.norm`/`GPU.temperature`, used by `gaussBlur`/`normalize()`/
+  `computeTemperature()`) was traced as a real, measurable cost in an early profile
+  (`gl.readPixels` synchronous GPU→CPU readback) but not investigated further — disclosed rather
+  than acted on, since this environment's software-GPU (SwiftShader) numbers cannot be trusted to
+  represent real-device GPU behavior, and any change to the GPU/CPU dispatch logic needs testing
+  against an actual GPU this session cannot access.
+
 ### v1.88 — Settlement picking is weighted by how prominently a settlement actually draws, and respects its own visibility gate at every pick site
 
 Owner: *"Settlements are clickable on any zoom level, making it hard to click a larger settlement

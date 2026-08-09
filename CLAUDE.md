@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.88**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.89**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.88.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.87.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.89.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.88.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,32 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Simulation-speed pass: erosion kernels' priority-flood heap (v1.89)
+
+Owner: "Again search for optimisation in the simulation, rendering, LOD, and way/route/
+PathFinding.js systems" — continuation of v1.87's render pass, targeting `generate()` itself
+(`carveRivers` was 18s, `plates+stress`/`flexure` 6s/3s at 2048px, dwarfing anything v1.87 touched).
+Engine only. Hash vs v1.88 ALL IDENTICAL. Two real fixes, one real regression found and reverted —
+all verified by direct A/B wall-clock measurement, since a CPU profile of these specific hot loops
+turned out to meaningfully overstate the win. `streamPowerKernel` (runs synchronously inside
+`carveRiverValleys()` on every default `generate()` call, not just the manual erosion button) and
+`glacialKernel` got the same preallocated-typed-array `MinHeap` fix as `buildWaterBodies` (v1.87).
+`streamPowerKernel`'s own implicit-incision loop was also recomputing a per-cell coefficient
+(`Math.pow`-driven) on every one of `P.iters` passes even though every input to it is fixed before
+the loop starts — hoisted into a **`Float64Array`** (not Float32 — the original was full-precision
+JS numbers; a first cut cached into Float32 and was correctly caught as a real mismatch by
+`hash_gen1.js`). Net: ~12% off `carveRivers`, ~4-5% off total `generate()` at 2048px. The SAME fix
+applied to `roadDijkstra` (per-settlement road-network Dijkstra) measured WORSE, not better — up to
+-41% on a 36-settlement "Generate Roads" run — because that function allocates a fresh heap PER
+SETTLEMENT, so typed-array allocation/copy overhead dozens of times per run outweighed V8's own
+already-tuned plain-array growth; reverted, with the measured numbers left in a comment. LOD
+(profiled zoom/pan session) and the per-pixel render loop were re-investigated and found already
+tight (same conclusion as v1.87 — no redundant computation, cost is inherent to the feature set).
+`assignPlates`/`computeStress` read for the same defect patterns, found clean. GPU-path timing
+(`gl.readPixels` synchronous readback in `gaussBlur`/`normalize()`/`computeTemperature()`) measured
+as a real cost but not investigated further — disclosed rather than acted on, since this headless
+test environment's SwiftShader software-GPU numbers can't represent real-device GPU behavior.
 
 ### Settlement pick priority + visibility-gate consistency (v1.88)
 

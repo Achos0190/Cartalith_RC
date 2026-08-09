@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.88.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.89.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.89 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.87` are kept and never edited.
+  (v1.90 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.88` are kept and never edited.
+- **v1.89 — simulation-speed pass: erosion kernels' priority-flood heap.** Owner: "Again search
+  for optimisation in the simulation, rendering, LOD, and way/route/PathFinding.js systems"
+  (no separate PathFinding.js file exists — the in-file route/Dijkstra logic is what's meant).
+  `streamPowerKernel` (runs synchronously inside `carveRiverValleys()` on every default
+  `generate()` call) and `glacialKernel` (manual erosion button) got the same preallocated-
+  typed-array `MinHeap` fix v1.87 shipped for `buildWaterBodies`. `streamPowerKernel`'s implicit-
+  incision loop was ALSO recomputing a per-cell `Math.pow`-driven coefficient on every one of
+  `P.iters` passes despite every input being fixed before the loop starts — hoisted into a
+  `Float64Array` (a first cut used Float32 and was correctly caught as a real mismatch by
+  `hash_gen1.js` — `field`/`temp`/`rain` differed while `flow`/`rgba` coincidentally still
+  matched). Net: ~12% off `carveRivers`, ~4-5% off total `generate()` at 2048px, all measured via
+  direct A/B (a CPU profile of these loops turned out to meaningfully overstate the win — profiler
+  overhead, not a real cost, so every number in the CHANGELOG entry is wall-clock, not profiler
+  self-time). The identical fix applied to `roadDijkstra` measured WORSE (up to -41% on a real
+  "Generate Roads" run) because it allocates a fresh heap per SETTLEMENT rather than once per
+  call — reverted, numbers left in a comment so it isn't re-attempted blind. LOD and the per-pixel
+  render loop re-investigated, found already tight (same conclusion as v1.87). Hash vs v1.88 ALL
+  IDENTICAL. See CHANGELOG for the full writeup including the GPU-readback finding left disclosed,
+  not acted on (this environment's software-GPU numbers can't represent real-device behavior).
 - **v1.88 — settlement pick priority + visibility-gate consistency.** Owner: "Settlements are
   clickable on any zoom level, making it hard to click a larger settlement when you're zoomed out
   as it often means you click one of the smaller ones that are only visible when zooming in." Two
@@ -2617,6 +2636,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, considered not done: GPU `readPixels` synchronous readback cost in `gaussBlur`/
+  `normalize()`/`computeTemperature()`.** Found during the v1.89 simulation-speed pass — a CPU
+  profile of a full `generate()` call showed `gl.readPixels` (the GPU→CPU sync readback inside the
+  `GPU._down` helper, used by `GPU.blurArr`/`GPU.norm`/`GPU.temperature`) as one of the single
+  largest line items, comparable to `streamPowerKernel` itself. NOT investigated further or
+  touched, for two reasons: (1) this session's headless-Chromium test environment renders WebGL2
+  via SwiftShader (software rasterization — confirmed via `perf_gen1.js`'s own `env.gpu` probe),
+  so "GPU path" timing measured here reflects CPU-emulated-GPU driver overhead, not real graphics-
+  hardware behavior — CLAUDE.md's own `perf_gen1.js` header already carries this exact caveat for
+  a reason. Any conclusion drawn from these numbers about whether the GPU path genuinely helps or
+  hurts on a real device would be unfounded. (2) Fixing this properly would mean either disabling
+  the GPU path when the CPU path is provably faster (a runtime GPU-vs-CPU benchmark — a materially
+  bigger feature than a targeted fix) or restructuring `gaussBlur`'s dispatch logic, both of which
+  need a REAL GPU to validate against, which this session cannot access. Worth a dedicated pass
+  with actual browser/device access — start by re-profiling `generate()` on a real GPU to see
+  whether `readPixels` is still disproportionate there before deciding anything.
+- **OPEN, considered not done: `roadDijkstra`'s heap already tried and reverted (v1.89) — do not
+  re-attempt the same typed-array technique blind.** The identical `MinHeap` fix that helped
+  `buildWaterBodies`/`streamPowerKernel`/`glacialKernel` measured WORSE here (up to -41% on a real
+  36-settlement "Generate Roads" run) because `roadDijkstra` allocates a fresh heap PER SETTLEMENT
+  rather than once per call — see the v1.89 CHANGELOG entry for the full numbers. If this is ever
+  revisited, the right shape of fix is different: e.g. a heap REUSED across the `for(let s=0;s<P;
+  s++)` loop in `buildRoadNetwork` (reset between calls instead of reallocated), which would keep
+  the typed-storage win without paying its allocation cost 36+ times — not attempted this pass, a
+  materially different (and untested) change from what was tried and reverted.
 - **OPEN, considered not done: a faster priority-queue for `buildWaterBodies`'s depression fill.**
   Found during the v1.87 rendering-speed pass — a CPU profile showed `MinHeap.pop`'s own O(log n)
   sift-down cost (~482ms of ~1050ms at 2048px) essentially unchanged by the typed-array fix (that
