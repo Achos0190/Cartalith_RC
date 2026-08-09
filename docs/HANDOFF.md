@@ -9,11 +9,48 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.92.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.93.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.93 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.91` are kept and never edited.
+  (v1.94 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.92` are kept and never edited.
+- **v1.93 — code streamlining: seven confirmed-dead functions/subsystems, three unused
+  constants, and one real bug found along the way.** Owner: "Can we make the very code itself
+  more streamlined? This by removing unnecessary bits or things that are double? Beware to not
+  lose functionality!" A mechanical zero-reference sweep, not a rewrite: a script extracted every
+  top-level `function`/`const` declaration across all 4 script blocks, counted occurrences of
+  each across the whole file, and flagged anything with a count of 1 (nothing else ever
+  references it) — then every flag was manually verified in context, cross-checked against BOTH
+  headless test suites (`tests/test_tail.js`, `tests/um_test_tail.js`), before touching anything.
+  Functions only called by a test suite (`featuresNear`, `collectVisibleTiles`, `chunkChildren`,
+  `unpackRGB8`, `grainKgPerHaMedieval`) were correctly left alone as deliberately-kept, tested
+  primitives, not cruft. **Seven genuinely dead functions/subsystems removed**, each because its
+  job is already done elsewhere — the recurring "two things answering one question, one silently
+  orphaned" shape, just with the orphaned side dead rather than drifted: `_civPopulateEntityInspector`
+  (a v1.16-planned settlement/faction-editor dispatcher — both targets are called directly from
+  their real call sites, nothing ever routed through it); `computeRainfall()` (an early orographic
+  rain model fully superseded by `simulateWeather()`); the entire `dirty`/`invalidate()`/
+  `flushDirty()` dependency-graph invalidation layer (superseded early on by direct calls +
+  `_fieldGen`/`_climGen` generation counters everywhere — `flushDirty()` never had a caller, four
+  of `dirty`'s five non-render flags never had a reader; `dirty` narrowed to just `{render:false}`,
+  the genuinely load-bearing `scheduleRender()` rAF scheduler is untouched); `clearScratch()` (an
+  unused optimization hook — the scratch-buffer pool already self-manages growth per call);
+  `view3dSync()` (its body is duplicated inline at `enter3D()`, the only place that needed it);
+  `_origRenderNow` (an abandoned capture — the real perf-overlay auto-refresh wiring exists under a
+  different name, `_renderNow_orig`, ~3700 lines later); `polylineCrossings` (UME engine, block 4 —
+  a thin `segInt` wrapper the ported engine never calls, and not part of UME's own `_test:{}`
+  exposure either). Three unused data constants removed too (`ORGANIC`, `LANDFORM_KEYS`,
+  `SCULPT_GLOBAL_KEYS`), each checked against its sibling to confirm only the unused half was
+  orphaned. **One real bug found and FIXED, not removed**: `resource_index.json` was documented (a
+  v1.31-era comment stated as present-tense fact that "these keys are written into
+  `resource_index.json`") but never actually pushed into `exportZip()`'s entries, unlike its
+  siblings `biome_index.json`/`lithology_index.json`. Wired `resourceIndexManifest()` in, matching
+  the existing pattern exactly; verified via a real export probe showing all 15 resource keys now
+  present. Deliberately left alone: `grainYieldRatio()`/`GRAIN_YIELD_RATIO_*` — also zero-caller,
+  but v1.31's own CHANGELOG already discloses this as an intentional, accepted scope cut, not
+  accidental cruft. Hash vs v1.92 ALL IDENTICAL. 1031/1031, 852/852, smoke matches the v1.92
+  baseline exactly (no new assertions needed). Net ~60 fewer lines, identical behavior, one
+  previously-silent export gap closed. See CHANGELOG for the full writeup.
 - **v1.92 — generation-chain speed pass: a redundant Math.hypot() in every D8 neighbour loop,
   and plate-array object access in assignPlates().** Owner: "Check the full génération chain and
   rendering chain function by function and see if we can optimise." A genuine function-by-

@@ -12,6 +12,98 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.93 — Code streamlining: seven confirmed-dead functions/subsystems, three unused constants, and one real bug found along the way
+
+Owner: "Can we make the very code itself more streamlined? This by removing unnecessary bits or
+things that are double? Beware to not lose functionality!" A dead-code sweep, not a rewrite —
+every candidate was verified to have ZERO callers anywhere in the 30k-line file OR either headless
+test suite (`tests/test_tail.js`, `tests/um_test_tail.js`) before being touched, and every removal
+that looked like it might be a broken feature rather than accidental cruft was investigated to the
+bottom before deciding. Civ/engine/UME mixed. Hash vs v1.92 **ALL IDENTICAL** — every removal is of
+code nothing ever called; the render/generate output cannot change.
+
+- **Method**: a small Node script extracted every top-level `function name(` and `const NAME=`
+  declaration across all four script blocks, counted `\bname\b` occurrences of each across the
+  WHOLE file (declaration included), and flagged anything with a count of 1 — i.e. nothing else in
+  the file, in any block, ever references it. Every flag was then manually read in context and
+  cross-checked against BOTH test files (a function only ever called by `test_tail.js`/
+  `um_test_tail.js` — e.g. `featuresNear`, `collectVisibleTiles`, `chunkChildren`, `unpackRGB8`,
+  `grainKgPerHaMedieval` — is deliberately tested, kept-for-API-completeness infrastructure, not
+  cruft, and was left untouched) before anything was removed.
+- **Seven confirmed-dead functions/subsystems removed**, each because its own intended job is
+  ALREADY done by something else — the recurring "two things answering one question, one of them
+  silently orphaned" shape this file's own CHANGELOG has hit many times before, just with the
+  orphaned side dead rather than drifted:
+  - `_civPopulateEntityInspector(host,kind,entity,rowRefs)` — a v1.16-planned dispatcher to the
+    settlement/faction editor populate functions. Both targets (`_civPopulatePlaceEditor`,
+    `_civPopulateFactionEditor`) are called DIRECTLY from their own real call sites; nothing ever
+    routed through the dispatcher.
+  - `computeRainfall()` — an early single-pass orographic rain model, fully superseded by
+    `simulateWeather()` (the real, wind-driven weather sim `refreshClimate()` actually calls).
+  - The **`dirty`/`invalidate()`/`flushDirty()` dependency-graph invalidation layer** — an early
+    architecture (doc §1 in its own comment) meant to mark `tectonics`/`heightmap`/`flow`/
+    `temperature`/`rainfall`/`render` dirty and let `flushDirty()` selectively recompute. The app's
+    ACTUAL invalidation mechanism ended up being direct calls (`computeFlow()`/`refreshClimate()`/
+    `recomputeClimate()`) plus generation counters (`_fieldGen`/`_climGen`) scattered at every real
+    mutation site — so `flushDirty()` never had a caller, and `dirty.tectonics/.heightmap/.flow/
+    .temperature/.rainfall` never had a reader. Only `dirty.render` was ever live, driving the
+    genuinely-load-bearing `scheduleRender()` rAF-coalescing scheduler (called by `render()`,
+    hundreds of call sites) — `dirty` is narrowed to just `{render:false}`, `scheduleRender()`
+    itself is untouched, and the one surviving-but-inert call site (`invalidate('temperature')` in
+    the `peak` slider handler, immediately followed by the real `recomputeClimate()` call that does
+    the actual work) is gone too.
+  - `clearScratch()` — an unused "call on grid resize" optimization hook for the `mbuf`/`ibuf`/
+    `ubuf` scratch-buffer pool; the pool already self-manages growth per-call (`if(!_mbufs[i]||
+    _mbufs[i].length<n)`), so its absence was never a correctness gap, just an unused hook.
+  - `view3dSync()` — its own body (`V3D.uploadHeight()`/`uploadColor()`/`_v3dGrabColor()`) is
+    duplicated inline at the one place that needed it, `enter3D()`, which never called the wrapper.
+  - `_origRenderNow` — a `const _origRenderNow=renderNow;` capture with a comment reading "wired
+    after renderNow is defined — see bottom of script." The actual wiring exists, ~3700 lines later,
+    under a DIFFERENT name (`const _renderNow_orig=renderNow; renderNow=function(rect){
+    _renderNow_orig(rect); updateResOverlay(); };`) — the resolution/perf overlay's real auto-
+    refresh-after-render mechanism, fully intact and untouched. `_origRenderNow` itself was simply
+    never consumed.
+  - `polylineCrossings(pts,a,b)` (UME engine, script block 4) — a thin wrapper around `segInt`
+    (which is itself heavily used elsewhere in block 4 and explicitly exposed via UME's own
+    `_test:{...}` object) that nothing in the ported/adapted engine ever called, and which isn't in
+    that `_test` exposure list either.
+- **Three unused data constants removed**: `ORGANIC` (an unconsumed peat/humus soil-color triple
+  sitting in a large materials palette — every sibling color in that palette IS read by
+  `landColorCore`/`materialWeights`); `LANDFORM_KEYS` (a landform-class name array whose numeric
+  sibling `LANDFORM_COLS` is used by the Landforms debug view, but the names themselves feed no
+  legend/manifest anywhere — unlike `BIOME_KEYS`/`LITH_KEYS`/etc., it isn't part of invariant 13's
+  protected frozen-vocabulary list); `SCULPT_GLOBAL_KEYS` (a parameter-name list for the sculpt
+  editor's global brush/noise defaults — its sibling `SCULPT_GLOBAL_DEF`, the actual default VALUES,
+  is used to seed `_sculptGlobal`, but every individual slider reads/writes `_sculptGlobal.<field>`
+  by its own literal name rather than looping over a keys array).
+- **One real bug found and fixed, not removed: `resource_index.json` was documented as an export
+  but never actually written.** `resourceIndexManifest()` (paired with `biomeIndexManifest()`/
+  `lithIndexManifest()`, which correctly ARE pushed into `exportZip()`'s entry list as
+  `biome_index.json`/`lithology_index.json`) had zero callers anywhere — but unlike the seven
+  removals above, this one's own comment (`RESOURCE_KEYS`' own v1.31-era doc comment: "these keys
+  are written into `resource_index.json`") makes a factual claim about CURRENT behavior that was
+  false, not a description of dead scaffolding. `E.push({name:'resource_index.json',data:...
+  resourceIndexManifest()...})` added to `exportZip()` in the exact style/position of its
+  biome/lithology siblings. Verified via a real `exportZip()` probe (not a reimplementation): the
+  entry now exists in the produced .zip, parses, and contains all 15 `RESOURCE_KEYS` with correct
+  names/colours.
+- **What this pass deliberately did NOT touch**: `grainYieldRatio()`/`GRAIN_YIELD_RATIO_FLOOR`/
+  `GRAIN_YIELD_RATIO_TYPICAL`/`GRAIN_SEED_KG_PER_HA` — also zero-caller, but this file's own v1.31
+  CHANGELOG entry already explicitly discloses it as a deliberate, accepted scope cut ("the
+  seed-to-yield floor is defined and exposed but only reported, not wired into food surplus"), not
+  accidental cruft; removing documented-as-intentional future-facing API surface is a materially
+  different call than removing an orphaned duplicate, and wasn't asked for. No sweep for duplicate
+  CSS rules or near-duplicate (as opposed to byte-identical-unused) logic blocks was attempted this
+  pass — the mechanical zero-reference method above is precise and safe but doesn't find those; a
+  broader stylistic dedup pass would be a separate, larger, higher-judgment undertaking.
+- **Tests**: `tests/run.sh` 1031/1031, `tests/run_um.sh` 852/852, `hash_gen1.js` ALL IDENTICAL,
+  `smoke_gen1.js` matches the v1.92 baseline exactly (674/676; the 2 failures are the same
+  pre-existing environmental canvas-sizing issues, unrelated). No new assertions — every change
+  either removes code nothing exercised, or is covered by the existing `exportZip()`-round-trip
+  test surface once `resource_index.json` is part of what gets written.
+- **Net effect**: ~60 fewer lines with identical behavior, plus one previously-silent export gap
+  closed.
+
 ### v1.92 — Generation-chain speed pass: a redundant Math.hypot() in every D8 neighbour loop, and plate-array object access in assignPlates()
 
 Owner: "Check the full génération chain and rendering chain function by function and see if we can

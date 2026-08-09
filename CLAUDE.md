@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.92**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.93**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.92.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.91.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.93.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.92.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,42 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Code streamlining: dead-code sweep + one real bug found along the way (v1.93)
+
+Owner: "Can we make the very code itself more streamlined? This by removing unnecessary bits or
+things that are double? Beware to not lose functionality!" A mechanical zero-reference sweep (every
+top-level `function`/`const` declaration checked against `\bname\b` occurrences across all 4 blocks
+AND both headless test suites), not a rewrite. Hash vs v1.92 ALL IDENTICAL — removed code was never
+called.
+
+- **Seven dead functions/subsystems removed**, each superseded by something else that does its
+  job: `_civPopulateEntityInspector` (its two dispatch targets are called directly elsewhere);
+  `computeRainfall()` (superseded by `simulateWeather()`); the `dirty`/`invalidate()`/
+  `flushDirty()` dependency-graph layer (superseded by direct calls + `_fieldGen`/`_climGen`
+  counters everywhere — only `dirty.render`/`scheduleRender()` was ever live, kept, `dirty` narrowed
+  to `{render:false}`); `clearScratch()` (the `mbuf`/`ibuf`/`ubuf` pool already self-manages growth);
+  `view3dSync()` (its body is duplicated inline at `enter3D()`, the only place that needed it);
+  `_origRenderNow` (an abandoned capture — the real renderNow-wrap-for-the-perf-overlay wiring
+  exists under a different name, `_renderNow_orig`, ~3700 lines later); `polylineCrossings` (UME
+  engine, block 4 — a thin `segInt` wrapper nothing in the ported engine calls, not in UME's own
+  `_test:{}` exposure either). Three unused data constants also removed (`ORGANIC`, `LANDFORM_KEYS`,
+  `SCULPT_GLOBAL_KEYS`) — each checked against its sibling (materials palette / `LANDFORM_COLS` /
+  `SCULPT_GLOBAL_DEF`) to confirm only the name/label half was orphaned, not the data it labels.
+- **One real bug found and FIXED, not removed**: `resource_index.json` was documented (a v1.31-era
+  comment stated as fact that "these keys are written into `resource_index.json`") but never
+  actually pushed into `exportZip()`'s entries — unlike its siblings `biome_index.json`/
+  `lithology_index.json`, which are. Wired `resourceIndexManifest()` in, matching the existing
+  pattern exactly. Verified via a real export probe: the entry now exists with all 15 resource keys.
+- **Deliberately left alone**: `grainYieldRatio()`/`GRAIN_YIELD_RATIO_*` — also zero-caller, but
+  v1.31's own CHANGELOG already discloses this as an intentional, accepted scope cut ("exposed but
+  only reported, not wired into food surplus"), not accidental cruft. Every function only called by
+  the test suites (`featuresNear`, `collectVisibleTiles`, `chunkChildren`, `unpackRGB8`,
+  `grainKgPerHaMedieval`, etc.) was left untouched — deliberately-kept, tested pure primitives.
+- 1031/1031, 852/852, hash ALL IDENTICAL, smoke matches the v1.92 baseline exactly (no new
+  assertions needed — removed code was unexercised by design, and the export fix is covered by the
+  existing `exportZip()` round-trip surface). Net ~60 fewer lines, same behavior, one silent gap
+  closed.
 
 ### Generation-chain speed pass: D8-neighbour Math.hypot hoist + assignPlates flattening (v1.92)
 
