@@ -12,6 +12,56 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.94 — Grain-yield wiring: a real formula bug found while connecting v1.31's orphaned code
+
+Owner: "Let's build in the grainyield part and all that it connects to." v1.31 introduced
+`grainYieldRatio()`/`GRAIN_YIELD_RATIO_FLOOR`/`GRAIN_YIELD_RATIO_TYPICAL`/`GRAIN_SEED_KG_PER_HA`
+grounded in `docs/research/settlement-resources.md` §10.4 (seed-to-yield ratio historically 1:3 to
+1:4, hard floor at 1:3 — below it "all seed grain consumed, no reserve for next planting") but
+never wired it to anything; v1.93's dead-code audit re-found it and correctly left it alone, since
+v1.31's own CHANGELOG already disclosed this as a deliberate, accepted scope cut, not accidental
+cruft. This version builds the connection. Civ-layer display only — feeds no population/food-shed
+math. Hash vs v1.93 **ALL IDENTICAL** (a pure on-demand display read, never reached from
+`generate()`/`renderNow()`). 1031/1031, 852/852, 685/687 smoke (the 2 shortfalls are the
+long-standing pre-existing v0.92/v0.87 environmental canvas-sizing failures, reconfirmed unrelated,
+same as every prior version's baseline).
+
+- **A real, previously-undetectable formula bug, found only by tracing the arithmetic before wiring
+  it in.** `grainYieldRatio(K) = FLOOR+(TYPICAL-FLOOR)*clamp(K/0.6,0,1)*2` reaches `TYPICAL` at the
+  HALFWAY point (K=0.3) and keeps climbing to `2×(TYPICAL-FLOOR)` above `FLOOR` by K=0.6, plateauing
+  there for the rest of the range — a flat **5.68**, 31% past the documented historical maximum of
+  4.34, for any K≥0.6. Undetectable by any existing test because the function had zero callers
+  before this version. Fixed to a plain, bounded linear interpolation over K's own natural [0,1]
+  range — the same clamp convention its sibling functions `subsistenceModeAt`/`agrarianDensityKm2`
+  already use: `FLOOR+(TYPICAL-FLOOR)*Math.max(0,Math.min(1,K||0))`. Verified via a live probe:
+  bounds exactly `[3, 4.34]` across the whole K range, monotonic, no overshoot at any sampled point.
+- **`_civPlaceGrainYield(p)`** (new, following the established `_civPlace*` primitive convention —
+  thin, cheap, on-demand, samples one point from a full-grid field, same idiom as
+  `_civPlaceDefensibility`): reads `currentCarryingCapacity()` at the settlement's own cell, computes
+  `grainYieldRatio(K)`, returns `{ratio, floor, deficit, kgPerHa}` (`kgPerHa = round(GRAIN_SEED_KG_PER_HA
+  * ratio)`, the doc's own seed-rate × yield-ratio formula). Explicitly **reported, not simulated** —
+  feeds no population/food-shed math whatsoever, preserving the v1.34-established ACYCLIC-chain
+  discipline ("terrain → carrying capacity → rural population → surplus → urban ceiling. Nothing
+  downstream may feed back.").
+- **Wired into the SHARED `_civFormatPlaceInsp(p)`** — discovered to already feed BOTH the Settlement
+  Inspector popup (`_civPopulatePlaceEditor`) AND the City Viewer's "General" section
+  (`_civPopulateCityViewerInfo`, which inlines the same call directly) — so one change satisfies "all
+  that it connects to" without a second, competing display path. The new "Grain yield 1:R.R (~NNN
+  kg/ha)" text sits directly beside the existing Food row.
+- **Deliberately NOT derived from `grainYieldKgHa(soil)`** — considered and rejected: dividing its
+  absolute kg/ha output (calibrated for population/food-shed surplus modeling, v1.34, up to
+  `GRAIN_YIELD_MAX_KG_HA=1000`) by `GRAIN_SEED_KG_PER_HA=60` would produce ratios up to 16.67, far
+  past any historically-grounded figure — the two constants were calibrated for different purposes
+  and mixing them silently invents a number, exactly the mistake this file's own CHANGELOG has
+  repeatedly flagged elsewhere (v1.30/v1.32/v1.33/v1.35/v1.37/v1.46/v1.55).
+- **Known scope cuts**: not added to the Settlements virtual-scrolling table (would need a new
+  sortable column — a bigger UI change than a Derived-block field warrants) or the Economy/
+  Statistics faction-aggregate pages (per-settlement granularity matches the established
+  `_civPlaceDefensibility`/`_civPlaceFoodSurplus` precedent, both display-only at the same scope);
+  no world-relative self-calibration of the K→ratio curve (v1.25/v1.31/v1.34's own repeatedly
+  re-learned discipline) — judged unnecessary since this quantity carries zero simulation/gameplay
+  stakes, display-only by design.
+
 ### v1.93 — Code streamlining: seven confirmed-dead functions/subsystems, three unused constants, and one real bug found along the way
 
 Owner: "Can we make the very code itself more streamlined? This by removing unnecessary bits or

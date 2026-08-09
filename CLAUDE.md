@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.93**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.94**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.93.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.92.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.94.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.93.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,36 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Grain-yield wiring: connecting v1.31's orphaned formula surfaced a real overshoot bug (v1.94)
+
+Owner: "Let's build in the grainyield part and all that it connects to." v1.31 shipped
+`grainYieldRatio()`/`GRAIN_YIELD_RATIO_FLOOR`/`GRAIN_YIELD_RATIO_TYPICAL`/`GRAIN_SEED_KG_PER_HA`
+grounded in `docs/research/settlement-resources.md` §10.4 but never called them — v1.93's dead-code
+audit re-found the same orphaned code and correctly left it alone (v1.31's own CHANGELOG already
+disclosed it as a deliberate scope cut, "exposed but only reported, not wired into food surplus").
+This version does the wiring. Civ-layer display only. Hash vs v1.93 ALL IDENTICAL (a pure on-demand
+read, never reached from `generate()`/`renderNow()`).
+
+- **The wiring surfaced a real formula bug that had been invisible for lack of any caller.**
+  `grainYieldRatio(K)`'s original formula reached `TYPICAL` at K=0.3 and kept climbing to a flat
+  **5.68** (31% past the documented historical maximum of 4.34) for any K≥0.6. Fixed to a plain
+  linear interpolation over K's own [0,1] range, matching the clamp convention its siblings
+  `subsistenceModeAt`/`agrarianDensityKm2` already use.
+- **`_civPlaceGrainYield(p)`** (new `_civPlace*` primitive, same thin on-demand idiom as
+  `_civPlaceDefensibility`) samples `currentCarryingCapacity()` at the settlement's own cell and
+  returns `{ratio, floor, deficit, kgPerHa}` — explicitly reported, not simulated, feeding no
+  population/food-shed math (preserves the v1.34 ACYCLIC-chain rule).
+- **One shared display function, both surfaces.** `_civFormatPlaceInsp(p)` already feeds BOTH the
+  Settlement Inspector popup and the City Viewer's General section (the latter inlines the same
+  call) — wiring it there once satisfies "all that it connects to" with no second display path.
+- **Deliberately not derived from `grainYieldKgHa(soil)`** — its absolute kg/ha scale was calibrated
+  for a different purpose (v1.34 population/food-shed modeling) than `GRAIN_SEED_KG_PER_HA`'s own
+  historical basis; dividing one by the other would silently invent ratios up to 16.67.
+- **Known scope cuts**: not surfaced in the Settlements table or Economy/Statistics pages
+  (per-settlement granularity matches the `_civPlaceDefensibility`/`_civPlaceFoodSurplus`
+  precedent); no world-relative self-calibration of the K→ratio curve — judged unnecessary since
+  this is a zero-stakes display value, not a simulation input.
 
 ### Code streamlining: dead-code sweep + one real bug found along the way (v1.93)
 

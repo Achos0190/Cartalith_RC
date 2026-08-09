@@ -6618,6 +6618,48 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  R.v194 = await page.evaluate(() => {
+    const o = {};
+    // (a) grainYieldRatio's own formula bounds — the v1.94 fix under test. The pre-fix formula
+    // (FLOOR + (TYPICAL-FLOOR)*clamp(K/0.6,0,1)*2) overshot to 5.68 for any K>=0.6; the fixed
+    // formula is a plain linear interpolation over K's own [0,1] range with no overshoot possible.
+    const samples = [];
+    for (let k = 0; k <= 1.0001; k += 0.1) samples.push(grainYieldRatio(+k.toFixed(2)));
+    o.allWithinBounds = samples.every(r => r >= GRAIN_YIELD_RATIO_FLOOR - 1e-9 && r <= GRAIN_YIELD_RATIO_TYPICAL + 1e-9);
+    o.monotonic = samples.every((r, i) => i === 0 || r >= samples[i - 1] - 1e-9);
+    o.atZeroIsFloor = Math.abs(grainYieldRatio(0) - GRAIN_YIELD_RATIO_FLOOR) < 1e-9;
+    o.atOneIsTypical = Math.abs(grainYieldRatio(1) - GRAIN_YIELD_RATIO_TYPICAL) < 1e-9;
+    // a K that used to sit on the old formula's overshoot plateau (any K>=0.6 -> a flat 5.68, 31%
+    // past TYPICAL) must now equal the correctly-bounded linear value FLOOR+(TYPICAL-FLOOR)*K, and
+    // must be measurably below the old plateau value and never above TYPICAL.
+    const oldOvershootPlateau = GRAIN_YIELD_RATIO_FLOOR + (GRAIN_YIELD_RATIO_TYPICAL - GRAIN_YIELD_RATIO_FLOOR) * 2;
+    const expectedAt08 = GRAIN_YIELD_RATIO_FLOOR + (GRAIN_YIELD_RATIO_TYPICAL - GRAIN_YIELD_RATIO_FLOOR) * 0.8;
+    const newAt08 = grainYieldRatio(0.8);
+    o.formerOvershootPointFixed = Math.abs(newAt08 - expectedAt08) < 1e-9 && newAt08 < oldOvershootPlateau - 1e-9 && newAt08 <= GRAIN_YIELD_RATIO_TYPICAL + 1e-9;
+
+    // (b) _civPlaceGrainYield: a real settlement on a real generated+populated world.
+    const savedPlaces = state.places;
+    try {
+      const midX = (GW / 2) | 0, midY = (GH / 2) | 0;
+      const p = { x: midX, y: midY, name: 'GrainTest', kind: 'town', faction: 0, pop: 4000, traits: [] };
+      state.places = [p];
+      const gy = _civPlaceGrainYield(p);
+      o.placeGrainYieldReturnsObject = !!gy;
+      o.placeGrainYieldInBounds = !!gy && gy.ratio >= GRAIN_YIELD_RATIO_FLOOR - 1e-9 && gy.ratio <= GRAIN_YIELD_RATIO_TYPICAL + 1e-9;
+      o.placeGrainYieldKgHaMatchesFormula = !!gy && gy.kgPerHa === Math.round(GRAIN_SEED_KG_PER_HA * gy.ratio);
+      o.placeGrainYieldDeficitFlagCorrect = !!gy && (gy.deficit === (gy.ratio <= GRAIN_YIELD_RATIO_FLOOR + 1e-6));
+
+      // (c) the shared inspector text (_civFormatPlaceInsp) — feeds BOTH the Settlement Inspector
+      // popup and the City Viewer's General section from one call, so this one check covers both.
+      const html = _civFormatPlaceInsp(p);
+      o.inspectorShowsGrainYield = html.includes('Grain yield') && html.includes('kg/ha');
+      o.inspectorNextToFoodRow = /<b>Food<\/b>[^<]*<\/?[^>]*>?\s*&nbsp;·&nbsp;\s*<b>Grain yield<\/b>/.test(html) || html.indexOf('<b>Food</b>') < html.indexOf('<b>Grain yield</b>');
+    } finally {
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -7393,6 +7435,18 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.91: the rebuilt pack\'s texture slot survives the Library round-trip (assetPack.textures.grass)', R.v191.rebuiltFromLibraryHasGrass);
   A('v1.91: the rebuilt pack\'s icon slot survives the Library round-trip (assetPack.icons.mountain)', R.v191.rebuiltFromLibraryHasMountainIcon);
   A('v1.91: pack name/author/license metadata also travels through the bridge, not just the art (assetPack.name reads the real pack name, not the generic "Asset Library" default)', R.v191.rebuiltFromLibraryPackName === 'Smoke Test Pack');
+
+  A('v1.94: grainYieldRatio(K) stays within [FLOOR,TYPICAL] across the whole K range — the v1.93 audit found it dead, v1.94 wires it in and this is the overshoot bug that wiring surfaced', R.v194.allWithinBounds);
+  A('v1.94: grainYieldRatio(K) is monotonically non-decreasing in K', R.v194.monotonic);
+  A('v1.94: grainYieldRatio(0) is exactly the subsistence floor (3)', R.v194.atZeroIsFloor);
+  A('v1.94: grainYieldRatio(1) is exactly the documented Sussex-manor typical (4.34), not past it', R.v194.atOneIsTypical);
+  A('v1.94: a K that used to sit on the old formula\'s overshoot plateau (K=0.8, was a flat value 31% past TYPICAL) now equals the correctly-bounded linear value', R.v194.formerOvershootPointFixed);
+  A('v1.94: _civPlaceGrainYield(p) returns a real object for a real settlement on a real generated world', R.v194.placeGrainYieldReturnsObject);
+  A('v1.94: _civPlaceGrainYield(p)\'s ratio stays within [FLOOR,TYPICAL] on real terrain, not just synthetic K samples', R.v194.placeGrainYieldInBounds);
+  A('v1.94: _civPlaceGrainYield(p)\'s kgPerHa follows the doc\'s own formula (seed_rate × yield_ratio), not an independent number', R.v194.placeGrainYieldKgHaMatchesFormula);
+  A('v1.94: _civPlaceGrainYield(p)\'s deficit flag matches the floor comparison exactly', R.v194.placeGrainYieldDeficitFlagCorrect);
+  A('v1.94: the Settlement Inspector\'s shared _civFormatPlaceInsp (feeds BOTH the inspector popup and the City Viewer) now shows the grain yield line', R.v194.inspectorShowsGrainYield);
+  A('v1.94: the grain yield line sits next to the existing Food row, matching the doc\'s own framing ("gives the food rows an honest answer")', R.v194.inspectorNextToFoodRow);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -9,11 +9,40 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.93.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.94.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.94 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.92` are kept and never edited.
+  (v1.95 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.93` are kept and never edited.
+- **v1.94 — grain-yield wiring: connecting v1.31's orphaned formula surfaced a real overshoot
+  bug.** Owner: "Let's build in the grainyield part and all that it connects to." v1.31 shipped
+  `grainYieldRatio()`/`GRAIN_YIELD_RATIO_FLOOR`/`GRAIN_YIELD_RATIO_TYPICAL`/`GRAIN_SEED_KG_PER_HA`
+  grounded in `docs/research/settlement-resources.md` §10.4 but never called them; v1.93's
+  dead-code audit re-found the same orphaned code and correctly left it alone (v1.31's own
+  CHANGELOG already discloses it as a deliberate, accepted scope cut — "exposed but only
+  reported, not wired into food surplus"). This version does the wiring. Tracing the arithmetic
+  before wiring it in surfaced a real formula bug: `grainYieldRatio(K)`'s original formula
+  reached `TYPICAL` at K=0.3 and kept climbing to a flat **5.68** (31% past the documented
+  historical maximum of 4.34) for any K≥0.6 — invisible until now because the function had zero
+  callers. Fixed to a plain linear interpolation over K's own [0,1] range, matching the clamp
+  convention its siblings `subsistenceModeAt`/`agrarianDensityKm2` already use. New
+  `_civPlaceGrainYield(p)` (the established thin on-demand `_civPlace*` primitive convention,
+  same idiom as `_civPlaceDefensibility`) samples `currentCarryingCapacity()` at the settlement's
+  own cell and returns `{ratio, floor, deficit, kgPerHa}` — explicitly reported, not simulated,
+  feeding no population/food-shed math (preserves the v1.34 ACYCLIC-chain rule: "nothing
+  downstream may feed back"). Wired into the SHARED `_civFormatPlaceInsp(p)`, discovered to
+  already feed BOTH the Settlement Inspector popup and the City Viewer's General section — one
+  change satisfies "all that it connects to" with no second, competing display path.
+  Deliberately not derived from `grainYieldKgHa(soil)` (calibrated for a different purpose,
+  v1.34 population modeling — dividing by `GRAIN_SEED_KG_PER_HA` would produce ratios up to
+  16.67, past any historically-grounded figure). Hash vs v1.93 ALL IDENTICAL (pure on-demand
+  display, never reached from `generate()`/`renderNow()`). 1031/1031, 852/852, 685/687 smoke (the
+  2 shortfalls are the long-standing pre-existing v0.92/v0.87 environmental canvas-sizing
+  failures, reconfirmed unrelated). Known scope cuts: not surfaced in the Settlements table or
+  Economy/Statistics pages (matches the `_civPlaceDefensibility`/`_civPlaceFoodSurplus`
+  per-settlement-only precedent); no world-relative self-calibration of the K→ratio curve
+  (judged unnecessary — zero simulation stakes, display-only). See CHANGELOG for the full
+  writeup.
 - **v1.93 — code streamlining: seven confirmed-dead functions/subsystems, three unused
   constants, and one real bug found along the way.** Owner: "Can we make the very code itself
   more streamlined? This by removing unnecessary bits or things that are double? Beware to not
