@@ -3,20 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.86**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.87**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.86.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.85.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.87.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.86.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1017-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1021-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +28,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1017 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1021 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -997,6 +997,32 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Rendering-speed pass: buildWaterBodies()'s priority-flood heap (v1.87)
+
+Owner: "let's see if we can optimise the code again for rendering speed whilst we keep the fidelity
+and detail." Measured first via `tests/perf/perf_gen1.js`'s render phase split, which showed the
+render "prologue" (everything before the per-pixel colour loop) costing nearly as much as the pixel
+loop itself at large resolutions. A CPU profile (CDP `Profiler`, real 2048px world) isolated it to
+`buildWaterBodies()` (the ocean/lake classification behind `currentWaterBodies()`, rebuilt once per
+terrain change) — specifically its `MinHeap` (Barnes-style priority-flood depression fill), backed by
+two dynamically-growing plain JS arrays even though every cell is enqueued at most once (a known
+upper bound `n=W·H`). Fixed by preallocating `Float32Array`/`Int32Array` heap storage (same sift-up/
+sift-down comparison logic, so push/pop order and every filled value stay bit-identical) and hoisting
+two neighbour-test closures (`nb`/`visit`) that were being reallocated on every one of up to `n` loop
+iterations. Verified three ways: `hash_gen1.js` ALL IDENTICAL; a direct hash/sum comparison of
+`buildWaterBodies`'s own output arrays at 512/1024/2048px; and a controlled 6-trial A/B (fresh page,
+cold cache, alternating versions) measuring a real 16% reduction at 2048px (median 1006ms→844ms) —
+the official `perf_gen1.js` harness itself under-reported this because its render-phase measurement
+runs immediately after twelve back-to-back `generate()` calls, adding enough background noise at
+2048px to mask the win. The per-pixel colour loop (`surfaceColor`/`materialWeights`/`landColorCore`)
+— the single largest render cost overall — was profiled too and left untouched: no redundant
+recomputation found, the cost is the genuine price of the existing feature set (multi-octave noise
+jitter, two-pass canopy closure), and further speedup would need either a LUT approximation (violates
+the "keep fidelity and detail" constraint) or a larger, higher-risk dispatch restructuring. `MinHeap`
+itself keeps its exact O(n log n) comparison structure — a faster heap variant was considered and
+rejected: it risks popping equal-priority cells in a different order than the original binary heap,
+which would change the fill-height tie-break cascade and thus the final lake classification.
 
 ### Bug hunt + optimization pass: climate re-simulation silently left settlement suitability stale (v1.86)
 
@@ -2956,7 +2982,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1017-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1021-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)

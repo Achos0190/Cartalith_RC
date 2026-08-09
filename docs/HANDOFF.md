@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.86.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.87.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.87 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.85` are kept and never edited.
+  (v1.88 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.86` are kept and never edited.
+- **v1.87 — rendering-speed pass: buildWaterBodies()'s priority-flood heap.** Owner: "let's see
+  if we can optimise the code again for rendering speed whilst we keep the fidelity and detail."
+  Measured first via `tests/perf/perf_gen1.js`: the render "prologue" phase (everything before the
+  per-pixel colour loop) cost nearly as much as the pixel loop at large resolutions. A CPU profile
+  (CDP `Profiler`, real 2048px world) isolated it to `buildWaterBodies()`'s `MinHeap` (the
+  priority-flood depression-fill backing lake classification, rebuilt once per terrain change) —
+  ~53% of the function's own time was `MinHeap.pop`/`.push`, which was backed by dynamically-
+  growing plain JS arrays even though every cell is enqueued at most once (a known upper bound
+  `n=W·H`). Fixed by preallocating typed-array heap storage (identical sift-up/sift-down
+  comparison logic ⇒ identical push/pop order ⇒ bit-identical output) and hoisting two neighbour-
+  test closures that were being reallocated on every one of up to `n` loop iterations. Verified via
+  `hash_gen1.js` (ALL IDENTICAL), a direct hash/sum comparison of `buildWaterBodies`'s own output
+  arrays, and a controlled 6-trial A/B showing a real 16% reduction at 2048px (median
+  1006ms→844ms) — the official harness itself under-reported this due to background noise from
+  twelve preceding `generate()` calls. The per-pixel colour loop (the single largest render cost
+  overall) was profiled too and deliberately left untouched — no redundant recomputation found;
+  further speedup there would need either a fidelity-losing LUT approximation or a much larger,
+  higher-risk dispatch restructuring. Hash vs v1.86 ALL IDENTICAL. See CHANGELOG for the full
+  writeup including the CPU-profile numbers.
 - **v1.86 — bug hunt + optimization pass: climate re-simulation silently left settlement
   suitability, biome classification and several debug views on stale data.** Owner: "Can you bug
   hunt and do a optimisation pass" — an audit pass, not an owner-reported symptom. Found by
@@ -2578,6 +2597,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, considered not done: a faster priority-queue for `buildWaterBodies`'s depression fill.**
+  Found during the v1.87 rendering-speed pass — a CPU profile showed `MinHeap.pop`'s own O(log n)
+  sift-down cost (~482ms of ~1050ms at 2048px) essentially unchanged by the typed-array fix (that
+  fix cut `push`/`nb`/`visit`, not `pop`'s comparison count). A d-ary heap or a bucket/radix
+  priority queue could plausibly cut the `log n` factor further, but risks popping equal-priority
+  cells (common — the algorithm's own `filled[j]=filled[i]+EPS` tie-break cascades through flat
+  depressions) in a DIFFERENT order than the current binary heap, which would change which cells
+  inherit which fill height and thus the final lake classification — a real bit-identity risk, not
+  attempted. If revisited, the verification bar is high: must reproduce the EXACT same `_waterBody`/
+  `_lakeFill` output (hash comparison, not just "looks similar") across several seeds/resolutions
+  with flat/depression-heavy terrain, not just the one reference seed.
+- **OPEN, considered not done: the per-pixel colour loop (`surfaceColor`/`materialWeights`/
+  `landColorCore`) is the single largest render cost and was left untouched in v1.87.** A CPU
+  profile found no redundant recomputation — every expensive call is already made exactly once per
+  pixel. Two paths were considered and rejected for this pass: (1) a lookup-table approximation of
+  the repeated `Math.pow`/`Math.exp` calls — rejected because any interpolation scheme introduces
+  quantization error, directly conflicting with the owner's explicit "keep fidelity and detail"
+  constraint on this task; (2) restructuring `renderNow`'s per-pixel debug-view dispatch (the ~20
+  `dbg==='...'` string-literal checks before reaching the biome-mode branch) — likely low-value
+  since V8 typically compiles literal-string comparisons to pointer equality, and a much larger,
+  higher-regression-risk change than the rest of this pass. Worth a dedicated look only if a future
+  profile shows the dispatch chain itself (not the colour math it guards) as a measurable cost.
 - **OPEN, found not fixed: Active foraging's speed cost can outweigh its consumption benefit on a
   single, already-marginal carry stretch.** Found while verifying v1.81 (below) —
   `probe_jp_forage_effect2.js` measured several scenarios where switching Foraging from None to

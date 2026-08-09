@@ -12,6 +12,81 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.87 — Rendering-speed pass: buildWaterBodies()'s priority-flood was paying for a dynamically-growing heap on every terrain edit
+
+Owner: *"let's see if we can optimise the code again for rendering speed whilst we keep the fidelity
+and detail."* Measured before touching anything, per this file's own discipline. Engine only (block
+1, one function). Hash vs v1.86 **ALL IDENTICAL** across all 5 `hash_gen1.js` scenarios — this
+changes only the CPU cost of a full render's prologue, never a single pixel of output.
+
+- **Measured first**: `tests/perf/perf_gen1.js`'s render phase split flagged the "prologue" phase
+  (everything a render does before the per-pixel colour loop starts) as costing nearly as much as the
+  pixel loop itself — 118 / 357 / 1244 ms at 512 / 1024 / 2048 px, versus 141 / 450 / 1611 ms for the
+  loop. A direct probe (invalidate each prologue sub-cache, time it in isolation) isolated the cause
+  to one function: `currentWaterBodies()` (`buildWaterBodies` — the ocean/lake classification that
+  drives lake shading and is rebuilt once per terrain change, i.e. every regenerate, sculpt commit,
+  erosion op, or sea-level move) — 71 / 187 / 1053 ms of that same budget, growing worse than
+  linearly with resolution (2.6×, then 5.6×, for a 4× pixel increase each step).
+- **A CPU profile (CDP `Profiler`, real 2048px world, seed 12345), not a guess, found the actual
+  cause.** `MinHeap.pop`/`.push` — the binary min-heap backing the function's Barnes-style
+  priority-flood depression fill — accounted for ~53% of the function's own time (482 ms of ~1050 ms
+  self+callees). The heap was backed by two plain, dynamically-growing JS arrays (`this.p=[]`,
+  `this.v=[]`, grown via `.push()`/`.pop()`), even though every cell is enqueued **at most once**
+  (`done[j]` guards every insert) — so the heap's maximum size, `n = W·H`, is known before the first
+  push. A first hypothesis (the `nb`/`visit` neighbour-test closures being *reallocated on every one
+  of up to `n` loop iterations*, feeding the GC) measured real but small (GC was only ~10 ms of the
+  1050) — worth fixing regardless, but not the dominant cost.
+- **Fix, both verified bit-identical by construction, not just by testing:**
+  1. `MinHeap` now preallocates `Float32Array(n)`/`Int32Array(n)` (matching `filled`'s own Float32
+     precision exactly — no additional rounding) instead of growing plain arrays, with an explicit
+     `len` counter. The sift-up/sift-down comparison logic (`<=`/`<`, same tie-break order) is
+     untouched — same push/pop sequence, same fill values, same final classification.
+  2. The `nb` (below-sea flood fill) and `visit` (priority-flood neighbour relax) closures — each
+     previously **redefined on every popped cell**, up to `n` times per call — are hoisted outside
+     their loops. Each only ever needed one per-iteration value (`comp` for `nb`, `filled[i]` for
+     `visit`, renamed `cur`), which nothing mutates between the read and the closure's use, so both
+     become explicit parameters instead of captures — same values, same order, same output.
+- **Verified three ways.** (1) `hash_gen1.js`: ALL IDENTICAL. (2) A direct probe hashing
+  `currentWaterBodies()`'s own return array + its `fillOut` pooled-level output at 512/1024/2048:
+  identical FNV hashes and identical land/lake cell-count sums before and after, at every resolution.
+  (3) A controlled A/B (6 alternating fresh-page trials, cold cache, 2048px, same seed): **v1.86
+  median 1005.7 ms → v1.87 median 844.3 ms, a real 16% reduction**, consistent across all 6 pairs —
+  the official `perf_gen1.js` harness itself under-reported this (its own render-phase measurement
+  runs immediately after twelve back-to-back `generate()` calls at three resolutions, adding enough
+  background GC/scheduling noise at 2048px to mask the win; the isolated A/B removes that confound).
+- **`MinHeap.pop`'s own cost barely moved** (~482 ms → ~505 ms in a repeat CPU profile) — the
+  O(log n) sift-down comparisons are the heap's genuine algorithmic cost for ~2.68M cells at 2048px,
+  not an implementation inefficiency; `push`/`visit`/`nb` all measurably dropped instead. A d-ary
+  heap or a bucket/radix priority queue could plausibly cut the `log n` factor further, but either
+  risks popping equal-priority cells (common — the `filled[j]=filled[i]+EPS` tie-break cascades
+  through flat depressions) in a **different order** than the original binary heap, which would
+  change which cells inherit which fill height and thus the final lake classification — a real
+  bit-identity risk, not attempted this pass.
+- **The per-pixel colour loop (`surfaceColor`/`materialWeights`/`landColorCore`) was profiled too
+  and deliberately left untouched.** It is the single largest cost overall (1611 ms of the 2048px
+  render's 2884 ms total) but a CPU profile found no redundant recomputation — every expensive call
+  (`slopeAt`, `aspectFactor`, `curvatureAt`, `vnoise`, `bioJitter`, `shadeFactor2`, `vignetteAt`) is
+  made exactly once per pixel already. The cost is the genuine price of the feature set (multi-octave
+  noise jitter, two-pass canopy closure, aspect/curvature-adjusted moisture, fire disturbance —
+  doc §2/§3/§7/§8/§11/§12), not a bug. Speeding it up further would mean either a lookup-table
+  approximation of `Math.pow`/`Math.exp` calls (introduces quantization error against the owner's
+  explicit "keep fidelity and detail" constraint) or restructuring `renderNow`'s per-pixel debug-view
+  dispatch (a much larger, higher-regression-risk change for a self-time cost that string-literal
+  comparisons in V8 make unlikely to be significant) — disclosed as a scope cut, not attempted.
+- **Known scope cuts**: the heap-algorithm question above (a faster priority queue exists in
+  principle but risks changing tie-break order); the pixel-loop question above; `smoothSeaH`/
+  `seaShadeFrom` (the sea-floor blur feeding lake shading) showed a smaller, noisier prologue cost
+  (4.8→134.8 ms across resolutions) that wasn't investigated this pass — its box-blur implementation
+  already uses an O(1)-per-pixel sliding window, so it isn't obviously inefficient the way
+  `buildWaterBodies` was.
+- **Tests**: `tests/run.sh` 1021/1021 (4 new: a flat-bottom priority-flood tie-region regression pin
+  — monotonic pooled fill, symmetric classification, and determinism of both classification AND fill
+  levels under a multi-cell tie, the scenario a future heap-implementation change is most likely to
+  break silently), `tests/run_um.sh` 852/852 (block 4 untouched), `hash_gen1.js` ALL IDENTICAL (5
+  scenarios), `smoke_gen1.js` 661/663 — identical to the v1.86 baseline (the 2 failures are the
+  pre-existing, environment-specific `v0.92`/`v0.87` canvas-sizing assertions, confirmed unrelated in
+  the v1.85/v1.86 CHANGELOG entries).
+
 ### v1.86 — Bug hunt + optimization pass: climate re-simulation silently left settlement suitability, biome classification and several debug views on stale data
 
 Owner: *"Can you bug hunt and do a optimisation pass."* An audit pass, not an owner-reported

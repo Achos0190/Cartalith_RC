@@ -1870,6 +1870,40 @@ if (typeof applyTidalSedimentation === 'function') {
   check('buildWaterBodies forceLake → forced cell is lake (class 2)', wbF[3 * W + 4] === 2 && wbF[0 * W + 5] === 0);
 }
 
+/* ---------- v1.87: priority-flood heap — flat-bottom tie stays monotonic (regression pin for the
+   preallocated-typed-array MinHeap: several cells sharing the exact same starting height must still
+   pool to a non-decreasing fill surface regardless of the order the heap happens to pop equal-priority
+   entries in — the one correctness property that MUST survive any heap-implementation change, tie-break
+   order itself is an implementation detail this test deliberately does not pin) ---------- */
+{
+  const W = 9, H = 9, sea = 0.5;
+  const f = new Float32Array(W * H).fill(0.6);
+  // a flat-bottomed depression: a 3×3 block at the SAME height (0.52, above sea, below the 0.6 walls
+  // around it) so several cells reach the priority-flood frontier with an identical priority at once —
+  // the exact scenario `filled[j]=filled[i]+EPS` tie-breaking exists to resolve.
+  for (let y = 3; y <= 5; y++) for (let x = 3; x <= 5; x++) f[y * W + x] = 0.52;
+  const fillOut = new Float32Array(W * H);
+  const wb = buildWaterBodies(f, W, H, sea, { rain: new Float32Array(W * H).fill(0.5), fillOut });
+  let monotonic = true;
+  for (let y = 3; y <= 5; y++) for (let x = 3; x <= 5; x++) {
+    const i = y * W + x, hgt = fillOut[i];
+    // every 4-neighbour must be filled to a height that is >= this cell's own (flood fills UPWARD from
+    // outlets inward/upward — a neighbour reading LOWER than its own upstream cell is a heap-order bug)
+    const nbs = [i - 1, i + 1, i - W, i + W];
+    for (const j of nbs) if (fillOut[j] > 0 && fillOut[j] < hgt - 1e-4) monotonic = false;
+  }
+  check('priority-flood tie region: pooled fill is monotonic across equal-starting-height neighbours', monotonic);
+  check('priority-flood tie region: all tied cells classify identically (symmetric depression)',
+    wb[4 * W + 4] === wb[3 * W + 3] && wb[4 * W + 4] === wb[5 * W + 5] && wb[4 * W + 4] === wb[3 * W + 5]);
+  // determinism under ties specifically (a heap bug is more likely to be order-dependent/flaky than a
+  // plain logic bug — run it again and require byte-identical fillOut, not just byte-identical wb)
+  const fillOut2 = new Float32Array(W * H);
+  const wb2 = buildWaterBodies(f, W, H, sea, { rain: new Float32Array(W * H).fill(0.5), fillOut: fillOut2 });
+  check('priority-flood tie region: deterministic (classification)', wb.every((v, i) => v === wb2[i]));
+  check('priority-flood tie region: deterministic (pooled fill levels, not just classification)',
+    fillOut.every((v, i) => v === fillOut2[i]));
+}
+
 /* ---------- v0.103: a deposited lake mask cell — a lake on a mountain without raising sea level ---------- */
 {
   // reuse the 256 region world generated for the CBiome/CTerrain blocks above (no regenerate → seam RNG untouched)
