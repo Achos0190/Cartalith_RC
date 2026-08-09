@@ -9,11 +9,42 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.90.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.91.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.91 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.89` are kept and never edited.
+  (v1.92 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.90` are kept and never edited.
+- **v1.91 — asset pack persistence + the Splat-texture Library bridge.** Owner: "Make sure all
+  shown functions in saving and loading assets are functional. And that saving a map saves
+  everything ways, settlements, assetpack, painting everything." Audited every save/load surface
+  before writing any fix — ways/settlements/labels/icons/factions/territory (`_civSyncToState`/
+  `_civSyncFromState`) and hand-painted Cartography overrides (`state.cartoPaint`, v0.146) were
+  already correctly round-tripped, reconfirmed with a fresh live probe. The asset pack was not: a
+  real `exportZip()`→`loadZip()` probe confirmed `loadAssetPack()` (the header's own "Import asset
+  pack…" button) set the runtime `assetPack` global directly but never touched the Asset Library's
+  `AssetDB` — the one thing `_alExportEntries`/`_alImportProject` actually persist (invariant 6:
+  `assetPack` is never serialized directly). Total, silent loss confirmed: 10 icon/7 texture slots
+  before export, `null` after reload. Fixed with a new `window._alImportPackZip` bridge (mirrors
+  the existing `_alExportEntries`/`_alImportProject` cross-block convention) that mirrors the same
+  pack into `AssetDB` right after `loadAssetPack()` sets `assetPack` — the live map is untouched,
+  only the NEXT save now captures the pack. Testing that fix surfaced three more real bugs in the
+  pre-existing v1.26/v1.28 Library→runtime bridge (`syncToRuntime()`/`applyLibraryAssets()`): the
+  "Splat channels" (`textures`) family was never wired into the bridge at all (v1.28's own "EVERY
+  family" pass missed the one family that predates it — ground-material Library art only ever
+  reached the map via a full pack export→re-import loop); `assetPack.texAny` (the gate every splat
+  render call site checks) was never set by the bridge even once the textures slots themselves
+  were restored — data present, invisible, caught only by a direct before/after probe of `texAny`
+  itself; and pack name/author/license attribution never traveled through the bridge. All three
+  fixed. A fifth, smaller gap: the Library's own "Import pack" button never called
+  `syncToRuntime()` (needed a separate manual "Apply to map" click, unlike every other way art
+  enters the Library) — fixed and confirmed via a real `page.setInputFiles()` drive of the actual
+  file input, not a direct function call. Disclosed residual: a texture round-tripped through the
+  Library gets resampled to that family's fixed 512×512 canvas size if it wasn't already that size
+  (confirmed on the reference sample pack: 256×256 → 512×512, `inv` unchanged to four significant
+  figures — same content, not corruption; a pre-existing property of `renderToCanvas` biomes/
+  terrains have had since v1.28, not newly introduced). Hash vs v1.90 ALL IDENTICAL (default render
+  untouched — every fix is reachable only once a pack is actually imported). 1031/1031, 852/852, 7
+  new smoke assertions (`R.v191`). See CHANGELOG for the full writeup.
 - **v1.90 — save files: DEFLATE-compress the project .zip; internal format unchanged.** Owner:
   "simplify save files and find a way to optimise the internal formatting of the save files and
   compression of the save files." Measured first: `exportZip()`'s `zipStore()` always wrote
@@ -2677,6 +2708,17 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, considered not done: the Library→runtime bridge still has no `dropTextures`/`dropBiomes`/
+  `dropTerrains`/`dropStructures` tracking.** Found during the v1.91 asset-pack-persistence pass.
+  v1.27 added `dropIcons`/`dropCustom` ownership tracking so deleting a Library-owned icon/custom
+  asset correctly retracts it from `assetPack` on the next `syncToRuntime()` — but when v1.28 wired
+  in `biomes`/`terrains`/structures (and v1.91 added `textures`), none of those four families got
+  the equivalent tracking. Deleting a Library-owned biome/terrain/structure/splat-texture asset
+  still leaves its stale pixels sitting in `assetPack` rather than retracting them — a real gap, but
+  narrower and lower-risk than the v1.91 data-loss bug it was found alongside (nothing goes MISSING,
+  a deleted asset just lingers visually until the next full reload). If picked up: extend the same
+  `_pushedIcons`/`_pushedCustom` Set-diff pattern `syncToRuntime()` already uses to four more owned-
+  key sets, and extend `applyLibraryAssets()`'s drop handling to match.
 - **OPEN, considered not done: GPU `readPixels` synchronous readback cost in `gaussBlur`/
   `normalize()`/`computeTemperature()`.** Found during the v1.89 simulation-speed pass — a CPU
   profile of a full `generate()` call showed `gl.readPixels` (the GPU→CPU sync readback inside the

@@ -6555,6 +6555,69 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  R.v191 = await page.evaluate(async () => {
+    const o = {};
+    const savedAssetPack = assetPack, savedAssetRules = assetRules;
+    try {
+      // Build a minimal synthetic pack (one texture slot + one icon slot) entirely in-browser via
+      // this file's own zipStore() — no external fixture file needed, and it's small enough that a
+      // fresh grass/mountain colour is unambiguous evidence of the SAME pixels round-tripping.
+      function solidPng(w, h, r, g, b) {
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const cx = c.getContext('2d'); cx.fillStyle = `rgb(${r},${g},${b})`; cx.fillRect(0, 0, w, h);
+        return new Promise(res => c.toBlob(b => b.arrayBuffer().then(ab => res(new Uint8Array(ab))), 'image/png'));
+      }
+      const grassPng = await solidPng(64, 64, 61, 141, 59);
+      const mountainPng = await solidPng(48, 48, 121, 121, 131);
+      const manifest = { name: 'Smoke Test Pack', author: 'suite', license: 'CC0',
+        textures: { grass: 'textures/grass.png' }, icons: { mountain: 'icons/mountain.png' } };
+      const entries = [
+        { name: 'textures/grass.png', data: grassPng },
+        { name: 'icons/mountain.png', data: mountainPng },
+        { name: 'pack.json', data: new TextEncoder().encode(JSON.stringify(manifest)) },
+      ];
+      const packFile = new File([await zipStore(entries)], 'smoke_pack.zip', { type: 'application/zip' });
+
+      // (a) the header's direct "Import asset pack…" button path (loadAssetPack itself).
+      await loadAssetPack(packFile);
+      o.directImportSetAssetPack = !!assetPack;
+      o.directImportTexAny = !!(assetPack && assetPack.texAny);
+      o.directImportHasGrass = !!(assetPack && assetPack.textures && assetPack.textures.grass);
+      o.directImportHasMountainIcon = !!(assetPack && assetPack.icons && assetPack.icons.mountain);
+
+      // (b) the v1.91 fix under test: does that SAME import also mirror into the persisted Asset
+      // Library (AssetDB, via _alExportEntries/_alImportProject)? Before this fix, a pack loaded
+      // through this button lived only in the `assetPack` runtime global and vanished on the very
+      // next project save/reload — confirmed by a real exportZip()/loadZip() probe before shipping.
+      const alEntries = window._alExportEntries ? await window._alExportEntries() : null;
+      o.mirroredIntoLibrary = !!(alEntries && alEntries.length);
+
+      // (c) wipe the runtime assetPack (simulate a fresh session after a reload) and rebuild it
+      // purely from the Library through the SAME bridge a real loadZip() drives
+      // (_alImportProject -> AssetLibrary.syncToRuntime() -> applyLibraryAssets()) — this is the
+      // actual save/reload mechanism, exercised without needing a second full project export.
+      assetPack = null; assetRules = null;
+      window.AssetLibrary.syncToRuntime();
+      o.rebuiltFromLibraryHasAssetPack = !!assetPack;
+      // texAny gates _splatK at every splat render call site — restoring the textures slot alone
+      // still renders nothing without it (the bug this fix specifically closes).
+      o.rebuiltFromLibraryTexAny = !!(assetPack && assetPack.texAny);
+      o.rebuiltFromLibraryHasGrass = !!(assetPack && assetPack.textures && assetPack.textures.grass);
+      o.rebuiltFromLibraryHasMountainIcon = !!(assetPack && assetPack.icons && assetPack.icons.mountain);
+      o.rebuiltFromLibraryPackName = assetPack && assetPack.name;   // packMeta fix
+    } finally {
+      // Return AssetDB to empty via the same "no assets in this project" path a real reload takes,
+      // so this synthetic pack doesn't linger in the Library for any later smoke block, then
+      // hard-restore assetPack/assetRules to exactly what they were before this test ran.
+      if (typeof window !== 'undefined' && window._alImportProject) {
+        const emptyLib = { version: 1, kind: 'cartalith-assetlib', pack: { name: '', author: '', license: '' }, collections: {}, slots: [] };
+        try { await window._alImportProject({ 'assetlib/library.json': new TextEncoder().encode(JSON.stringify(emptyLib)) }); } catch (_) { }
+      }
+      assetPack = savedAssetPack; assetRules = savedAssetRules;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -7322,6 +7385,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.88: _civDropPlace no longer selects a still-hidden villageAddon while zoomed out (previously only _civSelectPlaceAt checked this visibility gate, so _civDropPlace picked an invisible addon anyway)', R.v188.hiddenAddonNotPickedByDropPlace);
   A('v1.88: the same addon becomes a legitimate _civDropPlace target once zoomed in past its own reveal threshold — the fix gates on visibility, it doesn\'t exclude addon villages outright', R.v188.revealedAddonPickedByDropPlace);
   A('v1.88: the right-click context-menu pick site shows the same near-miss fix, reusing the shared _civPlacePickVisible/_civPlacePickWeight helpers rather than a fourth drifting copy', R.v188.contextMenuNearMissFavorsMetro);
+
+  A('v1.91: loadAssetPack() (the header "Import asset pack…" button) still sets assetPack directly, unchanged', R.v191.directImportSetAssetPack && R.v191.directImportTexAny && R.v191.directImportHasGrass && R.v191.directImportHasMountainIcon);
+  A('v1.91: that same import now ALSO mirrors into the persisted Asset Library (AssetDB) — previously it lived only in the runtime assetPack global and was silently lost on the next project save/reload', R.v191.mirroredIntoLibrary);
+  A('v1.91: rebuilding purely from the Library (the exact mechanism a real project reload drives) restores assetPack, not null', R.v191.rebuiltFromLibraryHasAssetPack);
+  A('v1.91: the rebuilt pack keeps texAny=true — the bridge\'s new "textures" family branch (Splat channels) was the missing piece; without it the gate stayed false and splat rendering silently drew nothing even with textures present', R.v191.rebuiltFromLibraryTexAny);
+  A('v1.91: the rebuilt pack\'s texture slot survives the Library round-trip (assetPack.textures.grass)', R.v191.rebuiltFromLibraryHasGrass);
+  A('v1.91: the rebuilt pack\'s icon slot survives the Library round-trip (assetPack.icons.mountain)', R.v191.rebuiltFromLibraryHasMountainIcon);
+  A('v1.91: pack name/author/license metadata also travels through the bridge, not just the art (assetPack.name reads the real pack name, not the generic "Asset Library" default)', R.v191.rebuiltFromLibraryPackName === 'Smoke Test Pack');
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -12,6 +12,88 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.91 — A directly-imported asset pack silently vanished on save/reload; the Splat-texture Library bridge was never wired
+
+Owner: "Make sure all shown functions in saving and loading assets are functional. And that saving
+a map saves everything ways, settlements, assetpack, painting everything." Audited every save/load
+surface before writing any fix — ways/settlements/labels/icons/journeys/factions/territory (already
+round-tripped via `_civSyncToState`/`_civSyncFromState`) and hand-painted Cartography overrides
+(already round-tripped via `state.cartoPaint`, v0.146) both checked out and were reconfirmed with a
+live round-trip probe. The asset pack did not. Civ/Asset-Library layer only (blocks 1/3) — hash vs
+v1.90 **ALL IDENTICAL** (every fix is reachable only once a pack is actually imported; the default
+render path is untouched).
+
+- **Confirmed, not assumed: a pack loaded via the header's own "Import asset pack…" button
+  (`loadAssetPack()`) was never saved.** `assetPack` (the module global every renderer reads) is
+  invariant-6 "never serialized directly" — by design, the persisted representation is supposed to
+  be the Asset Library's own `AssetDB`, round-tripped via `_alExportEntries`/`_alImportProject`. But
+  `loadAssetPack()` only ever wrote the runtime global directly; it never touched `AssetDB`. A live
+  Playwright probe (real `exportZip()`→mutate state→real `loadZip()`, the same discipline v1.90's own
+  verification used) reproduced the bug exactly: `assetPack` non-null with 10 icon slots/7 texture
+  slots before export, `null` after reload — total, silent loss on the very next save.
+- **Fix: `loadAssetPack()` now also mirrors the same pack into the Library.** A new
+  `window._alImportPackZip` bridge (mirroring the existing `_alExportEntries`/`_alImportProject`
+  cross-block-reference convention) re-decodes the identical zip bytes through the Library's own
+  `AssetImporter.importPackZip()` — already documented as "compatible with every pack the engine
+  importer reads." `assetPack` itself is left completely untouched by this (no risk to what's
+  currently on screen); only `AssetDB` gains the mirrored items, so the NEXT save now captures them.
+  Best-effort (wrapped in try/catch) — a pack the user can already see on the map must never be
+  blocked by a Library-side import hiccup.
+- **A second, independent bug surfaced by testing the fix, not by inspection: the Library→runtime
+  bridge (`AssetLibrary.syncToRuntime()`/`applyLibraryAssets()`, v1.26/v1.28) never carried the
+  "Splat channels" (`textures`) family at all** — only `biomes`/`terrains`/structures/scatter-icon
+  families were wired in v1.28's "carries EVERY family the runtime can draw" pass, which missed the
+  one family that predates it. Ground-material art authored or imported through the Library page
+  reached `assetPack.textures` only via a full pack export→re-import loop; the live/reload bridge
+  silently dropped it. Fixed: `syncToRuntime()` gained a `textures` branch mirroring the existing
+  biomes/terrains one but building `finalizePackTexture`'s own `{w,h,data,inv}` shape (the splat path
+  divides by `inv`, unlike the true-colour biome/terrain families); `applyLibraryAssets()` merges it
+  in per-slot, same convention as every other family.
+- **A third bug, worse than "missing texture pixels": `assetPack.texAny` — the gate every splat
+  render call site checks (`_splatK=(assetPack&&assetPack.texAny)?...:0`, six sites) — was never set
+  by the bridge even after the fix above restored the texture slots themselves.** Restoring
+  `assetPack.textures.grass` while `texAny` stayed `false` means splat rendering computes a blend
+  factor of exactly zero everywhere — the texture data is present but invisible. Caught by a direct
+  before/after probe comparing `texAny` across the round-trip, not assumed fixed once the slot count
+  matched. Fixed alongside the `textures` branch: `texAny=true` whenever the merged payload is
+  non-empty.
+- **A fourth, cosmetic gap fixed in the same pass**: `assetPack.name`/`.author`/`.license` (shown in
+  the Cartography sidebar's pack summary — attribution this project's own README explicitly cares
+  about, "credit where credit is due") were never carried by the bridge either, so a Library-restored
+  pack read as the generic "Asset Library" default instead of the real pack name. `syncToRuntime()`
+  now reads the Library's own name/author/license fields and threads them through as `packMeta`.
+- **A fifth, smaller UX gap found while reading the two importer call sites side by side: the Asset
+  Library's OWN "Import pack" button never called `syncToRuntime()`.** Every other way art enters the
+  Library (an inspector edit, a project reload) pushes to the map immediately; this one importer left
+  new art sitting in `AssetDB` until a separate "Apply to map" click. Now calls `syncToRuntime()`
+  right after import, confirmed live via a real `page.setInputFiles()` drive of the actual `#alPackPicker`
+  file input (not a direct function call) — `assetPack` updates with zero extra clicks.
+  `syncToRuntime()` also now refreshes the Cartography sidebar's pack-inspector thumbnails and icon/
+  paint pickers itself (previously only `loadAssetPack()`/`clearAssetPack()`'s own direct path did),
+  so a Library-driven sync no longer leaves those panels stale.
+- **A disclosed, accepted residual: a texture that wasn't already exactly the Library's fixed
+  512×512 canvas size for its family gets resampled to that size once it round-trips through the
+  Library bridge** (confirmed on the reference sample pack: a 256×256 "rock" texture became 512×512
+  post-reload, `inv` unchanged to four significant figures — same content, different resolution, not
+  corruption). This is not new: `renderToCanvas(item,fam.size,fam.opaque)` is the exact call
+  biomes/terrains have used since v1.28; the `textures` family added this pass inherits the same
+  property rather than introducing it. A native-resolution round-trip would need the direct pack
+  bytes preserved independently of the Library, a materially larger change not attempted here.
+- **Verified**: a full `exportZip()`→`loadZip()` round-trip now reproduces `assetPack` exactly
+  (icon/texture slot counts, `texAny`, pack name) for a pack imported via the header button; a
+  synthetic pixel-sample check confirmed content fidelity (a texture already at the family's native
+  512×512 size matched byte-for-byte); places/ways/labels/paint were reconfirmed unaffected by a
+  fresh probe of each. `tests/run.sh` 1031/1031, `tests/run_um.sh` 852/852, `hash_gen1.js` ALL
+  IDENTICAL, `smoke_gen1.js` matches the v1.90 baseline plus 7 new assertions (`R.v191`) covering the
+  direct-import mirror, the Library-only rebuild path, `texAny`, and pack metadata.
+- **Known scope cuts**: the 512×512 canonical-size resample noted above; `dropTextures`/`dropBiomes`/
+  `dropTerrains`/`dropStructures` tracking (v1.27 added this "retire art the Library no longer has"
+  bookkeeping for icons/custom only — deleting Library-owned biome/terrain/texture/structure art
+  still leaves stale pixels in `assetPack` rather than retracting them; a real gap, narrower and
+  lower-risk than the data-loss bug this pass targeted, left for a future pass); the sprite-sheet
+  slicer and per-slot drag/drop importer were re-read and confirmed already save-safe (they only ever
+  write into `AssetDB`) and were not touched.
+
 ### v1.90 — Save files: DEFLATE-compress the project .zip; internal format unchanged
 
 Owner: "simplify save files and find a way to optimise the internal formatting of the save files

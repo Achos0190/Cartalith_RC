@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.90**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.91**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.90.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.89.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.91.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.90.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,44 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Asset pack persistence + the Splat-texture Library bridge (v1.91)
+
+Owner: "Make sure all shown functions in saving and loading assets are functional. And that saving
+a map saves everything ways, settlements, assetpack, painting everything." Audited every save/load
+surface first — ways/settlements/painting were already correctly round-tripped (`_civSyncToState`/
+`_civSyncFromState`, `state.cartoPaint`), reconfirmed live. The asset pack was not: `loadAssetPack()`
+(the header's "Import asset pack…" button) only ever wrote the runtime `assetPack` global directly,
+never touching the Asset Library's own `AssetDB` — the one thing `_alExportEntries`/
+`_alImportProject` actually persist (invariant 6: `assetPack` is never serialized directly). A live
+`exportZip()`→`loadZip()` probe confirmed total, silent loss: 10 icon/7 texture slots before export,
+`null` after reload. Fixed with a new `window._alImportPackZip` bridge (mirrors the existing
+`_alExportEntries`/`_alImportProject` cross-block convention) that re-decodes the same pack bytes
+through the Library's own `AssetImporter.importPackZip()` right after `loadAssetPack()` sets
+`assetPack` — `assetPack` itself untouched, only `AssetDB` gains the mirrored items so the next save
+captures them. Testing that fix surfaced three more real bugs in the pre-existing v1.26/v1.28
+Library→runtime bridge (`syncToRuntime()`/`applyLibraryAssets()`): the "Splat channels" (`textures`)
+family was never wired in at all (only biomes/terrains/structures/scatter-icons were, v1.28's own
+"EVERY family" pass missed the one family that predates it) — ground-material art from the Library
+reached the map only via a full pack export→re-import loop; `assetPack.texAny` (the gate every splat
+render call site checks, `_splatK=(assetPack&&assetPack.texAny)?...:0`) was never set by the bridge
+even once the fix above restored the texture slots — data present, invisible; and pack
+name/author/license attribution never traveled through, so a Library-restored pack read as the
+generic "Asset Library" default. All three fixed in `syncToRuntime()`/`applyLibraryAssets()`. A
+fifth, smaller gap found reading the two importers side by side: the Asset Library's OWN "Import
+pack" button never called `syncToRuntime()` (every other way art enters the Library pushes to the
+map immediately; this one needed a separate "Apply to map" click) — fixed, confirmed via a real
+`page.setInputFiles()` drive of the actual file input, not a direct function call.
+`syncToRuntime()` now also refreshes the pack-inspector thumbnails/icon-paint pickers itself.
+Disclosed residual: a texture round-tripped through the Library gets resampled to that family's
+fixed 512×512 canvas if it wasn't already that size (confirmed: a 256×256 sample-pack texture became
+512×512 post-reload, `inv` unchanged to four significant figures — same content, not corruption; a
+pre-existing property of `renderToCanvas(item,fam.size,fam.opaque)` biomes/terrains have had since
+v1.28, inherited rather than introduced by the new `textures` branch). Hash vs v1.90
+ALL IDENTICAL (default render untouched; every fix is reachable only once a pack is imported). 1031/
+1031, 852/852, 7 new smoke assertions (`R.v191`) exercising the direct-import mirror, the
+Library-only rebuild path, `texAny`, and pack metadata via the real `exportZip()`/`loadZip()`
+mechanics.
 
 ### Save files: DEFLATE-compress the project .zip (v1.90)
 
