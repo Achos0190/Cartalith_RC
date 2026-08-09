@@ -6660,6 +6660,67 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  R.v197 = await page.evaluate(async () => {
+    const o = {};
+    // (a) U3 — the sail polar. The whole point of F-3 in the routing audit: speed is NOT monotonic
+    // in wind angle. Dead upwind is a no-go; dead downwind is SLOWER than a broad reach.
+    o.squareNoGo = jpSailFactor('Cog', 0) === 0;
+    o.squareDownwindSlowerThanReach = jpSailFactor('Cog', 180) < jpSailFactor('Cog', 135);
+    o.squarePeakIsReach = jpSailFactor('Cog', 135) >= jpSailFactor('Cog', 90) &&
+                          jpSailFactor('Cog', 135) >= jpSailFactor('Cog', 180);
+    o.foreaftPointsHigher = jpSailFactor('Dhow', 45) > jpSailFactor('Cog', 45);
+    o.oaredWindNeutral = [0, 45, 90, 135, 180].every(a => jpSailFactor('River Barge', a) === 1);
+    o.polarFoldsSymmetric = Math.abs(jpSailFactor('Cog', 225) - jpSailFactor('Cog', 135)) < 1e-9;
+    // neutral/span are DERIVED from pts, not hardcoded — guard against drift
+    const p = JP_RIG.square.pts;
+    let m = 0; for (let i = 0; i < 4; i++) m += (p[i] + p[i+1]) / 2;
+    o.rigNeutralDerived = Math.abs(JP_RIG.square.neutral - m/4) < 1e-9;
+    o.rigSpanDerived = Math.abs(JP_RIG.square.span - (Math.max.apply(null,p) - JP_RIG.square.neutral)) < 1e-9;
+
+    // (b) U1 — river direction from real signed elevation change (gain/loss are metres).
+    const riv = (gain, loss, km) => _jpRiverCondition({ gain, loss, km });
+    o.riverDownstream = riv(0, 100, 2) === 'Strong Downstream';       // 50 m/km descent
+    o.riverUpstream   = riv(100, 0, 2) === 'Strong Upstream';         // 50 m/km ascent
+    o.riverFlat       = riv(5, 5, 50) === 'Neutral';                  // net 0
+    o.riverMild       = riv(0, 20, 1) === 'Mild Downstream';          // 20 m/km
+    o.riverSigned     = riv(0, 100, 2) !== riv(100, 0, 2);            // direction actually matters
+
+    // (c) U2 — sea condition from the REAL current/wind fields, on a real generated world.
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    const oceanF = currentOceanField(), windF = currentWindField(), wb = currentWaterBodies();
+    // find a long all-ocean straight run
+    let fwd = null;
+    outer: for (let ay = 4; ay < GH - 4 && !fwd; ay += 3) {
+      for (let ax = 4; ax < GW - 40; ax += 3) {
+        const cand = []; let ok = true;
+        for (let s = 0; s <= 24; s++) { const x = ax + (s / 24) * 30, y = ay;
+          const ii = Math.min(GH-1,Math.round(y))*GW + Math.min(GW-1,Math.round(x));
+          if (wb[ii] !== 1) { ok = false; break; } cand.push([x, y]); }
+        if (ok && cand.length > 20) { fwd = cand; break outer; }
+      }
+    }
+    o.foundOceanRun = !!fwd;
+    if (fwd) {
+      const rev = fwd.slice().reverse();
+      const mk = pts => ({ cat:'sea', i0:0, i1:pts.length-1, km:120 });
+      const bf = _jpSeaCondition(mk(fwd), fwd, oceanF, windF, 'Cog');
+      const br = _jpSeaCondition(mk(rev), rev, oceanF, windF, 'Cog');
+      o.seaBandsValid = JP_ROUTE.sea[bf] != null && JP_ROUTE.sea[br] != null;
+      // THE headline check: sailing the same water the other way is not the same passage.
+      o.seaDirectional = bf !== br || JP_ROUTE.sea[bf] !== JP_ROUTE.sea[br];
+      // a wind-neutral oared hull must ignore wind entirely (current only)
+      o.oaredIgnoresWind = _jpSeaCondition(mk(fwd), fwd, oceanF, null, 'River Barge') ===
+                           _jpSeaCondition(mk(fwd), fwd, oceanF, windF, 'River Barge');
+      // no fields at all -> honest fallback, never a fabricated band
+      o.noFieldFallback = _jpSeaCondition(mk(fwd), fwd, null, null, 'Cog') === 'Neutral';
+    }
+
+    // (d) the guard: a LAND route-condition label must not leak onto a water stage.
+    o.landLabelRejected = JP_ROUTE.sea['Maintained'] == null && JP_ROUTE.river['Maintained'] == null;
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -7448,6 +7509,26 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.94: the Settlement Inspector\'s shared _civFormatPlaceInsp (feeds BOTH the inspector popup and the City Viewer) now shows the grain yield line', R.v194.inspectorShowsGrainYield);
   A('v1.94: the grain yield line sits next to the existing Food row, matching the doc\'s own framing ("gives the food rows an honest answer")', R.v194.inspectorNextToFoodRow);
 
+  // ── v1.97: river/sea route conditions derived from the real fields (routing-audit U1/U2/U3) ──
+  A('v1.97: square rig is a genuine no-go dead upwind (jpSailFactor=0) — not a cosine bonus', R.v197.squareNoGo);
+  A('v1.97: dead downwind is SLOWER than a broad reach — the non-monotonic polar shape F-3 requires', R.v197.squareDownwindSlowerThanReach);
+  A('v1.97: the square-rig polar peaks on a reach, not dead downwind', R.v197.squarePeakIsReach);
+  A('v1.97: a fore-and-aft rig points materially closer to the wind than a square rig', R.v197.foreaftPointsHigher);
+  A('v1.97: an oared/river hull is wind-neutral at every angle (no fabricated sail bonus)', R.v197.oaredWindNeutral);
+  A('v1.97: the polar folds symmetrically about 180 deg (port/starboard tack are equivalent)', R.v197.polarFoldsSymmetric);
+  A('v1.97: each rig\'s neutral is DERIVED from its own polar points, so it cannot drift from them', R.v197.rigNeutralDerived);
+  A('v1.97: each rig\'s span is likewise derived from its polar, not hardcoded', R.v197.rigSpanDerived);
+  A('v1.97: a descending river stage reads Strong Downstream (was hardcoded "Neutral" pre-v1.97)', R.v197.riverDownstream);
+  A('v1.97: the same reach travelled upstream reads Strong Upstream', R.v197.riverUpstream);
+  A('v1.97: a net-flat river stage reads Neutral', R.v197.riverFlat);
+  A('v1.97: an intermediate gradient reads Mild Downstream, so the band ladder is reachable', R.v197.riverMild);
+  A('v1.97: river direction genuinely changes the answer (downstream !== upstream)', R.v197.riverSigned);
+  A('v1.97: found a real all-ocean run to test the sea condition on', R.v197.foundOceanRun);
+  A('v1.97: _jpSeaCondition returns bands that exist in JP_ROUTE.sea', R.v197.seaBandsValid);
+  A('v1.97: sailing the SAME water in the opposite direction is not the same passage (A->B !== B->A)', R.v197.seaDirectional);
+  A('v1.97: a wind-neutral oared hull ignores the wind field entirely (current only)', R.v197.oaredIgnoresWind);
+  A('v1.97: with no current/wind fields available the condition falls back to Neutral, never fabricated', R.v197.noFieldFallback);
+  A('v1.97: land route-condition labels do not exist in the sea/river tables (the override guard is meaningful)', R.v197.landLabelRejected);
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

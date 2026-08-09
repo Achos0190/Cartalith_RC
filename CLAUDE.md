@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.96**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.97**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.96.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.95.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.97.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.96.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,40 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Water route conditions derived from the real fields (v1.97)
+
+First build off `docs/research/routing-audit.md` — closes its two **P0** rows. Owner picked scope
+U1+U2+U3 (then U4+U5) with auto-derived + manual override, via `AskUserQuestion`. Journey-Planner
+only; hash vs v1.96 ALL IDENTICAL.
+
+- **`_jpDeriveStages` hardcoded `routeCond="Neutral"` for EVERY water stage.** So
+  `JP_ROUTE.river`'s Downstream/Upstream bands and `JP_ROUTE.sea`'s "Favorable Wind & Current"
+  existed in the tables but were unreachable by derivation, and **A→B always cost what B→A cost**.
+  The data was already computed and never consulted.
+- **U1 river**: the chunker already accumulates `gain`/`loss` in metres, so `(loss-gain)/km` is a
+  free signed gradient. **U2 sea**: `_jpSeaCondition` samples `currentOceanField()`/
+  `currentWindField()` — resolved ONCE per route and only when a sea stage exists, because they are
+  deliberately uncached (v1.86, so the debug views track the tilt/rotation sliders live).
+  `twa = acos(-(Ŵ·t̂))` — the fields emit FLOW vectors in `pts`' own grid frame, so no conversion.
+- **U3 `jpSailFactor`**: speed is NOT monotonic in wind angle — zero in the no-go zone, peak on a
+  broad reach, lower again dead downwind. This is why the audit rejected the brief's own
+  `V_eff = V_vessel + V_current + V_wind`: wind acts THROUGH the rig.
+- **A rig's `neutral`/`span` are DERIVED from its own polar points, never written down.** A first
+  cut used one flat 0.80 for all rigs — that sits near a SQUARE rig's best value, so an average
+  heading read as adverse and **"Strong Headwind" was ~50% of all sampled passages**. The band must
+  mean "favourable FOR THIS VESSEL"; rig-vs-rig comparison belongs in the speed table.
+- **River thresholds are absolute (8/35 m/km), NOT world-relative** — unlike v1.34's food
+  calibration. "Does this current help or hinder" is a property of the reach; normalising per world
+  would make the same river read differently depending on its neighbours. First cut was 0.8/4.0
+  against a measured p50 of 9.6–32.8 — an order of magnitude out.
+- **Measured** (4 seeds × ~400 passages, both directions, n=1408): all five bands reachable
+  (35/27/17/11/11%), **directional asymmetry 100%**. The residual bimodality is deliberately NOT
+  tuned away — a square-rigger either has the wind or it does not, which is why historical
+  square-rig trade ran seasonal and one-way.
+- **Scope**: changes reported TIME, not route GEOMETRY. Sea lanes are still pathfound over a
+  uniform-cost water grid — that is U4+U5 (`edgeCost` hook + directional lanes), the agreed next
+  version, and it will be a deliberate re-baseline of generated lane geometry.
 
 ### A full-grid faction-aggregate pass ran on every generate(), into a hidden panel (v1.96)
 

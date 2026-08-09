@@ -12,6 +12,66 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.97 — Water route conditions derived from the real fields (routing-audit U1/U2/U3)
+
+Owner: "So propose upgrades", after the routing audit (`docs/research/routing-audit.md`); scope
+chosen via `AskUserQuestion` as **U1+U2+U3 first, then U4+U5**, with **auto-derived + manual
+override** as the control model. Closes the audit's two **P0** gap rows ("Rivers (direction)" and
+"Sea currents"/"Wind"). Journey-Planner only — never reached from `generate()`/`renderNow()` — so
+hash vs v1.96 is **ALL IDENTICAL**. 1031/1031, 852/852, 704/706 smoke (+19 new; the 2 shortfalls
+are the long-standing pre-existing v0.92/v0.87 environmental canvas-sizing failures).
+
+- **The gap being closed.** `_jpDeriveStages` hardcoded `routeCond="Neutral"` for **every** water
+  stage. So `JP_ROUTE.river`'s Strong/Mild Downstream/Upstream bands and `JP_ROUTE.sea`'s
+  "Favorable Wind & Current" band existed in the table but were unreachable by derivation, and
+  **A→B always cost exactly what B→A cost**. The data to answer both questions was already
+  computed and simply never consulted.
+- **U1 — river direction (free from existing data).** The stage chunker already accumulates
+  `gain`/`loss` in metres via `hM()`, so net descent is a subtraction: `(loss-gain)/km` gives a
+  signed gradient. `_jpRiverCondition` maps it onto the five existing bands.
+- **U2 — sea condition from the v1.77–v1.82 vector fields.** `_jpSeaCondition` samples
+  `currentOceanField()`/`currentWindField()` along the stage: mean along-track current component,
+  and true wind angle via `twa = acos(-(Ŵ·t̂))` (the fields emit FLOW vectors in the same grid frame
+  as `pts`, so the dot products need no conversion). Both fields are resolved **once per route** and
+  only when a sea stage exists — they are deliberately uncached (v1.86 left them so the Wind/Ocean
+  debug views track the tilt/rotation sliders live), so a per-stage call would rebuild the entire
+  wind+current solution every time.
+- **U3 — vessel sail polar.** `JP_RIG` (square / fore-and-aft / oared) + `JP_SHIP_RIG` +
+  `jpSailFactor(vessel,twa)`. Per the audit's F-3: speed is **not** monotonic in wind angle — zero
+  in the no-go zone, peak on a beam-to-broad reach, and lower again dead downwind. This is also why
+  the audit rejected the brief's own `V_eff = V_vessel + V_current + V_wind`: wind acts *through*
+  the rig, not as an additive velocity. Rig class rather than per-hull polars, because at this
+  fidelity the meaningful split is windward ability, which is a property of the sail plan.
+- **Two calibration errors caught by MEASUREMENT, not inspection** — the mistake this file keeps
+  re-learning (v1.25/v1.31/v1.34/v1.43/v1.55):
+  1. A single flat `JP_SAIL_NEUTRAL=0.80` sat near a *square rig's best* value, so an average
+     heading scored deeply negative and **"Strong Headwind" came out at ~50% of all sampled
+     passages across four seeds**. Fixed by deriving `neutral`/`span` per rig **from the polar's own
+     control points**, so they can never drift from the curve they describe. The band now means
+     "favourable FOR THIS VESSEL", not "this rig is worse than a lateen" — that comparison belongs
+     in the speed table and vessel choice, not a condition label.
+  2. River thresholds were an order of magnitude too low (0.8/4.0 m/km against a measured p50 of
+     9.6–32.8). Re-set to 8/35 m/km. Deliberately **absolute, not world-relative** (unlike v1.34's
+     food calibration): "does this current help or hinder" is a property of the reach, and
+     normalising per world would make the same river read differently depending on its neighbours.
+     The consequence is intended — a steep-relief world genuinely gets more fast water.
+- **Measured after calibration** (4 seeds × ~400 passages, both directions, n=1408): Favorable Wind
+  34.9% · Strong Headwind 26.6% · Neutral 17.3% · Favorable Wind & Current 10.7% · Headwind 10.6%.
+  All five bands reachable. **Directional asymmetry: 100% on every seed.** The residual bimodality
+  is physically correct and deliberately not tuned away — a square-rigger either has the wind or it
+  does not, which is precisely why historical square-rig trade was seasonal and largely one-way.
+- **Auto with manual override**, per the owner's choice: derivation supplies only the AUTO value.
+  The whole-route `plan.routeCond` dropdown is built from `JP_ROUTE.land` keys, so a land label is
+  explicitly rejected on a water stage (`JP_ROUTE[c.cat][manual]!=null`) and falls through to auto;
+  the per-stage `stageOverrides[].routeCond` mechanism still wins outright. Derived values surface
+  automatically in the existing results table, which already prints any non-Neutral condition.
+  `c.derivedCond` is retained so a future Info-panel line can say *why* a stage reads as it does.
+- **Known scope cuts**: this changes reported travel TIME, not route GEOMETRY — sea lanes are still
+  pathfound over a uniform-cost water grid (that is U4+U5, the agreed next version). No dedicated
+  water route-condition dropdown was added (there was none before either — water was hardcoded).
+  The polar values are reasoned from the shape the literature describes, not independently
+  calibrated against measured historical hull data; disclosed at the site.
+
 ### v1.96 — A full-grid faction-aggregate pass ran on every generate(), into a hidden panel
 
 Owner: "analyse the full code base again and check for optimisation. However small every ms I'll

@@ -9,11 +9,26 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.96.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.97.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.97 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.95` are kept and never edited.
+  (v1.98 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.96` are kept and never edited.
+- **v1.97 — water route conditions derived from the real fields (routing-audit U1/U2/U3).**
+  First build off `docs/research/routing-audit.md`; closes its two P0 rows. Owner picked
+  U1+U2+U3-then-U4+U5 with auto+override via `AskUserQuestion`. `_jpDeriveStages` hardcoded
+  `routeCond="Neutral"` for EVERY water stage, so JP_ROUTE's river-direction and favourable-sea
+  bands were unreachable by derivation and A→B always cost what B→A cost. U1: river gradient from
+  the `gain`/`loss` the chunker already accumulates in metres. U2: `_jpSeaCondition` samples the
+  v1.77-v1.82 current/wind vector fields (resolved ONCE per route — they are deliberately uncached
+  per v1.86). U3: `jpSailFactor` rig polars — zero dead upwind, peak on a broad reach, lower again
+  dead downwind. **Two calibration errors caught by measurement**: a flat sail-neutral of 0.80 sat
+  near a square rig's BEST value and made "Strong Headwind" ~50% of passages (fixed by deriving
+  neutral/span per rig from the polar itself); river thresholds were an order of magnitude low
+  (0.8/4.0 vs a measured p50 of 9.6-32.8 m/km → 8/35, deliberately absolute not world-relative).
+  Measured after: all five bands reachable (35/27/17/11/11%), **directional asymmetry 100%**.
+  Hash vs v1.96 ALL IDENTICAL. 1031/1031, 852/852, 704/706 smoke (+19). Changes reported TIME, not
+  route GEOMETRY — that is U4+U5 next. See CHANGELOG for the full writeup.
 - **v1.96 — a full-grid faction-aggregate pass ran on every `generate()`, into a hidden panel.**
   Owner: "check for optimisation. However small every ms I'll take it. Without degrading the
   fidelity of the data." Measure-first CPU profile; **root-causes the OPEN item v1.92 logged and
