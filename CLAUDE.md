@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.87**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.88**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.87.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.86.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.88.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.87.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,32 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Settlement pick priority + visibility-gate consistency (v1.88)
+
+Owner: "Settlements are clickable on any zoom level, making it hard to click a larger settlement
+when you're zoomed out as it often means you click one of the smaller ones that are only visible
+when zooming in." Civ-layer only. Hash vs v1.87 ALL IDENTICAL (interactive-only). Two defects, both
+present at all five place-pick sites (`_civSelectPlaceAt`, `_civDropPlace`'s select-near-existing,
+both `_civInfoAt` radii, the right-click context menu — the umpteenth "several call sites answering
+one question WILL drift" instance): (1) every site did pure nearest-pixel with no regard for how
+prominently `drawCivLayer` actually draws a settlement (`(4+klass.rank)*lsc`, rank 0 hamlet → 4,
+rank 5 metropolis → 9) — a small, close pin could out-compete a much bigger one only slightly
+farther away; (2) only `_civSelectPlaceAt` respected the `villageAddon` visibility gate (v1.68/
+v1.70) — a village `drawCivLayer` refuses to draw below `CIV_VILLAGE_ADDON_LOD` could still be
+picked at the other four sites. Fixed with two shared helpers — `_civPlacePickVisible(p)` (mirrors
+the one case fully hidden: a still-hidden `villageAddon`) and `_civPlacePickWeight(p)` (mirrors
+`drawCivLayer`'s own pin-size formula verbatim) — applied at every site by ranking candidates on
+`d²/w²` instead of raw `d²`. The absolute pick radius (v1.23's `_civZoomPickR`) is unchanged — only
+the tie-break among in-range candidates shifted, so an isolated settlement's click behavior is
+untouched. `_civInfoAt`'s tight City-Viewer pin-hit re-test is deliberately left unweighted (it
+re-tests an already-chosen candidate, not a competition — a first cut weighted it too, blowing up
+the radius up to 81× for a metropolis, caught and reverted before shipping). Verified directly
+against unmodified v1.87 in both directions: a realistic near-miss (city farther but bigger) picked
+the hamlet on v1.87, the city on v1.88; a hidden addon under a zoomed-out click was selected by
+`_civDropPlace` on v1.87, not on v1.88; an unambiguous click directly on a small settlement still
+picks it on both (guards against over-correcting into a blanket big-settlement bias). 6 new smoke
+assertions (`R.v188`).
 
 ### Rendering-speed pass: buildWaterBodies()'s priority-flood heap (v1.87)
 

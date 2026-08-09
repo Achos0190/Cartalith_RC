@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.87.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.88.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.88 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.86` are kept and never edited.
+  (v1.89 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.87` are kept and never edited.
+- **v1.88 — settlement pick priority + visibility-gate consistency.** Owner: "Settlements are
+  clickable on any zoom level, making it hard to click a larger settlement when you're zoomed out
+  as it often means you click one of the smaller ones that are only visible when zooming in." Two
+  defects found at all five place-pick sites (`_civSelectPlaceAt`, `_civDropPlace`'s
+  select-near-existing, both `_civInfoAt` radii, the right-click context menu): (1) every site
+  picked purely by nearest-pixel with no regard for how prominently `drawCivLayer` actually draws a
+  settlement (`(4+klass.rank)*lsc`) — a small, close pin could beat a much bigger one only slightly
+  farther away, exactly the reported symptom; (2) only `_civSelectPlaceAt` respected the
+  `villageAddon` visibility gate (v1.68/v1.70) — a village `drawCivLayer` refuses to draw below its
+  reveal threshold could still be picked at the other four sites. Fixed with two shared helpers
+  (`_civPlacePickVisible`, `_civPlacePickWeight` — the latter mirrors `drawCivLayer`'s own pin-size
+  formula verbatim) applied everywhere, ranking in-range candidates by `d²/w²` instead of raw `d²`.
+  The absolute pick radius is unchanged — only the tie-break among in-range candidates shifted.
+  Verified directly against unmodified v1.87 in both directions (a realistic near-miss flips from
+  hamlet→city; a hidden addon stops being selectable while zoomed out; an unambiguous click on a
+  small settlement still picks it, guarding against over-correction). One near-miss caught during
+  building: an early cut also weighted `_civInfoAt`'s tight City-Viewer pin-hit re-test, which isn't
+  a competition between candidates — that inflated the hit radius up to 81× for a metropolis;
+  reverted, left unweighted by design. Hash vs v1.87 ALL IDENTICAL. 6 new smoke assertions
+  (`R.v188`). See CHANGELOG for the full writeup.
 - **v1.87 — rendering-speed pass: buildWaterBodies()'s priority-flood heap.** Owner: "let's see
   if we can optimise the code again for rendering speed whilst we keep the fidelity and detail."
   Measured first via `tests/perf/perf_gen1.js`: the render "prologue" phase (everything before the

@@ -12,6 +12,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.88 — Settlement picking is weighted by how prominently a settlement actually draws, and respects its own visibility gate at every pick site
+
+Owner: *"Settlements are clickable on any zoom level, making it hard to click a larger settlement
+when you're zoomed out as it often means you click one of the smaller ones that are only visible
+when zooming in."* Civ-layer only (block 2). Hash vs v1.87 **ALL IDENTICAL** — picking is
+interactive-only and never reached from `generate()` or the render path.
+
+- **Two distinct defects, both reproduced on v1.87 before any fix shipped.**
+  1. **Every place-pick site was pure nearest-pixel.** `drawCivLayer` has always drawn a
+     settlement's pin at `(4+klass.rank)*lsc` — rank 0 hamlet → 4, rank 5 metropolis → 9, a real,
+     already-established visual-prominence signal — but none of the five pick sites consulted it.
+     So a small settlement slightly closer to the click always beat a much larger one slightly
+     farther away, which is precisely the reported symptom: at low zoom the big settlement is the
+     one you can see and mean to click, while the small one may be drawn as a 2px dot (or, for an
+     addon village, not drawn at all).
+  2. **Only ONE of the five sites honoured the `villageAddon` visibility gate.** v1.68/v1.70 added
+     that check to `_civSelectPlaceAt` alone; `_civDropPlace`'s select-near-existing, both
+     `_civInfoAt` radii, and the right-click "nearest place" context menu never got it — so a
+     village that `drawCivLayer` explicitly refuses to draw below `CIV_VILLAGE_ADDON_LOD` could
+     still silently win a click at those sites. **The umpteenth instance of this file's own "several
+     call sites answering one question WILL drift" lesson** (v1.30 two suitability scorers, v1.32
+     two coastal tests, v1.33 two trade rules, v1.35 two water tests, v1.50 two animal resolvers…).
+- **Fix: two shared helpers, applied at every site.** `_civPlacePickVisible(p)` mirrors the ONE
+  case `drawCivLayer` fully skips drawing (a still-hidden `villageAddon`; every other kind still
+  renders as a small dot below its own LOD threshold, so it stays a legitimate target — deliberately
+  matching the v1.70 comment at that draw site rather than inventing a stricter rule).
+  `_civPlacePickWeight(p)` returns `drawCivLayer`'s own pin-size formula verbatim (`4+klass.rank`,
+  flat `5` for POIs, town fallback for an unknown kind — the same fallback every other kind-lookup
+  in this file uses). Each pick site now scores candidates by `d²/w²` instead of raw `d²`.
+- **The ABSOLUTE pick radius (v1.23's `_civZoomPickR`) is deliberately unchanged.** Candidates are
+  still hard-filtered by exactly the same radius as before; only the tie-break *among* several
+  in-range candidates is now prominence-weighted. A click near an isolated settlement with no
+  competitor behaves identically to v1.87 — this widens nothing and can never make a settlement
+  clickable that wasn't before.
+- **`_civInfoAt`'s tight City-Viewer pin-hit re-test is deliberately NOT weighted** — unlike the
+  four search loops, it re-tests the ALREADY-chosen best candidate against a fixed "is this a
+  definite pin hit" radius. There is no competition there and no reference value to normalize a
+  weight against, so weighting it would simply inflate a fixed radius. A first cut did exactly that
+  (multiplying the radius by `w²`, up to an 81× area blow-up for a metropolis) and was caught and
+  reverted before shipping.
+- **Measured before and after, both directions.** On v1.87, a near-miss scenario (city at distance
+  4, hamlet at distance 3 from the click — a realistic ~75%-of-the-distance gap, not an absurd one)
+  picked the hamlet; on v1.88 it picks the city. A hidden addon village under a zoomed-out click
+  was selected by `_civDropPlace` on v1.87; on v1.88 it is not. **And the guard against
+  over-correcting**: an unambiguous click directly ON the small settlement still picks the small
+  settlement — verified explicitly, because a blanket bias toward big settlements would be a
+  different bug, not a fix.
+- **Tests**: 6 new smoke assertions (`R.v188`) — the weight formula matches `drawCivLayer`'s own
+  literal values; the near-miss now favors the bigger settlement at both `_civSelectPlaceAt` and the
+  context-menu site; an obvious small-settlement click still picks it; a hidden addon is no longer
+  picked by `_civDropPlace`; the same addon IS picked once zoomed past its reveal threshold (the
+  gate is on visibility, not on addon-ness).
+- **Known scope cuts**: the weight is the renderer's own pin *rank*, not population — two towns of
+  the same `kind` but very different `pop` weigh identically, matching what is actually drawn (a
+  population term would make picking disagree with the map). Label text is not a pick target (only
+  pins are, unchanged). Way/route picking is untouched — the report was specifically about
+  settlements.
+
 ### v1.87 — Rendering-speed pass: buildWaterBodies()'s priority-flood was paying for a dynamically-growing heap on every terrain edit
 
 Owner: *"let's see if we can optimise the code again for rendering speed whilst we keep the fidelity

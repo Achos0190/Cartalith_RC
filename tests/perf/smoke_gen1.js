@@ -6480,6 +6480,81 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.88 (owner report: "hard to click a larger settlement when you're zoomed out... you click
+  // one of the smaller ones that are only visible when zooming in"). Verifies the settlement
+  // pick-priority fix at all four affected pick sites (a fifth, _civInfoAt's tight City-Viewer
+  // pin-hit re-test, is deliberately unweighted by design — see its own code comment — so it isn't
+  // asserted here) plus the two new shared helpers directly.
+  R.v188 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedScale = viewT.scale, savedLodOn = _lodOn, savedSel = _civSelectedPlace;
+    try {
+      // (a) weight formula matches drawCivLayer's own pin-size formula exactly (4+klass.rank; flat 5 for POIs)
+      o.weightHamlet = _civPlacePickWeight({ kind: 'hamlet' });
+      o.weightCity = _civPlacePickWeight({ kind: 'city' });
+      o.weightMetropolis = _civPlacePickWeight({ kind: 'metropolis' });
+      o.weightPOI = _civPlacePickWeight({ kind: 'ruin' });
+
+      // Coordinates are GW/GH-relative throughout (not fixed literals) — this block runs deep
+      // inside the shared sequential suite, where an earlier test may have left GW/GH at any
+      // resolution; a hardcoded coordinate near the map edge silently no-ops every pick call's
+      // own bounds guard instead of exercising the picking logic at all.
+      const midX = (GW / 2) | 0, midY = (GH / 2) | 0;
+
+      // (b) _civSelectPlaceAt: a near-miss (city dist^2=16, hamlet dist^2=9 from the click) now
+      // favors the bigger, more prominent settlement instead of the raw-nearest pixel.
+      viewT.scale = 1; _lodOn = false;
+      const clickX = midX + 4, clickY = midY;
+      const city = { x: midX, y: midY, name: 'BigCity', kind: 'city', faction: 0, pop: 50000, traits: [] };
+      const hamlet = { x: midX + 1, y: midY, name: 'TinyHamlet', kind: 'hamlet', faction: 0, pop: 80, traits: [] };
+      state.places = [city, hamlet];
+      _civSelectPlaceAt(clickX, clickY);
+      o.nearMissFavorsBigCity = _civSelectedPlace === city;
+
+      // (c) an obvious, unambiguous click directly on the small settlement still picks it — the
+      // fix is a tie-break among close candidates, not a blanket bias toward big settlements.
+      _civSelectPlaceAt(hamlet.x, hamlet.y);
+      o.obviousHamletClickStillPicksHamlet = _civSelectedPlace === hamlet;
+
+      // (d) _civDropPlace: a hidden (below-threshold) villageAddon must not be picked while zoomed
+      // out — previously ONLY _civSelectPlaceAt checked this, so _civDropPlace picked it anyway.
+      const addon = { x: midX - 10, y: midY - 5, name: 'HiddenAddon', kind: 'hamlet', villageAddon: true, faction: 0, pop: 40, traits: [] };
+      state.places = [addon];
+      _civSelectedPlace = null;
+      _civDropPlace(addon.x, addon.y);
+      o.hiddenAddonNotPickedByDropPlace = _civSelectedPlace !== addon;
+
+      // same addon, zoomed in past its own reveal threshold — now a legitimate target.
+      state.places = [addon];
+      viewT.scale = Math.max(3, CIV_VILLAGE_ADDON_LOD + 0.5);
+      _civSelectedPlace = null;
+      _civDropPlace(addon.x, addon.y);
+      o.revealedAddonPickedByDropPlace = _civSelectedPlace === addon;
+      viewT.scale = 1;
+
+      // (e) the right-click context-menu pick site: metropolis dist^2=25, hamlet dist^2=9 from the
+      // click — the same near-miss shape, reusing the two new shared helpers directly (the handler
+      // itself is only reachable via a real contextmenu event, so this exercises its own logic).
+      const metro = { x: midX + 10, y: midY - 10, name: 'BigMetro', kind: 'metropolis', faction: 0, pop: 200000, traits: [] };
+      const hamlet2 = { x: midX + 12, y: midY - 10, name: 'TinyHamlet2', kind: 'hamlet', faction: 0, pop: 50, traits: [] };
+      state.places = [metro, hamlet2];
+      const clickX2 = midX + 15, clickY2 = midY - 10;
+      const R2 = Math.pow(_civZoomPickR(Math.max(10, GW / 50)), 2);
+      let nearest = null, nd = Infinity;
+      for (const p of state.places) {
+        if (!_civPlacePickVisible(p)) continue;
+        const d = (p.x - clickX2) ** 2 + (p.y - clickY2) ** 2;
+        if (d > R2) continue;
+        const w = _civPlacePickWeight(p), dn = d / (w * w);
+        if (dn < nd) { nd = dn; nearest = p; }
+      }
+      o.contextMenuNearMissFavorsMetro = nearest === metro;
+    } finally {
+      state.places = savedPlaces; viewT.scale = savedScale; _lodOn = savedLodOn; _civSelectedPlace = savedSel;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -7240,6 +7315,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.78: switching to the Wind debug view starts the streak animation with real particles', R.v178fx.runningOnWind && R.v178fx.visibleOnWind && R.v178fx.hasParticlesOnWind);
   A('v1.78: switching to the Ocean debug view keeps it running with an ocean-only particle set', R.v178fx.runningOnOcean && R.v178fx.oceanParticleCount > 0);
   A('v1.78: switching the debug view off self-terminates the animation and hides the canvas', R.v178fx.stoppedOnOff && R.v178fx.hiddenOnOff);
+
+  A('v1.88: _civPlacePickWeight matches drawCivLayer\'s own pin-size formula exactly (4+klass.rank; flat 5 for POIs)', R.v188.weightHamlet === 4 && R.v188.weightCity === 7 && R.v188.weightMetropolis === 9 && R.v188.weightPOI === 5);
+  A('v1.88: _civSelectPlaceAt now favors a bigger, more prominent settlement over a nearer-but-smaller one in a near-miss (was pure nearest-pixel, so the smaller settlement always won)', R.v188.nearMissFavorsBigCity);
+  A('v1.88: an unambiguous click directly on a small settlement still picks it — the fix is a tie-break among close candidates, not a blanket bias against small settlements', R.v188.obviousHamletClickStillPicksHamlet);
+  A('v1.88: _civDropPlace no longer selects a still-hidden villageAddon while zoomed out (previously only _civSelectPlaceAt checked this visibility gate, so _civDropPlace picked an invisible addon anyway)', R.v188.hiddenAddonNotPickedByDropPlace);
+  A('v1.88: the same addon becomes a legitimate _civDropPlace target once zoomed in past its own reveal threshold — the fix gates on visibility, it doesn\'t exclude addon villages outright', R.v188.revealedAddonPickedByDropPlace);
+  A('v1.88: the right-click context-menu pick site shows the same near-miss fix, reusing the shared _civPlacePickVisible/_civPlacePickWeight helpers rather than a fourth drifting copy', R.v188.contextMenuNearMissFavorsMetro);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
