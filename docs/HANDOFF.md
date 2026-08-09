@@ -9,11 +9,40 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.94.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.95.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.95 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.93` are kept and never edited.
+  (v1.96 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.94` are kept and never edited.
+- **v1.95 — duplicate-logic sweep: seven "two functions answering one question" instances
+  consolidated.** Owner: audit for functions that should be standard-on or merged, then "Fix all
+  7" of a dedicated agent sweep's findings — this file's own recurring lesson (v1.30 on) hit
+  again. All seven verified by direct measurement (a probe reproducing the shared function
+  against a hand-copy of the OLD formula, plus full-grid diffs), not assumed bit-identical from a
+  small-looking diff: (1) `_civEnhancedTravelCost` (trunk-road builder) vs `_civMixedCostGrid`
+  (Route tool) — the biome-friction table was a verbatim copy (now shared
+  `_civBiomeFriction`, bit-identical), and the "navigable river bonus" curve had ALREADY drifted
+  despite a comment claiming consistency (`_civMixedCostGrid` discounted any order≥1 flow via an
+  ungated absolute floor; `_civEnhancedTravelCost` only ever discounted order≥3) — new shared
+  `_civNavigableRiverDiscount(order)` makes them agree, measured: `_civEnhancedTravelCost`'s own
+  output is untouched (0/41,984 test cells differ), `_civMixedCostGrid` changes on 12.4% of cells
+  (mean cost +7.8%) — the one deliberate, disclosed behavioral consequence of the whole pass. (2)
+  `_civSettlementPopulation` vs `_civPlaceCatchmentCeiling` — the latter's own comment admitted
+  copying the former's formula rather than calling it; new shared `_civCatchmentPop`, verified
+  provably consistent across all 18 test-world settlements. (3) Journey Planner's human
+  water-consumption rate (4 sites) and animal water-carry-days (2 sites) — new
+  `jpHumanWaterRate`/`jpAnimalWaterCarryDays`, siblings to v1.84's `jpHumanWaterCarryDays` which
+  fixed the adjacent carry-duration duplication but left these two. (4) The mild-upland
+  defensibility term at 3 sites (`buildSettlementSuitability`, `_civPlaceDefensibility`,
+  `_umWallSpec`) — new `_civTerrainRuggednessD(r)` in block 1 (`_umWallSpec` still can't call
+  `_civPlaceDefensibility` directly, real recursion, but shares the raw term now). (5) Base
+  population-by-kind hardcoded at 3 sites with inconsistent `metropolis` coverage — new named
+  `_CIV_BASE_POP_BY_KIND`/`_civBasePopForKind`. (6) A "0.60 coastal tolerance" hardcoded at 2
+  sites whose comment wrongly claimed it matched `_civSnapToWaterEdge`'s default (actually 0.80)
+  — new named `SETTLE_COAST_SWAP_TOLERANCE`. (7) The catchment-radius-in-cells conversion at 5
+  sites — new `_civCatchmentRadiusRaw`/`_civCatchmentRadiusCells`. Hash vs v1.94 ALL IDENTICAL
+  (civ-layer only). 1031/1031, 852/852, 685/687 smoke (2 known pre-existing environmental
+  failures, unrelated). See CHANGELOG for the full writeup.
 - **v1.94 — grain-yield wiring: connecting v1.31's orphaned formula surfaced a real overshoot
   bug.** Owner: "Let's build in the grainyield part and all that it connects to." v1.31 shipped
   `grainYieldRatio()`/`GRAIN_YIELD_RATIO_FLOOR`/`GRAIN_YIELD_RATIO_TYPICAL`/`GRAIN_SEED_KG_PER_HA`

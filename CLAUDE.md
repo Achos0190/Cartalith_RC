@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.94**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.95**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.94.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.93.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.95.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.94.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,41 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Duplicate-logic sweep: seven "two functions answering one question" instances consolidated (v1.95)
+
+Owner asked for an audit of functions that should be standard-on or merged into one, then "Fix all
+7" of a dedicated agent sweep's findings — this file's own recurring lesson (v1.30 on), hit again.
+Civ-layer only. Hash vs v1.94 ALL IDENTICAL. 1031/1031, 852/852, 685/687 smoke (2 known
+pre-existing environmental failures).
+
+- **`_civEnhancedTravelCost` vs `_civMixedCostGrid` — the one that had ALREADY drifted.** Shared
+  biome-friction table extracted (`_civBiomeFriction`, bit-identical). The river-discount formulas
+  were a live bug: `_civMixedCostGrid`'s comment claimed to mirror `_civEnhancedTravelCost`'s curve
+  "for consistency" while using a different, ungated formula. New `_civNavigableRiverDiscount(order)`
+  is the one curve both use now — `_civEnhancedTravelCost`'s output is unaffected (0 of 41,984
+  test-grid cells differ), `_civMixedCostGrid` changes on 12.4% of cells (mean cost +7.8%): order-1/2
+  streams no longer get an artificial floor-discount, only genuinely navigable (order≥3) rivers do.
+  The only one of the seven with a measured, disclosed behavior change.
+- **`_civSettlementPopulation` vs `_civPlaceCatchmentCeiling`** — the latter's own comment admitted
+  copying the former's formula. New shared `_civCatchmentPop(x,y,kind,K)`; verified the two now
+  provably derive from the identical core across all 18 test-world settlements.
+- **Journey Planner water rate + animal carry-days**, duplicated 4× and 2× — new
+  `jpHumanWaterRate(biome)`/`jpAnimalWaterCarryDays(biome,supplyDays)`, siblings to v1.84's
+  `jpHumanWaterCarryDays` (which fixed the adjacent carry-duration duplication but left these two).
+- **Mild-upland defensibility term**, independently written at 3 sites (`buildSettlementSuitability`,
+  `_civPlaceDefensibility`, `_umWallSpec`) — new `_civTerrainRuggednessD(r)` in block 1.
+  `_umWallSpec` still can't call `_civPlaceDefensibility` (real recursion), but can share the raw term.
+- **Base population-by-kind**, hardcoded at 3 sites with inconsistent `metropolis` coverage — new
+  named `_CIV_BASE_POP_BY_KIND`/`_civBasePopForKind(kind)`.
+- **A "0.60 coastal tolerance"** hardcoded at 2 sites with a comment wrongly claiming it matched
+  `_civSnapToWaterEdge`'s default (actually 0.80) — new named `SETTLE_COAST_SWAP_TOLERANCE`.
+- **Catchment-radius-in-cells conversion**, independently written at 5 sites — new
+  `_civCatchmentRadiusRaw`/`_civCatchmentRadiusCells`.
+
+Every fix verified directly (a probe reproducing the shared function against a hand-copy of the OLD
+formula, plus full-grid diffs of the two cost functions' own output) rather than assumed bit-identical
+from a small diff.
 
 ### Grain-yield wiring: connecting v1.31's orphaned formula surfaced a real overshoot bug (v1.94)
 

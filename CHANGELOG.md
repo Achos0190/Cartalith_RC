@@ -12,6 +12,82 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.95 — Duplicate-logic sweep: seven "two functions answering one question" instances consolidated
+
+Owner: audit the codebase for "functions that should logically either be standard-on or can be
+integrated into a singular function," then "Fix all 7" of the findings a dedicated agent sweep
+turned up. Every instance matches this file's own long-running lesson (first named at v1.30, hit
+again at v1.33/v1.35/v1.37/v1.46/v1.55/v1.58/v1.62/v1.72/v1.75/v1.88/v1.89): two or more call sites
+independently answer the same real-world question, free to drift apart the moment only one is
+retuned. Six of the seven are pure extractions (bit-identical by construction, verified by direct
+measurement, not just by inspection); the seventh (finding #1) is a deliberate, disclosed civ-layer
+behavior fix — two river-cost formulas had ALREADY drifted despite a comment claiming they matched.
+Hash vs v1.94 **ALL IDENTICAL** (every fix is civ-layer-only, never reached from `generate()`/
+`renderNow()`). 1031/1031, 852/852, 685/687 smoke (the 2 shortfalls are the long-standing
+pre-existing v0.92/v0.87 environmental canvas-sizing failures, reconfirmed unrelated).
+
+1. **Land-crossing cost: `_civEnhancedTravelCost` (trunk-road builder) vs `_civMixedCostGrid`
+   (general Route tool) — the one that had ALREADY silently drifted.** Both copied the same
+   biome-friction table verbatim; new shared `_civBiomeFriction(b)` removes that risk, bit-identical
+   by construction (verified: 0 of 41,984 test-grid cells differ in `_civEnhancedTravelCost`'s
+   output before vs. after). The river-discount formulas were a real, live bug: `_civMixedCostGrid`'s
+   own comment claimed to "mirror `_civEnhancedTravelCost`'s navigable river bonus curve for
+   consistency" while actually applying a DIFFERENT formula — an ungated (any Strahler order≥1)
+   absolute floor via `_CIV_RIVER_COST_BASE=0.85`, vs. `_civEnhancedTravelCost`'s order≥3-gated
+   multiplicative discount. New shared `_civNavigableRiverDiscount(order)` is the one curve both now
+   use; `_civEnhancedTravelCost`'s own output is unaffected (the shared function reproduces its exact
+   formula), `_civMixedCostGrid`'s changes on 12.4% of test-grid cells (mean cost 1.032→1.112, +7.8%)
+   — order-1/2 streams no longer get an artificial floor-discount in the mixed land/water router,
+   only genuinely navigable (order≥3) rivers do, matching the trunk-road builder's own established
+   reasoning ("barge/raft transport along MAJOR rivers"). `_CIV_RIVER_COST_BASE` removed (now
+   unreferenced); the stale comment referencing it in `_jpModeForRoute` updated to match.
+2. **Catchment population: `_civSettlementPopulation` (placement) vs `_civPlaceCatchmentCeiling`
+   (Inspector's Food-surplus row) — the latter's own comment ADMITTED it was copying the former's
+   formula rather than calling it.** New shared `_civCatchmentPop(x,y,kind,K)` is the one source for
+   "people the settlement's own catchment sustains"; verified directly on a real generated+populated
+   world — `_civSettlementPopulation`'s and `_civPlaceCatchmentCeiling`'s numbers now provably derive
+   from the identical core across all 18 test-world settlements (previously merely claimed to match).
+3. **Journey Planner human water-consumption rate + animal water-carry-days, duplicated 4× and 2×.**
+   `jpHumanWaterRate(biome)` (new, sibling to v1.84's `jpHumanWaterCarryDays`, which fixed the
+   adjacent carry-DURATION duplication but left this consumption-RATE formula and the animal
+   carry-days formula as copy-paste right next to the fix) and `jpAnimalWaterCarryDays(biome,
+   supplyDays)` (new) replace the inline `biome?(biome.water[0]+biome.water[1])/2:2.5` copied at
+   `jpAutoPickTransport`×2/`jpCapacity`/`jpCalcWater`, and the inline animal-carry-days formula
+   copied at `jpAutoPickTransport`/`jpCapacity`. Bit-identical extractions.
+4. **Mild-upland "defensibility" terrain term (`1-4·|r-0.35|`), independently written at three
+   sites**: `buildSettlementSuitability` (the placement scorer), `_civPlaceDefensibility` (Inspector
+   display), `_umWallSpec` (wall-type decision). `_umWallSpec` genuinely cannot call
+   `_civPlaceDefensibility` (real recursion — that function's walled-blend term reads `_umInferWalls`,
+   which reads `_umWallSpec`), but nothing stopped it sharing the raw formula; new
+   `_civTerrainRuggednessD(r)` in block 1 (readable from block 2 like every other engine primitive
+   the civ layer already calls) is now that one shared primitive. Bit-identical.
+5. **Base population-by-kind, hardcoded independently at three sites** in/around
+   `_civIterativeAutoWorld` (initial candidate creation, the v1.46 coastal-swap re-roll, the
+   density-field-unavailable fallback) — two of the three lacked a `metropolis` entry the third had.
+   New named `_CIV_BASE_POP_BY_KIND`/`_civBasePopForKind(kind)`, joining this file's existing family
+   of shared per-kind civ constants (`_CIV_CATCHMENT_KM2`, `_CIV_SURPLUS_FRACTION`, `_CIV_TRADE_K`,
+   `_CIV_POP_CAP`, all declared together). Bit-identical: confirmed by reading
+   `_civIterativeAutoWorld`'s own call order that `metropolis` (a later promotion) cannot reach
+   either of the two sites that previously lacked it.
+6. **A "0.60 coastal-suitability tolerance" hardcoded at two sites, justified by a comment claiming
+   it matched `_civSnapToWaterEdge`'s own default — which is actually 0.80, not 0.60.** New named
+   `SETTLE_COAST_SWAP_TOLERANCE=0.60`, alongside `SETTLE_WATER_SNAP_KM`/`SETTLE_FLOOD_SAFE`; the
+   stale comment rewritten to state the real relationship (a shared constant these two call sites
+   happen to agree on, not a match to the snap function's own unrelated default).
+7. **Catchment-radius-in-cells conversion (`sqrt(catKm2/π)/cellKm`), independently written at five
+   sites**: `_civSettlementPopulation`, `_civPlaceCatchmentCeiling` (both folded into finding #2's
+   `_civCatchmentPop`), `_civFoodShed`'s hinterland scan, `_civPlaceSmelting`, `_civPlacePastoralBalance`.
+   New `_civCatchmentRadiusRaw(catKm2)` (the raw float — one caller needs a continuous distance for a
+   `dist<=radius` comparison, not a discrete loop bound) and `_civCatchmentRadiusCells(catKm2)` (the
+   ≥1-cell integer form every disc-scan loop uses). Bit-identical.
+
+**Method**: every finding was read at both/all call sites before any code changed (not just the
+audit's grep hits), each fix's bit-identity claim verified directly (a probe reproducing the shared
+function's output against a hand-written copy of the OLD formula, plus a full-grid diff of
+`_civEnhancedTravelCost`/`_civMixedCostGrid`'s own output arrays before vs. after) rather than
+assumed from the diff looking small. Finding #1 is the only one with a measured, disclosed
+behavioral consequence — flagged clearly above, not buried in the bit-identical majority.
+
 ### v1.94 — Grain-yield wiring: a real formula bug found while connecting v1.31's orphaned code
 
 Owner: "Let's build in the grainyield part and all that it connects to." v1.31 introduced
