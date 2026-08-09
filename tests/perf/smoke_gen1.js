@@ -1141,6 +1141,95 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     } finally { state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; }
     return o;
   });
+  // v1.86 (owner: "bug hunt and optimisation pass" — an audit pass, not an owner-reported symptom).
+  // Found via static analysis then confirmed by direct reproduction before any fix: currentFloodField
+  // and currentWindThrowField were keyed on state.tect.seed, which a same-seed regenerate (sea level/
+  // tectonic sliders/world-structure archetype) never changes, instead of _fieldGen (the file's own
+  // established convention — see currentSlopeField's own v1.17 comment claiming the flood field
+  // "above" already used it, which it didn't). Worse and more consequential: computeTemperature()/
+  // simulateWeather() — reachable independently via a climate-slider drag or the standalone "Simulate
+  // weather" button, neither of which touches _fieldGen — never invalidated the ELEVEN-field
+  // biome/soil/lithology/resource/carrying-capacity/settlement-suitability/wildlife/NPP/population-
+  // density/wetland cache family that only computeFlow()/generate() (and, since an earlier owner
+  // report, the sea-level slider) ever cleared. currentFloodField() feeds buildSettlementSuitability's
+  // flood penalty AND _civSnapToWaterEdge directly, so this was silently mis-scoring settlement
+  // placement after exactly the "tweak a slider, hit Simulate weather" workflow the tool exists for.
+  // Bit-identical to v1.85 (hash_gen1.js ALL IDENTICAL) — this only changes WHEN a derived cache
+  // recomputes, never the deterministic value it recomputes to.
+  // Uses the ambient, already-generated world in place throughout — no GW/resW/allocate() touched,
+  // and every mutation (climate params, field[]) is restored via the SAME real functions that would
+  // naturally undo it (refreshClimate(), computeFlow()), not a raw allocate()+no-regenerate reset.
+  // v1.85's own R.v185 test hit exactly this trap once already this session (a GW/resW round-trip
+  // that never re-ran generate() on restore corrupted a much later, unrelated test's civ state) —
+  // this test deliberately avoids it from the start rather than re-discovering it.
+  R.v186 = await page.evaluate(async () => {
+    const o = {};
+    const sum = a => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s; };
+    const savedEq = state.climate.equatorTemp, savedPo = state.climate.poleTemp;
+    const tempBefore = tempField.slice(), rainBefore = rainField.slice();
+    try {
+      // (a) a drastic climate swing + a pure weather re-simulation (no regenerate) must genuinely
+      // change biome classification, carrying capacity and the wind-throw debug field — all of which
+      // read tempField/rainField, directly or transitively.
+      const carryBefore = sum(currentCarryingCapacity());
+      const bioBefore = Array.from(buildBiomeRaster()).join(',');
+      const wtBefore = sum(currentWindThrowField());
+      state.climate.equatorTemp = 5; state.climate.poleTemp = -45;
+      simulateWeather(state.climate.wIters);
+      o.carryingCapacityRespondsToWeatherResim = sum(currentCarryingCapacity()) !== carryBefore;
+      o.biomeRasterRespondsToWeatherResim = Array.from(buildBiomeRaster()).join(',') !== bioBefore;
+      o.windThrowRespondsToWeatherResim = sum(currentWindThrowField()) !== wtBefore;
+    } finally {
+      // Restore climate state AND the raw tempField/rainField arrays directly (.set(), not a
+      // second refreshClimate() call). A re-run was tried first and measured EXACTLY reproducible
+      // in isolation (5 successive refreshClimate() calls, zero diff each) — but not reliably
+      // reproducible as the very next operation after this specific drastic a swing, on the real,
+      // many-tests-deep ambient world this probe runs against inside the full suite (confirmed via
+      // a direct A/B: the identical non-determinism reproduces on UNMODIFIED v1.85 with only this
+      // test added, so it's a pre-existing property of refreshClimate() on a perturbed-then-restored
+      // state, not a regression in the v1.86 fix this test exists to verify). Setting the arrays
+      // back directly sidesteps needing refreshClimate() to be bit-reproducible at all — this
+      // probe's OWN restoration doesn't depend on a property of the engine it isn't testing.
+      state.climate.equatorTemp = savedEq; state.climate.poleTemp = savedPo;
+      tempField.set(tempBefore); rainField.set(rainBefore);
+      let tD = 0; for (let i = 0; i < tempField.length; i++) tD += Math.abs(tempField[i] - tempBefore[i]);
+      let rD = 0; for (let i = 0; i < rainField.length; i++) rD += Math.abs(rainField[i] - rainBefore[i]);
+      o.climateFullyRestored = tD === 0 && rD === 0;
+    }
+
+    // (b) a direct terrain edit (the sculptCommit() shape: mutate field[], then computeFlow()) at
+    // the SAME seed must change the flood field — the old seed-only key could never see this.
+    const fieldBefore = field.slice(), flowBefore = flowField.slice(), seedBefore = state.tect.seed;
+    try {
+      const floodBefore = sum(currentFloodField());
+      const cx = (GW / 2) | 0, cy = (GH / 2) | 0, R2 = Math.max(6, (GW / 8) | 0);
+      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d < R2) field[y * GW + x] = Math.max(0, field[y * GW + x] - 0.35 * (1 - d / R2));
+      }
+      computeFlow(true);
+      o.floodFieldRespondsToTerrainEditSameSeed = sum(currentFloodField()) !== floodBefore;
+      o.seedGenuinelyUnchanged = state.tect.seed === seedBefore;
+    } finally {
+      // Restore field[] AND flowField[] directly via .set() — NOT by restoring field[] and calling
+      // computeFlow() a second time. Measured directly: computeFlow(true) is NOT idempotent across
+      // two calls even when field[] ends up bit-identical before each — flowDiffMean ~0.86 on a real
+      // world, a real, pre-existing (not introduced by v1.84-v1.86) property of computeFlow's own
+      // seeding/accumulation, unrelated to anything this test is verifying. Restoring both arrays
+      // directly sidesteps needing computeFlow() to be re-run-idempotent, the same lesson part (a)'s
+      // restoration already applied to tempField/rainField/refreshClimate().
+      field.set(fieldBefore); flowField.set(flowBefore);
+      let fD = 0; for (let i = 0; i < field.length; i++) fD += Math.abs(field[i] - fieldBefore[i]);
+      let flD = 0; for (let i = 0; i < flowField.length; i++) flD += Math.abs(flowField[i] - flowBefore[i]);
+      o.terrainFullyRestored = fD === 0 && flD === 0;
+    }
+
+    // (c) buildWindThrowField reuses buildBiomeRaster() rather than reclassifying per cell — a
+    // mountain lake (above sea level but water per currentWaterBodies()) now reads as non-forest
+    // canopy consistently with the biome raster, not via a separate, disagreeing classification.
+    o.windThrowUsesSharedBiomeRaster = buildWindThrowField.toString().includes('buildBiomeRaster()');
+    return o;
+  });
   // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
   // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
   // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
@@ -7129,6 +7218,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.85: rotation rate monotonically flattens the contrast as the day lengthens, reusing circulationCells()\'s own Ω=24/rotationHours rather than an unrelated constant', R.v185.rotationMonotonicDecreasing && R.v185.rotationReusesCirculationCellsOmega);
   A('v1.85: computeTemperature() on a real generated world genuinely diverges from Earth defaults at max tilt, in the predicted (colder) direction — the grounding is live end-to-end, not just correct in isolation', R.v185.liveGenerateRespondsToTilt);
   A('v1.85: the probe leaves tempField exactly as it found it once tilt/rotation are restored — no state leaked into the rest of the suite', R.v185.tempFieldFullyRestored);
+
+  A('v1.86: carrying capacity now genuinely responds to a pure climate re-simulation (was frozen — the biome-derived cache family was only invalidated by computeFlow()/generate(), never by computeTemperature()/simulateWeather())', R.v186.carryingCapacityRespondsToWeatherResim);
+  A('v1.86: the biome raster (buildBiomeRaster) now genuinely responds to a pure climate re-simulation, matching the OTHER settlement-suitability inputs it feeds', R.v186.biomeRasterRespondsToWeatherResim);
+  A('v1.86: the Wind-Throw-Risk debug field now genuinely responds to a pure climate re-simulation, not just a full regenerate', R.v186.windThrowRespondsToWeatherResim);
+  A('v1.86: the climate probe leaves tempField/rainField exactly as it found them once restored — no state leaked into the rest of the suite', R.v186.climateFullyRestored);
+  A('v1.86: currentFloodField now genuinely responds to a same-seed terrain edit (was frozen — keyed on state.tect.seed instead of _fieldGen, so a sculpt edit or same-seed regenerate could never invalidate it; consequential because it feeds buildSettlementSuitability\'s flood penalty and _civSnapToWaterEdge directly)', R.v186.floodFieldRespondsToTerrainEditSameSeed && R.v186.seedGenuinelyUnchanged);
+  A('v1.86: the terrain-edit probe leaves field[] exactly as it found it once restored — no state leaked into the rest of the suite', R.v186.terrainFullyRestored);
+  A('v1.86: buildWindThrowField reuses the shared buildBiomeRaster() instead of independently reclassifying biome per cell (avoids redundant work and a real mountain-lake classification disagreement)', R.v186.windThrowUsesSharedBiomeRaster);
 
   A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
   A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);

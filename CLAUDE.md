@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.85**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.86**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.85.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.84.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.86.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.85.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,54 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Bug hunt + optimization pass: climate re-simulation silently left settlement suitability stale (v1.86)
+
+Owner: "Can you bug hunt and do a optimisation pass." An audit pass — found via static analysis
+against this file's own `_fieldGen`/`_climGen` cache convention, confirmed by direct before/after
+reproduction before any fix shipped. Engine only. Hash vs v1.85 ALL IDENTICAL (fixes only *when*
+caches recompute, never their deterministic value).
+
+- **Root cause**: `computeFlow()`/`generate()` null a derived-cache family together (biome raster,
+  soil, lithology, landform, resources, carrying capacity, settlement suitability, wildlife, NPP,
+  population density, wetlands) since all transitively read temp/rain/flow/field. But
+  `computeTemperature()`/`simulateWeather()` — reachable independently via a climate-slider drag or
+  the "Simulate weather" button — rewrite temp/rain WITHOUT going through computeFlow/generate, so
+  none of that family invalidated. Same defect class the sea-level slider's handler already had to
+  patch once (its own comment: "owner report: the geological Resources view stayed stale... NOT
+  invalidated on a sea change") — never extended to climate.
+- **Consequential**: `currentFloodField()` feeds `buildSettlementSuitability`'s flood penalty AND
+  `_civSnapToWaterEdge` directly. The real workflow this breaks: generate once, try several climate
+  configs via "Simulate weather," auto-populate — settlements silently used the FIRST config's data.
+- **Two narrower, same-class bugs**: `currentFloodField`/`currentWindThrowField` were keyed on
+  `state.tect.seed` instead of `_fieldGen` (every sibling cache already uses it) — a same-seed
+  regenerate or sculpt/erosion edit never invalidated them.
+- **Fix**: `computeTemperature()`/`simulateWeather()` gained the SAME family-invalidation line
+  computeFlow/generate already use, copied verbatim (a narrower hand-picked list nearly shipped
+  missing `_landformF`/`_lithField`, both transitively rain-dependent). The two cache keys switched
+  to `_fieldGen`(`,_climGen` for wind-throw).
+- **Bundled optimization**: `buildWindThrowField` reuses the cached `buildBiomeRaster()` instead of
+  re-running `classifyBiome()` per cell — also fixes a real mountain-lake misclassification.
+- **Considered, not done**: caching `currentWindField()`/`currentOceanField()` (the only
+  `current*Field()` accessors with zero caching) — but they recompute their `tSea` proxy directly
+  from live state (via `climEffectiveEquatorTemp()`), which is WHY they update instantly while
+  dragging tilt/rotation sliders; a version-keyed cache would have reintroduced staleness there,
+  trading one bug for another. Left uncached, disclosed rather than shipped as a plausible regression.
+- **A second, unrelated finding, surfaced only while verifying the new tests, NOT fixed this pass**:
+  `computeFlow(true)` is not idempotent across two calls even when `field` ends up bit-identical
+  before each — carve a depression, `computeFlow(true)`, restore `field` to its exact prior bytes,
+  `computeFlow(true)` again, and `flowField` differs by a mean ~0.86/cell from a version that was
+  never touched. Confirmed to reproduce identically on unmodified v1.85 (predates this version, not
+  a regression). `R.v186`'s own terrain-edit test was rewritten to restore `field`/`flowField`
+  directly via `.set()` rather than depend on this. See HANDOFF's Next/open for the full note.
+- **Verified by direct reproduction**: a probe confirmed carrying capacity/biome raster/wind-throw
+  were frozen on v1.85 across a drastic climate swing + re-simulation, and correctly respond on
+  v1.86 (357.26→279.43 summed carrying capacity on the reference seed); a second probe confirmed the
+  flood field was frozen across a same-seed terrain edit on v1.85 and responds on v1.86.
+- **Tests**: 1017/1017, 852/852, hash ALL IDENTICAL, 7 new smoke assertions (`R.v186`).
+- **Known scope cuts**: the wind/ocean-field caching question (disclosed above); this pass covers
+  block 1 engine/climate caches only — civ-layer and render-hot-path audits not attempted, since this
+  finding was substantial enough to verify thoroughly rather than spread effort across subsystems.
 
 ### Ocean heating grounded in axial tilt + rotation; confirms climate→rendering interconnection (v1.85)
 

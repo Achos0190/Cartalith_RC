@@ -12,6 +12,101 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.86 — Bug hunt + optimization pass: climate re-simulation silently left settlement suitability, biome classification and several debug views on stale data
+
+Owner: *"Can you bug hunt and do a optimisation pass."* An audit pass, not an owner-reported
+symptom — found by systematically checking this file's own cached-field convention
+(`_fieldGen`/`_climGen`-keyed, per `currentSlopeField`'s v1.17 comment and `_climGen`'s own module
+comment) against every sibling cache, then confirmed by direct before/after reproduction on a real
+generated world before any fix shipped. Engine only (block 1). Hash vs v1.85 **ALL IDENTICAL** —
+every fix changes only *when* a derived cache recomputes, never the deterministic value it recomputes
+to.
+
+- **Root cause, the systemic version.** `computeFlow()`/`generate()` null a whole family of derived
+  caches together — biome raster, lithology, soil, landform, resource potentials, carrying capacity,
+  settlement suitability, wildlife, NPP, population density, wetlands — because all of them
+  transitively read `tempField`/`rainField`/`flowField`/`field`. But **`computeTemperature()`** and
+  **`simulateWeather()`** — independently reachable via a climate-slider drag (`recomputeClimate()`,
+  live on every `'input'` event) or the standalone "Simulate weather" button — rewrite
+  `tempField`/`rainField` **without ever going through `computeFlow()`/`generate()`**, so none of that
+  family was invalidated. This is the *exact* defect class the sea-level slider's own handler already
+  had to patch once (its own comment: *"owner report: the geological Resources view stayed stale...
+  NOT invalidated on a sea change"*) — never extended to the climate sliders or the weather button.
+- **Consequential, not cosmetic.** `currentFloodField()` feeds `buildSettlementSuitability`'s flood
+  penalty **and** `_civSnapToWaterEdge` directly; `buildBiomeRaster()`/`currentCarryingCapacity()`
+  feed icon scattering and settlement suitability's resource/food terms. The real-world workflow this
+  breaks — generate terrain once, try a few climate configurations via "Simulate weather," then
+  auto-populate settlements — silently placed settlements using the *first* configuration's data,
+  regardless of which one the map was actually showing.
+- **Two narrower cache-key bugs, same class.** `currentFloodField()`/`currentWindThrowField()` were
+  keyed on `state.tect.seed` instead of `_fieldGen` (the file's own established convention — every
+  neighboring cache, `currentSlopeField`/`currentRouteCorridors`/`currentLandmassQuality`, already
+  uses it). A same-seed regenerate (sea level, tectonic sliders, world-structure archetype, or a
+  sculpt/erosion edit) never changes `state.tect.seed`, so these two caches could silently serve
+  terrain-shaped data from a *previous* landscape. `currentWindThrowField` additionally lacked
+  `_climGen` in its key despite reading `tempField`/`rainField` directly.
+- **Fix**: `computeTemperature()`/`simulateWeather()` each gained the SAME family-invalidation line
+  `computeFlow()`/`generate()` already use (copied verbatim rather than hand-trimmed — an earlier,
+  narrower attempt at this fix nearly shipped without `_landformF`/`_lithField`, both of which turned
+  out to depend on `rainField` transitively; the verbatim, already-vetted list is safer than
+  re-deriving it by inspection). `currentFloodField`/`currentWindThrowField`'s keys now read
+  `_fieldGen`(`,_climGen` for the wind-throw one) instead of `state.tect.seed`.
+- **Bundled, low-risk optimization**: `buildWindThrowField` (Wind-Throw-Risk debug view) now reuses
+  the already-cached `buildBiomeRaster()` instead of independently re-running `classifyBiome()` per
+  cell — removes redundant work and fixes a real disagreement it surfaced: a mountain lake (above sea
+  level, so the old `vw<sea` guard didn't skip it, but classified as water by
+  `currentWaterBodies()`) was misclassified via raw temp/rain as an ordinary forest/land biome instead
+  of reading as water, disagreeing with the biome raster used everywhere else.
+- **A caching approach considered and deliberately NOT taken**: adding a version-keyed cache to
+  `currentWindField()`/`currentOceanField()` (the Wind/Ocean debug-view functions), the only
+  `current*Field()`-style accessors in the file with *no* caching at all. Investigated because it
+  looked like the same missing-cache pattern — but unlike their siblings, these two recompute their
+  own `tSea` proxy **directly from live `state.climate`/`state.planet` values** (via
+  `climEffectiveEquatorTemp()`), not from the cached `tempField` array, which is *why* they currently
+  update instantly while dragging the axial-tilt/rotation sliders. A `_fieldGen`/`_climGen`-keyed
+  cache would have **reintroduced** a staleness bug — losing that live reactivity until the next full
+  climate recompute — trading one correctness bug for another. Left uncached; disclosed here instead
+  of shipped as a plausible-looking regression.
+- **Every fix verified by direct reproduction, not just static reasoning**: a Playwright probe
+  confirmed, on v1.85, that a drastic climate swing (`equatorTemp` 30→5, `poleTemp` −25→−45) followed
+  by `simulateWeather()` left `currentCarryingCapacity()`/`buildBiomeRaster()`/`currentWindThrowField()`
+  completely unchanged; on v1.86 the identical scenario shows a real, substantial change in all three
+  (carrying capacity summed 357.26→279.43 on the reference seed). A second probe confirmed
+  `currentFloodField()` was frozen across a same-seed terrain edit (`computeFlow()`-triggering, the
+  exact shape `sculptCommit()` uses) on v1.85 and correctly responds on v1.86.
+- **Tests**: 1017/1017 `tests/run.sh` (bit-identical at defaults), 852/852 `tests/run_um.sh` (block 4
+  untouched — this pass is entirely block 1), `hash_gen1.js` v1.85→v1.86 ALL IDENTICAL across every
+  scenario, 7 new smoke assertions (`R.v186`) — each reproducing one of the direct-repro probes above
+  as a permanent regression check, plus explicit "leaves no trace" restoration checks (mutating
+  `state.climate`/`field[]` mid-suite without breaking a later, unrelated test — the exact
+  test-isolation trap this same session's own v1.85 `R.v185` test hit once already and had to fix,
+  deliberately avoided here from the start by never touching `GW`/`resW`/`allocate()`).
+- **A second, unrelated finding surfaced only while verifying the new tests, not shipped as part of
+  this fix: `computeFlow(true)` is not idempotent across two calls even when `field` ends up
+  bit-identical before each one.** Discovered chasing a genuinely confusing smoke-suite failure (the
+  pre-existing v1.78 "`refreshClimate()` is deterministic" check started failing only when the new
+  `R.v186` test ran immediately before it) — root-caused, with a Playwright A/B, all the way down to
+  `computeFlow`'s own accumulation/seeding, and confirmed to reproduce IDENTICALLY on unmodified
+  v1.85 (so it predates this version, isn't a v1.86 regression, and isn't touched by any v1.84–v1.86
+  fix). Measured directly: carve a depression into `field`, run `computeFlow(true)`, restore `field`
+  to its exact prior bytes, run `computeFlow(true)` again — `flowField` differs by a mean of ~0.86
+  per cell from a version that never had the depression carved at all, despite `field` itself
+  measuring bit-identical before each call. **Not fixed this pass** (out of scope for a test-harness
+  fix, and a real engine-level finding deserves its own dedicated look rather than a rushed
+  drive-by) — `R.v186`'s own terrain-edit sub-test was rewritten to restore `field`/`flowField`
+  directly via `.set()` instead of re-running `computeFlow()` to "undo" the edit, sidestepping the
+  need for that idempotency rather than depending on it. Flagged in `docs/HANDOFF.md`'s Next/open
+  section for a future pass — worth investigating given it implies a real sculpt-edit-then-undo in
+  the live app could leave `flowField` (and everything downstream of it: rivers, settlement
+  suitability, resources) subtly different from a "never touched" world, not just the debug-view
+  staleness this version's main finding covers.
+- **Known scope cuts**: the `currentWindField`/`currentOceanField` caching question (see above,
+  deliberately deferred, not silently dropped); this pass covers block 1 (engine/climate caches)
+  only — a civ-layer (block 2) or render-hot-path (LOD compositor, already extensively tuned in
+  v0.93/v1.22/v1.74) audit was not attempted this pass, since the climate-cache finding was
+  substantial enough on its own to verify thoroughly rather than spreading effort thin across
+  multiple unrelated subsystems.
+
 ### v1.85 — Ocean heating grounded in axial tilt + rotation (a real solar-energy budget); confirms climate→rendering interconnection
 
 Owner: *"For the climate modeling, now that water and wind are influenced by topology I want to make
