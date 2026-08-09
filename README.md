@@ -42,7 +42,7 @@ file; their inputs are not in this repository (see `legacy/README.md`).
 ## Verify
 
 ```bash
-tests/run.sh                                 # newest Gen1 file → 1021-assertion headless suite
+tests/run.sh                                 # newest Gen1 file → 1031-assertion headless suite
 tests/run.sh "Cartalith Gen1 v0.57.html"     # explicit target
 node tests/perf/hash_gen1.js A.html B.html   # A/B bit-identity battery (Playwright)
 ```

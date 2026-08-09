@@ -12,6 +12,92 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.90 — Save files: DEFLATE-compress the project .zip; internal format unchanged
+
+Owner: "simplify save files and find a way to optimise the internal formatting of the save files
+and compression of the save files." Engine only (block 1: `zipStore`/`loadZip`), touching the
+export/import path exclusively — never `generate()`/`renderNow()`. Hash vs v1.89 **ALL IDENTICAL**
+(this changes only how bytes are packaged for storage, never any computed field).
+
+- **Measured first, on a real exported project, not assumed.** A live-browser probe (real
+  `generate()` + `_civIterativeAutoWorld` populated world, 1024px) broke down `exportZip()`'s own
+  raw `.f32`/`.bin`/`.json` entries (excluding already-compressed PNG/atlas chunks): **71.24 MB
+  total, and every byte of it was written completely uncompressed.** `zipStore` — this file's
+  own zero-dependency ZIP writer — hardcoded compression method 0 (STORE) for every entry; the
+  reader side (`unzipStore`) could only ever read STORE-format entries.
+- **The infrastructure to fix this already existed, unused, for the main save path.** `unzipAny` (a
+  central-directory-based reader supporting both STORE and DEFLATE, already shipped and used by
+  `loadAssetPack`/the asset-pack importer) already handled compressed entries — `loadZip()` (the
+  MAIN project-save loader) was the one place still hardcoded to the store-only `unzipStore`. And
+  `CompressionStream`/`DecompressionStream` — the native, zero-dependency browser API this file's
+  own `gzipBytes()` helper already used elsewhere (`docs/` region-tile export) — makes writing real
+  DEFLATE compression a small, self-contained change, no new format, no new dependency.
+- **Fix**: `zipStore` now DEFLATEs (`deflate-raw`, matching the ZIP spec's own method-8 format)
+  each entry via `CompressionStream`, using it (method 8) only when the compressed result is
+  genuinely smaller — otherwise falling back to STORE (method 0), byte-for-byte the v1.89 behavior.
+  `.png`-named entries skip the attempt outright (already internally DEFLATE-compressed by the
+  browser's own PNG encoder — attempting to recompress them is pure wasted CPU with no possible
+  gain, and the fallback-if-not-smaller check would discard the attempt anyway). `zipStore` is now
+  `async` (compression is stream-based) — every one of its 4 call sites was already inside an
+  async function or event handler, so this needed no restructuring, only adding `await`
+  (`ZipExporter.blob`/`.download` — the Asset Library's own thin wrapper around `zipStore` — became
+  async too, and their two call sites needed the same). `loadZip()` moved from `unzipStore` to
+  `unzipAny` — a strict superset (still reads every pre-v1.90 store-only save exactly as before;
+  now also reads the new compressed format) — the ONE actual behavior-relevant code change on the
+  read side.
+- **Measured after, via the REAL production `exportZip()`/`loadZip()` functions, not a
+  reimplementation.** A Playwright probe intercepted the real export (monkeypatching
+  `URL.createObjectURL` to capture the Blob instead of letting it hit a download link), then fed it
+  straight back through the real `loadZip()`: **field/temp/rain FNV hashes, settlement count and
+  details, way count, label count, sea level, and seed all matched exactly** before vs. after —
+  full round-trip fidelity, not just "the file got smaller." Same world, same settings: **26.35 MB
+  (v1.89) → 12.11 MB (v1.90), a 54% reduction** for a genuine `exportZip()` call including the
+  baked `map.png`. The isolated raw-entries-only measurement (excluding the PNG bake) showed an
+  even larger 78.2% reduction (71.24 MB → 15.55 MB) — resource-potential `.f32` files (copper/tin/
+  iron/gold/salt/…, mostly-zero rasters) compressed to as little as 0.4–10% of their raw size;
+  heightmap/temperature (real, noisy generated data, not the idealized case) compressed more
+  modestly, ~14%/16%.
+- **A test-writing mistake caught and fixed before shipping, not shipped as a false claim.** A
+  first cut of the new regression test asserted a smooth sine-wave-shaped float array would
+  compress ">2x smaller" — it measured only ~9% (generic byte-level DEFLATE doesn't exploit float32
+  mantissa continuity the way a format-aware codec would; smoothness in the mathematical sense
+  isn't the same as byte-level redundancy). Replaced with a sparse, mostly-zero array — the actual
+  shape of the resource-potential fields that drive the real measured win — and a threshold the
+  measurement genuinely supports (>5x), rather than loosening the claim to fit a misleading
+  synthetic case.
+- **A second test bug, also caught by running the suite, not assumed correct because it looked
+  right on paper**: an independent hand-rolled "pre-v1.90 STORE-only zip" backward-compatibility
+  test initially omitted the central directory record's own trailing filename copy (a ZIP central-
+  directory entry carries its OWN copy of the name, separate from the local header's) — `unzipAny`
+  read a truncated/wrong filename as a result. Fixed by following the established, already-correct
+  hand-rolled-zip pattern elsewhere in this exact test file (`v1.60`'s DEFLATE-entry test), which
+  folds the trailing name directly into the central-directory byte array rather than concatenating
+  it as a separate piece afterward.
+- **"Simplify"**: the format itself is unchanged — same entries, same names, same semantic content;
+  compression is purely a byte-level packaging change, not a redesign. A real, related redundancy
+  was found (`exportRegionTiles`'s own pre-existing ad-hoc per-file `gzipBytes()`+`.gz`-suffix
+  mechanism for its refined-tile `.bin` files, and the atlas-chunk export's identical pattern) but
+  deliberately left alone — it's now largely superseded by `zipStore`'s own universal compression
+  (redundant, not incorrect: a `.bin` file gzip-wrapped once is already near-incompressible, so
+  `zipStore`'s own attempt on it correctly falls back to STORE, wasting a little CPU but nothing
+  else), and removing it would touch a user-facing checkbox (`#refGzip`, "Compress heightmaps
+  (gzip)") and a documented `.gz`-suffix naming convention external tooling may depend on — a
+  narrower, separate, lower-value change than the save-file path this request was about.
+- **Tests**: 10 new assertions in `tests/run.sh` (1031/1031) — compression ratio on realistic sparse
+  data, DEFLATE (method 8) used for the compressible entry, STORE (method 0) both for `.png`
+  (skipped by name) and for genuinely incompressible random data (attempted, correctly discarded),
+  byte-identical round-trip for all four scenarios (compressible/incompressible/PNG/tiny), the exact
+  `new Float32Array(bytes.buffer)` reinterpretation idiom `loadZip()` itself relies on reproducing
+  the original values exactly, and backward-compatibility with a hand-rolled pre-v1.90 STORE-only
+  zip. `tests/run_um.sh` 852/852 (block 4 untouched), `hash_gen1.js` ALL IDENTICAL, `smoke_gen1.js`
+  matches the v1.89 baseline exactly (including the pre-existing `R.exportTrim` monkeypatch test,
+  confirmed unaffected since it captures entry names synchronously before compression runs).
+- **Known scope cuts**: no change to WHAT is saved (see "Simplify" above — a genuine content-level
+  simplification, e.g. determining which fields are truly re-derivable from the seed alone and
+  could be omitted rather than compressed, is a materially larger, higher-risk undertaking not
+  attempted this pass); `exportRegionTiles`'s/the atlas exporter's own pre-existing ad-hoc gzip
+  mechanisms are left in place, disclosed as now-largely-redundant rather than removed.
+
 ### v1.89 — Simulation-speed pass: erosion kernels' priority-flood heap, and a redundant per-iteration coefficient in stream-power incision
 
 Owner: "Again search for optimisation in the simulation, rendering, LOD, and way/route/

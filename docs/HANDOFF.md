@@ -9,11 +9,52 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.89.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.90.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.90 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.88` are kept and never edited.
+  (v1.91 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.89` are kept and never edited.
+- **v1.90 — save files: DEFLATE-compress the project .zip; internal format unchanged.** Owner:
+  "simplify save files and find a way to optimise the internal formatting of the save files and
+  compression of the save files." Measured first: `exportZip()`'s `zipStore()` always wrote
+  method-0 (STORE, zero compression) — a real populated 512px world's export measured 71.24MB raw,
+  with the large `.f32` field exports (many of them sparse/mostly-zero, e.g. resource-potential
+  layers) the dominant contributor. `unzipAny` (pre-existing, already used by `loadAssetPack`/the
+  asset-pack importer) already reads BOTH stored and DEFLATE'd entries via the central directory —
+  so the only missing half was on the WRITE side. `zipStore` is now `async` and DEFLATE-compresses
+  each entry via the native, zero-dependency `CompressionStream('deflate-raw')` (raw DEFLATE
+  bitstream — matches ZIP method 8 exactly, unlike `'deflate'`/`'gzip'`'s extra wrapper bytes),
+  falling back to method 0 whenever compression doesn't shrink the entry, whenever
+  `CompressionStream` is unavailable (this file's `file://`-degrades-gracefully convention), or for
+  any `.png`-named entry (already-compressed raster data — not worth the CPU). `loadZip` switched
+  its reader from the store-only `unzipStore` to `unzipAny` — the one place still on the old
+  reader, so a v1.90+ compressed save silently failed every `.f32`/`.bin` lookup before this; a
+  strict superset, every pre-v1.90 store-only save still loads unchanged. `exportZip`/
+  `exportRegionTiles`/`ZipExporter.blob`/`.download`/`AssetLibrary.exportPack()` all threaded the
+  new `await`; fixed one real latent bug surfaced by the same sweep —
+  `AssetLibrary.applyToMap()` called `ZipExporter.blob()` without awaiting it, which would have
+  passed a bare Promise into `loadAssetPack()` and thrown at runtime the first time that code path
+  actually ran. Verified via a REAL end-to-end `exportZip()`→mutate-live-state→`loadZip()`
+  round-trip (the actual production functions, not a reimplementation, Playwright-driven on a real
+  generated+auto-populated world): perfect fidelity (field/temp/rain hashes, places, ways, labels,
+  seaLevel, seed all identical after reload) and a measured 26.35MB→12.11MB (54%) real file-size
+  reduction; isolated raw sparse-`.f32`-style entries compressed ~78%. Two test-writing mistakes
+  caught before shipping: an initial smoke test assumed generic sine-wave float data would compress
+  >2x and measured only ~9% (DEFLATE doesn't exploit float32 mantissa continuity) — replaced with a
+  sparse/mostly-zero test array matching the real shape that drives the actual measured win, at a
+  realistic >5x threshold; a hand-rolled backward-compatibility test constructing a pre-v1.90-style
+  ZIP byte-for-byte omitted the central directory record's own separate trailing filename-bytes
+  copy (distinct from the local header's copy), corrupting the parse — fixed by including it, per
+  the ZIP spec. `exportRegionTiles`'s own separate `wantGzip`-driven per-file `.gz` mechanism for
+  refined heightmap tiles is now largely redundant (the whole `.zip` compresses anyway) but was
+  deliberately left alone — a separate, working, user-facing feature with its own naming
+  convention, not in scope for a "don't touch things that work" pass. Internal SAVE FORMAT
+  (`params.json` shape, field/layer naming, entry list) is unchanged — "simplify" resolved to
+  "smaller and cleaner," not a schema rewrite; no evidence surfaced that the existing format itself
+  is a real pain point beyond size. Hash vs v1.89 ALL IDENTICAL (compression is a
+  write/read-time-only change, never touches `generate()`/render output). 1031 / 1031 (`run.sh`,
+  +10 new assertions), 852 / 852 (`run_um.sh`, block 4 untouched). See CHANGELOG for the full
+  writeup.
 - **v1.89 — simulation-speed pass: erosion kernels' priority-flood heap.** Owner: "Again search
   for optimisation in the simulation, rendering, LOD, and way/route/PathFinding.js systems"
   (no separate PathFinding.js file exists — the in-file route/Dijkstra logic is what's meant).

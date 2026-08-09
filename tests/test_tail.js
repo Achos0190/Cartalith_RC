@@ -3825,7 +3825,7 @@ if (typeof carveRiverValleys === 'function') {
       await atlasPut({ key: atlasKeyStr('ax', 512, 0, 0, 0), worldKey: 'ax', ts: 512, z: 0, col: 0, row: 0, w: 4, h: 4, rg16: packHeight16(d1, 16), png: null, ver: VERSION, time: 1 });
       const exp = await atlasExportEntries(true);
       check('atlasExportEntries gathers both chunks + a manifest', exp && exp.manifest.count === 2 && exp.entries.some(e => e.name === 'World/atlas.json'));
-      const blob = zipStore(exp.entries), zip = await unzipAny(await blob.arrayBuffer());
+      const blob = await zipStore(exp.entries), zip = await unzipAny(await blob.arrayBuffer());
       check('exported ZIP contains the gzipped chunk bins', !!zip['World/LOD1/1_2_3.bin.gz'] && !!zip['World/LOD0/0_0_0.bin.gz']);
       // fresh "machine": new shim, same worldKey so import repopulates _atlasBaked
       global.indexedDB = __makeIDBShim(); _atlasDBp = null; _atlasBaked.clear();
@@ -3842,6 +3842,91 @@ if (typeof carveRiverValleys === 'function') {
       delete global.indexedDB; _atlasDBp = null; _atlasBaked.clear(); _atlasImg.clear(); _atlasMeta = null; _worldKey = '';
     } else { console.log('skip - CompressionStream/DecompressionStream unavailable'); }
   }
+
+  /* ---------- v1.90: zipStore DEFLATE compression (save-file size pass) ---------- */
+  if (typeof CompressionStream !== 'undefined' && typeof DecompressionStream !== 'undefined') {
+    // (a) a real save file's dominant win — a sparse, mostly-zero float array, the shape of the
+    // resource-potential .f32 files (copper/tin/iron/gold/salt/…) that dominated the measured
+    // real-world save-size reduction (a live-browser probe on an actual generate()'d + auto-
+    // populated world measured these compressing to 0.4%-60% of their raw size, driving a 78%
+    // reduction in overall save size at 1024px). A smooth-but-noisy field (e.g. a real heightmap)
+    // was tried FIRST here and measured a much smaller, still-real win (~9% — generic byte-level
+    // DEFLATE doesn't exploit float32 mantissa continuity the way a format-aware codec would); this
+    // scenario is deliberately the one save-file field shape proven to compress dramatically, not
+    // an idealized "any smooth data compresses a lot" claim the measurement didn't support.
+    const W = 256, H = 256, n = W * H;
+    const smooth = new Float32Array(n);
+    for (let i = 0; i < n; i++) smooth[i] = (i % 37 === 0) ? (0.2 + 0.6 * ((i * 2654435761) >>> 0) / 4294967296) : 0;
+    const smoothBytes = new Uint8Array(smooth.buffer, smooth.byteOffset, smooth.byteLength);
+    // (b) genuinely incompressible data (crypto-quality-ish PRNG bytes) — must NOT grow, and must
+    // still round-trip exactly (exercises the "compression didn't help → fall back to STORE" path).
+    let seed = 987654321; const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return seed >>> 0; };
+    const randomBytes = new Uint8Array(4096); for (let i = 0; i < randomBytes.length; i++) randomBytes[i] = rnd() & 0xFF;
+    // (c) a fake "PNG" entry — real PNGs are already internally DEFLATE-compressed, so zipStore
+    // must skip attempting to recompress anything named *.png (pure efficiency; correctness is
+    // covered by (b) not growing even for genuinely incompressible data either way).
+    const fakePng = new Uint8Array(2048); for (let i = 0; i < fakePng.length; i++) fakePng[i] = rnd() & 0xFF;
+    // (d) a tiny entry — must still round-trip (edge case: near-zero-length payloads).
+    const tiny = new TextEncoder().encode('x');
+
+    const entries = [
+      { name: 'heightmap.f32', data: smoothBytes },
+      { name: 'random.bin', data: randomBytes },
+      { name: 'tiles/x.png', data: fakePng },
+      { name: 'tiny.txt', data: tiny },
+    ];
+    const blob = await zipStore(entries);
+    const ab = await blob.arrayBuffer();
+
+    // parse the raw ZIP structure directly (not just via unzipAny) to confirm the .png entry
+    // genuinely used STORE (method 0) while the compressible entry used DEFLATE (method 8), AND
+    // to measure the compressible entry's OWN compressed size directly (the whole-file byteLength
+    // also includes the two deliberately-incompressible entries, so it can't tell "this specific
+    // entry shrank a lot" from "the file barely shrank overall").
+    const dv = new DataView(ab), u8 = new Uint8Array(ab);
+    const methodByName = {}, csizeByName = {};
+    { let p = 0;
+      while (p + 30 <= u8.length && dv.getUint32(p, true) === 0x04034b50) {
+        const method = dv.getUint16(p + 8, true), csize = dv.getUint32(p + 18, true),
+          nlen = dv.getUint16(p + 26, true), elen = dv.getUint16(p + 28, true);
+        const name = new TextDecoder().decode(u8.subarray(p + 30, p + 30 + nlen));
+        methodByName[name] = method; csizeByName[name] = csize; p = p + 30 + nlen + elen + csize;
+      }
+    }
+    check('zipStore compresses a sparse, mostly-zero float array dramatically (>5x smaller — the resource-potential-field shape that drives the real measured save-size win)', csizeByName['heightmap.f32'] < smoothBytes.length * 0.2);
+    check('zipStore: the compressible heightmap.f32 entry used DEFLATE (method 8)', methodByName['heightmap.f32'] === 8);
+    check('zipStore: the .png entry was never even attempted — stayed STORE (method 0)', methodByName['tiles/x.png'] === 0);
+    check('zipStore: genuinely incompressible random.bin fell back to STORE (method 0), not a bloated DEFLATE stream', methodByName['random.bin'] === 0);
+
+    const zip = await unzipAny(ab);
+    const bytesEqual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+    check('round-trip: smooth float array is byte-identical after DEFLATE + inflate', bytesEqual(zip['heightmap.f32'], smoothBytes));
+    check('round-trip: incompressible random data is byte-identical (STORE path)', bytesEqual(zip['random.bin'], randomBytes));
+    check('round-trip: .png entry is byte-identical (STORE path)', bytesEqual(zip['tiles/x.png'], fakePng));
+    check('round-trip: tiny entry is byte-identical', bytesEqual(zip['tiny.txt'], tiny));
+    // the exact pattern loadZip()'s own read path relies on: new Float32Array(z['heightmap.f32'].buffer)
+    // must reproduce the original float values (not just matching bytes coincidentally, and not
+    // tripping over a byteOffset/length mismatch from the compress/decompress round-trip).
+    const backAsFloats = new Float32Array(zip['heightmap.f32'].buffer);
+    let maxDiff = 0; for (let i = 0; i < n; i++) maxDiff = Math.max(maxDiff, Math.abs(backAsFloats[i] - smooth[i]));
+    check('round-trip: reinterpreting the decompressed bytes as Float32Array (loadZip\'s own idiom) reproduces the exact original values', maxDiff === 0);
+
+    // (e) backward compatibility: an OLD (pre-v1.90, store-only) zip must still be readable by
+    // unzipAny exactly as it always was — compression is additive, not a format break.
+    const oldStyleEntries = [{ name: 'params.json', data: new TextEncoder().encode('{"v":"1.89"}') }];
+    // build a hand-rolled STORE-only zip mirroring zipStore's pre-v1.90 byte layout, independent of
+    // zipStore itself (so this test doesn't just check zipStore against itself).
+    const encName = new TextEncoder().encode(oldStyleEntries[0].name), payload = oldStyleEntries[0].data;
+    const crc = crc32(payload);
+    const u16 = v => [v & 255, (v >> 8) & 255], u32 = v => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255];
+    const lh = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(payload.length), ...u32(payload.length), ...u16(encName.length), ...u16(0)]);
+    const cdOff = lh.length + encName.length + payload.length;
+    const cd = new Uint8Array([0x50, 0x4b, 0x01, 0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(payload.length), ...u32(payload.length), ...u16(encName.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(0), ...encName]);   // central-dir record carries its OWN copy of the name, appended after the fixed 46-byte header
+    const eocd = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(1), ...u16(1), ...u32(cd.length), ...u32(cdOff), ...u16(0)]);
+    const oldZipBytes = new Uint8Array([...lh, ...encName, ...payload, ...cd, ...eocd]);
+    const oldZip = await unzipAny(oldZipBytes.buffer);
+    check('backward compat: a pre-v1.90 STORE-only zip still reads correctly via unzipAny (the read path loadZip now uses)', bytesEqual(oldZip['params.json'], payload));
+  } else { console.log('skip - CompressionStream/DecompressionStream unavailable (zipStore compression tests)'); }
 
   /* ---------- R5: terrain rendering modernization (SVF · cast shadows · curvature · geology · wetness · landforms · contour-m) ---------- */
   {

@@ -3,20 +3,20 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.89**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.90**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.89.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.88.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.90.html` | **Current** unified tool (~30.0k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.89.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1021-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1031-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +28,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1021 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1031 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -997,6 +997,36 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Save files: DEFLATE-compress the project .zip (v1.90)
+
+Owner: "simplify save files and find a way to optimise the internal formatting of the save files
+and compression of the save files." `zipStore` (this file's zero-dependency ZIP writer) hardcoded
+STORE (no compression) for every entry — measured on a real populated world: 71.24 MB of raw
+`.f32`/`.bin`/`.json` entries, zero compression. `unzipAny` (already shipped, used by
+`loadAssetPack`) already read both STORE and DEFLATE via the central directory; only `loadZip()`
+was still hardcoded to the store-only `unzipStore`. Fixed by DEFLATE-compressing each entry via the
+native `CompressionStream('deflate-raw')` (falling back to STORE when compression doesn't actually
+shrink the entry, or for `.png` names — already internally compressed, skip the wasted attempt),
+making `zipStore` async (every call site was already inside an async context), and switching
+`loadZip()` from `unzipStore` to `unzipAny` (a strict superset — every pre-v1.90 save still reads
+correctly). Verified via the REAL `exportZip()`/`loadZip()` functions (Blob captured by
+monkeypatching `URL.createObjectURL`, not a reimplementation): field/temp/rain hashes, settlement/
+way/label counts, sea level, and seed all matched exactly after a full round-trip; same world, same
+settings, file size 26.35 MB → 12.11 MB (54% smaller) including the baked map.png; the isolated
+raw-entries measurement showed 78.2% (resource-potential fields, mostly-zero rasters, compressed to
+0.4-10% of raw size). Two test-writing mistakes caught and fixed before shipping: a synthetic
+"smooth" compression-ratio test assumed sine-wave data compresses >2x (measured only ~9% — generic
+DEFLATE isn't float32-mantissa-aware; replaced with a sparse mostly-zero array, the actual shape
+that drives the real win); a hand-rolled backward-compatibility test's central directory record
+omitted its own trailing filename copy (ZIP central-directory entries carry a SEPARATE copy of the
+name from the local header's) — fixed by following this file's own pre-existing correct pattern.
+Hash vs v1.89 ALL IDENTICAL (export/import format only, never `generate()`/`renderNow()`). Format
+itself is unchanged (same entries/names/content) — a genuine content-level simplification (removing
+truly re-derivable data) was considered out of scope; `exportRegionTiles`'s own pre-existing ad-hoc
+per-file gzip mechanism is now largely redundant but deliberately left alone (a user-facing
+checkbox + documented `.gz` naming convention, lower value to touch than the main save path this
+request was about).
 
 ### Simulation-speed pass: erosion kernels' priority-flood heap (v1.89)
 
@@ -3034,7 +3064,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1021-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1031-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
