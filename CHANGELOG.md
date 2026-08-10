@@ -98,7 +98,7 @@ Hash vs v1.98 **ALL IDENTICAL** — none of these functions are reached from `ge
   seed's auto-network output turned out to be a SETTLEMENT'S OWN PIN sitting on a water-classified
   cell — a placement/classification question, correctly out of scope for a routing-geometry repair
   pass, and untouched by design (the caller-supplied endpoint is never moved). (2) `hash_gen1.js`
-  ALL IDENTICAL; 1031/1031; 852/852; smoke 712/714 → 730/732 (+18: unit tests of
+  ALL IDENTICAL; 1031/1031; 852/852; smoke 712/714 → 728/730 (+16: unit tests of
   `_civTerrainValidTest`/`_civNearestValidPt`/the repair pass/the ferry exception on a controlled
   synthetic grid, plus live-world land/water/auto-network cleanliness and the new
   `unreachableLegs`/`_civCommitWay` warning behaviour) — the 2 shortfalls are the pre-existing

@@ -45,7 +45,7 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   seeds (25,652 land-mode path points): 0 genuinely-bad points after the fix, excluding
   legitimate ferry crossings; the auto-network/sea-lane-MST/village connectors (no ferry
   exception, held to a fully strict standard) also came back clean. Hash vs v1.98 ALL IDENTICAL.
-  1031/1031, 852/852, smoke +18. See CHANGELOG for the full writeup.
+  1031/1031, 852/852, smoke +16. See CHANGELOG for the full writeup.
 - **v1.98 — sea-lane geometry from round-trip time, not uniform distance (routing-audit U4/U5).**
   The agreed second half of the routing work. **U4**: `roadDijkstra` gained an optional trailing
   `edgeCost(i,j,dx,dy)` — every cost model here was `cost(cell)`, but currents/wind/flow are

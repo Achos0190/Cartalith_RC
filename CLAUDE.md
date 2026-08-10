@@ -1039,7 +1039,7 @@ Civ-layer only (`_civSmoothPath` + its five callers). Hash vs v1.98 ALL IDENTICA
   after the fix; auto-network/sea-lane-MST/village connectors (no ferry exception, strict standard)
   also clean. Two residual "bad" points in one seed traced to a SETTLEMENT'S OWN PIN sitting on a
   water-classified cell — a placement question, correctly untouched (caller endpoints are never
-  moved by the repair pass). Hash ALL IDENTICAL, 1031/1031, 852/852, smoke +18.
+  moved by the repair pass). Hash ALL IDENTICAL, 1031/1031, 852/852, smoke +16.
 
 ### Sea-lane geometry from round-trip time (v1.98)
 
