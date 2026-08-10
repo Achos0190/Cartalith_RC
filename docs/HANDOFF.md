@@ -9,11 +9,34 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.04.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.05.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v2.03` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.04` are kept and never edited.
+- **v2.05 — LOD zoom-detail pipeline made real-km-aware (deep-zoom pixelation fix).** Owner,
+  pasting a screenshot of blocky terrain under the `LOD6 12,38/par 6,19/cached` debug label:
+  "There is still a certain pixilated quality to the map when we zoom. The graphics should be
+  finer than that." Root cause, found by reading source before writing any fix: neither
+  `amplifyRegion` (per-tile refine pass) nor `addZoomDetail` (extra fractal octaves as LOD depth
+  increases) reference `cellKm`/`mapWidthKm`/`terrainDetailK` anywhere — added-noise frequency
+  ("cycles per coarse cell") always defaulted to a flat `1.0`. Exact v1.60 defect, different
+  subsystem: `terrainDetailK` only eases the BASE field (deliberately does nothing for world-scale
+  maps), while the LOD viewer's whole job is showing texture finer than the base grid can — exactly
+  what a huge-`cellKm` world (the owner's own: 20,000km/2048px, 9.77 km/cell) needed and never got.
+  Fix: `lodDetailFreqK(mapWidthKm)`, the 4th sibling of `terrainDetailK`→`riverCoarseEase`→
+  `_jpDrinkingCoarseEase` (same formula as `riverCoarseEase`, own name — a future retune of one
+  must not silently retune the others), wired at `lodTileOpts()`'s one call site
+  (`detailFreq: lodDetailFreqK(state.mapWidthKm)` — both consumers already read `opts.detailFreq`
+  with a `1.0` fallback). No-op at the literal default `mapWidthKm=800`. Measured, not assumed: the
+  same coarse field/seed/tile location showed ~10.5x more high-frequency energy post-fix (discrete-
+  Laplacian proxy); a real screenshot at matching Tiled-LOD z=6 coordinates confirmed visibly finer
+  grain — after catching a test-site trap (the world's highest point sits on a locally flat summit
+  plateau where the amplitude taper suppresses detail regardless of frequency; a nearby sloped
+  point was the correct site). Engine-only, hash vs v2.04 ALL IDENTICAL at default. `tests/run.sh`
+  1046/1046 (+8), `tests/run_um.sh` 852/852. Known scope cut: the v1.29-disclosed per-tile seam
+  residue and v1.22's supersample-backing mechanism are separate, untouched pieces of overall LOD
+  render quality. See CHANGELOG/CLAUDE.md for the full writeup.
 - **v2.04 — per-stage Journey Planner overrides expanded to the full travel-option set.** Owner:
   "Per stage override should be the full travel options. Per stage a lot can change." Before this,
   `stageOverrides[idx]` only had a UI for 6 fields (Travel mode/Group size/Cargo/Pace/Pack animal/

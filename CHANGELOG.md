@@ -12,6 +12,72 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.05 — LOD zoom-detail pipeline made real-km-aware (deep-zoom pixelation fix)
+
+Owner, pasting a screenshot of the debug-labeled `LOD6 12,38 / par 6,19 / cached` overlay over
+visibly blocky terrain: "There is still a certain pixilated quality to the map when we zoom. The
+Graphics should be finer than that." Owner's own world (from their earlier troubleshooting dump):
+20,000 km wide, 2048px, 9.77 km/cell. Engine only (`amplifyRegion`/`addZoomDetail`/`lodTileOpts`,
+block 1). Hash vs v2.04 **ALL IDENTICAL** at the app's own default (mapWidthKm=800, any
+resolution) — a deliberate, measured re-baseline above that, same class as v1.60's own
+`terrainDetailK` cut and v1.101's `riverCoarseEase`.
+
+- **Root cause, confirmed by direct source inspection before writing any fix**: neither
+  `amplifyRegion` (the per-tile refine pass that upsamples a coarse region and adds one octave of
+  fractal detail) nor `addZoomDetail` (v0.126's extra fractal octaves added as LOD depth increases)
+  reference `cellKm`, `mapWidthKm`, or `terrainDetailK` anywhere. Both express their added noise's
+  frequency as "cycles per COARSE CELL" — a flat `detailFreq=1.0` default, completely blind to how
+  many real km one coarse cell spans. This is the exact v1.60 defect ("relief samples fractal noise
+  at a frequency fixed as a fraction of grid width, never a real km wavelength") but in a DIFFERENT
+  subsystem `terrainDetailK` never reached: that fix only eases the BASE field's own generation
+  frequency (and is deliberately one-sided — it does nothing for world-scale/coarse maps, since the
+  base grid genuinely can't represent finer detail than its own resolution). The LOD viewer's whole
+  job is synthesizing texture FINER than the base grid can show when the user zooms in — exactly
+  the case a huge `cellKm` world needs most, and exactly the case this pipeline never adjusted for.
+  At the 800km/2048px reference, "1 cycle per coarse cell" is a ~390m wavelength; at the reported
+  20,000km world it's a ~9.8km wavelength — 25x coarser — so the finest texture the pipeline could
+  ever add was a ~9.8km-wide lobe, reading as smooth/blocky patches once zoomed in past that.
+- **Fix: `lodDetailFreqK(mapWidthKm)`**, the fourth sibling of the `terrainDetailK` →
+  `riverCoarseEase` → `_jpDrinkingCoarseEase` "coarse-world companion" family, kept as its own named
+  function (identical formula to `riverCoarseEase`, different subsystem — a future retune of one
+  must not silently retune the others, the same reasoning that already keeps those two separate).
+  One-sided like `riverCoarseEase`: keyed on `mapWidthKm` ALONE, never blended with `gw`/`cellKm` —
+  `riverCoarseEase`'s own CHANGELOG entry already found that blending `gw` re-baselines this file's
+  low-resolution test previews (which overwhelmingly run below 2048px at the `mapWidthKm=800`
+  default); that exact trap applies identically here. Capped at the same `TERRAIN_DETAIL_MAX_K`
+  (deeper LOD octaves already multiply frequency by up to 2^6 on their own — an unbounded base
+  multiplier on top risks visible aliasing). No-op (returns 1, bit-identical) at/below the literal
+  default `mapWidthKm=800`.
+- **Wired at the ONE call site**: `lodTileOpts()` (the file's own "single source of truth for
+  procedural-tile opts" per its v0.133 comment) gained one line — `detailFreq:
+  lodDetailFreqK(state.mapWidthKm)` — both `amplifyRegion` and `addZoomDetail` already read
+  `opts.detailFreq` when present (falling back to `1.0` otherwise), so no other code changed.
+- **Measured before shipping, not assumed correct because it compiled.** Reproduced the owner's
+  exact world shape (huge `mapWidthKm` relative to resolution) and, at the SAME real coarse field,
+  SAME seed, SAME tile location, compared a tile built with the eased `detailFreq` against the same
+  tile forced back to the old flat `1.0` (isolating exactly the one line this fix changed): a
+  discrete-Laplacian high-frequency-energy proxy measured **~10.5x more fine-grained texture**
+  post-fix at the world-scale reproduction. A real screenshot comparison at matching coordinates/
+  zoom (Tiled LOD, z=6, same seed) confirmed visibly finer grain in the affected area — after first
+  discovering (and correcting) a test-methodology trap: probing at the world's single highest point
+  initially showed NO visible difference, traced to that point sitting on a locally flat summit
+  plateau (relief≈0.008) where the amplitude taper (`relief*(1-underwater)`, "flat plains/oceans
+  stay smooth" by design) suppresses nearly all added detail regardless of frequency — a nearby
+  point with real local slope (relief≈0.32) was the correct test site.
+- **Tests**: `tests/run.sh` 1046/1046 (+8), `tests/run_um.sh` 852/852 (block 4 untouched), hash ALL
+  IDENTICAL at the default. New unit assertions cover `lodDetailFreqK`'s own no-op-at-default/
+  growth/cap behavior, `lodTileOpts()` threading it correctly, and a direct
+  `amplifyRegion`-consumes-the-eased-frequency measurement (>2x high-frequency energy vs. the same
+  tile forced to the old flat `detailFreq:1`).
+- **Known scope cuts**: this addresses the LOD zoom-detail SYNTHESIS frequency only — the v1.29-
+  disclosed per-tile seam residue (shared-boundary blur artifact) and the v1.22 supersample-backing-
+  resolution mechanism are separate, already-shipped/already-disclosed pieces of the same overall
+  "LOD render quality" picture, untouched here; a genuinely different biome/season/debug-view than
+  the one reproduced here may still read as visually distinct from the owner's exact screenshot,
+  though the measured, code-verified root cause (a scale-blind noise pipeline) is the same regardless
+  of which specific view triggered the report. `detailAmp` (the added detail's AMPLITUDE, separate
+  from its frequency) is untouched — only how fine-grained, not how tall, the added texture is.
+
 ### v2.04 — Per-stage Journey Planner overrides expanded to the full travel-option set
 
 Owner: "Per stage override should be the full travel options. Per stage a lot can change." Before

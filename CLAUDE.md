@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.04**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.05**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.04.html` | **Current** unified tool (~30.2k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.03.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.05.html` | **Current** unified tool (~30.2k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.04.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,45 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### LOD zoom-detail pipeline made real-km-aware (v2.05)
+
+Owner, pasting a screenshot of blocky terrain under the `LOD6 12,38/par 6,19/cached` debug label:
+"There is still a certain pixilated quality to the map when we zoom. The graphics should be finer
+than that." Engine only (`amplifyRegion`/`addZoomDetail`/`lodTileOpts`). Hash vs v2.04 ALL
+IDENTICAL at the default; a deliberate, measured re-baseline above `mapWidthKm=800`, same class as
+v1.60/v1.101.
+
+- **Root cause, found by reading the source before writing any fix**: neither `amplifyRegion` (the
+  per-tile refine pass) nor `addZoomDetail` (v0.126's extra fractal octaves as LOD depth increases)
+  reference `cellKm`/`mapWidthKm`/`terrainDetailK` anywhere — their added-noise frequency
+  ("cycles per coarse cell") has always defaulted to a flat `1.0`. The exact v1.60 defect, in a
+  DIFFERENT subsystem `terrainDetailK` never reached: that fix only eases the BASE field (one-
+  sided, does nothing for world-scale maps by design), while the LOD viewer's entire purpose is
+  synthesizing texture finer than the base grid can show — precisely what a huge-`cellKm` world
+  needs and never got. At 800km/2048px, one noise cycle per coarse cell is a ~390m wavelength; at
+  the reported 20,000km world it's ~9.8km — 25x coarser, reading as smooth/blocky patches once
+  zoomed in past that.
+- **`lodDetailFreqK(mapWidthKm)`** — the fourth sibling of `terrainDetailK`→`riverCoarseEase`→
+  `_jpDrinkingCoarseEase`, same formula as `riverCoarseEase`, kept as its own named function (a
+  future retune of one must not silently retune the others). Keyed on `mapWidthKm` alone, never
+  blended with `gw` — `riverCoarseEase`'s own CHANGELOG already found blending `gw` re-baselines
+  this file's low-res test previews. Capped at `TERRAIN_DETAIL_MAX_K`; no-op at the literal
+  default.
+- **One-line wire-up**: `lodTileOpts()` (the declared single source of truth for procedural-tile
+  opts) gained `detailFreq: lodDetailFreqK(state.mapWidthKm)` — both consumers already read
+  `opts.detailFreq` with a `1.0` fallback, so nothing else changed.
+- **Measured, not assumed**: reproduced the owner's world shape; the same coarse field/seed/tile
+  location compared against the pre-fix flat `detailFreq:1` showed ~10.5x more high-frequency
+  energy (discrete-Laplacian proxy) post-fix. A real screenshot at matching Tiled-LOD z=6
+  coordinates confirmed visibly finer grain — after catching and fixing a test-site trap: the
+  world's single highest point sits on a locally flat summit plateau (relief≈0.008), where the
+  amplitude taper suppresses added detail regardless of frequency; a nearby sloped point
+  (relief≈0.32) was the correct site.
+- **Tests**: 1046/1046 (+8), 852/852, hash ALL IDENTICAL at default.
+- **Known scope cuts**: the v1.29-disclosed per-tile seam residue and the v1.22 supersample-backing
+  mechanism are separate, untouched pieces of overall LOD render quality; `detailAmp` (amplitude,
+  not frequency) is unchanged.
 
 ### Per-stage Journey Planner overrides expanded to the full travel-option set (v2.04)
 

@@ -4072,6 +4072,45 @@ if (typeof carveRiverValleys === 'function') {
       return t < 2048 * 1024 * 0.0004;
     })());
   }
+  /* ---------- v2.05: lodDetailFreqK — the LOD zoom-detail pipeline's own coarse-side companion ---------- */
+  if (typeof lodDetailFreqK === 'function') {
+    check('lodDetailFreqK===1 at the app default mapWidthKm (800) — bit-identical there', lodDetailFreqK(800) === 1);
+    check('lodDetailFreqK===1 below the default (never eases the fine side)', lodDetailFreqK(50) === 1);
+    check('lodDetailFreqK>1 above the default mapWidthKm (a genuinely large region/world)', lodDetailFreqK(6400) > 1);
+    check('lodDetailFreqK grows as mapWidthKm grows (a bigger world adds finer LOD-zoom noise)', lodDetailFreqK(20000) > lodDetailFreqK(3200));
+    check('lodDetailFreqK is capped at TERRAIN_DETAIL_MAX_K', lodDetailFreqK(1e7) === TERRAIN_DETAIL_MAX_K);
+    check('lodTileOpts() threads lodDetailFreqK(state.mapWidthKm) into detailFreq', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 20000;
+      const o = lodTileOpts(); state.mapWidthKm = savedW;
+      return o.detailFreq === lodDetailFreqK(20000) && o.detailFreq > 1;
+    })());
+    check('lodTileOpts() is a no-op detailFreq (1) at the literal default mapWidthKm', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 800;
+      const o = lodTileOpts(); state.mapWidthKm = savedW;
+      return o.detailFreq === 1;
+    })());
+    check('amplifyRegion/addZoomDetail actually consume the eased detailFreq — a world-scale tile shows more high-frequency content than the same tile forced back to detailFreq:1', (() => {
+      // synthetic coarse field: a smooth dome so relief/taper is nonzero and detail actually applies
+      const cW = 32, cH = 32, coarse = new Float32Array(cW * cH);
+      for (let y = 0; y < cH; y++) for (let x = 0; x < cW; x++) {
+        const dx = (x - cW / 2) / cW, dy = (y - cH / 2) / cH;
+        coarse[y * cW + x] = 0.6 + 0.3 * Math.exp(-(dx * dx + dy * dy) * 6);
+      }
+      const sea = 0.42, region = { x: 8, y: 8, w: 8, h: 8 }, outW = 128, outH = 128;
+      const freqEased = lodDetailFreqK(20000);
+      const tileEased = amplifyRegion(coarse, cW, cH, region, outW, outH, { detailAmp: 0.14, detailFreq: freqEased, sea, seed: 42 });
+      const tileFlat = amplifyRegion(coarse, cW, cH, region, outW, outH, { detailAmp: 0.14, detailFreq: 1, sea, seed: 42 });
+      function highFreqEnergy(arr, W, H) {
+        let e = 0;
+        for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+          const i = y * W + x;
+          e += Math.abs(arr[i - 1] + arr[i + 1] + arr[i - W] + arr[i + W] - 4 * arr[i]);
+        }
+        return e;
+      }
+      return highFreqEnergy(tileEased, outW, outH) > highFreqEnergy(tileFlat, outW, outH) * 2;
+    })());
+  }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
