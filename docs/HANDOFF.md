@@ -9,11 +9,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.99.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.100.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.98` are kept and never edited.
+  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.99` are kept and never edited.
+- **v1.100 — Journey Planner stage-blocking audit: a real remedy gap fixed, two other suspects
+  cleared by measurement.** Owner asked to fix, together, three flagged concerns: frequent stage
+  blocking, whether the route-drawing cost model over-prefers water, and whether settlement
+  gravity ever produces pathologically bad detours. **Real fix**: `_stageTrouble` missed 2 of
+  `_jpVesselWaterBlock`'s 4 verdicts ("cannot operate on..." mode mismatch, "No vessel selected")
+  — both fell to the generic catch-all with no useful remedy. Both mean the party cannot make this
+  water leg at all, so a new confirm()-gated "🔧 Re-route journey, land-only" button (reusing
+  `_jpRerouteForMode`, which gained an optional `forceMode` param) is now offered — the one case
+  where re-routing the whole journey is a genuine, deterministic fix. The land-side capacity hard-
+  blocks (v1.63/v1.67) also now point at their own controls instead of the generic line (no
+  button, per the existing "never applied automatically" precedent). **Suspects #1 and #2 were
+  re-verified and CLEARED, not fixed**: the original sea-cost diagnosis was itself an artefact of
+  comparing against an unfair (non-friction-aware) land baseline — re-measured fairly, the water
+  preference is friction-driven and reasonably grounded, so `_CIV_SEA_COST` was left unchanged;
+  settlement gravity + the existing-way discount measured a bounded ~20% worst-case detour,
+  matching their documented "soft + capped" design. **A real, unrelated bug caught during
+  verification**: the JS `VERSION` const still read `'1.99'` — the THIRD recurrence of this exact
+  drift (v1.30, v1.52, now this); fixed. **Environmental note**: the full `smoke_gen1.js` run
+  crashes the headless Chromium page near its own end in this session's execution environment —
+  reproduced identically against an unmodified v1.99 with a no-op stub, confirming it predates
+  this change; the new assertions were verified via direct, isolated Playwright reproduction
+  instead. 1031/1031, 852/852, hash ALL IDENTICAL. See CHANGELOG/CLAUDE.md for the full writeup.
 - **v1.99 — routing geometry can cut a corner across forbidden terrain; a ferry-crossing
   exception found along the way.** A live Journey-Planner audit (real world, land+sea routes
   between real settlements, several presets/party/vessel configs, checked against
@@ -2920,6 +2942,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, considered not done: `tests/perf/smoke_gen1.js`'s full run (700+ assertions) crashes the
+  headless Chromium page near its own end in this session's execution environment.** Found while
+  verifying v1.100. Reproduced identically against a completely unmodified `Cartalith Gen1
+  v1.99.html`, substituting a no-op stub for v1.100's own new test block — the crash fires at the
+  exact same position regardless of what runs there, confirming it predates v1.100 and is not
+  triggered by any specific test's logic. Most likely cumulative headless-Chromium renderer memory
+  pressure from ~700 assertions' worth of `generate()` calls/canvases/WebGL contexts accumulating in
+  one long-lived page across the whole suite (this environment renders WebGL via SwiftShader —
+  software rasterization, already flagged elsewhere as heavier than real hardware). NOT fixed this
+  pass — no `generate()`/`renderNow()` code was touched, and diagnosing a headless-browser resource
+  ceiling is a different kind of work than the routing audit this session was asked to do. If picked
+  up: try periodically closing/reopening the page (or splitting the suite into several page sessions)
+  inside `smoke_gen1.js` itself; confirm first whether the crash point is stable (always the same
+  assertion offset) or drifts with unrelated changes, which would point to a memory-size threshold
+  rather than a specific leak.
+- **OPEN, considered not done: the `VERSION` JS const (`Cartalith Gen1 v*.html`, near the top of
+  script block 1) has now drifted stale THREE times** (v1.30, v1.52, v1.100) despite two prior
+  fix-comments warning about exactly this. It's export/atlas metadata + the on-screen `#verTag`
+  chip only — never gated on, confirmed harmless to every hashed/tested field — but still a real,
+  repeatedly-recurring defect. A real fix needs one source of truth: either derive `VERSION` from
+  the `<title>` tag at load time (or vice versa), or add a build-time/commit-time check outside the
+  file itself, rather than relying on a human to remember a third hardcoded literal on every version
+  bump. Not attempted this pass — a version-bump-hygiene change is a different scope than a version
+  bump itself.
 - **RESOLVED in v1.96** (was: "`buildResourcePotentials` costs ~500ms at 2048px inside a PLAIN
   `generate()`"). The v1.92 guess — block 2's `renderNow` wrapper lazily triggering it — was wrong.
   The real path is `generate()`'s civ-layer **wrapper**, not its render: it calls

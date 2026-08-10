@@ -12,6 +12,91 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.100 — Journey Planner stage-blocking audit: a real remedy gap fixed, two other suspects cleared by measurement
+
+Owner: reported the Journey Planner blocking frequently and asked to check whether the route-drawing
+cost model (sea preference) and settlement gravity ever produce pathologically bad routes, alongside
+the blocking itself. Audited all three; only one produced code changes. Civ-layer only. Hash vs v1.99
+**ALL IDENTICAL** in every scenario — none of these functions are reached from `generate()`/
+`renderNow()`.
+
+- **Real finding: `_stageTrouble` missed 2 of `_jpVesselWaterBlock`'s 4 verdicts, and the land
+  capacity hard-blocks fell to the fully generic catch-all too.** "Cannot operate on rivers/lakes"/
+  "the open sea" (a MODE mismatch, not a rating shortfall — this class of vessel can never be here)
+  and "No vessel selected for the water leg." match neither pre-existing regex (no hyphenated
+  "open-sea", no "navigate"), so both fell through to "Adjust this stage's overrides below, or
+  re-route" with no useful remedy. Both mean the party cannot make this water leg at all, which
+  makes them the one case where re-routing the WHOLE journey land-only is a genuine, deterministic,
+  one-click fix — `_jpRerouteForMode` gained an optional `forceMode` param (`'land'|'water'|'mixed'`,
+  omitted = identical pre-v1.100 behaviour) so the button can force land even when the journey's
+  overall Transport is still Sea Faring/River Transport for the rest of the trip (re-deriving from
+  `plan.transport` there would just re-path the same water domain and reproduce the identical
+  unusable leg). A new "🔧 Re-route journey, land-only" quick-fix button, confirm()-gated exactly
+  like the existing `#reRerouteBtn` since it replaces the whole drawn path, not just this stage. The
+  land-side capacity hard-blocks (v1.63's pre-loop ratio0 check, v1.67's post-loop water-driven
+  check) already name their own remedy in `r.blocked`, so — like the sibling water-resupply case —
+  they now point at the controls instead of the generic line; no button, same v1.48/v1.49 "cargo/
+  party-size stays the user's own call" precedent.
+- **Testing this surfaced a real test-authoring trap, not an app bug**: a mocked water stage with a
+  wrong vessel set at the PLAN level (`plan.vessel`) never actually blocks — `_jpPlan`'s own v1.53
+  graceful per-stage vessel fallback silently substitutes a working vessel whenever a water stage's
+  block has no EXPLICIT per-stage override, and a shared-plan vessel doesn't count as one. The
+  mismatch/no-vessel scenarios had to be set via `stageOverrides[idx].vessel` to actually reach the
+  blocked state — confirmed by first observing the wrong scenario render "Favourable," not blocked
+  at all, then fixing the test setup, not the (working) fallback. Verified end-to-end via direct
+  reproduction: block renders → button appears → decline leaves `jn.pts` untouched → accept reroutes
+  and the resulting journey, re-planned through the REAL (unmocked) stage deriver on the new
+  all-land path, is genuinely no longer blocked.
+- **Suspect #1 (sea-cost model), re-verified and cleared — the original diagnosis was itself an
+  artefact of an unfair baseline.** A first comparison (mixed-mode path vs. `mode='land'`) found
+  many real routes 30–50% water for a claimed <2% distance saving, suggesting `_CIV_SEA_COST=0.6`
+  was pulling routes into the ocean for near-zero benefit. Re-run against a FAIR baseline —
+  `_civMixedCostGrid`'s own land-cost formula (biome friction + navigable-river discount), with
+  water forced to Infinity, rather than `_civLandCostGrid`'s plain slope-only cost — the same
+  routes are typically within ±2% of the achievable friction-aware land route, and roughly a third
+  show a real ~6–7% advantage for the water option; a large share of the highest-water-fraction
+  cases turned out to have NO land alternative at all (genuinely separate landmasses, where the
+  land-only baseline is correctly unreachable). Sweeping the sea-cost constant from 0.6 up to 1.1
+  never changed this outcome (the water preference is friction-driven, not a coin-flip cost
+  artefact). Given real sailing ships are 1.7–2.5× a walker's speed (per `travel-speeds.md`), a
+  modest per-cell cost preference for water is economically justified whenever a suitable vessel
+  exists — which is exactly the gap the remedy fix above closes for the party that doesn't have
+  one. No change shipped to `_CIV_SEA_COST`/`_civMixedCostGrid` — recalibrating a model that
+  measures out as reasonably grounded would have been exactly the "guess-and-ship" this file's own
+  CHANGELOG repeatedly warns against.
+- **Suspect #2 (settlement gravity + the existing-way discount), also cleared.** A direct A/B
+  (real vs. a neutralized control with both mechanisms off) found the intended, bounded behaviour —
+  worst measured circuity 1.57×, up to ~20% longer than the neutral control, consistent with v0.73's
+  own "soft + capped, never a large detour" design and v1.64's explicit "always follow existing
+  infrastructure" request. One real methodology trap found along the way, not an app bug: clearing
+  `civWays`/`state.roads` entirely to build a "neutral" control also strips the v1.53/v1.99
+  documented sea-lane "ferry crossing" exception, which provides genuine LAND-mode connectivity
+  between separate landmasses — several seeds' farthest-apart pairs turned out to be ferry-dependent,
+  reading as "unreachable" once the ferry was removed rather than revealing anything about gravity or
+  the way discount. Re-run against seeds whose sampled pairs don't depend on a ferry to stay
+  comparable.
+- **A real, unrelated bug caught by the smoke suite's own v1.52 assertion during verification, not
+  invented by this pass**: this file shipped with the JS `VERSION` const still reading `'1.99'` — the
+  THIRD time this exact drift has recurred (v1.30, v1.52, now this). Fixed; a real single-source-of-
+  truth fix (deriving the `<title>`/`#verTag` literals from `VERSION` or vice versa) is disclosed as
+  a follow-up rather than folded into this bump.
+- **Known environmental note, not a regression**: the full `smoke_gen1.js` run (700+ assertions)
+  crashes the headless Chromium page near its own end in this execution environment — reproduced
+  identically against a completely unmodified `Cartalith Gen1 v1.99.html` with a no-op stub in place
+  of this version's own new test block, confirming it predates this change and is unrelated to it
+  (likely cumulative renderer memory pressure from ~700 assertions' worth of `generate()` calls/
+  canvases/WebGL contexts in one long-lived page, not something a specific test triggers). The new
+  v1.100 assertions were independently verified via direct, isolated Playwright reproduction instead
+  (matching this file's own precedent for canvas/GPU-adjacent verification gaps). `tests/run.sh`
+  (1031/1031), `tests/run_um.sh` (852/852), and `hash_gen1.js` (ALL IDENTICAL) all ran clean and are
+  unaffected by this environmental limitation.
+- **Known scope cuts**: the vessel-rating shortfall messages ("not rated for open-sea conditions",
+  "cannot navigate X") keep their pre-existing vessel-swap-only fix text — a different hull might
+  sail this exact water fine, so land-only reroute is offered as a secondary option in the fix text
+  but doesn't get its own button there (a rating shortfall isn't "this class of vessel can never be
+  here," unlike the two messages this version does button); the `VERSION` triple-drift's real fix
+  (one source of truth) is disclosed, not built, this pass.
+
 ### v1.99 — Routing geometry can cut a corner across forbidden terrain; a ferry-crossing exception found along the way
 
 Owner: a live Journey-Planner audit (real generated+auto-populated world, land and sea routes

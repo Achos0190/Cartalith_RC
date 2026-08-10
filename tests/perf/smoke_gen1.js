@@ -7798,6 +7798,154 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.99: _civCommitWay still creates the way despite the warning — a hand-placed waypoint is not silently discarded', !R.v199.foundOceanPt || R.v199.commitWayStillCreatedTheWay);
   A('v1.99: an ordinary reachable leg between two real settlements is never flagged (no false positives)', R.v199.ordinaryLegNotFlagged !== false);
 
+  // ── v1.100 (JP stage-blocking audit): _stageTrouble missed 2 of _jpVesselWaterBlock's 4
+  // verdicts. "cannot operate on rivers/lakes"/"the open sea" (a MODE mismatch — this class of
+  // vessel can never be here, unlike a rating shortfall) and "No vessel selected" match neither
+  // pre-existing regex (no hyphenated "open-sea", no "navigate") and fell to the fully generic
+  // catch-all with no useful remedy. Both are water-only and mean the party cannot make this leg
+  // by water at all — the one case where re-routing the WHOLE journey land-only is a genuine,
+  // deterministic, one-click fix (reuses _jpRerouteForMode verbatim via a new optional forceMode
+  // param, confirm()-gated exactly like the existing #reRerouteBtn since it replaces the whole
+  // drawn path). The land-side capacity hard-blocks (v1.63/v1.67) also fell to the generic line
+  // despite already naming their own remedy in r.blocked — given the same "point at the controls,
+  // don't restate" treatment as the sibling water-resupply case, still with no button (a
+  // cargo/party-size change stays the user's own call, same v1.48/v1.49 precedent as always).
+  R.v100 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const span = Math.max(20, Math.min(GW - 10 - landPt[0], 40));
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    const origConfirm = window.confirm, origAlert = window.alert;
+    try {
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v100', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // ── vessel MODE mismatch: a river-only vessel (River Barge) staged on open sea. Set as an
+      // EXPLICIT PER-STAGE override (stageOverrides[0].vessel), not the shared plan-level vessel —
+      // a shared vessel that can't do one stage is silently substituted by _jpPlan's own graceful
+      // per-stage fallback (v1.53, "a keelboat auto-selected crossing the ocean is rejected" fix)
+      // UNLESS the stage carries its own explicit override, which that fallback deliberately never
+      // second-guesses. Caught by first running this against the plan-level field and observing it
+      // silently render "Favourable", not blocked at all — the fallback quietly picked a working
+      // vessel instead. ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'sea', terrain: 'Coastal Waters', routeCond: 'Neutral',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', groupSize: 4, cargoKg: 10, stageOverrides: { 0: { vessel: 'River Barge' } } });
+        _civOpenRouteEditor(0);
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.mismatchRendered = /Impossible as configured/.test(h) && /cannot operate on/.test(h);
+        o.mismatchFixMentionsReroute = /re-route this journey land-only/.test(h);
+        const btn = document.querySelector('[data-jps-fix-reroute-land]');
+        o.mismatchButtonExists = !!btn;
+
+        // decline leaves the drawn path untouched (same confirm()-gate as #reRerouteBtn)
+        const ptsBeforeDecline = jn.pts;
+        let confirmCalls = 0;
+        window.confirm = () => { confirmCalls++; return false; };
+        if (btn) btn.click();
+        o.declineLeavesPtsUntouched = jn.pts === ptsBeforeDecline && confirmCalls === 1;
+
+        // accept genuinely reroutes and, run back through the REAL (unmocked) stage deriver on
+        // the new all-land path, actually clears the block end-to-end
+        window._jpDeriveStages = origDerive;
+        window.confirm = () => true; window.alert = () => {};
+        const btn2 = document.querySelector('[data-jps-fix-reroute-land]');
+        if (btn2) btn2.click();
+        o.rerouteReplacedPts = jn.pts !== ptsBeforeDecline && jn.pts.length >= 2;
+        const plan2 = _jpPlan(jn);
+        o.rerouteUnblocksJourney = !plan2.blocked;
+      }
+
+      // ── "No vessel selected for the water leg." — same explicit-override requirement as above;
+      // a genuinely empty per-stage vessel override (ov.vessel==='') is treated as "no override"
+      // by _jpPlan's own hasOverride check and would hit the graceful fallback instead, so this
+      // uses a non-empty but invalid vessel name (JP_SHIPS[name]===undefined) — the real shape a
+      // stray/corrupted stageOverrides entry would take, since the UI's own per-stage select only
+      // ever offers real JP_SHIPS keys or deletes the override entirely. ──
+      {
+        window.confirm = origConfirm; window.alert = origAlert;
+        window._jpDeriveStages = () => [{ km: 50, cat: 'river', terrain: 'Calm River', routeCond: 'Neutral',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', groupSize: 4, cargoKg: 10, stageOverrides: { 0: { vessel: 'Nonexistent Vessel' } } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.noVesselRendered = /Impossible as configured/.test(h) && /No vessel selected/.test(h);
+        o.noVesselButtonExists = !!document.querySelector('[data-jps-fix-reroute-land]');
+      }
+
+      // ── land capacity overload: improved fix text (names the controls, like the sibling
+      // water-resupply case), but still NO button — matches the pre-existing v1.65
+      // noFixButtonForCapacityBlock scenario exactly, confirming that behavior is unchanged ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', carts: 0, wagons: 0, groupSize: 1, cargoKg: 5000,
+          stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.overloadRendered = /Impossible as configured/.test(h) && /no party departs in this state/.test(h);
+        o.overloadFixNamesControls = /pack animals or a cart\/wagon/.test(h);
+        o.overloadNoRerouteButton = !document.querySelector('[data-jps-fix-reroute-land]');
+      }
+
+      // ── the mechanism this whole feature depends on: forceMode='land' must override
+      // plan.transport, not merely omit it — a block can happen on ONE stage even while the
+      // journey's overall transport is Sea Faring/River Transport for the rest of the trip;
+      // re-deriving from plan.transport there would re-path the SAME water domain and reproduce
+      // the identical unusable leg ──
+      {
+        window._jpDeriveStages = origDerive;
+        const p = _jpEnsurePlan(jn);
+        p.transport = 'Sea Faring';
+        jn.pts = pts.map(pt => pt.slice());
+        const withoutForce = _jpRerouteForMode(jn);
+        o.withoutForceFailsUnderSeaTransport = withoutForce.ok === false;
+        jn.pts = pts.map(pt => pt.slice());
+        const withForce = _jpRerouteForMode(jn, 'land');
+        o.forceLandSucceedsUnderSeaTransport = withForce.ok === true;
+      }
+
+      // ── backward compatibility: the pre-v1.100 call shape (no second argument) is unaffected ──
+      {
+        window._jpDeriveStages = origDerive;
+        const p = _jpEnsurePlan(jn);
+        p.transport = 'Walking';
+        jn.pts = pts.map(pt => pt.slice());
+        const oldPts = jn.pts;
+        const res = _jpRerouteForMode(jn);
+        o.plainRerouteStillWorks = res.ok === true && jn.pts !== oldPts;
+      }
+    } finally {
+      window._jpDeriveStages = origDerive; window.confirm = origConfirm; window.alert = origAlert;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+  A('v1.100: a vessel MODE mismatch ("cannot operate on...") now renders with a specific fix, not the generic catch-all', R.v100.mismatchRendered);
+  A('v1.100: its fix text points at re-routing the journey land-only', R.v100.mismatchFixMentionsReroute);
+  A('v1.100: the "Re-route journey, land-only" quick-fix button is rendered for it', R.v100.mismatchButtonExists);
+  A('v1.100: declining the reroute confirm() leaves the drawn path untouched', R.v100.declineLeavesPtsUntouched);
+  A('v1.100: accepting genuinely replaces the drawn path', R.v100.rerouteReplacedPts);
+  A('v1.100: and the rerouted journey is no longer blocked, run back through the real (unmocked) stage deriver', R.v100.rerouteUnblocksJourney);
+  A('v1.100: "No vessel selected for the water leg." also renders with the reroute quick fix', R.v100.noVesselRendered && R.v100.noVesselButtonExists);
+  A('v1.100: a land capacity overload gets fix text naming the actual controls (pack animals/cart, resupply stop), not the fully generic line', R.v100.overloadRendered && R.v100.overloadFixNamesControls);
+  A('v1.100: but still gets no quick-fix button (cargo/party-size stays the user\'s own call, v1.48/v1.49 precedent, unchanged from v1.65)', R.v100.overloadNoRerouteButton);
+  A('v1.100: _jpRerouteForMode(jn) with no forceMode still fails under Sea Faring for two inland points (unchanged pre-v1.100 behavior)', R.v100.withoutForceFailsUnderSeaTransport);
+  A('v1.100: _jpRerouteForMode(jn,\'land\') succeeds for the SAME inland points even though plan.transport is still Sea Faring — the actual mechanism this feature depends on', R.v100.forceLandSucceedsUnderSeaTransport);
+  A('v1.100: the pre-v1.100 call shape (no second argument) is unaffected', R.v100.plainRerouteStillWorks);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

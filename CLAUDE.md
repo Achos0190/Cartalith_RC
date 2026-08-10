@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.99**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.100**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.99.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.98.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.100.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.99.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,60 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Journey Planner stage-blocking audit: a real remedy gap fixed, two other suspects cleared by measurement (v1.100)
+
+Owner asked to fix, together, three things flagged by a Journey Planner audit: frequent stage
+blocking, whether the route-drawing cost model over-prefers water, and whether settlement gravity
+ever produces pathologically bad detours. Civ-layer only. Hash vs v1.99 ALL IDENTICAL.
+
+- **Real fix: `_stageTrouble` missed 2 of `_jpVesselWaterBlock`'s 4 verdicts.** "Cannot operate on
+  rivers/lakes"/"the open sea" (a MODE mismatch, not a rating shortfall) and "No vessel selected"
+  matched neither pre-existing regex (no hyphenated "open-sea", no "navigate"), so both fell to the
+  fully generic catch-all. Both mean the party cannot make this water leg at all — the one case
+  where re-routing the WHOLE journey land-only is a genuine, deterministic fix. `_jpRerouteForMode`
+  gained an optional `forceMode` param (omitted = identical pre-v1.100 behaviour) so a new
+  confirm()-gated "🔧 Re-route journey, land-only" button can force land even when the journey's
+  overall Transport is still Sea Faring/River Transport for the rest of the trip. The land-side
+  capacity hard-blocks (v1.63/v1.67) already name their own remedy in `r.blocked`; they now point at
+  the controls instead of the generic line, same as the sibling water-resupply case — no button,
+  per the existing v1.48/v1.49 "cargo/party-size stays the user's own call" precedent.
+- **Test-authoring trap found while verifying it**: a mocked water stage with the wrong vessel set
+  at the PLAN level never blocks — `_jpPlan`'s own v1.53 graceful per-stage fallback silently
+  substitutes a working vessel whenever a water stage's block has no EXPLICIT per-stage override,
+  and a shared-plan vessel doesn't count as one. Fixed the test (`stageOverrides[idx].vessel`), not
+  the (correctly working) fallback.
+- **Suspect #1 (sea-cost model), re-verified and cleared.** A first comparison (mixed-mode vs.
+  `mode='land'`) suggested `_CIV_SEA_COST=0.6` pulls routes into the ocean for near-zero benefit.
+  Re-run against a FAIR baseline — `_civMixedCostGrid`'s own land-cost formula (biome friction +
+  river discount) with water forced to Infinity, instead of `_civLandCostGrid`'s plain slope-only
+  cost — the same routes are typically within ±2% of the achievable land route, a third show a real
+  ~6–7% water advantage, and many of the highest-water-fraction cases have no land alternative at
+  all (genuinely separate landmasses). Sweeping the constant 0.6→1.1 didn't change the outcome — the
+  preference is friction-driven, not a coin-flip artefact. No change shipped; recalibrating a model
+  that measures out as reasonably grounded would itself have been the "guess-and-ship" this file's
+  CHANGELOG repeatedly warns against.
+- **Suspect #2 (settlement gravity + the existing-way discount), also cleared.** Direct A/B (real vs.
+  a neutralized control) measured worst circuity 1.57×, up to ~20% longer than neutral — bounded,
+  matching v0.73's "soft + capped" design and v1.64's explicit "always follow existing
+  infrastructure" request. One methodology trap along the way: clearing `civWays`/`state.roads`
+  entirely to build the "neutral" control also strips the v1.53/v1.99 documented ferry-crossing
+  exception, so several seeds' farthest pairs read as "unreachable" once the ferry was removed —
+  not a gravity/discount effect. Re-run against ferry-independent pairs.
+- **A real, unrelated bug caught by the smoke suite's own v1.52 assertion during verification**:
+  this file shipped with the JS `VERSION` const still reading `'1.99'` — the THIRD recurrence of
+  this exact drift (v1.30, v1.52, now this). Fixed; a real single-source-of-truth fix is disclosed
+  as a follow-up, not folded into this bump.
+- **Known environmental note, not a regression**: the full `smoke_gen1.js` run (700+ assertions)
+  crashes the headless Chromium page near its own end in this execution environment — reproduced
+  identically against an unmodified v1.99 with a no-op stub in place of this version's own new test
+  block, confirming it predates this change. The new assertions were independently verified via
+  direct, isolated Playwright reproduction instead. `tests/run.sh` (1031/1031), `tests/run_um.sh`
+  (852/852), and `hash_gen1.js` (ALL IDENTICAL) all ran clean.
+- **Known scope cuts**: the vessel-rating-shortfall messages ("not rated for open-sea conditions",
+  "cannot navigate X") keep their pre-existing vessel-swap-only fix text (a different hull might
+  sail this exact water fine) — land-only reroute is mentioned but doesn't get its own button there;
+  the `VERSION` triple-drift's real fix (one source of truth) is disclosed, not built, this pass.
 
 ### Routing geometry can cut a corner across forbidden terrain; a ferry exception found along the way (v1.99)
 
