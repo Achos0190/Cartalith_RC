@@ -6,7 +6,11 @@ Audited against `Cartalith Gen1 v1.96.html`. Line numbers are from that file.
 > fields + vessel sail polar). P1 U4+U5 shipped in **v1.98** (`edgeCost` hook + sea-lane geometry
 > costed by round-trip sailing time). Remaining open: time-valued LAND cost (U6, deliberately
 > deferred), route-class cost functions, gravity demand, seasonality, storm risk. Rows below are
-> annotated where v1.97/v1.98 changed them.
+> annotated where v1.97/v1.98 changed them. **v1.99** fixed a correctness bug this audit didn't
+> cover — the downsampled routing grid (§K) plus `_civSmoothPath`'s Catmull-Rom smoothing could
+> produce geometry crossing terrain the caller's mode declares forbidden — found via a live
+> Journey-Planner audit against `travel-speeds.md`, not this document; see § M below and
+> CHANGELOG.md for the full writeup.
 
 This document is an **audit**, not an implementation. Nothing in it has been built. Section I
 proposes a prioritised plan; it is a recommendation awaiting owner direction.
@@ -405,6 +409,35 @@ or river-flow component — the single sharpest check that directionality is rea
   currently fixed multipliers, which is why the network has not collapsed onto single trunks.
 - **Anisotropic land cost is optional.** It is the literature default but the gain at fantasy map
   scale is unproven; P2, not P0.
+
+---
+
+## M. Addendum (v1.99): the downsampled grid + spline smoothing can produce invalid geometry
+
+Not a finding of this audit — discovered afterward, via a live Journey-Planner audit run against
+`docs/research/travel-speeds.md` rather than against this document. Recorded here because it sits
+squarely in §K's territory (the downsampled `_civRoutingGrid`) and the next reader of this audit
+should know about it before touching that code.
+
+- §K notes the ≤384px downsample "handles the brief's §26 performance concern" — true, but it also
+  means `_civLandCostGrid`/`_civWaterCostGrid` decide passability from ONE sampled full-res pixel
+  per coarse cell, which can misclassify a coarse cell that contains a small patch of the forbidden
+  terrain. Worse: this is not purely a downsampling artefact — `_civSmoothPath`'s Catmull-Rom
+  reconstruction is not guaranteed to stay within its own control points' convex hull, so it can
+  swing across a concave water/land boundary even with NO downsampling in effect.
+- Fixed with a full-resolution repair pass (`_civTerrainValidTest`/`_civNearestValidPt`) inside
+  `_civSmoothPath` itself, applied wherever a 'land'- or 'water'-mode path is built. 'mixed' mode
+  (§F, §H — the general Route tool, sea lanes excluded) is exempt: crossing water there is already
+  legitimate by design, so there is no forbidden terrain to repair against.
+- One real subtlety worth flagging for anyone extending this: `_civDijkstraPath`'s own land-mode
+  cost grid carries a pre-existing "an existing sea-lane way is a traversable ferry crossing" (v1.53)
+  exception that none of the OTHER land-only cost-grid builders in §B (`_civHierarchicalNetwork`,
+  `_civConnectPlaceToNetwork`, `_civConnectVillageAddons`) share — a naive version of this fix
+  didn't account for that and "corrected" a legitimate ferry crossing back onto dry land. Any future
+  change to where ferries are allowed needs to touch `_civTerrainValidTest`'s `allowSeaLanes` flag,
+  not just the cost grid, or the two will drift the same way every duplicate-logic instance in this
+  file's own CHANGELOG eventually does.
+- Full writeup, measurements and test coverage: CHANGELOG.md's v1.99 entry.
 
 ---
 

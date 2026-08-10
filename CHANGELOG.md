@@ -12,6 +12,106 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.99 — Routing geometry can cut a corner across forbidden terrain; a ferry-crossing exception found along the way
+
+Owner: a live Journey-Planner audit (real generated+auto-populated world, land and sea routes
+between real settlements, several presets/party/animal/vessel configurations, checked against
+`docs/research/travel-speeds.md` §8 and fresh independent research) found land-mode routes reading
+partly as ocean and vice versa, then "Fix all bugs you found." Two of the three reported findings
+were real; the third turned out to be the audit's own mistake, caught by re-reading the source
+table before writing a fix — see below. Civ-layer only (`_civSmoothPath` and its five callers).
+Hash vs v1.98 **ALL IDENTICAL** — none of these functions are reached from `generate()`/
+`renderNow()`.
+
+- **Root cause, confirmed by direct reproduction before writing any fix.** `_civLandCostGrid`/
+  `_civWaterCostGrid` decide passability on `_civRoutingGrid`'s downsampled grid (≤384px wide),
+  sampling ONE representative full-res pixel per coarse cell — a coarse cell can read "passable"
+  while other full-res pixels inside it are the forbidden terrain. Confirmed this is not merely a
+  downsampling artefact: it reproduces even at 1:1 resolution (GW≤384, no downsampling at all),
+  because `_civSmoothPath`'s `catmullRomSample` is a Catmull-Rom spline, and a Catmull-Rom spline
+  is **not guaranteed to stay within the convex hull of its own control points** — it can swing
+  across a concave water/land boundary (a coastal inlet, a river bend) between two waypoints that
+  are each individually fine. Measured before fixing: a land-mode path had up to 33.6% of its
+  points sitting on real ocean at 512px, and the effect persisted (4.5–23% residual) even with
+  downsampling eliminated. Symptom downstream: `_jpDeriveStages` correctly classifies the resulting
+  phantom stage from the real full-res field — the stage classification was never the bug — but the
+  stage itself shouldn't exist. It either hard-blocks an otherwise-fine journey with a confusing
+  "Hold overloaded: 54.6 t exceeds Keelboat's 8.0 t capacity" on a Walking party, or (the worse
+  case) silently succeeds with a physically nonsensical leg: one audited route had a solo Foot
+  Traveller "walking" 229.9 km through Coastal Waters at 17.1 km/day, no warning.
+- **Fix: `_civTerrainValidTest(kind)` + `_civNearestValidPt`, a full-resolution repair pass inside
+  `_civSmoothPath` itself.** `_civTerrainValidTest('land'|'water'|'ocean')` builds a FULL-res point
+  predicate mirroring each cost grid's own impassability definition exactly (one definition, reused
+  for the check AND the geometry that produced it — otherwise this is the same "two functions
+  answering one question WILL drift" lesson, this time between a cost grid and its own output).
+  `_civSmoothPath` gained an optional `isValid` parameter: any smoothed point that fails it gets
+  snapped to the nearest full-res cell that passes, via `_civNearestValidPt`'s bounded expanding-box
+  search (mirrors the `snapFinite` idiom already used by `_civMstRoutes`/`_civHierarchicalNetwork`,
+  against a point predicate instead of a cost-grid cell; gives up and keeps the original point,
+  never a wild teleport, if nothing qualifies within range). Wired at every 'land'/'water'-mode
+  caller: `_civDijkstraPath`, `_civMstRoutes`, `_civHierarchicalNetwork`, `_civConnectPlaceToNetwork`,
+  `_civConnectVillageAddons`. **'mixed' mode is deliberately exempt** — `_civMixedCostGrid` allows
+  crossing water when it's genuinely cheaper (by design, v0.94), so there is no forbidden terrain
+  for it to violate. The caller's own supplied endpoint (a settlement pin, or a pre-snapped water
+  cell for a sea lane) is restored AFTER the repair pass, unchanged — the v0.92 "the run's own
+  endpoint is authoritative" precedent, still respected.
+- **A first version of this fix was wrong, and verification caught it before shipping.** The naive
+  repair pass (no ferry awareness) measured as a REGRESSION on one real route — water-fraction went
+  UP after the fix, from 2% to 32%. Root cause: `_civDijkstraPath`'s own land-mode cost-grid
+  mutation already has a pre-existing, documented exception — a cell on an existing sea-lane way
+  becomes a traversable "ferry crossing" even in 'land' mode (the v1.53 comment on that exact
+  mutation: `cost[i]=isFinite(cost[i])?cost[i]*DISCOUNT:1.0`). The naive fix didn't know about this
+  and was "fixing" a real, intentional 77-point ferry leg back onto dry land — direct measurement
+  confirmed all 77 flagged points sat within 2.83 px of the actual sea lane, none anywhere else.
+  `_civTerrainValidTest` gained an `opts.allowSeaLanes` flag, wired ONLY at `_civDijkstraPath`'s own
+  'land' branch (the only cost-grid builder with this exception — confirmed by reading
+  `_civLandCostGrid`/`_civEnhancedTravelCost`, used by every other land-only caller, which have no
+  such mutation). **Third time this file has shipped a fix, measured it, and found the fix itself
+  was the bug** — the discipline that catches it (measure before AND after, on the real function,
+  not the intended behaviour) is the whole reason it gets caught before the commit, not after.
+- **`_civJoinDijkstraSegs` gained `unreachableLegs`, and `_civCommitWay` now warns instead of
+  silently drawing a straight line through forbidden terrain.** Found while verifying the fix: a
+  manually-drawn 'land'/'water' Way between two waypoints with no real connecting path
+  (`_civDijkstraPath`'s own documented straight-line fallback for this case, guarded by its
+  `reachable` field since v1.47) was committed with zero indication anything was off — the ONE
+  caller that already checks `.reachable` is `_jpRerouteForMode` (v1.47); the manual Way tool never
+  did. Non-blocking (the waypoints are the user's own placed work, same "never silently discard it"
+  precedent as v1.24's BUG-4): the way still commits, but an alert names the affected segment count
+  and points at the map. `_civCommitRoute`'s 'mixed' mode is untouched — it has no unreachable
+  concept to warn about (§ above).
+- **The third reported finding was the audit's own comparison error, not an app bug — confirmed by
+  re-reading the source table, not by re-measuring.** Solo Foot-Traveller Paved-Road speed measured
+  43.3–50.3 km/day and was compared against `docs/research/travel-speeds.md` §8's **calendar-
+  average** band (30-40) — wrong column. That table's row reads "Paved road (Roman-equivalent,
+  unaided traveler) | 40-50 | 30-40 | 25-32" — **travel-day | calendar-average | expedition-
+  average** — and `_jpPlan`'s `dailyKm`/`avgKmDay` is explicitly the travel-day figure (v1.52's own
+  CHANGELOG: "Rest days added to a travel-day total... the underlying per-stage speeds are
+  untouched"). Measured against the correct column (40-50), the tool's 43.3–50.3 sits inside the
+  band, 0.3 over at the very top — negligible route-condition/infra-tier stacking, not a
+  miscalibration. No code change; "fix all bugs found" applies to the two that were real.
+- **Verified two ways.** (1) A live A/B across 7 seeds/resolutions, land- and water-mode
+  `_civDijkstraPath` calls between real settlement pairs (up to 30 reachable pairs per seed,
+  25,652 total path points measured): **0 genuinely-bad points** (water on a land-mode path,
+  excluding legitimate ferry cells; land on a water-mode path) across the entire sample; the
+  auto-road-network/sea-lane-MST/village-addon connectors (which have no ferry exception, so held
+  to a fully strict standard) likewise measured clean. Two residual "bad" points found in one
+  seed's auto-network output turned out to be a SETTLEMENT'S OWN PIN sitting on a water-classified
+  cell — a placement/classification question, correctly out of scope for a routing-geometry repair
+  pass, and untouched by design (the caller-supplied endpoint is never moved). (2) `hash_gen1.js`
+  ALL IDENTICAL; 1031/1031; 852/852; smoke 712/714 → 730/732 (+18: unit tests of
+  `_civTerrainValidTest`/`_civNearestValidPt`/the repair pass/the ferry exception on a controlled
+  synthetic grid, plus live-world land/water/auto-network cleanliness and the new
+  `unreachableLegs`/`_civCommitWay` warning behaviour) — the 2 shortfalls are the pre-existing
+  v0.92/v0.87 environmental canvas-sizing failures, unrelated.
+- **Known scope cuts**: the repair pass corrects points, not the underlying coarse-grid sampling or
+  spline algorithm themselves — a deliberate choice, since the coarse grid genuinely needs
+  downsampling for performance and Catmull-Rom's lack of a convex-hull guarantee is a property of
+  the curve family, not a bug in this file's use of it; fixing the SYMPTOM at the one place the
+  invariant is actually checked is more robust than chasing every contributing cause upstream.
+  `_civNearestValidPt`'s search is bounded (`maxR=16` full-res cells) — sufficient for every case
+  measured, but a pathological world could in principle still leave an unrepaired point, which the
+  function surfaces honestly (keeps the original point) rather than silently teleporting far away.
+
 ### v1.98 — Sea-lane geometry from round-trip time, not uniform distance (routing-audit U4/U5)
 
 The agreed second half of the routing-audit work (U1+U2+U3 shipped in v1.97). Closes the audit's

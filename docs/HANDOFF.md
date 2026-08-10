@@ -9,11 +9,43 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.98.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.99.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.99 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.97` are kept and never edited.
+  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.98` are kept and never edited.
+- **v1.99 — routing geometry can cut a corner across forbidden terrain; a ferry-crossing
+  exception found along the way.** A live Journey-Planner audit (real world, land+sea routes
+  between real settlements, several presets/party/vessel configs, checked against
+  `docs/research/travel-speeds.md` §8) found land-mode routes reading partly as ocean and vice
+  versa, then "Fix all bugs you found." **Root cause**: `_civRoutingGrid`'s downsampled coarse
+  cell can read "passable" from one sampled pixel while other full-res pixels inside it are the
+  forbidden terrain, AND `catmullRomSample`'s Catmull-Rom spline is not guaranteed to stay within
+  its own control points' convex hull — reproduces even at 1:1 resolution, so it's the spline,
+  not merely the downsample. Symptom: `_jpDeriveStages` correctly classifies the resulting
+  phantom stage, but the stage itself shouldn't exist — either a confusing hold/porter-capacity
+  hard-block, or (worse) a silently-accepted nonsensical leg (a solo walker "crossing" 230 km of
+  open water at 17 km/day, no warning). **Fix**: `_civTerrainValidTest`/`_civNearestValidPt`, a
+  full-resolution repair pass inside `_civSmoothPath` itself, wired at every 'land'/'water'-mode
+  caller (`_civDijkstraPath`, `_civMstRoutes`, `_civHierarchicalNetwork`,
+  `_civConnectPlaceToNetwork`, `_civConnectVillageAddons`) — 'mixed' mode is exempt by design
+  (crossing water there is legitimate). **A first cut of the fix was itself wrong** — caught by
+  measuring before AND after: water-fraction went UP (2%→32%) on one route, because
+  `_civDijkstraPath`'s own land-mode cost grid already has a documented "existing sea lane is a
+  traversable ferry crossing" exception (v1.53) the naive repair didn't know about, and was
+  "fixing" a real 77-point ferry leg back onto dry land — a new `opts.allowSeaLanes` flag, scoped
+  to the ONE cost-grid builder that actually has this exception, fixed it. Also: `_civCommitWay`
+  now warns (non-blocking) instead of silently drawing a straight line through forbidden terrain
+  when a manually-drawn Way's waypoints have no real connecting path — the one
+  `_civDijkstraPath`-consuming caller besides `_jpRerouteForMode` that never checked `.reachable`.
+  **The audit's third finding (solo-walker paved-road speed) turned out to be the audit's OWN
+  comparison error**, not an app bug — it compared against travel-speeds.md's calendar-average
+  column when this tool's `dailyKm` is explicitly the travel-day figure (v1.52); against the
+  correct column the measured speeds fit. No code change there. Verified via a live A/B across 7
+  seeds (25,652 land-mode path points): 0 genuinely-bad points after the fix, excluding
+  legitimate ferry crossings; the auto-network/sea-lane-MST/village connectors (no ferry
+  exception, held to a fully strict standard) also came back clean. Hash vs v1.98 ALL IDENTICAL.
+  1031/1031, 852/852, smoke +18. See CHANGELOG for the full writeup.
 - **v1.98 — sea-lane geometry from round-trip time, not uniform distance (routing-audit U4/U5).**
   The agreed second half of the routing work. **U4**: `roadDijkstra` gained an optional trailing
   `edgeCost(i,j,dx,dy)` — every cost model here was `cost(cell)`, but currents/wind/flow are

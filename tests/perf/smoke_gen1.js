@@ -6799,6 +6799,170 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  // v1.99 (routing-audit follow-up — live Journey-Planner audit): _civLandCostGrid/_civWaterCostGrid
+  // decide passability on the downsampled routing grid, and _civSmoothPath's Catmull-Rom smoothing
+  // is not guaranteed to stay within the raw path's own convex hull — either can cut a corner across
+  // real water/land that the caller's mode says is forbidden, producing phantom stages the Journey
+  // Planner then either wrongly hard-blocks or silently accepts. Fix: a full-resolution repair pass
+  // in _civSmoothPath (_civTerrainValidTest + _civNearestValidPt), applied everywhere a 'land'- or
+  // 'water'-mode path is built, PLUS a narrow ferry-crossing exception for _civDijkstraPath's own
+  // pre-existing "an existing sea lane is a traversable ferry in land mode" allowance (confirmed by
+  // direct measurement during verification — the naive fix was "fixing" a real, intentional ferry
+  // leg back onto dry land). 'mixed' mode is untouched (crossing water there is legitimate).
+  R.v199 = await page.evaluate(async () => {
+    const o = {};
+
+    // ---- (a) synthetic unit tests: a controlled water column, no real generate() needed ----
+    {
+      const savedGW = GW, savedGH = GH, savedField = field, savedSea = state.seaLevel,
+            savedCWB = window.currentWaterBodies, savedWays = civWays;
+      try {
+        // GW wide enough that the 50-cell-wide test path below stays under _civSmoothPath's own
+        // GW/2 world-seam-wrap threshold (a narrower grid made the "raw path" trigger the SAME
+        // seam-split guard real world-wrap routes need, discarding both points as a false wrap —
+        // a test-authoring mistake caught by running this standalone before trusting it).
+        GW = 110; GH = 40; state.seaLevel = 0.42;
+        const synthField = new Float32Array(GW * GH);
+        for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) synthField[y * GW + x] = (x === 55 || x === 56) ? 0.1 : 0.8;
+        field = synthField;
+        const wb = new Uint8Array(GW * GH);
+        for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) wb[y * GW + x] = (x === 55 || x === 56) ? 1 : 0;
+        window.currentWaterBodies = () => wb;
+        civWays = [];
+
+        const isLand = _civTerrainValidTest('land'), isWater = _civTerrainValidTest('water'), isOcean = _civTerrainValidTest('ocean');
+        o.landRejectsWater = isLand(55, 10) === false && isLand(56, 25) === false;
+        o.landAcceptsLand = isLand(10, 10) === true && isLand(90, 25) === true;
+        o.waterAcceptsWater = isWater(55, 10) === true;
+        o.waterRejectsLand = isWater(10, 10) === false;
+        o.oceanMatchesWater = isOcean(55, 10) === true && isOcean(10, 10) === false;
+
+        const [nx, ny] = _civNearestValidPt(55, 10, isLand, 16);
+        o.nearestValidFound = isLand(nx, ny) === true && Math.abs(nx - 55) <= 16;
+        const [gx, gy] = _civNearestValidPt(55, 10, () => false, 4);
+        o.nearestValidGivesUpCleanly = gx === 55 && gy === 10;
+
+        // a raw path straight across the water column: uncorrected smoothing crosses it, the
+        // isValid-guided repair pass never does — proves the fix, not a coincidence of geometry
+        const raw = [{ x: 30, y: 20 }, { x: 80, y: 20 }];
+        const baseline = _civSmoothPath(raw);
+        o.baselineCrossesWater = baseline.pts.some(([x, y]) => Math.round(x) === 55 || Math.round(x) === 56);
+        const repaired = _civSmoothPath(raw, isLand);
+        o.repairedNeverCrossesWater = repaired.pts.every(([x, y]) => isLand(x, y));
+
+        // ferry exception: an existing sea-lane way makes ONE spot on the water column valid for
+        // land-mode+allowSeaLanes, without opening up the rest of the column
+        civWays = [{ pts: [[45, 20], [66, 20]], sea: true, type: 'sea-lane', km: 10 }];
+        const isLandFerry = _civTerrainValidTest('land', { allowSeaLanes: true });
+        o.ferryPointValid = isLandFerry(55, 20) === true;
+        o.awayFromFerryStillInvalid = isLandFerry(55, 35) === false;
+        o.plainLandModeIgnoresFerry = isLand(55, 20) === false;   // captured before the allowSeaLanes flag existed on this closure — the flag gates it, not civWays alone
+      } finally {
+        GW = savedGW; GH = savedGH; field = savedField; state.seaLevel = savedSea;
+        window.currentWaterBodies = savedCWB; civWays = savedWays;
+      }
+    }
+
+    // ---- (b) a real generated+auto-populated world: land/water-mode _civDijkstraPath calls
+    // between real settlement pairs never cross the wrong terrain (excluding legitimate ferry
+    // crossings on an existing sea-lane way); the auto-road-network/sea-lane-MST builders (which
+    // have NO ferry exception) are held to a fully strict standard ----
+    {
+      state.tect.seed = 424242; state.resW = 220; state.world = false; state.mapWidthKm = 3000;
+      GW = state.resW; GH = gridH(GW); allocate();
+      await generate();
+      await _civIterativeAutoWorld(3);
+      const places = (state.places || []).filter(p => p.category === 'settlement');
+      const wb = currentWaterBodies();
+      const laneCells = new Set();
+      for (const w of civWays) { if (!w || !w.pts || (!w.sea && w.type !== 'sea-lane')) continue;
+        _civWalkWayCells(w, (px, py) => { const xi = Math.max(0, Math.min(GW - 1, Math.round(px))), yi = Math.max(0, Math.min(GH - 1, Math.round(py))); laneCells.add(yi * GW + xi); }); }
+      const nearLane = (xi, yi) => { for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const nx = xi + dx, ny = yi + dy; if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue; if (laneCells.has(ny * GW + nx)) return true; } return false; };
+
+      // Sorted farthest-first (the more stressful case for corner-cutting), but walks the WHOLE
+      // list rather than stopping at a fixed slice — a world where the farthest few pairs happen
+      // to be genuinely unreachable (e.g. separate landmasses) must not starve this assertion of
+      // real reachable-pair coverage (caught by running this standalone before trusting it: a
+      // fixed top-12 slice landed 0/12 reachable on one seed).
+      const pairs = [];
+      for (let i = 0; i < places.length; i++) for (let j = i + 1; j < places.length; j++) { const a = places[i], b = places[j]; pairs.push([a, b, Math.hypot(a.x - b.x, a.y - b.y)]); }
+      pairs.sort((x, y) => y[2] - x[2]);
+      let landPairsTested = 0, landBadPoints = 0;
+      for (const [a, b] of pairs) {
+        if (landPairsTested >= 10) break;
+        const p = _civDijkstraPath(a.x, a.y, b.x, b.y, 'land');
+        if (!p.reachable) continue;
+        landPairsTested++;
+        for (const [x, y] of p.pts) { const xi = Math.max(0, Math.min(GW - 1, Math.round(x))), yi = Math.max(0, Math.min(GH - 1, Math.round(y))); if (wb[yi * GW + xi] !== 0 && !nearLane(xi, yi)) landBadPoints++; }
+      }
+      o.landPairsTested = landPairsTested; o.landBadPoints = landBadPoints;
+
+      const coastal = places.filter(p => { const xi = Math.round(p.x), yi = Math.round(p.y);
+        for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const xx = xi + dx, yy = yi + dy; if (xx < 0 || yy < 0 || xx >= GW || yy >= GH) continue; if (wb[yy * GW + xx] === 1) return true; } return false; });
+      const seaPairs = [];
+      for (let i = 0; i < coastal.length; i++) for (let j = i + 1; j < coastal.length; j++) { seaPairs.push([coastal[i], coastal[j], Math.hypot(coastal[i].x - coastal[j].x, coastal[i].y - coastal[j].y)]); }
+      seaPairs.sort((x, y) => y[2] - x[2]);
+      let waterPairsTested = 0, waterBadPoints = 0;
+      for (const [a, b] of seaPairs) {
+        if (waterPairsTested >= 10) break;
+        const p = _civDijkstraPath(a.x, a.y, b.x, b.y, 'water');
+        if (!p.reachable) continue;
+        waterPairsTested++;
+        const interior = p.pts.slice(2, -2);
+        for (const [x, y] of interior) { const xi = Math.max(0, Math.min(GW - 1, Math.round(x))), yi = Math.max(0, Math.min(GH - 1, Math.round(y))); if (wb[yi * GW + xi] === 0) waterBadPoints++; }
+      }
+      o.waterPairsTested = waterPairsTested; o.waterBadPoints = waterBadPoints;
+
+      const netRes = _civHierarchicalNetwork(places, {});
+      let netBad = 0, netTot = 0;
+      for (const w of netRes.ways) { if (!w.pts) continue; for (const [x, y] of w.pts) { netTot++; const xi = Math.max(0, Math.min(GW - 1, Math.round(x))), yi = Math.max(0, Math.min(GH - 1, Math.round(y))); if (wb[yi * GW + xi] !== 0) netBad++; } }
+      o.autoNetTot = netTot; o.autoNetBad = netBad;
+
+      // ---- (c) _civJoinDijkstraSegs reports an unreachable leg, and _civCommitWay warns instead
+      // of silently committing a straight line through it (never applied to the general Route
+      // tool's 'mixed' mode, which has no unreachable concept — see _civMixedCostGrid) ----
+      let oceanPt = null;
+      const sea = state.seaLevel || 0.42;
+      // deep water, AND clear of any existing sea-lane way — otherwise the land-mode ferry
+      // exception could legitimately make this exact point reachable, which would make this a
+      // test of the wrong thing (see part (b)'s own laneCells/nearLane, reused here).
+      outer: for (let y = 6; y < GH - 6; y++) for (let x = 6; x < GW - 6; x++)
+        if (wb[y * GW + x] === 1 && field[y * GW + x] < sea - 0.1 && !nearLane(x, y)) { oceanPt = [x, y]; break outer; }
+      o.foundOceanPt = !!oceanPt;
+      if (oceanPt && places.length) {
+        const landPt = [Math.round(places[0].x), Math.round(places[0].y)];
+        const j = _civJoinDijkstraSegs([landPt, oceanPt], 'land');
+        o.unreachableLegDetected = j.unreachableLegs > 0;
+
+        const savedWayWps = _civWayWaypoints, savedWays2 = civWays.slice();
+        const origAlert = window.alert;
+        let alertCalls = 0, alertMsg = '';
+        try {
+          window.alert = (m) => { alertCalls++; alertMsg = String(m); };
+          _civWayWaypoints = [landPt, oceanPt];
+          const civWayTypeEl = document.getElementById('civWayType');
+          const savedSel = civWayTypeEl ? civWayTypeEl.value : null;
+          if (civWayTypeEl) civWayTypeEl.value = 'road';
+          _civCommitWay();
+          if (civWayTypeEl && savedSel != null) civWayTypeEl.value = savedSel;
+          o.commitWayWarnedOnUnreachable = alertCalls > 0 && /route/i.test(alertMsg);
+          o.commitWayStillCreatedTheWay = civWays.length > savedWays2.length;
+        } finally {
+          window.alert = origAlert; _civWayWaypoints = savedWayWps;
+        }
+
+        // a reachable, ordinary two-land-point way commits with NO warning (never a false positive)
+        if (places.length > 1) {
+          const a2 = [Math.round(places[0].x), Math.round(places[0].y)], b2 = [Math.round(places[1].x), Math.round(places[1].y)];
+          const j2 = _civJoinDijkstraSegs([a2, b2], 'land');
+          o.ordinaryLegNotFlagged = j2.unreachableLegs === 0;
+        }
+      }
+    }
+
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -7616,6 +7780,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.98: upwind water is slow but never impassable (the tack floor keeps every edge finite and positive)', R.v198.seaEdgeFinitePositive);
   A('v1.98: Test D — the time-costed router is never SLOWER than pure shortest-distance on the same water', R.v198.testD_worse === 0);
   A('v1.98: Test D — and it is genuinely faster on real ocean pairs (a longer route chosen because it is quicker)', R.v198.testD_better > 0);
+
+  A('v1.99: _civTerrainValidTest(\'land\') rejects water and accepts dry land on a controlled synthetic grid', R.v199.landRejectsWater && R.v199.landAcceptsLand);
+  A('v1.99: _civTerrainValidTest(\'water\')/(\'ocean\') accept water and reject dry land', R.v199.waterAcceptsWater && R.v199.waterRejectsLand && R.v199.oceanMatchesWater);
+  A('v1.99: _civNearestValidPt finds nearby dry land off the water column', R.v199.nearestValidFound);
+  A('v1.99: _civNearestValidPt gives up cleanly (returns the original point, does not hang) when nothing within range qualifies', R.v199.nearestValidGivesUpCleanly);
+  A('v1.99: an uncorrected _civSmoothPath genuinely crosses the water column on this synthetic raw path (proves the repair pass fixes something real, not a coincidence)', R.v199.baselineCrossesWater);
+  A('v1.99: the SAME raw path with the land isValid test never crosses the water column', R.v199.repairedNeverCrossesWater);
+  A('v1.99: an existing sea-lane way makes its own crossing point valid under land+allowSeaLanes (the pre-existing "ferry crossing" allowance _civDijkstraPath\'s cost grid already grants)', R.v199.ferryPointValid);
+  A('v1.99: the ferry exception stays narrowly scoped to the lane itself, not the whole water body', R.v199.awayFromFerryStillInvalid);
+  A('v1.99: plain land-mode (no allowSeaLanes) is unaffected by an existing sea lane — only _civDijkstraPath opts in', R.v199.plainLandModeIgnoresFerry);
+  A('v1.99: on a real generated+auto-populated world, land-mode _civDijkstraPath paths between real settlements never cross real water outside a legitimate ferry crossing', R.v199.landPairsTested > 0 && R.v199.landBadPoints === 0);
+  A('v1.99: water-mode _civDijkstraPath paths never cross real land', R.v199.waterPairsTested === 0 || R.v199.waterBadPoints === 0);
+  A('v1.99: the auto-generated land road network (_civHierarchicalNetwork, no ferry exception) never crosses water', R.v199.autoNetTot > 0 && R.v199.autoNetBad === 0);
+  A('v1.99: _civJoinDijkstraSegs flags a genuinely unreachable leg (land point to open ocean, clear of any ferry) via unreachableLegs', !R.v199.foundOceanPt || R.v199.unreachableLegDetected);
+  A('v1.99: _civCommitWay warns (not silently) when a drawn segment has no real route, naming the route as the issue', !R.v199.foundOceanPt || R.v199.commitWayWarnedOnUnreachable);
+  A('v1.99: _civCommitWay still creates the way despite the warning — a hand-placed waypoint is not silently discarded', !R.v199.foundOceanPt || R.v199.commitWayStillCreatedTheWay);
+  A('v1.99: an ordinary reachable leg between two real settlements is never flagged (no false positives)', R.v199.ordinaryLegNotFlagged !== false);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

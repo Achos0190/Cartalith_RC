@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.98**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.99**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.98.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.97.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.99.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.98.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,49 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Routing geometry can cut a corner across forbidden terrain; a ferry exception found along the way (v1.99)
+
+A live Journey-Planner audit (real world, land+sea routes, checked against
+`docs/research/travel-speeds.md`) found land-mode routes reading partly as ocean and vice versa.
+Civ-layer only (`_civSmoothPath` + its five callers). Hash vs v1.98 ALL IDENTICAL.
+
+- **Root cause: `_civRoutingGrid`'s downsampled coarse cell can read "passable" while other
+  full-res pixels inside it are the forbidden terrain, AND `catmullRomSample`'s Catmull-Rom spline
+  is not guaranteed to stay within its own control points' convex hull** — reproduces even at 1:1
+  resolution (no downsampling), so it's the spline, not merely the downsample. `_jpDeriveStages`
+  correctly classifies the resulting phantom stage; the stage itself shouldn't exist. Either
+  hard-blocks a fine journey with a confusing hold/porter-capacity message, or silently succeeds
+  with a nonsensical leg (a solo walker "crossing" 230 km of open water, no warning).
+- **`_civTerrainValidTest(kind)` + `_civNearestValidPt`** — a full-resolution repair pass inside
+  `_civSmoothPath` itself (new optional `isValid` param): any smoothed point failing the FULL-res
+  version of its own cost grid's passability test snaps to the nearest cell that passes (bounded
+  expanding-box search, mirrors the existing `snapFinite` idiom). Wired at every 'land'/'water'
+  caller (`_civDijkstraPath`, `_civMstRoutes`, `_civHierarchicalNetwork`,
+  `_civConnectPlaceToNetwork`, `_civConnectVillageAddons`); 'mixed' mode is exempt by design
+  (`_civMixedCostGrid` allows crossing water when cheaper — no forbidden terrain to repair).
+- **A first cut of the fix was itself wrong, caught by measuring before AND after.** Water-fraction
+  went UP (2%→32%) on one route after the naive repair. Cause: `_civDijkstraPath`'s own land-mode
+  cost grid already has a documented exception (v1.53) — an existing sea-lane way is a traversable
+  "ferry crossing" even in land mode. The naive fix didn't know that and "fixed" a real 77-point
+  ferry leg back onto dry land (measured: all 77 within 2.83 px of the actual lane). New
+  `opts.allowSeaLanes`, wired ONLY at `_civDijkstraPath`'s land branch — the one cost-grid builder
+  with this exception (every other land-only caller has none, confirmed by reading them).
+- **`_civJoinDijkstraSegs` gained `unreachableLegs`; `_civCommitWay` now warns** (non-blocking, way
+  still commits — a hand-placed waypoint is the user's own work) instead of silently drawing a
+  straight line through forbidden terrain when no real path connects two Way waypoints — the one
+  `_civDijkstraPath` caller besides `_jpRerouteForMode` (v1.47, already correct) that never checked
+  `.reachable`.
+- **The audit's third finding (solo-walker paved-road speed) was a comparison error, not a bug** —
+  measured 43.3-50.3 km/day against travel-speeds.md §8's CALENDAR-AVERAGE column (30-40); the
+  correct column for this tool's `dailyKm` (v1.52: explicitly the travel-day figure, rest days
+  added separately) is TRAVEL-DAY (40-50) — the measured figures fit, 0.3 over at the very top. No
+  code change.
+- **Verified**: live A/B, 7 seeds, 25,652 land-mode path points — 0 genuinely-bad (excl. ferry)
+  after the fix; auto-network/sea-lane-MST/village connectors (no ferry exception, strict standard)
+  also clean. Two residual "bad" points in one seed traced to a SETTLEMENT'S OWN PIN sitting on a
+  water-classified cell — a placement question, correctly untouched (caller endpoints are never
+  moved by the repair pass). Hash ALL IDENTICAL, 1031/1031, 852/852, smoke +18.
 
 ### Sea-lane geometry from round-trip time (v1.98)
 
