@@ -8077,6 +8077,47 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.102: a lake wide enough reaches the Open Sea band at its true middle, same distance rule the ocean branch already uses', R.v102.wideLakeReachesOpenSea);
   A('v1.102: a real ocean crossing is unaffected by the lake fix (still sea-classified via its own bIdx=15 branch)', R.v102.oceanCrossingStillWorks);
 
+  // v2.03 (owner, pasting the always-visible #readout screenshot: "I want the generation info
+  // button here"): the v1.101 ℹ️ Info button moved from inside #genWorld (one of three mutually-
+  // exclusive tab panels, invisible whenever Explore/Assets was active) to sit beside #readout — a
+  // sibling .sec rendered after all three tab panels close, genuinely always visible. Pure DOM
+  // relocation; every element id kept, so this just re-confirms the v1.101 behavior still holds
+  // from its NEW location, plus the actual point of the move: visibility survives a tab switch.
+  R.v203 = await page.evaluate(async () => {
+    const o = {};
+    const readout = document.getElementById('readout');
+    const btn = document.getElementById('genInfoBtn'), panel = document.getElementById('genInfoPanel'), ta = document.getElementById('genInfoText');
+    o.readoutExists = !!readout;
+    o.infoButtonExists = !!btn; o.infoPanelExists = !!panel; o.infoTextareaExists = !!ta;
+    o.sameSecAsReadout = !!(readout && btn && readout.closest('.sec') === btn.closest('.sec'));
+    o.notInsideGenWorld = !(btn && btn.closest('#genWorld'));
+    o.notInsideExplorePanel = !(btn && btn.closest('#explorePanel'));
+    o.notInsideAssetsPanel = !(btn && btn.closest('#assetsPanel'));
+    const aside = document.querySelector('aside');
+    o.insideAside = !!(btn && aside && aside.contains(btn));
+    o.infoPanelStartsClosed = panel && panel.style.display === 'none';
+    if (btn) btn.click();
+    o.infoPanelOpensOnClick = panel && panel.style.display !== 'none';
+    o.infoTextHasVersion = ta && /Elevation Foundation v/.test(ta.value);
+    if (btn) btn.click();
+    o.infoPanelClosesOnSecondClick = panel && panel.style.display === 'none';
+    // the actual point of the move: switch to the Explore tab and confirm the button is still
+    // present/visible/clickable (it would have been display:none-ancestor-hidden pre-v2.03)
+    const exploreTabBtn = document.querySelector('[data-tab="explore"]');
+    if (exploreTabBtn) exploreTabBtn.click();
+    const btnRect = btn ? btn.getBoundingClientRect() : null;
+    o.visibleUnderExploreTab = !!(btn && getComputedStyle(btn).display !== 'none' && btnRect && btnRect.width > 0 && btnRect.height > 0);
+    const genTabBtn = document.querySelector('[data-tab="generate"]');
+    if (genTabBtn) genTabBtn.click();   // restore for any later smoke block reading Generate-tab DOM state
+    return o;
+  });
+  A('v2.03: #readout and the info button share the same sidebar .sec (they were moved to sit together)', R.v203.readoutExists && R.v203.infoButtonExists && R.v203.sameSecAsReadout);
+  A('v2.03: the info button/panel are no longer inside any of the three tab panels (genWorld/explorePanel/assetsPanel)', R.v203.notInsideGenWorld && R.v203.notInsideExplorePanel && R.v203.notInsideAssetsPanel);
+  A('v2.03: the info button is still inside <aside>, just relocated within it', R.v203.insideAside);
+  A('v2.03: the info panel still starts closed and opens/closes on click from its new location', R.v203.infoPanelStartsClosed && R.v203.infoPanelOpensOnClick && R.v203.infoPanelClosesOnSecondClick);
+  A('v2.03: the info text still renders real generation-parameter content from its new location', R.v203.infoTextHasVersion);
+  A('v2.03: the info button stays visible/clickable under the Explore tab — the whole point of the move (it never did before)', R.v203.visibleUnderExploreTab);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.102.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.03.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
-  there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.101` are kept and never edited.
+  there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
+  `v0.6`/`v0.61`–`v1.102` are kept and never edited.
+- **v2.03 — the ℹ️ Info button moved beside the persistent `#readout` panel.** Owner, pasting a
+  screenshot of the always-visible `#readout` summary in the sidebar: "I want the generation info
+  button here." The button/panel (v1.101) previously lived inside `#genWorld` (`#genInfoSec`),
+  so it disappeared whenever the Explore or Asset-Library tab was active — exactly the moment a
+  troubleshooting dump is most likely to be wanted, since `#readout` itself is a sibling of every
+  tab panel inside `<aside>` (rendered after `#genWorld`/`#explorePanel`/`#assetsPanel` close,
+  never inside any of them) and stays visible regardless of the active tab. Pure DOM relocation:
+  the whole `#genInfoSec` block (`genInfoBtn`/`genInfoPanel`/`genInfoText`/`genInfoCopyBtn`/
+  `genInfoCopyStatus`) moved into the SAME `.sec` that already holds `#readout`, right below it —
+  every element id kept exactly, so `generationInfoText()` and its event-listener block (both
+  `getElementById`-driven, indifferent to DOM position) needed zero changes. Owner also asked for
+  the version to jump straight to **v2.03** (not the previously-planned v2.00) for this release —
+  no significance beyond the version string itself. Hash vs v1.102 **ALL IDENTICAL** in every
+  scenario (a static-markup move, zero logic touched). `tests/run.sh` 1038/1038, `tests/run_um.sh`
+  852/852 (block 4 untouched — this is pure block-1 HTML). Verified via an isolated Playwright
+  probe before trusting it in the full smoke suite: the button now sits in the same `.sec` as
+  `#readout`, is outside `#genWorld`/`#explorePanel`/`#assetsPanel`, opens with real content on
+  click, and stays visible/clickable under the Explore tab — the whole point of the move.
 - **v1.102 — lakes were silently misclassified as rivers in the Journey Planner.** Owner: "Pathfinding
   and routes seem to make mistakes with lakes?" Root-caused on a real lake before fixing:
   `_jpDeriveStages` correctly distinguishes CART_BIOMES Lake (14) from Ocean (15) as raw indices, but

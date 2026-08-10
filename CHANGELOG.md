@@ -12,6 +12,37 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.03 — Generation info button relocated beside the persistent readout panel
+
+Owner, pasting a screenshot of the always-visible `#readout` summary in the sidebar: "I want the
+generation info button here." Pure DOM relocation, civ/UI-layer only (block 1 HTML). Hash vs
+v1.102 **ALL IDENTICAL** in every scenario — no logic touched, only markup position. Owner also
+requested the version string jump straight to v2.03 for this release (no engine/behavioral
+significance to the number itself — a version-naming decision, not a scope change).
+
+- **The v1.101 ℹ️ Info button (`#genInfoSec`) lived inside `#genWorld`**, one of three mutually-
+  exclusive tab panels (`#genWorld`/`#explorePanel`/`#assetsPanel`) toggled by the top Generate/
+  Explore/Assets tab bar — so it vanished whenever a different tab was active. `#readout`, by
+  contrast, is a sibling `.sec` rendered AFTER all three panel divs close, still inside `<aside>`
+  — genuinely always visible regardless of which tab is open, exactly the persistent summary the
+  owner's screenshot was pointing at.
+- **Fix**: moved the whole `#genInfoSec` block into the SAME `.sec` that already holds `#readout`,
+  directly below it. Every element id (`genInfoBtn`/`genInfoPanel`/`genInfoText`/
+  `genInfoCopyBtn`/`genInfoCopyStatus`) is unchanged — `generationInfoText()` and its
+  `getElementById`-driven event-listener block (both defined near `updateReadout()`) needed zero
+  code changes; only the markup's DOM position moved.
+- **Verified via an isolated Playwright probe** before trusting the change in the full smoke
+  suite (this session's established discipline): the button/panel resolve inside the same `.sec`
+  as `#readout`, are outside `#genWorld`/`#explorePanel`/`#assetsPanel`, the panel opens with real
+  generation-parameter text on click, and — the actual point of the move — the button stays
+  visible and clickable while the Explore tab is active, which it never did before.
+- **Tests**: `tests/run.sh` 1038/1038 (block 1 engine untouched, so no new assertions needed —
+  this is a pure static-markup relocation with an existing `R.v101` smoke block already covering
+  the button's own ids/behavior, which still passes unmodified since only its DOM ancestor
+  changed). `tests/run_um.sh` 852/852 (block 4 untouched). `hash_gen1.js` ALL IDENTICAL.
+- **Known scope cuts**: none — a straightforward relocation of existing, working functionality per
+  explicit owner direction.
+
 ### v1.102 — Lakes were silently misclassified as rivers in the Journey Planner
 
 Owner report: "Pathfinding and routes seem to make mistakes with lakes?" Root-caused by

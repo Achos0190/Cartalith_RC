@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.102**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.03**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.102.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.101.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.03.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.102.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,32 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Generation info button relocated beside the persistent readout panel (v2.03)
+
+Owner, pasting a screenshot of the always-visible `#readout` summary in the sidebar: "I want the
+generation info button here." Pure DOM relocation (block 1 HTML), no engine/civ-layer logic
+touched. Hash vs v1.102 ALL IDENTICAL in every scenario. Owner also asked the version to jump
+straight to v2.03 for this release — a naming choice with no behavioral significance.
+
+- **The v1.101 ℹ️ Info button (`#genInfoSec`) lived inside `#genWorld`**, one of three mutually-
+  exclusive tab panels (`#genWorld`/`#explorePanel`/`#assetsPanel`), so it vanished whenever the
+  Explore or Asset-Library tab was active. `#readout` is a sibling `.sec` rendered AFTER all three
+  panel divs close, still inside `<aside>` — genuinely always visible regardless of the active tab,
+  exactly the persistent panel the owner's screenshot pointed at.
+- **Fix**: the whole `#genInfoSec` block moved into the same `.sec` that holds `#readout`, directly
+  below it. Every element id (`genInfoBtn`/`genInfoPanel`/`genInfoText`/`genInfoCopyBtn`/
+  `genInfoCopyStatus`) is unchanged, so `generationInfoText()` and its `getElementById`-driven
+  event-listener block needed zero code changes — only the markup's DOM position moved.
+- **Verified via an isolated Playwright probe** before trusting the change in the full smoke suite:
+  the button/panel resolve inside the same `.sec` as `#readout`, sit outside all three tab panels,
+  the panel opens with real generation-parameter text on click, and — the actual point of the
+  move — the button stays visible/clickable while the Explore tab is active, which it never did
+  before.
+- **Tests**: `tests/run.sh` 1038/1038 (unchanged — no engine code touched), `tests/run_um.sh`
+  852/852 (block 4 untouched), hash ALL IDENTICAL. The existing `R.v101` smoke block (button
+  id/behavior) needed no changes since only its DOM ancestor moved.
+- **Known scope cuts**: none.
 
 ### Lakes were silently misclassified as rivers in the Journey Planner (v1.102)
 
