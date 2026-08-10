@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.03**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.04**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.03.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.102.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.04.html` | **Current** unified tool (~30.2k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.03.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,48 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Per-stage Journey Planner overrides expanded to the full travel-option set (v2.04)
+
+Owner: "Per stage override should be the full travel options. Per stage a lot can change." Before
+this version, `stageOverrides[idx]` only had a UI for six fields (Travel mode/Group size/Cargo/
+Pace/Pack animal/Vehicle) even though `_jpEffectiveStagePlan`'s generic `Object.assign` merge
+already threads EVERY plan field through to `jpCalcLand`/`jpCalcWater`/`jpCapacity` per stage with
+zero plumbing changes — confirmed by reading every consumer before adding a single row. Civ-layer
+only (`_jpRenderResults`). Hash vs v2.03 ALL IDENTICAL — UI-only, the merge mechanism was already
+load-bearing.
+
+- **Ten new rows, exactly matching what each stage's own calculator reads.** Every category:
+  Weather, Carry food (tri-state select — the underlying field is a boolean, and a stage override
+  needs a third "inherit" state a checkbox can't express), Road/water quality, Infrastructure.
+  Land-only (`jpCalcWater` reads none of these): Hours/day, Supplies carried, Grazing, Foraging,
+  Mount (shown only once the stage's own resolved transport is "Mounted Rider"), Desert water
+  (gated on the STAGE's own biome, not the whole-route `plan.hasDesert` flag the party form uses).
+- **`routeCond`'s options are stage-category-aware.** The party form's own "Road quality" control
+  only ever lists `JP_ROUTE.land`'s keys — safe there because `_jpDeriveStages` validates a
+  land-only choice against the real stage category before applying it. A per-stage control has no
+  such net (`_jpPlan`'s pre-pass writes `ov.routeCond` onto the stage unconditionally), so this
+  keys the option list off `JP_ROUTE[s.cat]` directly — a sea stage offers wind/current bands, a
+  river stage Downstream/Upstream, a land stage the road table.
+- **Two fields deliberately excluded, disclosed not silent**: `seasonalClosures` (a property of
+  the pass, not the stage — v1.65's own reasoning) and `restCadence`/`seasonDrift`/`autoPromote`
+  (whole-journey aggregates `_jpPlan` reads once over the summed day count — a per-stage override
+  would be silently inert). Animal/vehicle head-counts stay at the existing species/type-swap
+  granularity (v1.50/v1.66) rather than gaining separate raw-count fields.
+- **A real test bug caught before shipping**: per-stage cards are trouble-sorted (v1.51's
+  `_stageOrder`), so a check that grabs "the first `[data-jps="X"]`" without scoping by
+  `data-jps-idx` can silently exercise the wrong stage — the first draft of this version's own
+  verification probe did exactly that, producing three false failures, fixed by scoping every
+  check to `[data-jps-idx="0"]` rather than touching any product code.
+- **Verified via two isolated Playwright probes** (22 land-stage + 15 sea-stage assertions) before
+  trusting the full smoke suite: every row's presence/absence gates correctly; Carry-food's
+  tri-state round-trips to a real boolean and back; an Hours/Weather override measurably changes
+  the real computed speed, not just stored inertly; a sea stage's quality list is provably
+  `JP_ROUTE.sea`'s keys, never `.land`'s.
+- **Tests**: 1038/1038, 852/852, hash ALL IDENTICAL, 11 new smoke assertions (`R.v204`).
+- **Known scope cuts**: raw animal/vehicle head-count overrides; no per-stage
+  `seasonalClosures`/`restCadence`/`seasonDrift`/`autoPromote` (disclosed as structurally inert at
+  stage granularity).
 
 ### Generation info button relocated beside the persistent readout panel (v2.03)
 

@@ -8118,6 +8118,123 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v2.03: the info text still renders real generation-parameter content from its new location', R.v203.infoTextHasVersion);
   A('v2.03: the info button stays visible/clickable under the Explore tab — the whole point of the move (it never did before)', R.v203.visibleUnderExploreTab);
 
+  // v2.04 (owner: "Per stage override should be the full travel options. Per stage a lot can
+  // change."). Every scalar/enum field jpCalcLand/jpCalcWater/jpCapacity read off the per-stage
+  // effective plan already flowed through _jpEffectiveStagePlan's generic Object.assign merge with
+  // zero plumbing changes — Pace/Group size/Cargo were simply the only three that had ever been
+  // given a per-stage control. This closes the gap: Weather/Carry food/Road-or-water quality/
+  // Infrastructure on every stage category; Hours-per-day/Supplies carried/Grazing/Foraging/Mount/
+  // Desert water on land stages only (jpCalcWater never reads any of the five — a ship has no
+  // marching hours, fodder or a mount). Two synthetic journeys (land + hand-carved sea, the same
+  // v1.102 hand-carve-a-water-region idiom) exercise the DOM directly rather than depending on a
+  // real generated world's own biome mix, since desert/mounted/sea gating needs exact control.
+  R.v204 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      // ── land journey ──
+      const x0 = Math.round(GW * 0.3), y0 = Math.round(GH * 0.5);
+      const x1 = Math.round(GW * 0.5), y1 = Math.round(GH * 0.5);
+      state.places = [
+        { kind: 'town', name: 'Testford', x: x0, y: y0, category: 'settlement', pop: 4000 },
+        { kind: 'town', name: 'Testbury', x: x1, y: y1, category: 'settlement', pop: 6000 }
+      ];
+      const pts = []; for (let k = 0; k <= 20; k++) pts.push([x0 + (x1 - x0) * k / 20, y0 + (y1 - y0) * k / 20]);
+      const km = Math.hypot(x1 - x0, y1 - y0) * ((state.mapWidthKm || 800) / GW);
+      const jn = { pts, km, name: 'v2.04 land test', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const pl = _jpEnsurePlan(jn);
+
+      _civOpenRouteEditor(0);
+      const html = document.getElementById('reResults').innerHTML;
+      o.hasWeather = /data-jps="weatherOverride"/.test(html);
+      o.hasCarryFood = /data-jps="carryFood"/.test(html);
+      o.hasRouteCond = /data-jps="routeCond"/.test(html);
+      o.hasInfra = /data-jps="infra"/.test(html);
+      o.hasHours = /data-jps="hours"/.test(html);
+      o.hasSupplyDays = /data-jps="supplyDays"/.test(html);
+      o.hasGrazing = /data-jps="grazing"/.test(html);
+      o.hasForaging = /data-jps="foraging"/.test(html);
+      o.noMountOnWalking = !document.querySelector('[data-jps="mountAnimal"][data-jps-idx="0"]');
+
+      pl.transport = 'Mounted Rider'; pl.mountAnimal = 'horse';
+      _jpRenderResults(jn);
+      o.hasMountOnMountedRider = !!document.querySelector('[data-jps="mountAnimal"][data-jps-idx="0"]');
+
+      pl.transport = 'Walking';
+      const stageBiome = _jpPlan(jn).stages[0].biome;
+      const savedDesertLike = JP_BIOMES[stageBiome].desertLike;
+      JP_BIOMES[stageBiome].desertLike = true;
+      _jpRenderResults(jn);
+      o.hasDesertWaterWhenDesert = !!document.querySelector('[data-jps="desertWater"][data-jps-idx="0"]');
+      JP_BIOMES[stageBiome].desertLike = savedDesertLike;
+      _jpRenderResults(jn);
+      o.noDesertWaterByDefault = !document.querySelector('[data-jps="desertWater"][data-jps-idx="0"]');
+
+      // carryFood tri-state translates to a real boolean, and '' clears back to inherit
+      const cfSel = document.querySelector('[data-jps="carryFood"][data-jps-idx="0"]');
+      cfSel.value = 'off'; cfSel.dispatchEvent(new Event('change'));
+      o.carryFoodOffIsBoolean = pl.stageOverrides['0'].carryFood === false;
+      const cfSel2 = document.querySelector('[data-jps="carryFood"][data-jps-idx="0"]');
+      cfSel2.value = ''; cfSel2.dispatchEvent(new Event('change'));
+      o.carryFoodInheritClears = !pl.stageOverrides['0'] || !('carryFood' in pl.stageOverrides['0']);
+
+      // an override actually reaches jpCalcLand's real speed math (not just stored inertly)
+      const before = _jpPlan(jn).results[0].dailyKm;
+      const hoursSel = document.querySelector('[data-jps="hours"][data-jps-idx="0"]');
+      hoursSel.value = String(Math.round(_jpPlan(jn).plan.hours) === 16 ? 4 : 16);
+      hoursSel.dispatchEvent(new Event('change'));
+      o.hoursChangesSpeed = Math.abs(_jpPlan(jn).results[0].dailyKm - before) > 1e-6;
+
+      const routeCondOpts = Array.from(document.querySelector('[data-jps="routeCond"][data-jps-idx="0"]').options).map(x => x.value).filter(Boolean);
+      o.routeCondUsesLandTable = routeCondOpts.join(',') === Object.keys(JP_ROUTE.land).join(',');
+
+      _civCloseRouteEditor();
+
+      // ── sea journey (hand-carved open-water band, mirrors v1.102's synthetic-lake technique) ──
+      const savedCB = _cartBiome, savedField = field;
+      const cb = new Uint8Array(GW * GH); cb.fill(2);
+      const fld = new Float32Array(field);
+      const sy = Math.floor(GH / 2);
+      for (let x = 40; x < 160; x++) { cb[sy * GW + x] = 15; fld[sy * GW + x] = 0.1; }
+      _cartBiome = cb; field = fld;
+      const spts = []; for (let k = 0; k <= 20; k++) spts.push([60 + 80 * k / 20, sy]);
+      const jnSea = { pts: spts, km: 80 * ((state.mapWidthKm || 800) / GW), name: 'v2.04 sea test', groupSize: 4 };
+      const plSea = _jpEnsurePlan(jnSea);
+      plSea.transport = 'Sea Faring'; plSea.vessel = 'Cog';
+      civJourneys = [jnSea]; _civSelectedJourneyIdx = 0;
+      _civOpenRouteEditor(0);
+      o.seaStageIsSea = _jpPlan(jnSea).stages[0].cat === 'sea';
+      o.seaHasWeather = !!document.querySelector('[data-jps="weatherOverride"][data-jps-idx="0"]');
+      o.seaHasCarryFood = !!document.querySelector('[data-jps="carryFood"][data-jps-idx="0"]');
+      o.seaHasRouteCond = !!document.querySelector('[data-jps="routeCond"][data-jps-idx="0"]');
+      o.seaHasInfra = !!document.querySelector('[data-jps="infra"][data-jps-idx="0"]');
+      o.seaNoHours = !document.querySelector('[data-jps="hours"][data-jps-idx="0"]');
+      o.seaNoSupplyDays = !document.querySelector('[data-jps="supplyDays"][data-jps-idx="0"]');
+      o.seaNoGrazing = !document.querySelector('[data-jps="grazing"][data-jps-idx="0"]');
+      o.seaNoForaging = !document.querySelector('[data-jps="foraging"][data-jps-idx="0"]');
+      o.seaNoMount = !document.querySelector('[data-jps="mountAnimal"][data-jps-idx="0"]');
+      o.seaNoDesertWater = !document.querySelector('[data-jps="desertWater"][data-jps-idx="0"]');
+      const seaRouteCondOpts = Array.from(document.querySelector('[data-jps="routeCond"][data-jps-idx="0"]').options).map(x => x.value).filter(Boolean);
+      o.seaRouteCondUsesSeaTable = seaRouteCondOpts.join(',') === Object.keys(JP_ROUTE.sea).join(',');
+      _civCloseRouteEditor();
+      _cartBiome = savedCB; field = savedField;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+  A('v2.04: Weather/Carry food/Road quality/Infrastructure rows present on a land stage', R.v204.hasWeather && R.v204.hasCarryFood && R.v204.hasRouteCond && R.v204.hasInfra);
+  A('v2.04: Hours/Supplies/Grazing/Foraging rows present on a land stage', R.v204.hasHours && R.v204.hasSupplyDays && R.v204.hasGrazing && R.v204.hasForaging);
+  A('v2.04: Mount row hidden while Walking, shown once the stage resolves to Mounted Rider', R.v204.noMountOnWalking && R.v204.hasMountOnMountedRider);
+  A('v2.04: Desert water row appears only once the stage\'s own biome reads desert-like, not by default', R.v204.hasDesertWaterWhenDesert && R.v204.noDesertWaterByDefault);
+  A('v2.04: the Carry food tri-state select stores a real boolean, and inherit clears the override key', R.v204.carryFoodOffIsBoolean && R.v204.carryFoodInheritClears);
+  A('v2.04: a per-stage override (Hours) actually changes jpCalcLand\'s computed speed, not just stored inertly', R.v204.hoursChangesSpeed);
+  A('v2.04: Road quality options on a land stage are JP_ROUTE.land\'s own keys', R.v204.routeCondUsesLandTable);
+  A('v2.04: Weather/Carry food/Road quality/Infrastructure rows present on a sea stage too', R.v204.seaHasWeather && R.v204.seaHasCarryFood && R.v204.seaHasRouteCond && R.v204.seaHasInfra);
+  A('v2.04: land-only rows (Hours/Supplies/Grazing/Foraging/Mount/Desert water) are all absent on a sea stage', R.v204.seaNoHours && R.v204.seaNoSupplyDays && R.v204.seaNoGrazing && R.v204.seaNoForaging && R.v204.seaNoMount && R.v204.seaNoDesertWater);
+  A('v2.04: Road/Water quality options on a sea stage are JP_ROUTE.sea\'s own keys, not JP_ROUTE.land\'s', R.v204.seaRouteCondUsesSeaTable);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

@@ -12,6 +12,70 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.04 — Per-stage Journey Planner overrides expanded to the full travel-option set
+
+Owner: "Per stage override should be the full travel options. Per stage a lot can change." Before
+v2.04, `stageOverrides[idx]` only had a UI for six fields (Travel mode, Group size, Cargo, Pace,
+Pack animal, Vehicle) even though `_jpEffectiveStagePlan`'s generic `Object.assign` merge already
+threads EVERY plan field through to `jpCalcLand`/`jpCalcWater`/`jpCapacity` per stage with zero
+plumbing changes — confirmed by reading every consumer before adding a single row. Civ-layer only
+(`_jpRenderResults`, block 2). Hash vs v2.03 **ALL IDENTICAL** — a UI-only addition; the underlying
+per-stage merge mechanism was already load-bearing and untouched.
+
+- **Ten new per-stage rows, exactly matching what each stage's own calculator actually reads.**
+  Apply to every stage category: **Weather** (forces one `JP_WEATHER` condition for just this
+  stretch — "what if a storm hits this one stage"), **Carry food** (a tri-state select — Inherit/
+  Yes/No — since the underlying field is a plain boolean and a stage override needs a third
+  "unset" state a checkbox can't express), **Road/water quality** (`routeCond`, labeled "Road" or
+  "Water" per the stage's own category — see below), **Infrastructure**. Land-only (`jpCalcWater`
+  never reads any of these — a ship has no marching hours, fodder or a mount): **Hours/day**,
+  **Supplies carried** (`supplyDays`), **Grazing**, **Foraging**, **Mount** (only shown once the
+  stage's own resolved transport is "Mounted Rider" — the twin of the existing Pack animal
+  control, but a plain string field needing no headcount-map translation), **Desert water** (only
+  shown once the STAGE's own biome reads desert-like, not the whole-route `plan.hasDesert` flag
+  the party form gates on — a single desert stretch on an otherwise temperate route now gets its
+  own crossing tier without the row cluttering every other stage).
+- **`routeCond`'s option list is stage-category-aware, not copy-pasted from the party form.** The
+  whole-plan "Road quality" control only ever lists `JP_ROUTE.land`'s keys (Maintained/Standard/
+  Deteriorated/Broken/None-Wild) — fine for the party form, since `_jpDeriveStages` validates a
+  land-only choice against the stage's real category before applying it to a water stage. A
+  per-stage control has no such safety net (the `_jpPlan` pre-pass at the top does
+  `if(ov.routeCond) s.routeCond=ov.routeCond;` unconditionally, no category check), so listing
+  land options on a sea stage would silently write an unrecognized key that `JP_ROUTE[cat][route]
+  ??1.0` falls back to a no-op on. Fixed by keying the option list off `JP_ROUTE[s.cat]` directly
+  — a river stage offers Downstream/Upstream bands, a sea stage offers wind/current bands, a land
+  stage offers the road-condition table.
+- **Two fields deliberately do NOT get a per-stage row, and it's disclosed why rather than left a
+  silent gap**: `seasonalClosures` (a property of the season/pass itself, not the stage — v1.65's
+  own reasoning, unchanged) and `restCadence`/`seasonDrift`/`autoPromote` (whole-JOURNEY
+  aggregates — `_jpPlan` reads `plan.restCadence` exactly once, over the summed day count, never
+  per stage; a per-stage override on any of these three would be silently inert, which is worse
+  than not offering the control at all). Animal/vehicle head-COUNTS also stay at the existing
+  species/type-swap granularity (v1.50/v1.66 — pick a kind, the shared plan's total head-count
+  carries over) rather than gaining separate raw-count fields — a narrower, disclosed scope cut,
+  not an oversight.
+- **One real bug caught before shipping, not by inspection but by testing the actual DOM**: the
+  per-stage details cards are trouble-sorted (`_stageOrder` floats problem stages to the front —
+  v1.51), so a test that grabs "the first `[data-jps="X"]` element" without scoping by
+  `data-jps-idx` can silently exercise a DIFFERENT stage than the one it thinks it's checking. The
+  first draft of this version's own verification probe did exactly that and produced three false
+  failures (a per-stage Hours/Weather override that looked inert, a Desert-water row that looked
+  like it leaked onto a non-desert stage) — all resolved by scoping every check to
+  `[data-jps-idx="0"]` explicitly, not by changing any product code.
+- **Verified via two isolated Playwright probes** before trusting the change in the full smoke
+  suite (22 land-stage assertions + 15 sea-stage assertions, all passing): every new row's
+  presence/absence gates correctly by stage category and resolved transport/biome; the Carry-food
+  tri-state select round-trips to a real boolean and back to "inherit"; an Hours override and a
+  Weather override both measurably change `jpCalcLand`'s/`jpCalcWater`'s real computed speed (not
+  just stored inertly); a sea stage's Road/Water quality list is provably `JP_ROUTE.sea`'s keys,
+  never `JP_ROUTE.land`'s.
+- **Tests**: `tests/run.sh` 1038/1038 (block 1 engine untouched), `tests/run_um.sh` 852/852 (block
+  4 untouched), hash ALL IDENTICAL, 11 new smoke assertions (`R.v204`) covering both stage
+  categories end-to-end through the real DOM change-handlers.
+- **Known scope cuts**: raw animal/vehicle head-count overrides (species/type-swap only, see
+  above); no per-stage override for `seasonalClosures`/`restCadence`/`seasonDrift`/`autoPromote`
+  (all disclosed as structurally inert at stage granularity, see above).
+
 ### v2.03 — Generation info button relocated beside the persistent readout panel
 
 Owner, pasting a screenshot of the always-visible `#readout` summary in the sidebar: "I want the

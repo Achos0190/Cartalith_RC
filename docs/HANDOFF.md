@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.03.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.04.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v1.102` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.03` are kept and never edited.
+- **v2.04 — per-stage Journey Planner overrides expanded to the full travel-option set.** Owner:
+  "Per stage override should be the full travel options. Per stage a lot can change." Before this,
+  `stageOverrides[idx]` only had a UI for 6 fields (Travel mode/Group size/Cargo/Pace/Pack animal/
+  Vehicle) even though `_jpEffectiveStagePlan`'s generic merge already threads EVERY plan field to
+  `jpCalcLand`/`jpCalcWater`/`jpCapacity` per stage with zero plumbing changes. Added 10 new rows —
+  Weather/Carry food (tri-state)/Road-water quality/Infrastructure on every stage; Hours/day/
+  Supplies carried/Grazing/Foraging/Mount (Mounted-Rider-only)/Desert water (gated on the STAGE's
+  own biome) on land stages only, since `jpCalcWater` never reads any of those five. `routeCond`'s
+  option list is now stage-category-aware (`JP_ROUTE[s.cat]`, not always `.land`'s keys) — the
+  party form's own control gets away with land-only options because `_jpDeriveStages` validates
+  before applying; a per-stage override has no such net. Deliberately NOT given a row:
+  `seasonalClosures` (a pass/season property) and `restCadence`/`seasonDrift`/`autoPromote`
+  (whole-journey aggregates a per-stage value would be silently inert for). Civ-layer only, hash
+  vs v2.03 ALL IDENTICAL. `tests/run.sh` 1038/1038, `tests/run_um.sh` 852/852, 11 new smoke
+  assertions, independently verified via two isolated Playwright probes (22 land + 15 sea
+  assertions) before trusting the full suite — caught and fixed one real test-authoring bug along
+  the way (per-stage cards are trouble-sorted, so an unscoped `[data-jps="X"]` query can silently
+  grab the wrong stage). See CHANGELOG/CLAUDE.md for the full writeup.
 - **v2.03 — the ℹ️ Info button moved beside the persistent `#readout` panel.** Owner, pasting a
   screenshot of the always-visible `#readout` summary in the sidebar: "I want the generation info
   button here." The button/panel (v1.101) previously lived inside `#genWorld` (`#genInfoSec`),
