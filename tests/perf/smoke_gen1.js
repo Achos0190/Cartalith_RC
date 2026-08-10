@@ -6721,6 +6721,84 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return o;
   });
 
+  R.v198 = await page.evaluate(async () => {
+    const o = {};
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    const RW = Math.min(GW, 384), sc = RW/GW, RH = Math.max(2, Math.round(GH*sc));
+    const wb = currentWaterBodies();
+    const cost = new Float32Array(RW*RH);
+    for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) {
+      const gx = Math.min(GW-1,(x/sc)|0), gy = Math.min(GH-1,(y/sc)|0);
+      cost[y*RW+x] = (wb[gy*GW+gx] === 1) ? 1 : Infinity;
+    }
+    // pick an ocean start
+    let s0 = -1; for (let i = 0; i < RW*RH; i++) if (cost[i] === 1) { s0 = i; break; }
+    o.foundOcean = s0 >= 0;
+    if (s0 < 0) return o;
+    const sx = s0 % RW, sy = (s0/RW)|0;
+
+    // (a) U4 — omitting edgeCost must take the identical arithmetic path as before.
+    const a1 = roadDijkstra(cost, RW, RH, sx, sy, !!state.world);
+    const a2 = roadDijkstra(cost, RW, RH, sx, sy, !!state.world, null);
+    let same = true; for (let i = 0; i < a1.dist.length; i++) if (a1.dist[i] !== a2.dist[i]) { same = false; break; }
+    o.nullEdgeCostIdentical = same;
+
+    // (b) a supplied callback is genuinely consulted (a 10x constant must change distances)
+    const a3 = roadDijkstra(cost, RW, RH, sx, sy, !!state.world,
+      (i,j,dx,dy) => (cost[i]===Infinity||cost[j]===Infinity) ? Infinity : (dx&&dy?1.4142135623730951:1)*10);
+    let differs = false;
+    for (let i = 0; i < a1.dist.length; i++) if (isFinite(a1.dist[i]) && Math.abs(a3.dist[i]-a1.dist[i]) > 1e-6) { differs = true; break; }
+    o.edgeCostIsConsulted = differs;
+
+    // (c) U5 — the sea time cost exists and is SYMMETRIC. Symmetry is the correctness guarantee
+    // that keeps the undirected Prim MST valid; an asymmetric cost would make the tree ill-defined.
+    const seaEdge = _civSeaTimeEdgeCost(RW, RH, sc);
+    o.seaEdgeBuilt = typeof seaEdge === 'function';
+    if (seaEdge) {
+      let symOK = true, finiteOK = true, checked = 0;
+      for (let i = 0; i < RW*RH && checked < 300; i += 37) {
+        if (cost[i] !== 1) continue;
+        const x = i % RW, y = (i/RW)|0;
+        for (const [dx,dy] of [[1,0],[0,1],[1,1],[1,-1]]) {
+          const nx = x+dx, ny = y+dy; if (nx<0||nx>=RW||ny<0||ny>=RH) continue;
+          const j = ny*RW+nx; if (cost[j] !== 1) continue;
+          const f = seaEdge(i,j,dx,dy), r = seaEdge(j,i,-dx,-dy);
+          if (Math.abs(f-r) > 1e-9) symOK = false;
+          if (!isFinite(f) || f <= 0) finiteOK = false;
+          checked++;
+        }
+      }
+      o.seaEdgeSymmetric = symOK && checked > 50;
+      o.seaEdgeFinitePositive = finiteOK;   // the tack floor: upwind is slow, never impassable
+      o.seaEdgeChecked = checked;
+
+      // (d) Test D — the time-costed router finds a path no slower, and usually faster, than
+      // the pure shortest-distance router, on the SAME water.
+      const edgeFn = (i,j,dx,dy) => (cost[i]===Infinity||cost[j]===Infinity) ? Infinity : seaEdge(i,j,dx,dy);
+      const timeOf = (prev, si, ti) => { let t = 0, c = ti, g = RW*RH;
+        while (c !== si && c >= 0 && g-- > 0) { const p = prev[c]; if (p < 0) return null;
+          const cx = c%RW, cy = (c/RW)|0, px = p%RW, py = (p/RW)|0;
+          t += edgeFn(p, c, cx-px, cy-py); c = p; }
+        return c === si ? t : null; };
+      const oc = []; for (let i = 0; i < RW*RH; i += 5) if (cost[i] === 1) oc.push(i);
+      let better = 0, worse = 0;
+      for (let t = 0; t < 8 && oc.length > 50; t++) {
+        const b = oc[(t*3571+17) % oc.length];
+        const bx = b%RW, by = (b/RW)|0;
+        if (Math.hypot(bx-sx, by-sy) < RW*0.18) continue;
+        const uni = roadDijkstra(cost, RW, RH, sx, sy, !!state.world);
+        const tim = roadDijkstra(cost, RW, RH, sx, sy, !!state.world, edgeFn);
+        if (!isFinite(uni.dist[b]) || !isFinite(tim.dist[b])) continue;
+        const tU = timeOf(uni.prev, s0, b), tT = timeOf(tim.prev, s0, b);
+        if (tU == null || tT == null) continue;
+        if (tT < tU - 1e-6) better++; else if (tT > tU + 1e-6) worse++;
+      }
+      o.testD_better = better; o.testD_worse = worse;
+    }
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -7529,6 +7607,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.97: a wind-neutral oared hull ignores the wind field entirely (current only)', R.v197.oaredIgnoresWind);
   A('v1.97: with no current/wind fields available the condition falls back to Neutral, never fabricated', R.v197.noFieldFallback);
   A('v1.97: land route-condition labels do not exist in the sea/river tables (the override guard is meaningful)', R.v197.landLabelRejected);
+  // ── v1.98: edgeCost hook + directional sea-lane geometry (routing-audit U4/U5) ──
+  A('v1.98: found ocean water to route over', R.v198.foundOcean);
+  A('v1.98: omitting edgeCost takes the identical arithmetic path as pre-v1.98 (bit-identical by construction)', R.v198.nullEdgeCostIdentical);
+  A('v1.98: a supplied edgeCost callback is genuinely consulted, not ignored', R.v198.edgeCostIsConsulted);
+  A('v1.98: _civSeaTimeEdgeCost builds a real cost function from the current/wind fields', R.v198.seaEdgeBuilt);
+  A('v1.98: the sea edge cost is SYMMETRIC (round-trip) — the guarantee that keeps the undirected Prim MST well-defined', R.v198.seaEdgeSymmetric);
+  A('v1.98: upwind water is slow but never impassable (the tack floor keeps every edge finite and positive)', R.v198.seaEdgeFinitePositive);
+  A('v1.98: Test D — the time-costed router is never SLOWER than pure shortest-distance on the same water', R.v198.testD_worse === 0);
+  A('v1.98: Test D — and it is genuinely faster on real ocean pairs (a longer route chosen because it is quicker)', R.v198.testD_better > 0);
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

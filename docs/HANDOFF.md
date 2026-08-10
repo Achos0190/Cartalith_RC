@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.97.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.98.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v1.98 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.96` are kept and never edited.
+  (v1.99 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.97` are kept and never edited.
+- **v1.98 — sea-lane geometry from round-trip time, not uniform distance (routing-audit U4/U5).**
+  The agreed second half of the routing work. **U4**: `roadDijkstra` gained an optional trailing
+  `edgeCost(i,j,dx,dy)` — every cost model here was `cost(cell)`, but currents/wind/flow are
+  `cost(from→to)`; omitting the argument takes the identical arithmetic path, asserted by diffing
+  the whole `dist` array. **U5**: `_civSeaTimeEdgeCost` replaces the flat `cost=1` per ocean cell
+  (which made lane geometry pure shortest-distance with the v1.77-v1.82 vector fields having zero
+  influence) with sailing time — rig polar vs local TWA plus along-track current, fields resampled
+  onto the routing grid ONCE since they are deliberately uncached (v1.86).
+  **A Prim MST is UNDIRECTED**, so rather than invent a tie-break for an asymmetric cost, each edge
+  costs the MEAN of its two directional times — which is also the right objective, since a permanent
+  lane is sailed both ways. Symmetric ⇒ MST valid and deterministic. Not a no-op: the polar is
+  non-linear, so an along-wind lane has a worse round trip than a cross-wind one.
+  **The obvious aggregate test was too weak to report** (mean lane sailing quality +0.35% — noise,
+  because a world has only ~1-6 lanes with fixed port endpoints); the controlled same-water
+  comparison is the real evidence: **36 better, 0 worse, 1 tie**, up to 15.3% faster, accepting up
+  to 24% longer paths — audit Test D passing. Hash vs v1.97 ALL IDENTICAL. Deliberate re-baseline of
+  generated lane geometry. See CHANGELOG for the full writeup.
 - **v1.97 — water route conditions derived from the real fields (routing-audit U1/U2/U3).**
   First build off `docs/research/routing-audit.md`; closes its two P0 rows. Owner picked
   U1+U2+U3-then-U4+U5 with auto+override via `AskUserQuestion`. `_jpDeriveStages` hardcoded

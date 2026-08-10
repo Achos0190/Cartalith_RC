@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.97**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.98**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.97.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.96.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.98.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.97.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,33 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Sea-lane geometry from round-trip time (v1.98)
+
+Second half of the routing-audit work (U4+U5). Closes its P1 sea-current/wind rows. Hash vs v1.97
+ALL IDENTICAL — sea lanes are civ-layer, never touched by `generate()`.
+
+- **`roadDijkstra` gained an optional trailing `edgeCost(i,j,dx,dy)`.** Every cost model here was
+  `cost(cell)`; currents/wind/flow are `cost(from → to)`. The loop already computed a per-edge step,
+  so this was one seam. **Omitting it takes the identical arithmetic path** — bit-identical by
+  construction, asserted by diffing the whole `dist` array against a null-callback run.
+- **`_civSeaTimeEdgeCost` replaces the flat `cost=1` per ocean cell.** Sea lanes were pure
+  shortest-distance and the v1.77–v1.82 vector fields had zero influence on geometry. Now each edge
+  is priced by sailing time (rig polar vs local TWA + along-track current). The coarse fields are
+  resampled onto the routing grid ONCE — they are deliberately uncached (v1.86).
+- **A Prim MST is UNDIRECTED, so an asymmetric cost has no well-defined tree.** Rather than invent a
+  tie-break, each edge costs the MEAN of its two directional times. That is the right objective
+  anyway: a permanent lane is sailed both ways. Symmetric by construction ⇒ MST valid, deterministic
+  (asserted). It is NOT a no-op — the polar is non-linear, so an along-wind lane (broad reach one
+  way, beat the other) has a worse round trip than a cross-wind lane that reaches both ways.
+- **`_CIV_LANE_TACK_FLOOR`**: polar 0 means "cannot sail this angle directly", not "cannot get
+  there". Without it an upwind edge costs Infinity and reads as impassable ocean.
+- **The obvious aggregate test was too weak to report.** Mean sailing quality across whole worlds'
+  lanes moved +0.35% — noise, because a world has only ~1–6 lanes with fixed port endpoints. The
+  real evidence is the controlled comparison on the same water under the same metric: **36 better,
+  0 worse**, up to 15.3% faster, accepting up to 24% longer paths. Audit Test D passing.
+- **Deliberate re-baseline**: regenerated sea-lane geometry differs from v1.97 (verified it moves on
+  every seed). Land routing untouched (`edgeCost` null for `isSea=false`).
 
 ### Water route conditions derived from the real fields (v1.97)
 

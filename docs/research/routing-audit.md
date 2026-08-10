@@ -3,8 +3,10 @@
 Audited against `Cartalith Gen1 v1.96.html`. Line numbers are from that file.
 
 > **Status:** P0 shipped in **v1.97** (river direction + sea condition from the real current/wind
-> fields + vessel sail polar). U4 (`edgeCost` hook) and U5 (directional sea-lane geometry) are the
-> agreed next step. Rows below are annotated where v1.97 changed them.
+> fields + vessel sail polar). P1 U4+U5 shipped in **v1.98** (`edgeCost` hook + sea-lane geometry
+> costed by round-trip sailing time). Remaining open: time-valued LAND cost (U6, deliberately
+> deferred), route-class cost functions, gravity demand, seasonality, storm risk. Rows below are
+> annotated where v1.97/v1.98 changed them.
 
 This document is an **audit**, not an implementation. Nothing in it has been built. Section I
 proposes a prioritised plan; it is a recommendation awaiting owner direction.
@@ -295,8 +297,8 @@ sail polar. The defensible form is `V_eff = V_sail(vessel, TWS, TWA) + V_current
 | Settlement demand | `minDeg` by tier (20808) | gravity-weighted demand | Rank-only | P2 |
 | Route corridors | computed (5759), used only for settlement placement (6328) | feed the router | **Orphaned field** | P2 |
 | Route classes | 6 types, assigned post-hoc from centrality | per-class cost functions | Class is output not input | P2 |
-| **Sea currents** | flat cost = 1 (20550) for GEOMETRY; **travel time now samples the real field (v1.97)** | directional, time-varying | Geometry only | **P1 (U5)** |
-| **Wind** | **travel time now uses a rig polar (v1.97 `jpSailFactor`)**; geometry still ignores it | polar-curve vessel speed | Geometry only | **P1 (U5)** |
+| **Sea currents** | **time (v1.97) + lane GEOMETRY via round-trip cost (v1.98 `_civSeaTimeEdgeCost`)** | directional, time-varying | **Closed** (seasonality still P3) | ✅ v1.98 |
+| **Wind** | **rig polar drives both reported time (v1.97) and lane geometry (v1.98)** | polar-curve vessel speed | **Closed** | ✅ v1.98 |
 | Storms / waves | none in routing | risk term / safest mode | Complete | P3 |
 | Seasonality | closures only (`jpSeaClosure`, seasonal passes) | time-varying fields | Geometry is season-invariant | P3 |
 | Travel time | JP only, post-hoc on a fixed polyline (18036) | the routing objective | Two objective functions | **P1** |
@@ -339,7 +341,7 @@ item 3 moves to P1 with U4/U5)
 3. Add the `edgeCost` hook to `roadDijkstra` (default = today's behaviour, so bit-identical when
    unused).
 
-**P1 — architecture**
+**P1 — architecture** — ✅ **items 4 SHIPPED in v1.98**; item 5 (time-valued land cost) deliberately deferred
 4. Directional sea cost: `V_eff = V_sail(vessel, TWS, TWA) + V_current`, minimise `Σ ds/|V_eff|`.
    Sea-lane MST then produces genuinely time-optimal, direction-dependent lanes.
 5. Convert land cost to a time quantity (Tobler-style), unifying the two objective functions.
@@ -365,8 +367,8 @@ Mapped to the brief's §28. A–C should **pass today** (regression guards); D�
 | A Mountain | 2 settlements, ridge with one low pass | route finds the pass | expected pass |
 | B River | large river, one favourable crossing | routes converge on it | expected pass |
 | C Existing road | overlapping corridors | shared, not parallel | expected pass (v1.76/v1.79 measured) |
-| D Sea current | adverse direct, favourable detour | fastest route is longer | time ✅ v1.97 · geometry still fails (U5) |
-| E Wind | two routes, different TWA | vessel choice changes route | time ✅ v1.97 · geometry still fails (U5) |
+| D Sea current | adverse direct, favourable detour | fastest route is longer | ✅ **v1.98** — 36 better / 0 worse, up to 15.3% faster on paths up to 24% longer |
+| E Wind | two routes, different TWA | vessel choice changes route | time ✅ v1.97 · lane geometry ✅ v1.98 (fixed reference rig) |
 | F Season | same voyage, two seasons | routes may differ | **fails** (geometry season-invariant) |
 | G Vessel type | coastal vs ocean hull | different preferred routes | time ✅ v1.97 (rig polar) · geometry still fails (U5) |
 | H Mixed | land → river → sea → land | transitions at valid nodes | partial |
