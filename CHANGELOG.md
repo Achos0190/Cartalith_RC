@@ -12,6 +12,58 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.102 — Lakes were silently misclassified as rivers in the Journey Planner
+
+Owner report: "Pathfinding and routes seem to make mistakes with lakes?" Root-caused by
+reproduction on a real generated lake before writing any fix. Civ-layer only (`_jpDeriveStages`).
+Hash vs v1.101 ALL IDENTICAL — never reached from `generate()`/`renderNow()`.
+
+- **Root cause**: `CART_BIOMES` correctly distinguishes Lake (index 14) from Ocean (index 15), but
+  `_jpDeriveStages` only ever gave the ocean branch real treatment — Lake cells were unconditionally
+  hardcoded to `cat:'river'`/`terrain:"Calm River"`, regardless of the lake's actual size. Reproduced
+  on a real world: a stage crossing an actual lake measured **172.8m gain / 183.6m loss over an
+  85.9km stretch** — a lake bed is physically flat, so that's DEM sampling noise across the lake
+  surface being read by `_jpRiverCondition` (net elevation change ÷ distance) as a real downhill
+  current. On a different seed/crossing that noise can just as easily net out past the Strong
+  Downstream/Upstream threshold, fabricating a fast current on a genuinely still body of water. A
+  pond and a Great-Lakes-scale crossing got IDENTICAL treatment: the calmest, fastest river terrain,
+  and river-only vessel eligibility — a real open-water hull crossing a big lake would incorrectly
+  read as ineligible, while a pure river barge would incorrectly read as fine for ANY lake, however
+  vast.
+- **Fix**: `nearestLandDist` (the "how far to the nearest dry-land cell" measurement the ocean
+  branch already computed inline) is factored out and reused for lake cells too. A small, near-shore
+  lake crossing (`d<=2`, the SAME cutoff "Sheltered Bay" already uses) stays river-like — reasonably
+  calm, any small craft, unchanged from before. A lake wide enough that its middle sits genuinely far
+  from either shore gets the SAME open-water terrain/vessel/condition treatment the ocean branch
+  already has: Coastal Waters or Open Sea terrain (real entries in the existing `JP_TERRAIN`/
+  `JP_ROUTE`/`JP_WATER_WINDOW` tables — no new lake-specific vocabulary invented), `cat:'sea'`
+  vessel eligibility, and `_jpSeaCondition`'s wind-driven condition instead of the noise-prone
+  gradient one. Wind is a real atmospheric field and blows over lakes same as sea, so it
+  meaningfully applies; the ocean-current term correctly reads ~0 over a lake (`currentOceanField()`
+  is masked to real ocean cells, so it doesn't fabricate an ocean-scale current there — an honest
+  omission, not a regression, since this model never claimed to simulate lake currents).
+- **Verified on a controlled synthetic lake** (a real generated world with `_cartBiome`/`field`
+  hand-overridden to carve exact-size lake bodies, since sweeping seeds for a specific lake width is
+  slow and non-deterministic): a 3-cell-wide lake stays fully river-classified; a 30×31-cell lake
+  produces a genuine `cat:'sea'` middle section reaching "Open Sea" at its centre, exactly the same
+  distance rule the (untouched) ocean branch uses; a real ocean crossing is provably unaffected.
+- **Tests**: 5 new smoke assertions (`R.v102`), independently verified via isolated Playwright
+  reproduction before being added to the suite (this environment's own pre-existing `smoke_gen1.js`
+  crash, disclosed in v1.100, is unrelated — confirmed by direct reproduction, not re-run in the
+  full suite). `tests/run.sh` 1038/1038, `tests/run_um.sh` 852/852 (block 4 untouched),
+  `hash_gen1.js` ALL IDENTICAL.
+- **Known scope cuts**: no dedicated "Lake" JP category was introduced — reusing the sea vocabulary
+  keeps the fix minimal and avoids a second, drifting copy of the terrain/route/vessel tables; the
+  d<=2 river/sea cutoff is the same value the ocean branch already committed to, not independently
+  recalibrated for lakes specifically; the underlying DEM-noise-across-flat-water artefact that
+  first surfaced this (visible in the gain/loss numbers even on the now-correctly-classified stretch)
+  is a pre-existing terrain-generation characteristic, not something this pass touches — it only
+  stopped the Journey Planner from mis-reading it as a real current, it doesn't smooth the lake bed.
+  A second lake-adjacent question — whether the auto-generated sea-lane network (`_civMstRoutes`)
+  should ever connect settlements across a lake, which it currently never does by design ("lakes are
+  a separate unconnected body") — was investigated and found to be a deliberate, documented choice,
+  not a bug; left alone.
+
 ### v1.101 — River/water detection eased for large-scale maps; a Generate → World troubleshooting info button
 
 Owner report, immediately following the v1.100 audit: a Journey Planner stage on a 40,000km-wide,

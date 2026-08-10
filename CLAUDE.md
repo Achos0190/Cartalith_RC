@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.101**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.102**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.101.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.100.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.102.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.101.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,48 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Lakes were silently misclassified as rivers in the Journey Planner (v1.102)
+
+Owner: "Pathfinding and routes seem to make mistakes with lakes?" Root-caused by reproduction on a
+real generated lake before writing any fix. Civ-layer only (`_jpDeriveStages`). Hash vs v1.101 ALL
+IDENTICAL.
+
+- **Root cause**: `CART_BIOMES` correctly distinguishes Lake (index 14) from Ocean (index 15), but
+  `_jpDeriveStages` only ever gave the ocean branch real treatment — every Lake cell was
+  unconditionally `cat:'river'`/`terrain:"Calm River"` regardless of size. Reproduced on a real
+  world: a lake crossing measured 172.8m gain / 183.6m loss over an 85.9km stretch — a lake bed is
+  physically flat, so that's DEM sampling noise across the lake surface being read by
+  `_jpRiverCondition` (net elevation change ÷ distance) as a real downhill current, which can just
+  as easily net out past the Strong Downstream/Upstream threshold on a different crossing,
+  fabricating a fast current on a genuinely still body of water. A pond and a Great-Lakes-scale
+  crossing got identical treatment — the calmest river terrain, and river-only vessel eligibility (a
+  real open-water hull crossing a big lake incorrectly read as ineligible; a pure river barge
+  incorrectly read as fine for any lake, however vast).
+- **Fix**: `nearestLandDist` (the ocean branch's own "distance to nearest dry land" measurement) is
+  factored out and reused for lake cells. A small, near-shore lake (`d<=2`, the same cutoff
+  "Sheltered Bay" already uses) stays river-like, unchanged. A lake wide enough that its middle sits
+  genuinely far from either shore gets the SAME open-water treatment the ocean branch already has:
+  Coastal Waters/Open Sea terrain (existing table entries, no new lake-specific vocabulary),
+  `cat:'sea'` vessel eligibility, and `_jpSeaCondition`'s wind-driven condition instead of the
+  noise-prone gradient one. Wind is a real atmospheric field and blows over lakes same as sea; the
+  ocean-current term correctly reads ~0 over a lake (`currentOceanField()` is masked to real ocean
+  cells) — an honest omission, not a regression, since this model never claimed lake currents.
+- **Verified on a controlled synthetic lake** (a real world with `_cartBiome`/`field` hand-overridden
+  to carve exact-size lake bodies — sweeping seeds for a specific width is slow and
+  non-deterministic): a 3-cell-wide lake stays fully river-classified; a 30×31-cell lake produces a
+  genuine `cat:'sea'` middle section reaching "Open Sea" at its centre, the same distance rule the
+  untouched ocean branch uses; a real ocean crossing is provably unaffected.
+- **Tests**: 5 new smoke assertions (`R.v102`), independently verified via isolated reproduction
+  (this environment's own pre-existing `smoke_gen1.js` crash, disclosed in v1.100, is unrelated).
+  1038/1038, 852/852, hash ALL IDENTICAL.
+- **Known scope cuts**: no dedicated "Lake" JP category — reusing the sea vocabulary avoids a
+  second, drifting copy of the terrain/route/vessel tables; the `d<=2` cutoff is the same value the
+  ocean branch already committed to, not independently recalibrated; the underlying DEM-noise
+  characteristic is pre-existing terrain generation, untouched — this only stops the Journey Planner
+  from mis-reading it as a real current. A second lake-adjacent question — whether the auto-generated
+  sea-lane network should ever connect settlements across a lake — was checked and found to be a
+  deliberate, already-documented design choice ("lakes are a separate unconnected body"), not a bug.
 
 ### River/water detection eased for large-scale maps; a Generate → World troubleshooting info button (v1.101)
 

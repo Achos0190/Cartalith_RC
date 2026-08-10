@@ -9,11 +9,30 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.101.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.102.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.100` are kept and never edited.
+  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.101` are kept and never edited.
+- **v1.102 — lakes were silently misclassified as rivers in the Journey Planner.** Owner: "Pathfinding
+  and routes seem to make mistakes with lakes?" Root-caused on a real lake before fixing:
+  `_jpDeriveStages` correctly distinguishes CART_BIOMES Lake (14) from Ocean (15) as raw indices, but
+  only ever gave the ocean branch real treatment — every lake cell was unconditionally
+  `cat:'river'`/`terrain:"Calm River"` regardless of size. Reproduced: a real lake crossing measured
+  172.8m gain/183.6m loss over 85.9km — a lake bed is flat, so that's DEM noise being read by
+  `_jpRiverCondition` as a real current, which can just as easily fabricate a fast "Strong
+  Downstream/Upstream" reading on a different crossing. A pond and a Great-Lakes-scale crossing got
+  identical treatment (calmest river terrain, river-only vessel eligibility — a real open-water hull
+  crossing a big lake incorrectly read as ineligible). **Fix**: `nearestLandDist` (the ocean branch's
+  own "distance to shore" measurement) reused for lakes too — near-shore (`d<=2`, same cutoff as
+  "Sheltered Bay") stays river-like; a lake wide enough that its middle is genuinely far from any
+  shore gets the SAME open-water terrain/vessel/wind-condition treatment the ocean branch already
+  has (Coastal Waters/Open Sea — existing tables, no new vocabulary). Verified on a controlled
+  synthetic lake (hand-carved `_cartBiome`/`field` on a real world): 3-cell-wide stays river; a
+  30×31-cell lake produces a genuine sea-classified middle reaching Open Sea; a real ocean crossing
+  is unaffected. Civ-layer only, hash vs v1.101 ALL IDENTICAL. 1038/1038, 852/852, 5 new smoke
+  assertions (independently verified via isolated reproduction). See CHANGELOG/CLAUDE.md for the
+  full writeup.
 - **v1.101 — river/water detection eased for large-scale maps; a Generate → World troubleshooting
   info button.** Owner report right after v1.100: a Journey Planner stage on a 40,000km-wide,
   2048px world (19.53 km/cell) read hundreds of km with zero water in reach. Reproduced the exact

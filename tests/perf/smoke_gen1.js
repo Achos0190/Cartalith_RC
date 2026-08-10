@@ -8020,6 +8020,63 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.101: the info text contains the version/grid summary AND the full-parameters JSON dump (incl. the real seed)', R.v101.infoTextHasVersion && R.v101.infoTextHasGrid && R.v101.infoTextHasFullParams);
   A('v1.101: clicking the info button again closes the panel', R.v101.infoPanelClosesOnSecondClick);
 
+  // ── v1.102 (owner: "pathfinding and routes seem to make mistakes with lakes"). Root-caused by
+  // reproduction on a real generated lake: a stage crossing it measured 172.8m gain / 183.6m loss
+  // over an 85.9km "Calm River" — a lake bed is flat, so that's DEM sampling noise across the lake
+  // surface being read by _jpRiverCondition as a real downhill current, and it can just as easily
+  // cross the Strong Downstream/Upstream threshold on a different seed/crossing, fabricating a fast
+  // current on a genuinely still body of water. Every lake cell (CART_BIOMES index 14) was
+  // unconditionally cat:'river'/terrain:"Calm River" regardless of the lake's actual size — a pond
+  // and a Great-Lakes-scale crossing got IDENTICAL treatment: river-only vessel eligibility (a real
+  // open-water hull incorrectly read as ineligible) and the calmest, fastest river terrain. Fix:
+  // reuse the ocean branch's own "distance to nearest land" measurement for lake cells too — a
+  // small, near-shore lake (d<=2, the SAME cutoff "Sheltered Bay" already uses) stays river-like;
+  // a lake wide enough that its middle sits genuinely far from either shore gets the SAME
+  // open-water terrain/vessel/condition treatment the ocean branch already has (Coastal Waters/
+  // Open Sea, wind-driven _jpSeaCondition instead of the noise-prone gradient one). Civ-layer only
+  // (_jpDeriveStages); hash vs v1.101 ALL IDENTICAL.
+  R.v102 = await page.evaluate(async () => {
+    const o = {};
+    const realCB = currentCartBiome(), savedCB = _cartBiome, savedField = field;
+    try {
+      // an all-land baseline avoids surrounding-row leakage into the distance-to-shore search
+      // (which scans a 2-D neighbourhood, not just along the sampled row)
+      const cb = new Uint8Array(realCB.length); cb.fill(2);   // 2 = Temperate Forest (land)
+      const y = Math.floor(GH / 2);
+      const seaLvl = state.seaLevel;
+      const f = new Float32Array(field.length); f.fill(seaLvl + 0.1);
+      // narrow lake: 3 cells wide, entirely within the d<=2 "stays river" reach
+      for (let dy = -1; dy <= 1; dy++) for (let x = 40; x < 43; x++) { cb[(y + dy) * GW + x] = 14; f[(y + dy) * GW + x] = seaLvl - 0.05; }
+      // wide lake: 30 cells wide and 31 tall, so the middle is genuinely far (>8 cells) from any shore
+      for (let dy = -15; dy <= 15; dy++) for (let x = 100; x < 130; x++) { cb[(y + dy) * GW + x] = 14; f[(y + dy) * GW + x] = seaLvl - 0.05; }
+      _cartBiome = cb; field = f;
+      const pts = []; for (let x = 0; x < GW; x++) pts.push([x, y]);
+      const jn = { pts, name: 'lake-synth' };
+      const plan = _jpEnsurePlan(jn);
+      const stages = _jpDeriveStages(jn, plan);
+      o.narrowLakeStagesAllRiver = stages.filter(s => s.i0 <= 42 && s.i1 >= 40).every(s => s.cat === 'river' && s.terrain === 'Calm River');
+      const wideLakeMidStages = stages.filter(s => s.i0 <= 120 && s.i1 >= 108);
+      o.wideLakeHasSeaStage = wideLakeMidStages.length > 0 && wideLakeMidStages.every(s => s.cat === 'sea');
+      o.wideLakeUsesRealSeaTerrain = wideLakeMidStages.every(s => s.terrain === 'Coastal Waters' || s.terrain === 'Open Sea');
+      o.wideLakeReachesOpenSea = wideLakeMidStages.some(s => s.terrain === 'Open Sea');
+      // no false positive: a real ocean crossing (bIdx 15) is completely unaffected by this change
+      const cbOcean = new Uint8Array(realCB.length); cbOcean.fill(2);
+      for (let dy = -15; dy <= 15; dy++) for (let x = 100; x < 130; x++) { cbOcean[(y + dy) * GW + x] = 15; }
+      _cartBiome = cbOcean;
+      const oceanStages = _jpDeriveStages({ pts, name: 'ocean-synth' }, _jpEnsurePlan({ pts, name: 'ocean-synth' }));
+      const oceanMid = oceanStages.filter(s => s.i0 <= 120 && s.i1 >= 108);
+      o.oceanCrossingStillWorks = oceanMid.length > 0 && oceanMid.every(s => s.cat === 'sea');
+    } finally {
+      _cartBiome = savedCB; field = savedField;
+    }
+    return o;
+  });
+  A('v1.102: a small, near-shore lake crossing (3 cells wide) stays river-classified with Calm River terrain — unchanged from before', R.v102.narrowLakeStagesAllRiver);
+  A('v1.102: a lake wide enough to be genuinely far from any shore is now sea-classified in its middle, not river', R.v102.wideLakeHasSeaStage);
+  A('v1.102: that sea-classified lake stretch uses the real sea terrain bands (Coastal Waters/Open Sea), not a fabricated lake-specific label', R.v102.wideLakeUsesRealSeaTerrain);
+  A('v1.102: a lake wide enough reaches the Open Sea band at its true middle, same distance rule the ocean branch already uses', R.v102.wideLakeReachesOpenSea);
+  A('v1.102: a real ocean crossing is unaffected by the lake fix (still sea-classified via its own bIdx=15 branch)', R.v102.oceanCrossingStillWorks);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();
