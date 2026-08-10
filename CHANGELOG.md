@@ -12,6 +12,70 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.06 — LOD tile cache: shallow zoom levels are pinned, never evicted (zoom-out re-render fix)
+
+Owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out tiles had
+already been rendered before. They should be stored and recalled." Engine only
+(`lodCacheGet`/`lodCachePut`/`_lodTileCacheGet`/`_lodTileCacheSet`/`lodCacheClear`, plus new
+`lodPinMaxZ()`). Hash vs v2.05 **ALL IDENTICAL** — LOD is opt-in/off by default, and this changes
+only *when* a cached tile gets reused, never the pixels it produces.
+
+- **Root cause, confirmed by direct measurement before writing any fix.** The LOD viewer has two
+  tile caches — `_lodCache` (refined heightmap data, cap 48) and `_lodTileCanvasCache` (colorized
+  pixels, pixel-budgeted to ~72 tiles at the default 1024px tile size — v1.74's own fix for a
+  DIFFERENT report, "repeated quick zoom in-out freezes the browser"). Both are **plain LRU pools**
+  with no notion that some tiles are more valuable to keep than others. A synthetic reproduction
+  (render a wide view, dive deep and pan across a real swath of the map — enough distinct tiles to
+  exceed the ~72-tile budget — then return to the EXACT original wide view) measured **3 of the
+  original 10 tiles evicted and needing full recolorization** on return, confirmed via a real
+  Playwright session instrumenting `renderBiomeTileRGBA` call counts directly. A first, narrower
+  "just zoom in and back out at one fixed point" reproduction found near-perfect caching (0-2
+  recolorizations per step) — the defect only shows up once the deep-zoom dive genuinely EXPLORES
+  (pans across an area), which is exactly what v1.74's own 68-72-tile budget was sized for a
+  single-spot zoom gesture, not for.
+- **The fix is not a bigger cap — no finite budget survives unbounded deep exploration** (at deep z
+  levels the combinatorial tile count vastly exceeds any affordable cache). Instead: shallow
+  pyramid levels are cheap and FEW (z=0 is 1 tile, z=1 is 4, z=2 is 16 — cumulative `(4^(z+1)-1)/3`)
+  and are exactly what a "zoom all the way back out" gesture always returns to. `_lodCachePinned`
+  and `_lodTileCanvasPinned` hold shallow-level entries **outside** the ordinary LRU pool, never
+  evicted — the deep-zoom LRU pool is otherwise completely unchanged, still capped, still evicts
+  under genuinely deep exploration (which is inherent to any bounded cache, not a bug).
+- **`lodPinMaxZ()` scales the pinned depth down as `_lodTile` grows**, reserving at most 30% of the
+  SAME per-tile-size pixel budget `lodTileCanvasMax()` already draws from — at the default 1024px
+  tile that reaches z≤2 (21 tiles); at 2048px it drops to z≤1 (5 tiles); at the largest 4096px
+  setting (where the ordinary pool floors at just 6 tiles) it drops to z≤0 (the single root tile).
+  A flat "always pin z≤2" was considered and rejected: at 4096px, 21 pinned tiles would alone dwarf
+  the entire 6-tile budget that size is supposed to live within — the same "budget by pixels, not a
+  fixed count" discipline v1.74 already established for the main pool, extended to the new pinned
+  one so it can never crowd out the pool it sits beside.
+- **`pyramidTile`'s own return value already carries `z`** (`{data,w,h,z,col,row}`), so
+  `lodCachePut` routes on it with no key-format or call-site change. A `<canvas>` has no `.z` of
+  its own, so `_lodTileCacheSet`'s one call site (`drawLODView`, where `v.z` is already in scope)
+  passes it explicitly instead.
+- **`lodCacheClear()` now also clears both pinned pools.** Unlike the LRU pools (which self-bound
+  via eviction regardless of key staleness), a pinned entry is never evicted by construction — left
+  unclearred, a pinned map would leak a handful of stale-world tiles on every regenerate over a
+  long session. `lodCacheClear()` is already called from every site that invalidates LOD tiles
+  (regenerate, the zoom-detail/tile-size/LOD-levels sliders, the burn-rivers/micro-erode toggles),
+  so no new call sites were needed.
+- **Re-measured after the fix, same reproduction**: the return-to-the-original-wide-view step now
+  needs **zero** recolorizations (was 3) — the exact "already rendered... should be recalled"
+  behavior the owner asked for.
+- **Tests**: `tests/run.sh` 1055/1055 (+9, incl. two pre-existing LOD-cache assertions updated to
+  sum both the LRU and pinned pool sizes now that a tile can land in either), `tests/run_um.sh`
+  852/852 (block 4 untouched), hash ALL IDENTICAL. Two new smoke assertions (`R.v206`),
+  independently verified via an isolated Playwright probe before trusting the full suite: a real
+  `drawLODView()`/`renderNow()` session confirms a previously-rendered wide view needs zero
+  recolorization after deep exploration, through the actual rendering pipeline, not just the pure
+  cache functions in isolation.
+- **Known scope cuts**: the deep-zoom LRU pool itself is unbounded-exploration-limited by design
+  (no cache survives touching more distinct tiles than it can hold) — this fix specifically and
+  only guarantees the CHEAP, FEW, high-value shallow levels are never lost; `_lodCacheMax` (the
+  data pool's own flat 48-entry cap, pre-existing and untouched) still isn't pixel-budgeted the way
+  the canvas pool is — a smaller, disclosed inconsistency that doesn't gate this fix's own
+  correctness (the canvas pool's cap is what actually determines whether a re-visit needs real
+  work, and it already tracked `_lodTile` before this version).
+
 ### v2.05 — LOD zoom-detail pipeline made real-km-aware (deep-zoom pixelation fix)
 
 Owner, pasting a screenshot of the debug-labeled `LOD6 12,38 / par 6,19 / cached` overlay over

@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.05**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.06**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.05.html` | **Current** unified tool (~30.2k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.04.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.06.html` | **Current** unified tool (~30.2k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.05.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,41 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### LOD tile cache: shallow zoom levels are pinned, never evicted (v2.06)
+
+Owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out tiles had
+already been rendered before. They should be stored and recalled." Engine only. Hash vs v2.05 ALL
+IDENTICAL — LOD is opt-in/off by default; this changes only *when* a tile is reused, never its
+pixels.
+
+- **Measured before fixing**: a wide view rendered, then a deep-zoom dive PANNING across a real
+  swath of the map (enough distinct tiles to exceed the ~72-tile canvas budget), then a return to
+  the exact original wide view — 3 of the original 10 tiles needed full recolorization. A narrower
+  "zoom in/out at one fixed spot" reproduction showed near-perfect caching, isolating the defect to
+  genuine exploration exceeding the LRU pools' budget (both `_lodCache` and `_lodTileCanvasCache`
+  are plain LRU, with no notion that some tiles are worth more to keep).
+- **Fix is not a bigger cap** (no finite budget survives unbounded exploration) — shallow pyramid
+  levels are cheap and FEW (z=0..2 is 1+4+16=21 tiles) and are exactly what "zoom all the way back
+  out" returns to. `_lodCachePinned`/`_lodTileCanvasPinned` hold them OUTSIDE the LRU pool, never
+  evicted; the deep-zoom pool is otherwise unchanged.
+- **`lodPinMaxZ()`** scales the pinned depth down as `_lodTile` grows (reserves ≤30% of the SAME
+  per-tile-size budget `lodTileCanvasMax()` draws from) — z≤2 at the default 1024px tile, z≤1 at
+  2048px, z≤0 at 4096px (where the whole pool floors at 6 tiles) — so pinning can never itself
+  blow the budget it sits beside, the same "budget by pixels" discipline v1.74 established.
+- **`pyramidTile`'s own return already carries `z`**, so `lodCachePut` needs no key/call-site
+  change; a `<canvas>` has no `.z`, so `_lodTileCacheSet`'s one call site passes `v.z` explicitly.
+- **`lodCacheClear()` clears both pinned pools too** — unlike the LRU pools (self-bound via
+  eviction), a pinned entry never evicts, so leaving it uncleared would leak stale-world tiles
+  every regenerate.
+- **Re-measured**: the return-to-wide-view step now needs zero recolorizations (was 3).
+- **Tests**: 1055/1055 (+9, two pre-existing LOD-cache assertions updated to sum both pools), 852/
+  852, hash ALL IDENTICAL, 2 new smoke assertions, independently verified through the real
+  `drawLODView()`/`renderNow()` pipeline before trusting the full suite.
+- **Known scope cuts**: the deep-zoom LRU pool remains exploration-budget-limited by design (this
+  fix protects only the cheap shallow levels); `_lodCacheMax` (the data pool's flat 48 cap) isn't
+  pixel-budgeted like the canvas pool — pre-existing, doesn't gate this fix's correctness since the
+  canvas pool already gates whether a re-visit needs real work.
 
 ### LOD zoom-detail pipeline made real-km-aware (v2.05)
 

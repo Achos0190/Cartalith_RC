@@ -352,7 +352,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const t0 = performance.now(); renderNow();       // second draw at the same view: overview reuse path
     const secondMs = performance.now() - t0;
     await refineVisibleTiles(); renderNow();         // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
-    const tileCacheN = _lodTileCanvasCache.size;
+    // v2.06: a colorized tile lands in EITHER _lodTileCanvasCache (the ordinary LRU pool) or
+    // _lodTileCanvasPinned (shallow z-levels, never evicted — see _lodTileCacheSet's own comment),
+    // so the total-cached count must sum both rather than checking the LRU pool alone.
+    const tileCacheN = _lodTileCanvasCache.size + (typeof _lodTileCanvasPinned !== 'undefined' ? _lodTileCanvasPinned.size : 0);
     lc.checked = false; lc.dispatchEvent(new Event('change'));
     return { cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true };
   });
@@ -8234,6 +8237,43 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v2.04: Weather/Carry food/Road quality/Infrastructure rows present on a sea stage too', R.v204.seaHasWeather && R.v204.seaHasCarryFood && R.v204.seaHasRouteCond && R.v204.seaHasInfra);
   A('v2.04: land-only rows (Hours/Supplies/Grazing/Foraging/Mount/Desert water) are all absent on a sea stage', R.v204.seaNoHours && R.v204.seaNoSupplyDays && R.v204.seaNoGrazing && R.v204.seaNoForaging && R.v204.seaNoMount && R.v204.seaNoDesertWater);
   A('v2.04: Road/Water quality options on a sea stage are JP_ROUTE.sea\'s own keys, not JP_ROUTE.land\'s', R.v204.seaRouteCondUsesSeaTable);
+
+  // v2.06 (owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out
+  // tiles had already been rendered before. They should be stored and recalled."). test_tail.js
+  // already unit-tests lodPinMaxZ()/lodCachePut()/_lodTileCacheSet() directly (block 1, pure); this
+  // is the end-to-end confirmation through the REAL drawLODView()/renderNow() rendering pipeline —
+  // render a wide view, dive deep and explore a real swath of the map (touching enough distinct
+  // tiles to pressure the ordinary LRU pool), then return to the exact original wide view and
+  // confirm it needs ZERO recolorization, not a partial or full re-render.
+  R.v206 = await page.evaluate(async () => {
+    const o = {};
+    document.getElementById('lodChk').checked = true;
+    _lodOn = true;
+    let colorizeCount = 0;
+    const origRender = renderBiomeTileRGBA;
+    window.renderBiomeTileRGBA = function (...args) { colorizeCount++; return origRender.apply(this, args); };
+    async function settleAt(zoom, cx, cy) {
+      _lodZoom = zoom; _lodCx = cx; _lodCy = cy;
+      applyView();
+      colorizeCount = 0;
+      await refineVisibleTiles();
+      renderNow();
+      return colorizeCount;
+    }
+    const wideColorizedFirst = await settleAt(2, GW / 2, GH / 2);
+    o.wideRenderedSomething = wideColorizedFirst > 0;
+    // explore a real swath at deep zoom — enough distinct tiles to exceed the ordinary LRU budget
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      await settleAt(24, GW * (0.25 + 0.5 * t), GH * (0.25 + 0.5 * Math.sin(t * Math.PI)));
+    }
+    o.returnColorized = await settleAt(2, GW / 2, GH / 2);
+    window.renderBiomeTileRGBA = origRender;
+    _lodOn = false;
+    return o;
+  });
+  A('v2.06: the Tiled LOD view actually renders tiles on first reveal (sanity check the harness itself works)', R.v206.wideRenderedSomething);
+  A('v2.06: returning to a previously-rendered wide view after deep exploration needs ZERO recolorization — it is recalled, not rerendered', R.v206.returnColorized === 0);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

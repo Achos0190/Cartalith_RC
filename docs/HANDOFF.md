@@ -9,11 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.05.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.06.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v2.04` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.05` are kept and never edited.
+- **v2.06 — LOD tile cache: shallow zoom levels are pinned, never evicted (zoom-out re-render
+  fix).** Owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out
+  tiles had already been rendered before. They should be stored and recalled." Measured before
+  fixing: a wide view rendered, a deep-zoom dive PANNING across a real swath of the map (enough
+  distinct tiles to exceed the ~72-tile canvas budget v1.74 set), then a return to the exact
+  original wide view — 3 of 10 original tiles needed full recolorization (a narrower "zoom in/out
+  at one fixed spot" test showed near-perfect caching, isolating the defect to genuine exploration
+  exceeding the LRU budget). Fix: shallow pyramid levels (z=0 is 1 tile, z=1 is 4, z=2 is 16 — the
+  exact levels a "zoom all the way back out" gesture returns to) are now held in
+  `_lodCachePinned`/`_lodTileCanvasPinned`, OUTSIDE the ordinary LRU pool, never evicted; the
+  deep-zoom LRU pool is otherwise unchanged (still capped, still evicts under genuinely deep
+  exploration — no finite cache survives that, and this fix doesn't try to). New `lodPinMaxZ()`
+  scales the pinned depth DOWN as `_lodTile` grows (≤30% of the same per-tile-size pixel budget
+  `lodTileCanvasMax()` already draws from), so pinning can never itself exceed the budget it sits
+  beside — z≤2 at the default 1024px tile, down to z≤0 at 4096px. `lodCacheClear()` now also
+  clears both pinned pools (unlike the LRU pools, a pinned entry never self-evicts, so leaving it
+  uncleared would leak stale-world tiles every regenerate). Re-measured: the return-to-wide-view
+  step now needs zero recolorizations. Engine-only, hash vs v2.05 ALL IDENTICAL. `tests/run.sh`
+  1055/1055 (+9), `tests/run_um.sh` 852/852, 2 new smoke assertions verified via an isolated
+  Playwright probe through the real rendering pipeline. See CHANGELOG/CLAUDE.md for the full
+  writeup.
 - **v2.05 — LOD zoom-detail pipeline made real-km-aware (deep-zoom pixelation fix).** Owner,
   pasting a screenshot of blocky terrain under the `LOD6 12,38/par 6,19/cached` debug label:
   "There is still a certain pixilated quality to the map when we zoom. The graphics should be

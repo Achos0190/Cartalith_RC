@@ -1452,6 +1452,41 @@ fieldsFinite('generate(world)');
   for (let i = 0; i < 6; i++) lodCachePut('k' + i, { i });
   check('LRU cache evicts down to max', _lodCache.size === 3 && lodCacheGet('k0') === null && lodCacheGet('k5') !== null);
   _lodCacheMax = sv; lodCacheClear();
+
+  /* ---------- v2.06: shallow-level tiles are PINNED — never evicted, so "zoom all the way back
+     out" is always instant (owner report: "Zooming out seems to rerender all tiles... they had
+     already been rendered before. They should be stored and recalled"). ---------- */
+  {
+    const svTile = _lodTile, svMax = _lodCacheMax;
+    _lodTile = 1024;   // the app's own default — lodPinMaxZ() should reach z=2 here (21 tiles)
+    check('lodPinMaxZ reaches z=2 at the default tile size (21 shallow tiles is a small, safe reservation)', lodPinMaxZ() === 2);
+    _lodTile = 4096;   // the largest tile-size setting — pinning must shrink so it can't itself blow the tiny per-tile-size budget
+    check('lodPinMaxZ shrinks at a large tile size (never lets pinning outgrow lodTileCanvasMax\'s own floor)', lodPinMaxZ() < 2 && Math.pow(4, lodPinMaxZ() + 1) - 1 <= 3 * lodTileCanvasMax());
+    _lodTile = 1024;
+
+    // a shallow-level (z<=lodPinMaxZ()) tile survives LRU pressure that would otherwise evict it
+    lodCacheClear(); _lodCacheMax = 3;
+    lodCachePut('shallow', { z: 0, marker: 'shallow' });
+    for (let i = 0; i < 6; i++) lodCachePut('deep' + i, { z: 5, i });   // z=5 is well past lodPinMaxZ() — ordinary LRU pool
+    check('a z=0 tile is pinned — survives filling the LRU pool well past its cap', lodCacheGet('shallow') !== null && lodCacheGet('shallow').marker === 'shallow');
+    check('the pinned tile never occupied an LRU slot — deep tiles still evict down to _lodCacheMax on their own', _lodCache.size === 3);
+    check('a deep (unpinned) tile past the cap is genuinely gone, same as before this fix', lodCacheGet('deep0') === null);
+    _lodCacheMax = svMax;
+
+    // lodCacheClear() must also clear the pinned pools — a world regenerate must not leak stale tiles into a new world forever
+    check('lodCacheClear empties both the LRU pool and the pinned pool', (() => { lodCachePut('p', { z: 0 }); lodCacheClear(); return _lodCache.size === 0 && _lodCachePinned.size === 0; })());
+
+    // the canvas-cache twin: same pin/evict split, keyed on an explicit z argument (a <canvas> has no .z of its own)
+    _lodTileCanvasPinned.clear(); _lodTileCanvasCache.clear();
+    _lodTileCacheSet('shallowCanvas', { marker: 'canvas' }, 0);
+    check('_lodTileCacheSet pins a shallow-z canvas the same way lodCachePut pins shallow-z data', _lodTileCanvasPinned.has('shallowCanvas') && !_lodTileCanvasCache.has('shallowCanvas'));
+    check('_lodTileCacheGet transparently returns a pinned canvas entry', _lodTileCacheGet('shallowCanvas') !== null);
+    _lodTileCacheSet('deepCanvas', { marker: 'canvas2' }, 5);
+    check('_lodTileCacheSet leaves a deep-z canvas in the ordinary evictable pool', _lodTileCanvasCache.has('deepCanvas') && !_lodTileCanvasPinned.has('deepCanvas'));
+    _lodTileCanvasPinned.clear(); _lodTileCanvasCache.clear();
+
+    _lodTile = svTile;
+  }
 }
 
 /* ---------- v0.074: button-driven LOD refine (overview, then refine on demand) ---------- */
@@ -1462,11 +1497,14 @@ fieldsFinite('generate(world)');
   check('lodViewRect covers a centered sub-region', v.x1 > v.x0 && v.y1 > v.y0 && v.x1 <= GW - 1 && v.y1 <= GH - 1);
   const keys = visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1);
   check('visibleTileKeys non-empty', keys.length >= 1);
-  const before = _lodCache.size;
+  // v2.06: a refined tile lands in EITHER _lodCache (the LRU pool) or _lodCachePinned (shallow
+  // z-levels, never evicted — see lodCachePut's own comment) depending on the view's own z, so the
+  // total-cached count must sum both rather than checking _lodCache alone.
+  const before = _lodCache.size + _lodCachePinned.size;
   refineVisibleTiles();
-  check('Refine builds detail tiles into the cache', _lodCache.size > before);
-  const after = _lodCache.size; refineVisibleTiles();
-  check('re-refine reuses the cache (no growth)', _lodCache.size === after);
+  check('Refine builds detail tiles into the cache', (_lodCache.size + _lodCachePinned.size) > before);
+  const after = _lodCache.size + _lodCachePinned.size; refineVisibleTiles();
+  check('re-refine reuses the cache (no growth)', (_lodCache.size + _lodCachePinned.size) === after);
   const k0 = keys[0], t = lodCacheGet(lodCacheKey(v.z, k0.col, k0.row, _lodTile));
   check('refined tile is finite high-res detail', t && t.data.every(Number.isFinite) && t.w >= 2);
   _lodOn = false; _lodZoom = 1; lodCacheClear();
