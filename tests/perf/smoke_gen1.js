@@ -7946,6 +7946,80 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.100: _jpRerouteForMode(jn,\'land\') succeeds for the SAME inland points even though plan.transport is still Sea Faring — the actual mechanism this feature depends on', R.v100.forceLandSucceedsUnderSeaTransport);
   A('v1.100: the pre-v1.100 call shape (no second argument) is unaffected', R.v100.plainRerouteStillWorks);
 
+  // ── v1.101 (owner: fix both the sea-cost-model style over-strict water detection at large map
+  // scale, AND add a Generate → World troubleshooting info button). Two independent civ-layer
+  // pieces: (a)/(b) the JP-specific drinking-water threshold easing (_jpDrinkingCoarseEase,
+  // layered on top of the engine's own riverCoarseEase — see test_tail.js for the engine-side
+  // riverCoarseEase/riverFlowThresh unit tests, which this file doesn't duplicate), and (c) the new
+  // #genInfoBtn/#genInfoPanel UI. Hash vs v1.100 is NOT identical at scales above the app's default
+  // mapWidthKm=800 (a deliberate, measured re-baseline — see CHANGELOG); AT the default and below,
+  // riverCoarseEase is a no-op by construction, so the default render is untouched.
+  R.v101 = await page.evaluate(async () => {
+    const o = {};
+    o.riverCoarseEaseNoOpAtDefault = riverCoarseEase(800) === 1;
+    o.riverCoarseEaseCapped = riverCoarseEase(1e6) === TERRAIN_DETAIL_MAX_K;
+    o.jpDrinkingEaseNoOpAtDefault = _jpDrinkingCoarseEase(800) === 1;
+    o.jpDrinkingEaseGoesPastCartographicCap = _jpDrinkingCoarseEase(40000) > riverCoarseEase(40000);
+    o.jpDrinkingEaseCapped = _jpDrinkingCoarseEase(1e9) === JP_DRINKING_COARSE_MAX;
+
+    // _jpStageDryKm: a synthetic coarse world (cellKm=200, well past both easing caps' break
+    // points) with sparse minor-stream flow just strong enough to clear the NEW eased threshold but
+    // not the OLD (pre-v1.101) one — proves the fix changes the actual water-search OUTCOME, not
+    // just the standalone easing functions in isolation.
+    const savedGW = GW, savedGH = GH, savedField = field, savedFlow = flowField, savedMWK = state.mapWidthKm;
+    try {
+      GW = 200; GH = 10; state.mapWidthKm = 40000;
+      field = new Float32Array(GW * GH).fill(0.6);
+      const cellKm = state.mapWidthKm / GW;
+      const flowThreshEased = riverFlowThresh(GW, GH);
+      const newDrinkThresh = flowThreshEased * (riverCoarseEase(state.mapWidthKm) / _jpDrinkingCoarseEase(state.mapWidthKm)) / JP_DRINKING_FLOW_DIVISOR;
+      const oldDrinkThresh = (GW * GH * 0.0004) / JP_DRINKING_FLOW_DIVISOR;
+      o.newThreshBelowOld = newDrinkThresh < oldDrinkThresh;   // the fix must actually loosen it
+      const flowVal = (newDrinkThresh + oldDrinkThresh) / 2;   // clears NEW, does not clear OLD
+      const flow = new Float32Array(GW * GH);
+      for (let x = 20; x < GW; x += 40) flow[5 * GW + x] = flowVal;
+      flowField = flow;
+      const wb = new Uint8Array(GW * GH);
+      const pts = []; for (let x = 0; x < GW; x++) pts.push([x, 5]);
+      const dryKmPost = _jpStageDryKm(pts, 0, pts.length - 1, cellKm, wb, flowThreshEased);
+      // hand-rolled OLD-behavior scan: same reach/search logic, old (uneased) threshold
+      const R = Math.ceil(_jpWaterReachCells(cellKm));
+      function freshOld(x, y) { for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || nx >= GW || ny < 0 || ny >= GH) continue; if (dx * dx + dy * dy > R * R) continue; if (flow[ny * GW + nx] > oldDrinkThresh) return true; } return false; }
+      let longest = 0, run = 0;
+      for (let x = 0; x < GW; x++) { if (freshOld(x, 5)) run = 0; else { run += cellKm; if (run > longest) longest = run; } }
+      o.dryKmPost = dryKmPost; o.dryKmPreFix = longest;
+      o.fixBshortensDryRun = dryKmPost < longest;
+    } finally {
+      GW = savedGW; GH = savedGH; field = savedField; flowField = savedFlow; state.mapWidthKm = savedMWK;
+    }
+
+    // Generate → World info button
+    const btn = document.getElementById('genInfoBtn'), panel = document.getElementById('genInfoPanel'), ta = document.getElementById('genInfoText');
+    o.infoButtonExists = !!btn; o.infoPanelExists = !!panel; o.infoTextareaExists = !!ta;
+    o.infoCopyBtnExists = !!document.getElementById('genInfoCopyBtn');
+    o.infoPanelStartsClosed = panel && panel.style.display === 'none';
+    if (btn) btn.click();
+    o.infoPanelOpensOnClick = panel && panel.style.display !== 'none';
+    const text = ta ? ta.value : '';
+    o.infoTextHasVersion = /Elevation Foundation v/.test(text);
+    o.infoTextHasGrid = new RegExp('Grid ' + GW + '.' + GH).test(text);
+    o.infoTextHasFullParams = /Full generation parameters/.test(text) && /"warp"/.test(text) && text.includes(String(state.tect.seed));
+    if (btn) btn.click();
+    o.infoPanelClosesOnSecondClick = panel && panel.style.display === 'none';
+    return o;
+  });
+  A('v1.101: riverCoarseEase is a no-op at the app default mapWidthKm (800)', R.v101.riverCoarseEaseNoOpAtDefault);
+  A('v1.101: riverCoarseEase is capped at TERRAIN_DETAIL_MAX_K', R.v101.riverCoarseEaseCapped);
+  A('v1.101: _jpDrinkingCoarseEase is a no-op at the app default mapWidthKm (800)', R.v101.jpDrinkingEaseNoOpAtDefault);
+  A('v1.101: _jpDrinkingCoarseEase eases FURTHER than the cartographic riverCoarseEase past its cap — JP has no rendering cost to weigh against going further', R.v101.jpDrinkingEaseGoesPastCartographicCap);
+  A('v1.101: _jpDrinkingCoarseEase is capped at JP_DRINKING_COARSE_MAX (stays finite under an extreme misconfiguration)', R.v101.jpDrinkingEaseCapped);
+  A('v1.101: the new drinking threshold is genuinely looser than the pre-v1.101 one at world scale (the fix has real effect, not just a no-op formula)', R.v101.newThreshBelowOld);
+  A('v1.101: on a synthetic coarse world, _jpStageDryKm finds water (shorter dry run) that the pre-v1.101 threshold would have missed entirely', R.v101.fixBshortensDryRun);
+  A('v1.101: the Generate → World info button exists with its panel/textarea/copy button', R.v101.infoButtonExists && R.v101.infoPanelExists && R.v101.infoTextareaExists && R.v101.infoCopyBtnExists);
+  A('v1.101: the info panel starts closed and toggles open on click', R.v101.infoPanelStartsClosed && R.v101.infoPanelOpensOnClick);
+  A('v1.101: the info text contains the version/grid summary AND the full-parameters JSON dump (incl. the real seed)', R.v101.infoTextHasVersion && R.v101.infoTextHasGrid && R.v101.infoTextHasFullParams);
+  A('v1.101: clicking the info button again closes the panel', R.v101.infoPanelClosesOnSecondClick);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

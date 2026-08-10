@@ -12,6 +12,86 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v1.101 — River/water detection eased for large-scale maps; a Generate → World troubleshooting info button
+
+Owner report, immediately following the v1.100 audit: a Journey Planner stage on a 40,000km-wide,
+2048px-wide world (19.53 km/cell) read hundreds of km with zero water in reach. Investigated by
+reproducing the world's exact scale (owner supplied grid/plates/warp/seed/latitude/altitude from
+the on-screen readout) and measuring real hydrology density, not guessing. Two fixes, plus a new
+troubleshooting tool the investigation itself motivated. Hash vs v1.100 **ALL IDENTICAL at the
+app's own default (mapWidthKm=800, any resolution)** — a deliberate, measured re-baseline for any
+region/world larger than that, the same class of change as v1.60's own terrainDetailK cut.
+
+- **Root cause, measured on the reported world's own scale**: only ~34% of land sat within the
+  Journey Planner's own water-reach radius of a detected river/lake, and just ~16% in desert biome
+  — not because the fictional geography is that dry, but because `riverFlowThresh` (the engine's
+  one canonical "is this cell's flow significant enough to count as a river" cutoff, v1.60) is
+  keyed on `terrainDetailK`, which only ever eases on the FINE side of the scale (a region smaller
+  than the 800km/2048px reference gets more relief/drainage detail); a map coarser than the
+  reference — world scale, or any large region — sits flat at k=1 by design, so the threshold never
+  loosens for a big map the way it tightens for a small one. At 19.53 km/cell, a real minor stream's
+  catchment (tens of km²) can never accumulate the same flat cell-count threshold calibrated for an
+  800km region, regardless of how lenient that threshold reads in real-km terms.
+- **Fix A (engine): `riverCoarseEase`, a companion to `terrainDetailK` that eases the COARSE side.**
+  Deliberately a SEPARATE function, not folded into `terrainDetailK` itself (which also drives the
+  height-formula/heterogeneity noise FREQUENCY — easing that for large worlds would flatten their
+  relief, an unrelated and unwanted side effect); only divides into `riverFlowThresh`.
+  **Deliberately keyed on `mapWidthKm` alone, never blended with `gw` the way `terrainDetailK`'s own
+  `cellKm` is** — a first cut reused `cellKm` and measured a real regression before shipping: this
+  file's own test/perf harnesses overwhelmingly render at well below 2048px while leaving
+  `mapWidthKm` at its 800 default (`hash_gen1.js`'s whole battery runs at 512px; plenty of
+  `test_tail.js` scenarios at 128-256px) — a PREVIEW-resolution choice, not a "large world" one, and
+  `cellKm` alone can't tell those apart (GW=256/mapWidthKm=800 has the identical 3.125 km/cell that
+  GW=2048/mapWidthKm=6400 would). Keying on `cellKm` re-baselined the ENTIRE low-resolution test
+  suite — two real, unrelated `test_tail.js` failures traced directly to it — before the redesign
+  to `mapWidthKm` alone fixed both without touching either test. A river's real catchment area is a
+  property of the world's physical size, not of how many pixels a user chose to preview it at, so
+  `mapWidthKm` alone is both the safer AND the more correct anchor. No-op (returns 1) at/below the
+  app's own literal default mapWidthKm=800 — bit-identical there at ANY resolution; capped at the
+  same `TERRAIN_DETAIL_MAX_K` magnitude as `terrainDetailK`, for a bounded worst case.
+- **Fix B (Journey Planner only): `_jpDrinkingCoarseEase`, uncapped past the cartographic cap.**
+  `riverCoarseEase`'s cap exists for the MAP's own reason — don't clutter a rendered world with
+  faint rivers — which has nothing to do with whether a thirsty party can find a spring. Measured on
+  the reported world's own worst-case contiguous dry stretch (664 km through Cold Desert /
+  Badlands, 50x past the cartographic cap's own break point of 16x): Fix A's fair improvement on
+  the WORLD AVERAGE didn't help this specific stage, because the whole 664 km sits inside one
+  contiguous dry run either way. JP has no rendering cost to weigh against going further, so its own
+  ease reuses the identical `mapWidthKm/800` ratio uncapped (a much higher ceiling purely to keep an
+  extreme misconfiguration finite, not a "don't go too far" aesthetic judgment). Implemented by
+  "swapping" `flowThresh`'s already-capped ease for the uncapped one inside `_jpStageDryKm` (multiply
+  out `riverCoarseEase`, divide back in `_jpDrinkingCoarseEase`) rather than re-deriving from scratch
+  — avoids double-applying the shared portion, and needs no new parameters on an existing function.
+- **Measured net effect on the reported world**: drinkable-land fraction 34%→96% (16%→95% in
+  desert); the worst-case 874km Rocky-Terrain/Cold-Desert stage for a 10-Mounted-Rider party with
+  zero pack animals (the exact reported configuration) dropped from **3742%→698%** of capacity —
+  still correctly flags this specific, genuinely extreme configuration (no pack animals, the single
+  longest dry stretch on the whole map) rather than over-correcting to never block at all.
+- **New: Generate → World "ℹ️ Info" button** (owner: "would help in troubleshooting"), directly
+  motivated by this investigation — the on-screen `#readout` panel (grid/plates/warp/seed/volc/
+  craters/latitude/altitude) wasn't enough to reproduce the reported world exactly; several tect/
+  erosion sliders it never showed meant an independent reproduction attempt could only match the
+  SCALE-driving fields, not the exact terrain. `generationInfoText()` leads with the same on-screen
+  fields (so a report matches what the user is looking at) then a `JSON.stringify` dump of
+  `state.tect`/`volc`/`crater`/`erosion`/`stream`/`glacial`/`coastal`/`planet`/`world_structure` — a
+  full field list, not a hand-picked one, so a future slider is automatically included without this
+  function needing an update too. Copies via `navigator.clipboard`, falling back to
+  `document.execCommand('copy')`, falling back to a manually-selectable `<textarea>` — this app must
+  degrade gracefully on `file://`, where the Clipboard API's availability isn't guaranteed.
+- **Tests**: 7 new `test_tail.js` unit assertions for `riverCoarseEase`/`riverFlowThresh` (engine,
+  script block 1 — `tests/run.sh` now 1038/1038); 11 new smoke assertions (`R.v101`) for
+  `_jpDrinkingCoarseEase`, a synthetic-world proof that `_jpStageDryKm` finds water the pre-v1.101
+  threshold would have missed, and the info button's full open/close/content/copy-button lifecycle.
+  `tests/run_um.sh` 852/852 (block 4 untouched). `hash_gen1.js` ALL IDENTICAL at the default battery
+  (512px/800km); a direct field-hash A/B at mapWidthKm=12,800 confirms the expected, deliberate
+  divergence there. The v1.101 smoke assertions were independently verified via direct, isolated
+  Playwright reproduction (this environment's own pre-existing `smoke_gen1.js` crash, disclosed in
+  v1.100, reproduces identically here — confirmed unrelated to this version's changes by checking it
+  fires at the exact same position regardless of what test code follows).
+- **Known scope cuts**: `JP_DRINKING_COARSE_MAX=64` and the `TERRAIN_DETAIL_MAX_K`-shared cap on
+  `riverCoarseEase` are reasoned, not independently calibrated constants; the info button's full-
+  parameter dump doesn't include `state.places`/`civWays`/asset-pack data (troubleshooting geology/
+  climate generation specifically, not a full save-state export — `exportZip()` already covers that).
+
 ### v1.100 — Journey Planner stage-blocking audit: a real remedy gap fixed, two other suspects cleared by measurement
 
 Owner: reported the Journey Planner blocking frequently and asked to check whether the route-drawing

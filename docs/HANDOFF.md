@@ -9,11 +9,41 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v1.100.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v1.101.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file, two-digit minor
-  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.99` are kept and never edited.
+  (v2.00 next). Older `v0.57`/`v0.6`/`v0.61`–`v1.100` are kept and never edited.
+- **v1.101 — river/water detection eased for large-scale maps; a Generate → World troubleshooting
+  info button.** Owner report right after v1.100: a Journey Planner stage on a 40,000km-wide,
+  2048px world (19.53 km/cell) read hundreds of km with zero water in reach. Reproduced the exact
+  scale and measured before fixing. **Root cause**: `riverFlowThresh` is keyed on `terrainDetailK`,
+  which only eases the FINE side of the scale — a map coarser than the 800km/2048px reference sits
+  flat at k=1 by design, so the river/water threshold never loosens for a big map. Measured: only
+  ~34% of land (16% desert) was within the Journey Planner's own water-reach radius of a detected
+  river on the reported world. **Fix A (engine)**: `riverCoarseEase`, a new companion to
+  `terrainDetailK` that eases the COARSE side, feeding only into `riverFlowThresh` (not the height-
+  formula/heterogeneity noise frequency, which stays untouched). Deliberately keyed on `mapWidthKm`
+  ALONE, not blended with resolution the way `terrainDetailK`'s own `cellKm` is — a first cut that
+  reused `cellKm` measurably re-baselined this file's own low-resolution test suite (most of it
+  runs well under 2048px at the 800km default), caught by two real `test_tail.js` failures before
+  the redesign. **Fix B (Journey Planner only)**: `_jpDrinkingCoarseEase`, uncapped past Fix A's own
+  cartographic cap (which exists so a rendered world map isn't cluttered with faint rivers — not a
+  constraint the Journey Planner's "can a party find a spring" check should inherit). **Measured net
+  effect on the reported world**: drinkable-land 34%→96% (16%→95% desert); the reported worst-case
+  874km stage (10 Mounted Riders, zero pack animals) dropped from 3742%→698% of capacity — still
+  correctly flags this specific extreme configuration, not over-corrected to never block. **New**:
+  a Generate → World "ℹ️ Info" button (owner: "would help in troubleshooting") — a plain-text dump
+  led by the same fields the on-screen readout shows, then a full `JSON.stringify` of every
+  generation-affecting state block, since the readout alone wasn't enough to reproduce the reported
+  world this session (several tect/erosion sliders it never surfaced). Copies via
+  `navigator.clipboard` with an `execCommand`/manual-select fallback chain (must degrade on
+  `file://`). Hash vs v1.100 ALL IDENTICAL at the app's own default (mapWidthKm=800, any
+  resolution); a deliberate, measured re-baseline above that (confirmed via a direct field-hash A/B
+  at mapWidthKm=12,800). `tests/run.sh` 1038/1038 (+7), `tests/run_um.sh` 852/852, smoke +11
+  (independently verified via isolated reproduction — see v1.100's own disclosed pre-existing
+  `smoke_gen1.js` environmental crash, confirmed still unrelated to this version). See CHANGELOG/
+  CLAUDE.md for the full writeup.
 - **v1.100 — Journey Planner stage-blocking audit: a real remedy gap fixed, two other suspects
   cleared by measurement.** Owner asked to fix, together, three flagged concerns: frequent stage
   blocking, whether the route-drawing cost model over-prefers water, and whether settlement

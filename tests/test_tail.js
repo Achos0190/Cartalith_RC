@@ -4054,6 +4054,24 @@ if (typeof carveRiverValleys === 'function') {
       return true;
     })());
   }
+  /* ---------- v1.101: riverCoarseEase — the coarse-side companion to terrainDetailK ---------- */
+  if (typeof riverCoarseEase === 'function') {
+    check('riverCoarseEase===1 at the app default mapWidthKm (800) — bit-identical there', riverCoarseEase(800) === 1);
+    check('riverCoarseEase===1 below the default (never eases the FINE side — that stays terrainDetailK\'s own job)', riverCoarseEase(50) === 1);
+    check('riverCoarseEase>1 above the default mapWidthKm (a genuinely large region/world)', riverCoarseEase(6400) > 1);
+    check('riverCoarseEase grows as mapWidthKm grows (a bigger world eases further)', riverCoarseEase(20000) > riverCoarseEase(3200));
+    check('riverCoarseEase is capped at TERRAIN_DETAIL_MAX_K', riverCoarseEase(1e7) === TERRAIN_DETAIL_MAX_K);
+    check('riverFlowThresh matches the legacy formula at low resolution + default mapWidthKm (the overwhelmingly common test/preview shape — GW well under 2048, mapWidthKm still 800)', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 800; const gwSave = GW; GW = 256;
+      const t = riverFlowThresh(256, 164); GW = gwSave; state.mapWidthKm = savedW;
+      return Math.abs(t - 256 * 164 * 0.0004) < 1e-6;
+    })());
+    check('riverFlowThresh drops below the legacy formula for a larger-than-default mapWidthKm (world-scale)', (() => {
+      const savedW = state.mapWidthKm; state.mapWidthKm = 40000; const gwSave = GW; GW = 2048;
+      const t = riverFlowThresh(2048, 1024); GW = gwSave; state.mapWidthKm = savedW;
+      return t < 2048 * 1024 * 0.0004;
+    })());
+  }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);

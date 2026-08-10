@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v1.100**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v1.101**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v1.100.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.99.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v1.101.html` | **Current** unified tool (~30.1k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v1.100.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,65 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### River/water detection eased for large-scale maps; a Generate → World troubleshooting info button (v1.101)
+
+Owner report immediately after v1.100 shipped: a Journey Planner stage on a 40,000km-wide, 2048px
+world (19.53 km/cell) read hundreds of km with zero water in reach. Reproduced the world's exact
+scale and measured real hydrology density before writing any fix. Hash vs v1.100 ALL IDENTICAL at
+the app's own default (mapWidthKm=800, any resolution) — a deliberate, measured re-baseline above
+that, same class as v1.60's own terrainDetailK cut.
+
+- **Root cause**: `riverFlowThresh` (v1.60's canonical river-significance cutoff) is keyed on
+  `terrainDetailK`, which only ever eases the FINE side of the scale (a region smaller than the
+  reference gets more relief/drainage detail) — a map COARSER than the reference (world scale, or
+  any large region) sits flat at k=1 by design, so the threshold never loosens for a big map the way
+  it tightens for a small one. Measured: only ~34% of land (16% in desert biome) sat within the
+  Journey Planner's own water-reach radius of a detected river/lake on the reported world — not
+  because the geography is that dry, but because a real minor stream's catchment can never
+  accumulate the same flat cell-count threshold calibrated for an 800km reference region.
+- **Fix A (engine): `riverCoarseEase`**, a companion to `terrainDetailK` that eases the COARSE side
+  — a SEPARATE function (not folded into `terrainDetailK` itself, which also drives relief NOISE
+  FREQUENCY — easing that for large worlds would flatten their terrain, an unrelated side effect),
+  only divides into `riverFlowThresh`. **Deliberately keyed on `mapWidthKm` alone, never blended
+  with `gw`** the way `terrainDetailK`'s own `cellKm` is — a first cut reused `cellKm` and measured
+  a real regression: this file's own test/perf harnesses overwhelmingly render below 2048px while
+  leaving `mapWidthKm` at its 800 default (`hash_gen1.js`'s whole battery runs at 512px), which
+  `cellKm` alone can't distinguish from a genuinely large world. Keying on `cellKm` re-baselined the
+  entire low-resolution test suite (two real `test_tail.js` failures traced to it) before the
+  redesign to `mapWidthKm` alone fixed both without touching either test. No-op at/below the app's
+  literal default mapWidthKm=800 at ANY resolution; capped at the same `TERRAIN_DETAIL_MAX_K`.
+- **Fix B (Journey Planner only): `_jpDrinkingCoarseEase`**, uncapped past the cartographic cap —
+  that cap exists for the MAP's own reason (don't clutter a rendered world with faint rivers), which
+  has nothing to do with whether a thirsty party can find a spring. Measured on the reported world's
+  own worst-case contiguous dry stretch (664 km through Cold Desert / Badlands, 50x past the
+  cartographic cap's break point): Fix A's world-AVERAGE improvement didn't help this one stage,
+  since the whole 664 km sits inside a single contiguous dry run either way. Implemented by
+  "swapping" `flowThresh`'s already-capped ease for the uncapped one inside `_jpStageDryKm`
+  (multiply out `riverCoarseEase`, divide back in `_jpDrinkingCoarseEase`) — avoids double-applying
+  the shared portion, no new parameters needed.
+- **Measured net effect**: drinkable-land fraction 34%→96% (16%→95% desert); the reported worst-case
+  874km stage for a 10-Mounted-Rider party with zero pack animals dropped from **3742%→698%** of
+  capacity — still correctly flags this specific, genuinely extreme configuration rather than
+  over-correcting to never block at all.
+- **New: Generate → World "ℹ️ Info" button**, directly motivated by this investigation — the
+  on-screen `#readout` panel wasn't enough to reproduce the reported world exactly (several tect/
+  erosion sliders it never showed). `generationInfoText()` leads with the same on-screen fields then
+  a `JSON.stringify` dump of every generation-affecting state block (tect/volc/crater/erosion/
+  stream/glacial/coastal/planet/world_structure) — a full field list, not hand-picked, so a future
+  slider is automatically included. Copies via `navigator.clipboard`, falling back to
+  `execCommand('copy')`, falling back to a manually-selectable `<textarea>` — must degrade
+  gracefully on `file://`, where Clipboard API availability isn't guaranteed.
+- **Tests**: 7 new engine unit assertions (`test_tail.js`, `tests/run.sh` now 1038/1038); 11 new
+  smoke assertions (`R.v101`) for the JP easing and the info button's full lifecycle, independently
+  verified via isolated Playwright reproduction (this environment's pre-existing `smoke_gen1.js`
+  crash, disclosed in v1.100, reproduces identically here — confirmed unrelated by checking it fires
+  at the same position regardless of what test code follows). `run_um.sh` 852/852 (block 4
+  untouched). `hash_gen1.js` ALL IDENTICAL at the default battery; a direct field-hash A/B at
+  mapWidthKm=12,800 confirms the expected divergence there.
+- **Known scope cuts**: `JP_DRINKING_COARSE_MAX=64` and `riverCoarseEase`'s shared cap magnitude are
+  reasoned, not independently calibrated; the info button's dump covers geology/climate generation
+  parameters, not a full save-state export (`exportZip()` already does that).
 
 ### Journey Planner stage-blocking audit: a real remedy gap fixed, two other suspects cleared by measurement (v1.100)
 
