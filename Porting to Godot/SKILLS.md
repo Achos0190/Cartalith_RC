@@ -49,6 +49,45 @@ skills (`ponytail-audit`, `ponytail-debt`, `ponytail-gain`, `ponytail-review`,
 `ponytail-help`) and slash commands — not vendored here (smaller, more workflow-specific,
 easy to pull in later from the same repo if wanted; not requested by name).
 
+### `skills/rust-craft/` — general Rust craft, authored after studying the field
+
+Original prose, written for this project after reading the Rust-skill sources the owner
+supplied plus official Rust documentation. Not a copy of any of them — see
+`skills/rust-craft/ATTRIBUTION.md` for exactly what was studied, what was adopted, what was
+deliberately rejected, and which requested sources were unreachable.
+
+Structure: a lean `SKILL.md` carrying the decisions made in every function (signatures,
+borrowing, iterators, errors, types that make bugs unrepresentable, numbers, unsafe,
+modules, docs, tests, the clippy/fmt/test loop), plus three reference files loaded only when
+the subject comes up — `references/errors.md`, `references/async.md`,
+`references/performance.md`.
+
+**Written under two constraints the owner set.** Ponytail's ladder decided *what to
+include*: a long skill about writing less code would refute itself, so the top-level file
+carries only what you hit constantly and everything occasional moved to a reference.
+Strunk and White decided *how to phrase it*: active voice, positive form, each rule's reason
+in a clause rather than a paragraph, no prose defending a rule the reader can simply follow.
+
+**Sources reachable and studied**: [leonardomso/rust-skills](https://github.com/leonardomso/rust-skills)
+(MIT, 265 rules across 26 categories, current through Rust 1.96 / edition 2024 — the most
+substantive source found, and the origin of this skill's framing that agents "clone to dodge
+the borrow checker, `.unwrap()` everything, and reach for `Box<dyn Trait>` when `impl Trait`
+would do"); [actionbook/rust-skills](https://github.com/actionbook/rust-skills) (MIT — source
+of the edition-2024 / `rust-version = "1.85"` defaults; its mandatory-router architecture was
+deliberately *not* adopted, since a gatekeeper skill adds a hop without adding knowledge);
+[onsails/cc](https://github.com/onsails/cc) (MIT — source of the split-at-500-lines
+heuristic; its own `SKILL.md` 404'd on direct fetch, so only the repo-level description
+informed this).
+
+**Sources requested but unreachable** — this session's network egress proxy blocks these
+domains, so nothing from them is represented and no claim in the skill should be attributed
+to them: `mcpmarket.com` (rust-best-practices, rust-development-workflow,
+rust-developer-intelligence), `lib.rs/crates/claude-rust`, and
+`lobehub.com/…/rust-development`. Also blocked: `composio.dev/content/top-claude-skills`,
+the article the owner linked — its specific picks are therefore *not* reflected here. If you
+want them covered, paste the list and they can be folded in; the skill is structured so a new
+rule slots into an existing section rather than forcing a rewrite.
+
 ### `skills/cartalith-porting-discipline/` — original, authored for this project
 
 Not from an external source — written specifically to encode the decisions in
@@ -58,6 +97,21 @@ belong in" and "does this have a golden-parity test" without needing to have the
 document set open. Read it once directly (`skills/cartalith-porting-discipline/SKILL.md`) to
 confirm it actually reflects the current plan — update it if `ARCHITECTURE.md` or
 `PARITY_TESTING.md` change, since a skill enforcing a stale rule is worse than no skill.
+
+### `skills/cartalith-rust-conventions/` — original, deliberately small
+
+The handful of rules where this project's constraints override ordinary Rust practice:
+match the JS engine's float precision rather than improving on it, don't reorder float
+operations without re-running parity tests, state a NaN policy anywhere floats are sorted
+(JS comparison against NaN is `false`, Rust's `partial_cmp().unwrap()` panics), and keep
+panics from crossing the gdext boundary where they can take down the Godot process.
+
+**It was trimmed when `rust-craft` was written.** Its first draft also carried general Rust
+advice — module size, doc comments, dependency hygiene, test structure — which now lives in
+`rust-craft`. Leaving both copies would have been exactly the "two functions answering one
+question, and they drift" failure this repo's own CHANGELOG documents hitting repeatedly, so
+the general half was deleted rather than duplicated. What remains is only what would be
+*wrong advice* on any other Rust project.
 
 ## Researched, not vendored — recommended for the owner to pull in directly
 
@@ -96,6 +150,24 @@ Given this project targets a real Android app (`.apk`) and a desktop app (`.exe`
 2D rendering work in Phase 1/3 (`ROADMAP.md`) will need real interface design (not just a
 generation engine), these are worth a genuine look when UI work actually starts:
 
+- **[nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill)**
+  — **the one the owner named.** MIT licensed, ~23k★ on GitHub (a separate skill directory
+  lists it at 115k, so treat any single star count as approximate). Substantial and unusual
+  in shape: not one `SKILL.md` but a generator — `src/ui-ux-pro-max/` holds CSV databases
+  (84 UI styles, 192 color palettes, font pairings, 99 UX guidelines, 25 chart types, 161
+  reasoning rules) plus Python scripts and templates, and a CLI installs platform-specific
+  files built from them. Covers stack-specific guidance (React, Next.js, Tailwind),
+  accessibility rules, and a pre-delivery checklist.
+
+  **Not vendored, for a structural reason rather than a licensing one** (MIT would permit
+  it): it installs itself. The documented path is `npx skills add
+  nextlevelbuilder/ui-ux-pro-max-skill`, which generates the files for your platform from
+  those CSVs. Hand-copying a generated snapshot into this docs folder would freeze a build
+  artifact and cut it off from upstream updates — worse than running the installer in the
+  new repo when UI work starts. Recommended as the **first UI/UX skill to install**, at
+  Phase 3; its React/Next/Tailwind orientation is a partial fit at best for a Godot UI, so
+  expect to use its design-reasoning and accessibility halves more than its stack-specific
+  code output.
 - **[szilu/ux-designer-skill](https://github.com/szilu/ux-designer-skill)** — comprehensive:
   a 297-line `SKILL.md` plus ~24 reference documents (~10,700 lines total) covering
   accessibility (WCAG 2.2 AA), visual/interaction design, forms, mobile UX, and design
@@ -125,15 +197,33 @@ generation engine), these are worth a genuine look when UI work actually starts:
 **Recommendation, not a decision made unilaterally**: for the terrain-only MVP
 (`MVP_SCOPE.md` point 11, "a minimal UI"), none of the UX/UI skills above are likely worth
 the overhead yet — the MVP UI is explicitly minimal by design. Revisit at Phase 3
-(`ROADMAP.md`, rendering polish), where `mobile-app-ui-design` (compact, Android-relevant)
-is the most proportionate first pick, with `ux-designer-skill` as the deeper option if
-accessibility/design-system rigor becomes a real requirement.
+(`ROADMAP.md`, rendering polish). Install order if you want one: **UI/UX Pro Max** first (the
+owner's own pick, MIT, installs itself via its CLI), `ux-designer-skill` after it if
+accessibility and design-system rigor become real requirements, and the rest only if a
+specific gap shows up.
+
+One caveat worth stating plainly: every UI/UX skill found is written for web and mobile
+stacks — React, Next.js, Tailwind, SwiftUI. **Godot's UI system is none of those.** Their
+design *reasoning* (hierarchy, spacing rhythm, contrast, thumb zones, accessibility minimums)
+transfers; their *code output* does not. Use them for judgement, not for snippets, and expect
+to translate.
 
 ## What this means practically, right now
 
 Nothing needs to happen with any of this until the new repository (`DECISIONS.md` §8)
-actually exists. When it does: copy `skills/ponytail/` and
-`skills/cartalith-porting-discipline/` into its `.claude/skills/` directory as a first
-setup step (alongside the toolchain steps in `TOOLCHAIN.md`), and treat the "researched, not
-vendored" list above as a shopping list to revisit at the point each item's own relevant
-phase actually starts.
+actually exists. When it does, copy these four into its `.claude/skills/` as a first setup
+step (alongside `TOOLCHAIN.md`'s own steps):
+
+| Skill | Job |
+|---|---|
+| `ponytail` | whether to write it at all, and how little |
+| `rust-craft` | how to write good Rust anywhere |
+| `cartalith-rust-conventions` | the few rules where this project overrides ordinary Rust |
+| `cartalith-porting-discipline` | which crate it belongs in, and whether parity-verified |
+
+They are deliberately non-overlapping, and each one's own description says which of the other
+three owns an adjacent question — so a session that loads one can find the right neighbour
+instead of guessing or duplicating.
+
+Treat the "researched, not vendored" list above as a shopping list to revisit when each
+item's own phase actually starts.
