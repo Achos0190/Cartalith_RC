@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.08**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.09**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.08.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.07.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.09.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.08.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,45 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### LOD/bake terrain checkerboard from coarse-cell-quantized curvature (v2.09)
+
+Owner: "Terrain rendering/Painting is quickly blockey/pixilated especially when zooming in with
+LOD." Root-caused by direct measurement (real screenshots + instrumented render pipeline) before
+any fix, confirmed PRE-EXISTING (reproduces on v2.04, before this session's own v2.05–v2.08 LOD
+work) — a separate, older bug. Engine only (`renderBiomeTileRGBA`/`bakePixel`'s call sites). Hash
+vs v2.08 ALL IDENTICAL — neither function is on the default render path.
+
+- **Ruled out in order, by measurement**: `addZoomDetail` (disabled — checkerboard unchanged); the
+  raw amplified height buffer (sampled per-pixel — smooth, no periodic signature); temp/rain fields
+  and the `nHi` grain noise (all smooth). Geometrically isolated the pattern to WITHIN a single
+  1024px pyramid tile (only ~2 real tiles span the reproduction view, but ~10 checkerboard squares
+  are visible), ruling out tile-seam/compositing causes too.
+- **Root cause**: `curvatureAt(x,y)`/`aspectFactor(x,y)` are written for the main map's own
+  per-pixel loop (called with exact integer coarse coordinates — correct there).
+  `renderBiomeTileRGBA` (interactive LOD tiles) and `bakePixel` (refined-tile export) instead call
+  them as `curvatureAt(Math.round(wx),Math.round(wy))` on a FINE, fractional coordinate — every
+  pixel rounding to the same coarse cell reads the identical value, a hard step at each cell
+  boundary, while height/temperature/hillshade stay continuous. Invisible at normal zoom (many
+  screen pixels already share one coarse cell); a stark checkerboard once LOD zooms in far enough
+  that one coarse cell spans many pixels — and `materialWeights`' `curvNorm=clamp01(|curv|*300)`
+  turns the quantization into a large wet/dry material swing at every boundary.
+- **Fix**: `curvatureAtF`/`aspectFactorF`, continuous siblings that bilinear-sample `field` via the
+  existing `sampleArr` at the fractional coordinate instead of rounding first — bit-identical to
+  the originals at any exact integer coordinate (asserted), so the main map's own untouched
+  per-pixel render stays byte-for-byte identical. Both call sites now pass `wx,wy`/`gx,gy` straight
+  through, no rounding.
+- **Verified visually**: real before/after screenshots at the reproduction zoom (32×/64×) — the
+  checkerboard is gone, replaced by smooth shading matching the already-smooth underlying data.
+- **Tests**: 4 new unit assertions — integer-coordinate bit-identity for both functions; a live
+  reproduction proving the OLD `Math.round(...)` expression is piecewise-constant across a real
+  coarse-cell boundary while the new function varies smoothly across the identical span; a
+  source-inspection check that the two production call sites actually use the fix. `tests/run.sh`
+  1066/1066 (+4), `tests/run_um.sh` 852/852, hash ALL IDENTICAL.
+- **Known scope cuts**: the main map's own per-pixel `curvatureAt`/`aspectFactor` calls (exact
+  integer coords) were correct and untouched; no broader sweep for the same
+  `Math.round(fractional-coord)` defect shape elsewhere in the tile/bake pipeline was attempted —
+  only the two confirmed, reproduced call sites were fixed.
 
 ### LOD full zoom-out was cover-cropped on mobile, with no escape valve (v2.08)
 

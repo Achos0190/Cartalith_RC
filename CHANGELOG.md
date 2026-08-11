@@ -12,6 +12,66 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.09 — LOD/bake terrain checkerboard from coarse-cell-quantized curvature
+
+Owner: "Terrain rendering/Painting is quickly blockey/pixilated especially when zooming in with
+LOD." Root-caused by direct measurement (screenshots + isolated instrumentation of the actual
+render pipeline) before writing any fix, and confirmed PRE-EXISTING — reproduces identically on
+v2.04, before any of this session's v2.05–v2.08 LOD work — so this is a separate, older bug, not a
+regression, just never visually audited at this exact deep-zoom/large-map combination before.
+Engine only (`curvatureAt`/`aspectFactor`'s call sites in `renderBiomeTileRGBA`/`bakePixel`). Hash
+vs v2.08 **ALL IDENTICAL** — neither modified function is on the default (non-LOD, non-export)
+render path.
+
+- **The symptom**: a strong, regular checkerboard of alternating light/dark terrain squares,
+  clearly visible even after full tile refinement (not a transient coarse-preview state) — at a
+  20,000 km world, 1024px resolution, deep Tiled-LOD zoom, screenshotted and visually confirmed
+  before any code was touched.
+- **Ruled out by direct measurement, in order**: `addZoomDetail`'s added fractal octaves
+  (monkeypatched to identity — checkerboard unchanged, so not the source); the raw amplified height
+  data itself (sampled per-pixel from the actual tile buffer `pyramidTile` produces — smooth, no
+  periodic signature, `meanAdjDiff≈0.0003` with no alternating spike); `tempField`/`rainField`
+  sampled at the same fine sub-cell resolution the tile would (smooth gradients, no checkerboard);
+  the `nHi` grain noise term (smooth `vnoise`, continuous by construction). Geometrically isolated
+  the pattern to WITHIN a single 1024px pyramid tile (only ~2 real tiles span the view at this zoom,
+  but ~10 checkerboard squares are visible), ruling out a tile-seam/compositing cause too.
+- **Root cause**: `curvatureAt(x,y)`/`aspectFactor(x,y)` are written for the MAIN map's own
+  per-pixel render loop, called there with exact integer coarse-grid coordinates — correct.
+  `renderBiomeTileRGBA` (the interactive LOD tile renderer) and `bakePixel` (the "Tiles → Export
+  tile grid" refined-tile export path) both instead call them as `curvatureAt(Math.round(wx),
+  Math.round(wy))`/`aspectFactor(Math.round(gx),Math.round(gy))` on a FINE, fractional world
+  coordinate — every tile/bake pixel that rounds to the same coarse cell reads the IDENTICAL
+  curvature/aspect value, a hard step at each coarse-cell boundary, while height, temperature, and
+  hillshade all stay continuous (sampled via bilinear interpolation or the tile's own amplified
+  buffer). Invisible at ordinary zoom, where many screen pixels already share one coarse cell —
+  but the moment LOD zooms in far enough that ONE coarse cell spans many pixels, the quantization
+  becomes a visible block. `materialWeights`' `curvNorm=clamp01(Math.abs(curv)*300)` amplifies
+  curvature threehundredfold before clamping, turning what would already be a subtle block edge
+  into a stark wet/dry material swing at every coarse-cell boundary — the actual checkerboard.
+- **Fix**: `curvatureAtF(x,y)`/`aspectFactorF(x,y)`, continuous siblings that bilinear-sample
+  `field` via the existing `sampleArr` at the fractional coordinate directly, instead of rounding
+  to the nearest cell first. Because `sampleArr` at an exact integer coordinate returns the exact
+  cell value with zero interpolation weight on any neighbour, the new functions are **bit-identical
+  to the originals at any integer coordinate** (asserted) — so the main map's own per-pixel render,
+  which still calls `curvatureAt`/`aspectFactor` directly with integer x,y and was never touched,
+  is untouched byte-for-byte. `renderBiomeTileRGBA`'s and `bakePixel`'s two call sites now pass the
+  fractional `wx,wy`/`gx,gy` straight through with no rounding.
+- **Verified visually**: real screenshots at the exact reproduction zoom (32× and 64×) before and
+  after — the checkerboard is completely gone post-fix, replaced by smooth, continuous terrain
+  shading matching the underlying (already-smooth) height/climate data.
+- **Tests**: 4 new unit assertions (`test_tail.js`) — bit-identity at integer coordinates for both
+  functions; a live reproduction on the actual generated world proving the OLD `Math.round(...)`
+  expression is piecewise-constant on both sides of a real coarse-cell boundary with a genuine
+  curvature difference (confirms the bug is real, not assumed) while `curvatureAtF` varies smoothly
+  across the identical span (confirms the fix, not just the formula); and a source-inspection check
+  that `renderBiomeTileRGBA`/`bakePixel` actually call the new functions, not a hand-copy. `tests/
+  run.sh` 1066/1066 (+4), `tests/run_um.sh` 852/852 (block 4 untouched), hash ALL IDENTICAL.
+- **Known scope cuts**: the main map's own per-pixel render loop (`curvatureAt`/`aspectFactor`,
+  called with exact integer coordinates) is correct as-is and was not touched; no other
+  `Math.round(fractional-coord)` call site of a similarly-amplified quantity was found during this
+  investigation, but a broader sweep for the same defect shape elsewhere in the tile/bake pipeline
+  was not attempted — this fix addresses the two confirmed, reproduced call sites.
+
 ### v2.08 — LOD full zoom-out was cover-cropped on mobile, with no escape valve
 
 Owner: "When using LOD the window on mobile doesn't allow a full zoom out anymore." Root-caused by

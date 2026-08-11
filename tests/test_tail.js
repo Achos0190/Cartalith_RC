@@ -4193,6 +4193,64 @@ if (typeof carveRiverValleys === 'function') {
     })());
   }
 
+  /* ---------- v2.09: curvatureAtF/aspectFactorF — continuous (not coarse-cell-quantized) siblings ---------- */
+  if (typeof curvatureAtF === 'function') {
+    // exact integer coordinates: bilinear sampling at an integer point has zero weight on any
+    // neighbour, so the continuous sibling must reproduce the original's value bit-for-bit — the
+    // main map's own per-pixel render (which still calls curvatureAt/aspectFactor directly, untouched)
+    // depends on this never drifting.
+    check('curvatureAtF(x,y) === curvatureAt(x,y) at exact integer coordinates', (() => {
+      let ok = true;
+      for (let y = 5; y < GH - 5 && ok; y += 37) for (let x = 5; x < GW - 5 && ok; x += 41) {
+        if (curvatureAtF(x, y) !== curvatureAt(x, y)) ok = false;
+      }
+      return ok;
+    })());
+    check('aspectFactorF(x,y) === aspectFactor(x,y) at exact integer coordinates', (() => {
+      let ok = true;
+      for (let y = 5; y < GH - 5 && ok; y += 37) for (let x = 5; x < GW - 5 && ok; x += 41) {
+        if (aspectFactorF(x, y) !== aspectFactor(x, y)) ok = false;
+      }
+      return ok;
+    })());
+    // the bug being fixed: renderBiomeTileRGBA/bakePixel used to call curvatureAt(Math.round(wx),wy)
+    // on a FINE fractional coordinate — every wx between x0-0.5 and x0+0.5 collapsed onto the SAME
+    // curvatureAt(x0,y) value, a hard step exactly at the .5 boundary. Find a real cell pair with a
+    // genuinely different curvature (any large generated world has plenty) and confirm: (a) the OLD
+    // buggy expression is piecewise-constant on both sides of the boundary (proves the bug is real,
+    // not assumed), and (b) curvatureAtF varies continuously across the very same sweep instead of
+    // jumping (proves the fix).
+    check('curvatureAtF is continuous across a coarse-cell boundary where the old Math.round(...) approach stepped', (() => {
+      let x0 = -1, y0 = -1;
+      for (let y = 10; y < GH - 10 && x0 < 0; y += 3) for (let x = 10; x < GW - 11; x += 3) {
+        if (Math.abs(curvatureAt(x, y) - curvatureAt(x + 1, y)) > 1e-5) { x0 = x; y0 = y; break; }
+      }
+      if (x0 < 0) return false;   // no varying cell pair found — inconclusive, fail loudly rather than silently pass
+      const oldBuggy = (fx) => curvatureAt(Math.round(fx), y0);
+      // old approach: flat at x0-0.3..x0+0.3 (all round to x0), flat again at x0+0.7..x0+1.3 (round to x0+1)
+      const oldFlatLeft = oldBuggy(x0 - 0.3) === oldBuggy(x0) && oldBuggy(x0) === oldBuggy(x0 + 0.3);
+      const oldFlatRight = oldBuggy(x0 + 0.7) === oldBuggy(x0 + 1) && oldBuggy(x0 + 1) === oldBuggy(x0 + 1.3);
+      const oldSteps = oldBuggy(x0 + 0.3) !== oldBuggy(x0 + 0.7);   // the actual discontinuity at the .5 boundary
+      // new approach: sample densely across the same span and confirm no single-step jump anywhere
+      // near the magnitude of the old boundary step — i.e. it's a smooth blend, not a relocated cliff.
+      const oldJump = Math.abs(oldBuggy(x0 + 0.7) - oldBuggy(x0 + 0.3));
+      let maxNewStep = 0;
+      const N = 40;
+      for (let k = 0; k < N; k++) {
+        const a = x0 - 0.4 + (k / N) * 1.8, b = x0 - 0.4 + ((k + 1) / N) * 1.8;
+        maxNewStep = Math.max(maxNewStep, Math.abs(curvatureAtF(b, y0) - curvatureAtF(a, y0)));
+      }
+      return oldFlatLeft && oldFlatRight && oldSteps && maxNewStep < oldJump * 0.5;
+    })());
+    check('curvatureAtF/aspectFactorF are the ONLY calls left inside renderBiomeTileRGBA/bakePixel (Math.round(...) quantization fully removed)', (() => {
+      const src1 = renderBiomeTileRGBA.toString(), src2 = bakePixel.toString();
+      return !/curvatureAt\(Math\.round/.test(src1) && !/aspectFactor\(Math\.round/.test(src1)
+        && !/curvatureAt\(Math\.round/.test(src2) && !/aspectFactor\(Math\.round/.test(src2)
+        && /curvatureAtF\(/.test(src1) && /aspectFactorF\(/.test(src1)
+        && /curvatureAtF\(/.test(src2) && /aspectFactorF\(/.test(src2);
+    })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

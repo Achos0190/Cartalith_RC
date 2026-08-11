@@ -9,11 +9,31 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.08.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.09.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v2.07` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.08` are kept and never edited.
+- **v2.09 — LOD/bake terrain checkerboard from coarse-cell-quantized curvature.** Owner: "Terrain
+  rendering/Painting is quickly blockey/pixilated especially when zooming in with LOD."
+  Root-caused by direct measurement (screenshots + instrumented render pipeline), confirmed
+  PRE-EXISTING back through v2.04 — unrelated to this session's own v2.05–v2.08 LOD work, just
+  never visually audited at this exact deep-zoom/large-map combination before. Ruled out in order:
+  `addZoomDetail`, the raw amplified height buffer (sampled per-pixel — smooth), temp/rain fields,
+  the grain noise term — all smooth/continuous, and the pattern was isolated to WITHIN a single
+  pyramid tile, ruling out tile-seam causes. Root cause: `curvatureAt`/`aspectFactor` (written for
+  the main map's own per-pixel loop, called there with exact integer coordinates) were instead
+  called from `renderBiomeTileRGBA` (interactive LOD tiles) and `bakePixel` (refined-tile export)
+  as `curvatureAt(Math.round(wx),Math.round(wy))` on a FINE fractional coordinate — every pixel
+  rounding to the same coarse cell reads an identical curvature/aspect value while height/temp/
+  hillshade stay continuous; `materialWeights`' ×300 curvature amplification turns that
+  quantization into a stark wet/dry checkerboard the moment LOD zooms in far enough that one
+  coarse cell spans many pixels. Fix: `curvatureAtF`/`aspectFactorF`, continuous siblings that
+  bilinear-sample `field` at the fractional coordinate — bit-identical to the originals at any
+  exact integer coordinate (asserted), so the main map's own untouched per-pixel render stays
+  byte-for-byte identical. Verified with real before/after screenshots — checkerboard gone. Hash
+  vs v2.08 ALL IDENTICAL (neither modified function is on the default render path). `tests/run.sh`
+  1066/1066 (+4), `tests/run_um.sh` 852/852. See CHANGELOG/CLAUDE.md for the full writeup.
 - **v2.08 — LOD full zoom-out was cover-cropped on mobile, with no escape valve.** Owner: "When
   using LOD the window on mobile doesn't allow a full zoom out anymore." Root-caused by direct
   measurement (Playwright mobile-viewport probe), not by guessing at the `_lodZoom` clamp: every
