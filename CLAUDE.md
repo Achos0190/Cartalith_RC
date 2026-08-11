@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.07**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.08**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.07.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.06.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.08.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.07.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,44 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### LOD full zoom-out was cover-cropped on mobile, with no escape valve (v2.08)
+
+Owner: "When using LOD the window on mobile doesn't allow a full zoom out anymore." Root-caused by
+direct measurement (a Playwright mobile-viewport probe) before touching code. Civ/UI-layer only
+(`_lodFitCanvas`/`requestLodRender`). Hash vs v2.07 ALL IDENTICAL — pure CSS display sizing, never
+reaches `generate()`/`renderNow()`'s pixel output.
+
+- **The camera was never broken** — `_lodZoom` correctly floors at exactly `1` through every
+  zoom-out path (buttons, wheel, a real synthetic pinch gesture), ruling out `enterLodFromView`'s
+  own `Math.max(1.5,...)` entry floor (only sets the STARTING zoom on wheel auto-entry) as the
+  cause.
+- **The real defect: `_lodFitCanvas()` always displays the canvas in CSS "cover" mode, at ANY
+  zoom.** Cover (v1.01, correct for genuinely zoomed-in navigation — the v0.87 bug it fixed) crops
+  the canvas to the viewport's own aspect with no letterboxing, so "fully zoomed out" still showed
+  only a cropped slice of the world. Measured: a 390×844 (mobile) viewport cropped **~68% of the
+  map's width** even at `_lodZoom=1`; a 1400×900 (desktop) viewport cropped only ~15% — same bug,
+  far less visible on a wide window, hence "on mobile."
+- **The off-LOD camera already has an escape valve LOD never got.** `_viewClampFill`'s v1.13 fit-
+  scale zoom floor lets a user keep zooming out off-LOD until the whole map genuinely fits
+  (letterboxed) — measured directly on the same narrow viewport. In LOD mode `_lodZoom` is
+  HARD-floored at `1`, so there was no "zoom out further" to ever trigger an equivalent fit state —
+  a permanent, unescapable crop once the floor was reached, not a broken control.
+- **Fix**: letterbox-FIT exactly at the zoom floor (`_lodZoom<=1.0001`), cover above it (v0.87's
+  case, untouched). `_lodFitCanvas()` was only ever called from `applyView()`, but every zoom-only
+  path (`lodZoomStep`/`_lodZoomAt`, i.e. every button/wheel/pinch) calls `requestLodRender()`
+  directly and never `applyView()` — so it now also runs at the top of `requestLodRender()`
+  (guarded on `_lodOn`), or the fix would silently never apply on a pure zoom step.
+- **Verified**: the mobile probe confirms the fix (370×237px inside a 390×761 wrap — no crop,
+  correctly letterboxed) and confirms the on-screen `⟳` reset button alone re-fits at the floor
+  with no resize, proving the `requestLodRender()` wiring (not just `applyView()`) is what fixes
+  it. `tests/run.sh` 1062/1062 (unchanged), `tests/run_um.sh` 852/852, hash ALL IDENTICAL, 5 new
+  smoke assertions (`R.v208`) reproducing the bug through the real DOM/camera at a portrait
+  viewport.
+- **Known scope cuts**: the fit/cover switch is a discrete change exactly at the floor (nothing
+  below `_lodZoom=1` to blend through); cover geometry above the floor is otherwise unchanged.
+  Canvas/touch interaction stays under this file's own headless carve-out for on-device
+  confirmation.
 
 ### River channel width made real-km-aware (v2.07)
 

@@ -8275,6 +8275,57 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v2.06: the Tiled LOD view actually renders tiles on first reveal (sanity check the harness itself works)', R.v206.wideRenderedSomething);
   A('v2.06: returning to a previously-rendered wide view after deep exploration needs ZERO recolorization — it is recalled, not rerendered', R.v206.returnColorized === 0);
 
+  // v2.08 (owner: "when using LOD the window on mobile doesn't allow a full zoom out anymore").
+  // Root cause, measured directly (Playwright mobile-viewport probe) before fixing: _lodZoom already
+  // hard-floors at exactly 1 through every zoom-out path (button/pinch/reset) — the CAMERA reaches
+  // full zoom-out correctly — but _lodFitCanvas() always displayed the canvas in CSS "cover" mode,
+  // which crops it to the viewport's own aspect with no escape valve, unlike the off-LOD camera
+  // (_viewClampFill's fit-scale floor). On a portrait/mobile-shaped viewport that crops ~66% of the
+  // map's width even at the zoom floor. Fixed: letterbox-FIT exactly at _lodZoom<=1, cover above it;
+  // _lodFitCanvas() now also runs from requestLodRender() (every zoom-changing input reaches it),
+  // not just applyView() (which a zoom step alone never called). A real prior smoke pass on this
+  // narrow ratio DID observe the crop pre-fix; this reproduces it through the actual DOM/camera
+  // instead of asserting the formula in isolation.
+  const _origVp = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });   // portrait/mobile-shaped, deliberately far from GW:GH's landscape aspect
+  R.v208 = await page.evaluate(async () => {
+    const o = {};
+    document.getElementById('lodChk').checked = true;
+    _lodOn = true;
+    applyView();   // resets canvasStack's CSS transform to identity, as the real lodChk 'change' handler does
+    // full zoom-out (the floor) — the whole map must fit on screen, letterboxed, not cropped
+    _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2;
+    requestLodRender();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const wrap = document.querySelector('.canvas-wrap'), wr = wrap.getBoundingClientRect(), vr = view.getBoundingClientRect();
+    o.floorFitsWidth = vr.width <= wr.width + 1;
+    o.floorFitsHeight = vr.height <= wr.height + 1;
+    o.floorWidthPx = vr.width; o.wrapWidthPx = wr.width;
+    // zoomed IN — cover mode should still fill/overflow the viewport (the v0.87 behavior this
+    // function exists for must survive: a real zoom-in must not go back to a small letterboxed tile)
+    _lodZoom = 4; requestLodRender();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const vr2 = view.getBoundingClientRect();
+    o.zoomedInFillsViewport = (vr2.width >= wr.width * 0.9) && (vr2.height >= wr.height * 0.9);   // 0.9, not exact: wr is the wrap's OUTER box (incl. padding), the covered content box is a little smaller
+    // back down to the floor via the SAME on-screen control a mobile user taps — must re-fit, not
+    // stay stuck at the cover size from the zoomed-in step above (proves requestLodRender() itself
+    // refreshes the sizing, not just applyView()/resize)
+    document.getElementById('zoomReset').click();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const vr3 = view.getBoundingClientRect();
+    o.resetBtnRefitsAtFloor = vr3.width <= wr.width + 1;
+    o.lodZoomAtEnd = _lodZoom;
+    _lodOn = false;
+    document.getElementById('lodChk').checked = false;
+    return o;
+  });
+  await page.setViewportSize(_origVp);
+  A('v2.08: at the LOD zoom floor (_lodZoom=1) on a portrait/mobile-shaped viewport, the whole map fits on screen (no cover-crop) — width', R.v208.floorFitsWidth);
+  A('v2.08: at the LOD zoom floor, the whole map fits on screen — height too (letterboxed, not cropped)', R.v208.floorFitsHeight);
+  A('v2.08: a real zoom-in (_lodZoom=4) still fills/covers the viewport — the v0.87 fix this shares code with is not regressed', R.v208.zoomedInFillsViewport);
+  A('v2.08: the on-screen "⟳" reset button (the one #zoomOverlay exposes on mobile) re-fits the canvas at the floor immediately, not just on resize/toggle', R.v208.resetBtnRefitsAtFloor);
+  A('v2.08: _lodZoom itself still ends exactly at the floor (1) — the camera state, unaffected by the display-sizing fix', R.v208.lodZoomAtEnd === 1);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

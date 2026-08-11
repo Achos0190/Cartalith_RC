@@ -9,11 +9,28 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.07.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.08.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v2.06` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.07` are kept and never edited.
+- **v2.08 — LOD full zoom-out was cover-cropped on mobile, with no escape valve.** Owner: "When
+  using LOD the window on mobile doesn't allow a full zoom out anymore." Root-caused by direct
+  measurement (Playwright mobile-viewport probe), not by guessing at the `_lodZoom` clamp: every
+  zoom-out path (buttons/wheel/pinch/reset) already floored `_lodZoom` at exactly 1 — the camera
+  was never broken. The real defect: `_lodFitCanvas()` always displays the LOD canvas in CSS
+  "cover" mode (correct while genuinely zoomed in, the v0.87 fix it's built for), which crops it
+  to the viewport's own aspect with no letterboxing — so "fully zoomed out" still showed only a
+  cropped slice. Measured ~68% of map width cropped at a 390×844 (mobile) viewport vs ~15% at
+  1400×900 (desktop) — same bug, mostly invisible on wide windows. The off-LOD camera already has
+  an escape valve (`_viewClampFill`'s v1.13 fit-scale floor lets you keep zooming out past cover
+  until the whole map fits); LOD's hard `_lodZoom` floor at 1 gave the crop no such exit. Fix:
+  letterbox-FIT exactly at the zoom floor, cover above it; `_lodFitCanvas()` now also runs from
+  `requestLodRender()` (every zoom-only button/wheel/pinch path), not just `applyView()` (which a
+  zoom step alone never called — the fix would have silently never applied otherwise). Hash vs
+  v2.07 ALL IDENTICAL (pure CSS sizing). `tests/run.sh` 1062/1062 (unchanged), `tests/run_um.sh`
+  852/852, 5 new smoke assertions (`R.v208`) reproducing the crop through the real DOM/camera at a
+  portrait viewport. See CHANGELOG/CLAUDE.md for the full writeup.
 - **v2.07 — river channel width made real-km-aware.** Owner: "check the scaling from the base...
   when setting the width of the map to 1/5/10/100 km etc scales all features accordingly. So that a
   river becomes a bigger feature progressively." Root cause: `buildRiverNetwork`'s render half-width

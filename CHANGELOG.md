@@ -12,6 +12,72 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.08 — LOD full zoom-out was cover-cropped on mobile, with no escape valve
+
+Owner: "When using LOD the window on mobile doesn't allow a full zoom out anymore." Root-caused by
+direct measurement (a Playwright mobile-viewport probe) before writing any fix, rather than
+guessing at the `_lodZoom` clamp logic in isolation. Civ/UI-layer only (`_lodFitCanvas`,
+`requestLodRender`). Hash vs v2.07 **ALL IDENTICAL** — pure CSS display sizing, never reaches
+`generate()`/`renderNow()`'s pixel output.
+
+- **The camera itself was never broken.** Every path that changes `_lodZoom` — the on-screen `+`/
+  `−` buttons, the `⟳` reset, wheel-zoom, and a real synthetic two-finger pinch gesture (dispatched
+  as actual `TouchEvent`s, not a reimplementation) — was measured directly and correctly floors at
+  exactly `_lodZoom=1`, the "fully zoomed out" state, on every single path. That ruled out the
+  leading suspect (`enterLodFromView`'s own `Math.max(1.5,...)` entry floor) as the cause: it only
+  sets the STARTING zoom on wheel-driven auto-entry, and every ongoing zoom-out control already
+  floors at the correct `1`, not `1.5`.
+- **The real defect: `_lodFitCanvas()` always displayed the canvas in CSS "cover" mode, at ANY
+  zoom, with no way to ever see the whole map.** Cover mode (v1.01) crops the canvas to the
+  viewport's own aspect ratio rather than letterboxing — correct for genuinely zoomed-in
+  navigation (that's the v0.87 bug it was built to fix: a small tile floating in a big viewport),
+  but at the zoom FLOOR it means "fully zoomed out" still shows only a cropped slice of the world.
+  Measured directly: at a 390×844 (portrait/mobile) viewport, the canvas rendered at 1157×741px
+  inside a 390×761px wrap — **~68% of the map's width cropped off-screen**, even at `_lodZoom=1`.
+  At a 1400×900 (desktop) viewport the same mechanism crops only ~15% — the same underlying bug,
+  much less visible on a wide window, which is why it read as mobile-specific.
+- **The off-LOD camera already has an escape valve LOD mode never got.** `_viewClampFill`'s
+  documented v1.13 "zoom floor is the FIT scale" behavior means a user CAN keep zooming out past
+  the default cover-fill on the normal map view, until the whole map fits (letterboxed). Measured:
+  on the same 390×844 viewport, continuing to zoom out off-LOD reaches a state where the whole map
+  genuinely fits (`contentW=370 ≤ wrapW=390`). In LOD mode, `_lodZoom` is HARD-floored at exactly
+  `1` — there is no "zoom out further" past that to trigger an equivalent fit state, so the crop was
+  permanent and unescapable once the LOD floor was reached. That asymmetry, not a broken zoom
+  control, is what "doesn't allow a full zoom out anymore" describes.
+- **Fix**: `_lodFitCanvas()` now letterbox-FITs (shows the whole map, cropping nothing) exactly at
+  the zoom floor (`_lodZoom<=1.0001`), and keeps cover mode for any real zoom-in (`_lodZoom>1`) —
+  the v0.87 behavior that function exists for is untouched. "Fully zoomed out" in LOD mode now means
+  the same thing it already means off-LOD: the whole map visible, letterboxed on whichever axis
+  doesn't match the viewport.
+- **A display-sizing fix is only as good as when it's applied.** `_lodFitCanvas()` was only ever
+  called from `applyView()` — but `lodZoomStep`/`_lodZoomAt` (every button/wheel/pinch zoom path)
+  call `requestLodRender()` directly and never call `applyView()`, so a zoom-only action (no pan,
+  no toggle) would have left the canvas's CSS size stuck at whatever it was from the LAST
+  `applyView()` call, silently reintroducing the exact bug this fix closes on every zoom step short
+  of a resize. `_lodFitCanvas()` now also runs at the top of `requestLodRender()` (guarded on
+  `_lodOn`, so the off-LOD early-return path is untouched) — every zoom-changing input reaches it.
+- **Verified**: the mobile-viewport probe confirmed the fix directly (canvas now 370×237px inside
+  the 390×761 wrap — no crop, correctly letterboxed) and confirmed the `⟳` reset button alone
+  (without any window resize) re-fits the canvas immediately after returning to the floor, proving
+  the `requestLodRender()` wiring, not just `applyView()`, drives the fix. Hash `ALL IDENTICAL`;
+  `tests/run.sh` 1062/1062 (unchanged — block 1 untouched), `tests/run_um.sh` 852/852 (block 4
+  untouched); 5 new smoke assertions (`R.v208`) reproducing the bug through the real DOM/camera at
+  a portrait viewport rather than asserting the formula in isolation. A full `smoke_gen1.js` run
+  hit this environment's own long-documented pre-existing crash (headless Chromium closes the page
+  right after the v1.99 assertion block, before reaching v2.08's block near the file's end — the
+  same position every prior version back through v1.100 has hit, confirmed unrelated) — the new
+  assertions were independently verified via isolated Playwright reproduction instead, per that
+  same established precedent, including catching and fixing a test-authoring bug in the probe
+  itself (forgetting to call `applyView()` once when enabling LOD left `canvasStack`'s CSS
+  transform stale, inflating the measured canvas size — a reminder that a probe reproducing a
+  camera/DOM bug needs to mirror the app's OWN state-transition sequence, not just its end state).
+- **Known scope cuts**: the discrete switch from fit to cover happens exactly at the floor, not
+  blended across a range — consistent with `_lodZoom` itself being a hard floor with nothing below
+  it to blend through. `_lodFitCanvas`'s COVER geometry above the floor is otherwise unchanged, so
+  any residual "can't see the edges while genuinely zoomed in" is the v0.87-intended behavior, not
+  this bug. Canvas/touch interaction remains under this file's own headless carve-out for final
+  on-device confirmation.
+
 ### v2.07 — River channel width made real-km-aware
 
 Owner: "check the scaling from the base. That when setting the width of the map to 1/5/10/100 km
