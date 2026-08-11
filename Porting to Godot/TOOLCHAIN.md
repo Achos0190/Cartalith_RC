@@ -1,113 +1,86 @@
-# Toolchain setup
+# Toolchain
 
-Everything needed before writing any Rust/Godot code. Per `DECISIONS.md` §5, this session's
-cloud environment does the actual building — this document is written for that context, but
-applies equally if the owner ever sets this up locally.
+Everything needed before writing Rust or Godot code. Written for the cloud
+session that builds (`DECISIONS.md` §5); applies equally to a local setup.
 
-## Do not hardcode version numbers from this document without re-checking
-
-This document was written in a session with a training/knowledge cutoff. Godot, `gdext`,
-`cargo-ndk`, `cargo-xwin`, and the Android NDK all move. **At actual setup time, check each
-tool's own current release page/docs rather than trusting a version number written here** —
-this is the same discipline the root `CLAUDE.md` enforces around not trusting a stale
-assumption (e.g. its own repeated `VERSION`-const-drift lesson). Where this document does
-name a specific tool version, treat it as "what was current when this was written," not a
-pin.
+**Verify every version before pinning it.** This document was written against a
+knowledge cutoff, and Godot, `gdext`, `cargo-ndk`, `cargo-xwin`, and the NDK all
+move. Where a version appears below, read it as "current when written," not as a
+pin. Same discipline the HTML project enforces about stale assumptions.
 
 ## Rust
 
-- Install via `rustup` (not a distro package manager — need easy access to multiple
-  targets).
-- Add cross-compilation targets:
-  ```
-  rustup target add x86_64-pc-windows-msvc      # Windows (via cargo-xwin, see below)
-  rustup target add aarch64-linux-android        # Android (via cargo-ndk)
-  rustup target add armv7-linux-androideabi
-  rustup target add x86_64-linux-android
-  rustup target add i686-linux-android
-  ```
-  (the four Android targets cover ARM64, ARM32, x86_64, and x86 devices/emulators — a real
-  Android device today is almost always `aarch64`, but include the others for emulator
-  testing and broader device coverage.)
-- `godot-rust`/`gdext` tracks recent stable Rust; check its own `Cargo.toml`/docs for a
-  minimum-supported-Rust-version at setup time.
+Install through `rustup`, not a distro package — you need targets on demand.
+
+```bash
+rustup target add x86_64-pc-windows-msvc     # Windows, via cargo-xwin
+rustup target add aarch64-linux-android      # the target real devices use
+rustup target add armv7-linux-androideabi
+rustup target add x86_64-linux-android
+rustup target add i686-linux-android
+```
+
+The last three cover older hardware and emulators. Check `gdext`'s own
+minimum-supported Rust version at setup time.
 
 ## Godot
 
-- Install the **latest stable Godot 4.x** release (see `DECISIONS.md` §9 for why this
-  document doesn't pin a specific patch version) from the official godotengine.org
-  downloads page.
-- Godot has a **headless/server build** usable for CI-style automated exports without a
-  display — relevant since this session runs in a container. Confirm this works for
-  triggering Windows/Android exports non-interactively before assuming the normal GUI editor
-  is required for every build step.
-- Download the matching **export templates** for the installed Godot version (Editor →
-  Manage Export Templates, or the equivalent CLI/headless path) — required before any
-  platform export will work, including Windows and Android.
+Install the latest stable Godot 4.x (`DECISIONS.md` §9) and download the matching
+**export templates** — no platform export works without them.
 
-## `gdext` (godot-rust)
+Godot ships a **headless build** for CI-style exports without a display. Confirm
+it can drive Windows and Android exports non-interactively before assuming the
+GUI editor is needed for every step.
 
-- Add as a dependency of the `cartalith-godot` crate only (per `ARCHITECTURE.md` — no other
-  crate should depend on it).
-- **Verify Android export actually works early** — per `REFERENCES.md`'s flagged risk,
-  `gdext`'s own docs describe Android/WASM support as experimental with "documentation and
-  tooling still lacking" as of the most recent check. This is the single highest-risk item
-  in the whole toolchain for THIS project's specific goal (a working `.apk`). Confirm it in
-  Phase 0 (`ROADMAP.md`) before investing further.
+## `gdext`
 
-## Android (for the `.apk`)
+Depend on it from `cartalith-godot` only (`ARCHITECTURE.md`).
 
-- **Android SDK + NDK.** The NDK is what Rust code actually compiles against; the SDK
-  (plus a JDK) is what Gradle/Godot's own Android export pipeline needs to assemble the
-  final `.apk`.
-- **`cargo-ndk`** (see `REFERENCES.md`) — compiles the Rust `cartalith-godot`
-  cdylib/staticlib for each Android target without hand-managing NDK toolchain paths.
-- A JDK (for Gradle, which Godot's Android export uses under the hood).
-- **No signing keystore needed yet** per `DECISIONS.md` §6 (personal/hobby distribution) —
-  a debug-signed `.apk` (Godot/Gradle's default) is sufficient for the owner to sideload and
-  test. Revisit if the distribution goal ever changes.
+**Prove the Android export in Phase 0.** gdext's own documentation has described
+Android and WASM support as experimental with tooling still lacking
+(`REFERENCES.md`). For a project whose goal includes an `.apk`, this is the single
+highest-risk item in the toolchain — confirm it before investing further, not
+after the engine is ported.
 
-## Windows (for the `.exe`)
+## Android
 
-- Building happens in this Linux cloud session, so **cross-compilation**, not a native
-  Windows build. Options, in order of how well they fit "keep this reproducible in a Linux
-  container":
-  1. **`cargo-xwin`** (see `REFERENCES.md`) — cross-compiles Rust to the
-     `x86_64-pc-windows-msvc` target from Linux, fetching the necessary Windows
-     SDK/CRT pieces itself. Check its current minimum Rust version requirement at setup
-     time.
-  2. `x86_64-pc-windows-gnu` + `mingw-w64` — an alternative that avoids needing MSVC-specific
-     SDK files at all, at the cost of a GNU-ABI build rather than the more
-     conventionally-expected MSVC one. Worth having as a fallback if `cargo-xwin` proves
-     troublesome.
-- Godot's own Windows export also needs its export templates (see above) and, separately
-  from the Rust cross-compilation, Godot's own export pipeline needs to be told how to
-  cross-export a Windows build from a Linux host — confirm this is actually supported
-  smoothly (Godot has historically supported cross-exporting reasonably well, but verify
-  against the actually-installed version rather than assuming).
-- **Final verification still needs a real Windows machine** — building an `.exe` here only
-  confirms it compiles and Godot's exporter accepted it, not that it actually runs
-  correctly on Windows (`DECISIONS.md` §5).
+- **SDK and NDK.** Rust compiles against the NDK; the SDK plus a JDK is what
+  Gradle and Godot's export pipeline need to assemble the `.apk`. Use the NDK
+  version Godot pins, not the newest — a mismatch produces link errors that look
+  like Rust problems.
+- **`cargo-ndk`** handles the per-target clang and linker paths. Setting them by
+  hand works and is easy to get subtly wrong.
+- **No keystore yet.** Debug signing is enough to sideload (`DECISIONS.md` §6).
 
-## Save-file reading (for `cartalith-io`, see `SAVEFILE_COMPAT.md`)
+## Windows
 
-- `zip` crate — reads the HTML app's `.zip` saves directly (verified to be standard ZIP,
-  see `SAVEFILE_COMPAT.md`).
-- `serde` + `serde_json` — parses `params.json`.
+Cross-compiling from Linux, two routes:
 
-## Suggested install-order sanity check (Phase 0)
+1. **`cargo-xwin`** targeting `x86_64-pc-windows-msvc` — fetches the Windows
+   SDK and CRT pieces itself, and matches the ABI users expect. Try this first.
+2. **`mingw-w64`** targeting `x86_64-pc-windows-gnu` — no MSVC SDK needed,
+   different ABI. Keep as fallback.
 
-Before porting any real engine logic, confirm — in this order, so a failure is easy to
-attribute to the right layer:
-1. `cargo new --lib` a throwaway crate, confirm plain Rust compiles/tests in this
-   environment.
-2. Add `gdext`, confirm a minimal GDExtension class loads inside the Godot editor
-   (headless, if possible — see the Godot section above).
-3. Confirm a Windows cross-compiled build of that same minimal extension is produced and
-   Godot's exporter accepts it, producing an `.exe`.
-4. Confirm an Android cross-compiled build (via `cargo-ndk`) is produced and Godot's
-   exporter accepts it, producing an `.apk`. **This is the step most likely to surface real
-   problems** per the `gdext` Android-maturity flag above — budget real time for it, don't
-   assume it'll be as smooth as step 3.
-5. Only once all four steps above are confirmed: start Phase 1 (`ROADMAP.md`) — the actual
-   terrain engine port.
+Godot also needs its Windows export templates, and its exporter needs to be told
+to cross-export from Linux. Godot has historically handled this well; verify
+against the installed version.
+
+**A build produced here is confirmed to compile and package, nothing more.**
+Whether it runs is a question only Windows answers (`DECISIONS.md` §5).
+
+## Crates for `cartalith-io`
+
+`zip` reads the HTML app's saves directly; `serde` and `serde_json` parse
+`params.json` (`SAVEFILE_COMPAT.md`, `PROVENANCE.md` §3).
+
+## Phase 0 order
+
+Confirm each step before the next, so a failure names its own layer:
+
+1. A throwaway `cargo new --lib` compiles and tests here.
+2. Add `gdext`; a minimal GDExtension class loads in the Godot editor.
+3. A Windows cross-build of that class exports to a working `.exe`.
+4. An Android cross-build (via `cargo-ndk`) exports to a working `.apk`.
+   **Budget real time here** — see the gdext flag above.
+
+Only then start Phase 1 (`ROADMAP.md`).

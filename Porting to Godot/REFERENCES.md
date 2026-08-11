@@ -1,107 +1,82 @@
 # Reference libraries and projects
 
-Researched via live web search (not from possibly-stale training knowledge — this project's
-own discipline is to measure/verify rather than assume, applied here to "what's actually
-current and maintained" too). Re-verify currency/maintenance status again before actually
-adding any of these as a dependency — this list is a starting point for evaluation, not a
-pre-approved dependency list.
+Researched via live web search rather than recalled, and worth re-checking before
+adopting any of it — a starting point for evaluation, not an approved dependency
+list. For which algorithms may be replaced by a crate at all, see `PROVENANCE.md`
+§2.
 
-## Godot ↔ Rust binding
+## Godot ↔ Rust
 
-- **[`godot-rust/gdext`](https://github.com/godot-rust/gdext)** — the GDExtension binding
-  for Godot 4, already decided in `DECISIONS.md` §3. As of the most recent check, it's in
-  active, usable development (recent updates cited: Godot 4.6 API-level support, Rust
-  Edition 2024, WebAssembly improvements). **Platform support caveat, explicitly flagged by
-  the project itself: Android and WebAssembly support is described as "experimental," with
-  "documentation and tooling still lacking."** Given this port's whole point is an Android
-  `.apk`, this is the single most important thing to de-risk in Phase 0 (`ROADMAP.md`) —
-  confirm `gdext` actually produces a working Android export BEFORE committing further, not
-  after the terrain engine is already ported. If `gdext`'s Android story turns out to be too
-  rough, the fallback options are: (a) write the Android-facing boundary in C++ instead of
-  Rust for just that platform (unattractive — reintroduces a second language at the exact
-  boundary this architecture tries to keep thin), or (b) reconsider Godot entirely for
-  Android specifically. Surface this risk to the owner explicitly if it materializes — don't
-  silently work around it.
-  ([godot-rust book](https://godot-rust.github.io/book/), [docs.rs/godot](https://docs.rs/godot))
+**[`godot-rust/gdext`](https://github.com/godot-rust/gdext)** — the GDExtension
+binding for Godot 4, decided in `DECISIONS.md` §3. Actively developed; recent work
+cited covers Godot 4.6 API level, Rust edition 2024, and WebAssembly.
 
-## Noise / procedural generation
+**The caveat the project states about itself: Android and WASM support is
+experimental, "documentation and tooling still lacking."** This port's goal
+includes an `.apk`, which makes it the first thing to de-risk in Phase 0.
 
-- **[`noise-rs` (crate `noise`)](https://github.com/Razaekel/noise-rs)** — the standard,
-  actively maintained Rust procedural noise library (Perlin/Simplex/Worley/fBm/ridged
-  multifractal, combinators). **Not used for `cartalith-noise`** per `ARCHITECTURE.md`'s
-  explanation (golden-parity requires the exact existing hash/lattice functions, not a
-  different noise implementation) — but a real candidate for later, non-parity-critical
-  decorative rendering effects post-MVP.
-- An older crate, `noisy`, showed up in the same search and is explicitly **not
-  maintained** — noise-rs is what its own maintainers point people to instead. Don't use it.
+If Android proves too rough, the options are a C++ boundary layer for that
+platform alone (unattractive — a second language at the seam this architecture
+keeps thin) or reconsidering Godot for Android. **Surface it rather than working
+around it silently.**
 
-## Save/load (for `cartalith-io`, see `SAVEFILE_COMPAT.md`)
+Docs: [godot-rust book](https://godot-rust.github.io/book/),
+[docs.rs/godot](https://docs.rs/godot).
 
-- **[`zip` crate](https://docs.rs/zip)** — reads/writes ZIP archives, DEFLATE support
-  built in (DEFLATE is what the HTML app's own `exportZip()` uses as of its own v1.90
-  compression work — see the root `CHANGELOG.md`). This is the natural choice for parsing
-  the HTML app's `.zip` save files in `cartalith-io`.
-- **`serde` + `serde_json`** — for parsing the save format's `params.json` (the HTML app's
-  `serializeState()` output). Standard, no real alternative worth considering.
+## Noise
 
-## Cross-compilation tooling
+**[`noise-rs`](https://github.com/Razaekel/noise-rs)** — the standard Rust noise
+library. **Not used for `cartalith-noise`**: parity needs the JS engine's own hash
+and lattice functions, and this implements different ones (`ARCHITECTURE.md`).
+A fair candidate for later decorative effects where matching is not the goal.
 
-- **[`cargo-ndk`](https://github.com/bbqsrc/cargo-ndk)** — compiles Rust for Android via
-  the NDK "without hassle." Add the Android targets via `rustup target add
-  aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
-  first. See `TOOLCHAIN.md`.
-- **`cargo-xwin`** — cross-compiles Rust to Windows MSVC targets from a non-Windows host
-  (relevant since this port's building happens in a Linux cloud session per `DECISIONS.md`
-  §5). Confirm current minimum Rust version requirements against its own docs at setup
-  time, not against whatever this document says, since tool version requirements move.
+The older `noisy` crate is unmaintained; its own maintainers point to noise-rs.
 
-## Godot terrain plugins (relevant to the later 3D phase, NOT the 2D MVP)
+## Save and load
 
-Both are **C++ GDExtension terrain systems for Godot 4** aimed at real-time 3D heightmap
-terrain rendering with texture painting, sculpting, and LOD — i.e. exactly the kind of thing
-the JS engine's own 3D drape view (`view3d`) does, and exactly what `ROADMAP.md`'s later 3D
-phase would need to either use or take inspiration from:
+**[`zip`](https://docs.rs/zip)** reads the HTML app's archives, DEFLATE included.
+**`serde`** and **`serde_json`** parse `params.json`. See `SAVEFILE_COMPAT.md`.
 
-- **[`TokisanGames/Terrain3D`](https://github.com/TokisanGames/Terrain3D)** — described as
-  a high-performance, editable terrain system, GPU-driven clipmap mesh terrain, terrains
-  from 64×64m up to 65.5×65.5km, up to 32 textures, up to 10 LOD levels, heightmap import
-  support. The more actively promoted/current-looking of the two found. Worth a real
-  evaluation pass when the 3D phase is actually being planned — either as a dependency
-  (if its heightmap-import path can consume this project's own generated height data
-  directly) or purely as a reference for how a Godot-4-idiomatic clipmap terrain renderer
-  is structured.
-- **[`Zylann/godot_heightmap_plugin`](https://github.com/Zylann/godot_heightmap_plugin)** —
-  an older, GDScript-based heightmap terrain plugin (texture painting, colouring, holes,
-  LOD, grass). Simpler, GDScript rather than a native extension — potentially lower
-  performance ceiling but also lower integration risk than a C++ GDExtension if that
-  matters when it's actually evaluated.
+## Cross-compilation
 
-**Do not evaluate these now** — they're 3D-phase concerns and pulling them into the
-terrain-only MVP would violate `MVP_SCOPE.md`'s explicit exclusion of the 3D view. Listed
-here so the later phase doesn't have to re-discover them from scratch.
+**[`cargo-ndk`](https://github.com/bbqsrc/cargo-ndk)** builds for Android without
+hand-managing NDK paths. **`cargo-xwin`** cross-compiles to Windows MSVC targets
+from Linux. Both in `TOOLCHAIN.md`.
 
-## Hydraulic erosion — reference implementations, NOT a dependency
+## Godot terrain plugins — Phase 3, not now
 
-Several open-source droplet-based hydraulic erosion projects turned up in research
-(`csaddison/Hydraulic-Erosion-Sim`, `guydols/HydraulicErosion`, `weigert/SimpleErosion`,
-among others) — these are useful as **cross-reference reading** to sanity-check an
-understanding of the droplet-erosion technique (inertia/capacity/deposit/erode/evaporate
-parameters — the same vocabulary the existing JS engine's own `erosion` state block already
-uses, per this repo's own generation-info dumps) while porting `cartalith-erosion`. **Do
-not port from any of these** — per `PARITY_TESTING.md`, the actual source of truth is the
-existing JS `dropletKernel`/`streamPowerKernel` implementation in `Cartalith Gen1 v*.html`
-itself, which has its own specific tuning (accumulated over many owner-verified versions —
-see the root `CHANGELOG.md`'s erosion-related entries, e.g. v1.87/v1.89's `MinHeap`
-optimization work) that a generic reference implementation won't reproduce. Read these only
-to build intuition for *why* the existing algorithm's parameters behave the way they do, not
-as a source to copy formulas from.
+Both are C++ GDExtension terrain systems for Godot 4 doing what the JS engine's 3D
+drape does. Listed so Phase 3 need not rediscover them; evaluating them during the
+2D MVP would breach `MVP_SCOPE.md`.
 
-## Explicitly not adopted, and why
+- **[`TokisanGames/Terrain3D`](https://github.com/TokisanGames/Terrain3D)** —
+  GPU-driven clipmap terrain, 64 m to 65.5 km, up to 32 textures and 10 LOD
+  levels, heightmap import. The more actively promoted of the two. Evaluate as a
+  dependency if its import path can take this engine's height data directly, or as
+  reference for a Godot-idiomatic clipmap renderer.
+- **[`Zylann/godot_heightmap_plugin`](https://github.com/Zylann/godot_heightmap_plugin)**
+  — older, GDScript rather than native. Lower performance ceiling, lower
+  integration risk.
 
-- **`bevy`** — a full Rust game engine, considered and rejected as the primary framework in
-  `DECISIONS.md` §3 in favor of Godot. Its crate ecosystem (some noise/procedural-generation
-  crates originated for Bevy specifically) may still contain useful reference code, but
-  nothing found in this research pass looked like a clear win worth pulling in given Godot
-  is the chosen shell.
-- **Wrapping the existing HTML app (Tauri/Electron/Capacitor)** — rejected in
-  `DECISIONS.md` §1. Not re-litigated here.
+## Hydraulic erosion — reading, not a dependency
+
+Several droplet-erosion projects surfaced in research
+(`csaddison/Hydraulic-Erosion-Sim`, `guydols/HydraulicErosion`,
+`weigert/SimpleErosion`). They are useful for building intuition about the
+inertia/capacity/deposit/erode/evaporate parameters the JS `erosion` block already
+uses.
+
+**Do not port from them.** The source of truth is the JS `dropletKernel` and
+`streamPowerKernel`, carrying tuning accumulated across many verified versions
+(see v1.87 and v1.89 on the `MinHeap` work). A generic implementation will not
+reproduce it. Read them to understand *why* the parameters behave as they do.
+
+The app's own credits screen also names the erosion work it studied — see
+`PROVENANCE.md`.
+
+## Not adopted
+
+- **`bevy`** — rejected as the framework in `DECISIONS.md` §3. Its ecosystem may
+  hold useful reference code; nothing found was a clear win given Godot is the
+  shell.
+- **Wrapping the HTML app** — rejected in `DECISIONS.md` §1.

@@ -1,75 +1,64 @@
 # Porting to Godot — directory instructions
 
-This file is scoped to the `Porting to Godot/` folder — it supplements, and does not
-replace, the repository root's own `CLAUDE.md` (which governs `Cartalith Gen1 v*.html`
-itself and is unrelated to this effort except as the source material being ported).
+Scoped to this folder. Supplements the repository root's `CLAUDE.md`, which governs
+`Cartalith Gen1 v*.html` and is unrelated to this effort except as the source being
+ported.
 
-**This folder is documentation and reference material only.** No Rust or Godot project
-lives here, and none should be created here — per `DECISIONS.md` §8, the actual Rust/Godot
-project source belongs in a **new, separate repository**, created once porting work
-actually begins.
+**This folder holds documentation and reference material only.** The Rust and Godot
+project belongs in a new, separate repository (`DECISIONS.md` §8).
 
-## Read `README.md` first, always
+## Read `README.md` first
 
-`README.md` in this folder is the real entry point — decision summary table, reading order
-for every other document, and the working discipline that applies to any session doing port
-work. This `CLAUDE.md` exists only to make sure `README.md` (and the constraints below) load
-automatically; it is not a substitute for reading `README.md` and `DECISIONS.md` in full
-before doing anything substantive.
+It carries the decision summary, the reading order, and the working discipline.
+This file exists to load automatically and state the constraints below; it does
+not replace reading `README.md` and `DECISIONS.md` properly.
 
-## Hard constraints for any session working in this folder
+## Constraints
 
-- **Do not write Rust or Godot project files here.** If porting work is actually starting,
-  the first step is creating the new repository per `ARCHITECTURE.md`'s proposed layout —
-  not adding `Cargo.toml`/`project.godot` files inside `Cartalith_RC`.
-- **Do not edit `reference/Cartalith Gen1 v2.10.html`.** It is a frozen snapshot — the exact
-  version every other document in this folder (`MVP_SCOPE.md`, `SAVEFILE_COMPAT.md`,
-  `reference/FUNCTION_INDEX.md`) was written against. If the live file in the repository
-  root has moved to a newer version, that's expected and fine — but don't overwrite this
-  frozen copy without deliberately re-freezing a new one AND regenerating
-  `FUNCTION_INDEX.md` to match (see that file's own header for the regeneration note), so
-  the two never silently drift apart.
-- **Do not silently deviate from the decisions in `DECISIONS.md`.** If something in there
-  looks wrong once real porting work starts, that's a real possibility — architecture
-  decided before any code exists sometimes needs revision — but raise it with the owner and
-  update `DECISIONS.md` with the new reasoning, the same way the HTML project's own
-  `CHANGELOG.md` discloses every deliberate re-baseline rather than changing behavior
-  quietly.
-- **This folder's docs are allowed to go stale — flag it when they do.** Godot versions,
-  `gdext` maturity, crate ecosystem specifics (`TOOLCHAIN.md`, `REFERENCES.md`) will age.
-  Re-verify before trusting a version number or a "current status" claim written here,
-  exactly as those documents themselves say.
+- **Write no Rust or Godot project files here.** Starting the port means creating
+  the new repository, not adding a `Cargo.toml` to `Cartalith_RC`.
+- **Do not edit `reference/Cartalith Gen1 v2.10.html`.** It is the frozen snapshot
+  every other document was written against. Re-freezing to a newer version is
+  fine — regenerate `FUNCTION_INDEX.md` in the same pass, so the two never drift.
+- **Do not deviate from `DECISIONS.md` silently.** Architecture decided before any
+  code exists sometimes needs revision. Raise it, then record the new reasoning —
+  the same way the HTML CHANGELOG discloses every deliberate re-baseline.
+- **Expect these documents to age, and say so when they have.** Godot versions,
+  gdext maturity, and crate specifics all move. Re-verify rather than trusting a
+  version number written here.
 
-## What's in this folder
+## Contents
 
 | Path | What it is |
 |---|---|
-| `README.md` | Start here — decisions summary + reading order |
-| `DECISIONS.md` | Every major choice and why, in order made |
-| `MVP_SCOPE.md` | Precise terrain-only MVP boundary + success criteria |
-| `ARCHITECTURE.md` | Rust↔Godot split, per-subsystem crate layout |
-| `SAVEFILE_COMPAT.md` | The HTML app's `.zip` save format, verified against the live code |
-| `PARITY_TESTING.md` | Golden-value testing strategy vs. the JS engine |
-| `REFERENCES.md` | Researched, sourced external libraries/projects worth using |
-| `TOOLCHAIN.md` | Exact setup steps before writing any Rust/Godot code |
-| `ROADMAP.md` | Rough phases beyond the MVP |
-| `SKILLS.md` | Which Claude Code skills are vendored here, which are recommended-not-vendored, and why |
-| `skills/ponytail/` | Vendored anti-over-engineering skill (MIT, see `SKILLS.md`) |
-| `skills/rust-craft/` | General Rust craft — signatures, borrowing, errors, types, tests, plus references on errors/async/performance |
-| `skills/cartalith-rust-conventions/` | Only the Rust rules this project overrides (float parity, NaN policy, gdext panic boundary) |
-| `skills/godot-shell/` | Godot 4.x as a drawing/packaging shell — textures, renderer choice, UI, threading, plus an export-pipeline reference |
-| `skills/cartalith-porting-discipline/` | Original skill encoding this port's own working rules |
-| `reference/Cartalith Gen1 v2.10.html` | Frozen snapshot this whole folder is built against |
-| `reference/FUNCTION_INDEX.md` | Mechanically-generated name→line index of every top-level function in that snapshot |
+| `README.md` | start here — decisions and reading order |
+| `DECISIONS.md` | every choice, what it beat, and why |
+| `MVP_SCOPE.md` | the first milestone's boundary and success criteria |
+| `ARCHITECTURE.md` | the Rust↔Godot split and crate layout |
+| `PROVENANCE.md` | sources, algorithms, formats; what must be hand-ported |
+| `SAVEFILE_COMPAT.md` | the `.zip` format, verified against live code |
+| `PARITY_TESTING.md` | golden-value testing against the JS engine |
+| `REFERENCES.md` | external libraries and projects |
+| `TOOLCHAIN.md` | setup, in order |
+| `ROADMAP.md` | phases after the MVP |
+| `SKILLS.md` | which skills to install, vendored or not, and why |
+| `skills/ponytail/` | vendored anti-over-engineering skill (MIT) |
+| `skills/rust-craft/` | general Rust craft, plus errors/async/performance references |
+| `skills/cartalith-rust-conventions/` | only the rules this project overrides |
+| `skills/godot-shell/` | Godot 4.x as a drawing and packaging shell |
+| `skills/cartalith-porting-discipline/` | this port's own working rules |
+| `reference/` | the frozen HTML snapshot and its function index |
 
-## If you're here to actually start porting
+## To start porting
 
-1. Read `README.md`, `DECISIONS.md`, `MVP_SCOPE.md`, `ARCHITECTURE.md` in that order.
-2. Confirm the frozen `reference/` snapshot is still the current HTML version — if the repo
-   root has a newer `Cartalith Gen1 v*.html`, decide with the owner whether to re-freeze
-   before starting (a newer version may have fixed something relevant, per that project's
-   own extensive per-version CHANGELOG).
-3. Follow `TOOLCHAIN.md`'s Phase 0 walking-skeleton steps in a **new repository** before
-   porting any real engine logic.
-4. Copy `skills/ponytail/` and `skills/cartalith-porting-discipline/` into that new
-   repository's own `.claude/skills/` directory as part of its own initial setup.
+1. Read `README.md`, `DECISIONS.md`, `MVP_SCOPE.md`, `ARCHITECTURE.md`.
+2. Check whether the frozen snapshot is still current. If the repository root has
+   moved on, decide with the owner whether to re-freeze — a newer version may have
+   fixed something relevant.
+3. Create the new repository and work through `TOOLCHAIN.md`'s Phase 0 before
+   porting any engine logic.
+4. Copy the five skills into that repository's `.claude/skills/`, and install
+   GodotPrompter alongside them (`SKILLS.md`).
+5. Copy `docs/research/` — at least the six documents `PROVENANCE.md` names.
+   Constants without reachable derivations get "cleaned up" by someone who cannot
+   see why they hold.
