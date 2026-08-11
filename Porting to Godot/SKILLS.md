@@ -88,6 +88,31 @@ the article the owner linked — its specific picks are therefore *not* reflecte
 want them covered, paste the list and they can be folded in; the skill is structured so a new
 rule slots into an existing section rather than forcing a rewrite.
 
+### `skills/godot-shell/` — Godot 4.x as a shell, authored after surveying five packs
+
+Original prose. Covers only what this project touches: keeping logic out of
+GDScript, showing a generated field as a texture (including the `update()` over
+`create_from_image()` rule that governs regeneration performance), choosing a
+renderer, `Control`-node UI, the scene tree's thread rules, and what to commit —
+plus `references/export-pipeline.md` for the `.gdextension` manifest, the
+editor-works-but-export-fails failure, and the Windows/Android builds.
+
+**Godot 4.x only, stated in the description and enforced in the body.** Godot 4
+replaced GDNative with GDExtension outright, so Godot 3 native-code guidance is
+not dated — it describes an API that no longer exists.
+
+**Why narrow rather than vendoring a pack**, per Ponytail's first rung: every
+Godot pack surveyed teaches game development. This project has no physics bodies,
+no animation graph, no navigation, no multiplayer, and no game loop. The full
+survey — five packs, sizes, licences, and fit — is in
+`skills/godot-shell/ATTRIBUTION.md`, along with which technical claims came from
+where. The headline: **[jame581/GodotPrompter](https://github.com/jame581/GodotPrompter)**
+(55 skills, MIT, Godot 4.3+) is the recommended companion, because it has
+dedicated `gdextension` (godot-cpp *and* Rust), `export-pipeline`,
+`mobile-development`, and `multithreading` skills. That overlaps this skill's
+export reference honestly rather than quietly — if GodotPrompter covers it better
+once installed, delete the reference file and keep the pointer.
+
 ### `skills/cartalith-porting-discipline/` — original, authored for this project
 
 Not from an external source — written specifically to encode the decisions in
@@ -143,6 +168,41 @@ a re-research project.
   `CHANGELOG.md` (per `ARCHITECTURE.md`'s proposed layout) is a real, growing file — it's
   exactly the kind of document this project's own existing HTML-file discipline treats as
   load-bearing, not decorative.
+
+### Godot skill packs
+
+Full survey with sizes, licences, and per-pack fit in
+`skills/godot-shell/ATTRIBUTION.md`. In short:
+
+- **[jame581/GodotPrompter](https://github.com/jame581/GodotPrompter)** (55 skills,
+  MIT, Godot 4.3+ with 4.5/4.6/4.7 features) — **install this one.** Its
+  `gdextension`, `export-pipeline`, `mobile-development`, and `multithreading`
+  skills are exactly the four this project needs, and it is the only pack found
+  whose GDExtension coverage names Rust explicitly.
+- **[vl4dt/godot-skills](https://github.com/vl4dt/godot-skills)** (12 skills, MIT,
+  Godot 4.7) — game-oriented; GDExtension only inside the C# skill.
+- **[alexmeckes/godot-claude-skills](https://github.com/alexmeckes/godot-claude-skills)**
+  (5 skills, MIT) — pairs with godot-mcp for live editor control; interesting if
+  you adopt godot-mcp, off-target otherwise.
+- **[Randroids-Dojo/Godot-Claude-Skills](https://github.com/Randroids-Dojo/Godot-Claude-Skills)**
+  (MIT) — GdUnit4 testing, CI/CD, and web/desktop exports. Worth revisiting for
+  CI; note it does not cover Android, the harder target here.
+- **[sickn33/antigravity-awesome-skills](https://github.com/sickn33/antigravity-awesome-skills)**
+  — an aggregator of 1,400+ skills. Its `godot-gdscript-patterns` is 41 lines
+  pointing at a playbook, with no GDExtension, texture, or export coverage. See
+  the licensing caution below.
+
+### A caution about the aggregator
+
+Both skills inspected from `sickn33/antigravity-awesome-skills` (`rust-pro`,
+`godot-gdscript-patterns`) carry `source: community` and name **no original
+author and no license**. That is an unknown, not a permission, so nothing was
+copied from it into this repository. Its `rust-pro` (181 lines) also targets
+"Rust 1.75+", behind the edition-2024 / 1.85 baseline `rust-craft` uses, and its
+Godot skill is a thin pointer file.
+
+Install from an aggregator if you find it convenient; trace a skill to its
+original author and licence before vendoring it into a repository you own.
 
 ### UX/UI design skills
 
@@ -219,11 +279,16 @@ step (alongside `TOOLCHAIN.md`'s own steps):
 | `ponytail` | whether to write it at all, and how little |
 | `rust-craft` | how to write good Rust anywhere |
 | `cartalith-rust-conventions` | the few rules where this project overrides ordinary Rust |
+| `godot-shell` | Godot 4.x as the drawing and packaging layer |
 | `cartalith-porting-discipline` | which crate it belongs in, and whether parity-verified |
 
-They are deliberately non-overlapping, and each one's own description says which of the other
-three owns an adjacent question — so a session that loads one can find the right neighbour
+They are deliberately non-overlapping, and each one's own description says which of the
+others owns an adjacent question — so a session that loads one can find the right neighbour
 instead of guessing or duplicating.
+
+Then install **GodotPrompter** for the Godot depth this project will need beyond the shell
+(GDExtension, export pipeline, mobile, multithreading), and add **UI/UX Pro Max** at Phase 3
+when the interface stops being four controls.
 
 Treat the "researched, not vendored" list above as a shopping list to revisit when each
 item's own phase actually starts.

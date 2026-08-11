@@ -57,6 +57,7 @@ before doing anything substantive.
 | `skills/ponytail/` | Vendored anti-over-engineering skill (MIT, see `SKILLS.md`) |
 | `skills/rust-craft/` | General Rust craft — signatures, borrowing, errors, types, tests, plus references on errors/async/performance |
 | `skills/cartalith-rust-conventions/` | Only the Rust rules this project overrides (float parity, NaN policy, gdext panic boundary) |
+| `skills/godot-shell/` | Godot 4.x as a drawing/packaging shell — textures, renderer choice, UI, threading, plus an export-pipeline reference |
 | `skills/cartalith-porting-discipline/` | Original skill encoding this port's own working rules |
 | `reference/Cartalith Gen1 v2.10.html` | Frozen snapshot this whole folder is built against |
 | `reference/FUNCTION_INDEX.md` | Mechanically-generated name→line index of every top-level function in that snapshot |
