@@ -4149,6 +4149,49 @@ if (typeof carveRiverValleys === 'function') {
       return highFreqEnergy(tileEased, outW, outH) > highFreqEnergy(tileFlat, outW, outH) * 2;
     })());
   }
+  /* ---------- v2.07: riverWidthScaleK — real-km-aware river channel width ---------- */
+  if (typeof riverWidthScaleK === 'function') {
+    check('riverWidthScaleK===1 at the app default mapWidthKm (800) — bit-identical there', riverWidthScaleK(800) === 1);
+    check('riverWidthScaleK grows below the default (a fixed real width is a bigger fraction of a smaller map)', riverWidthScaleK(400) > 1 && riverWidthScaleK(100) > riverWidthScaleK(400));
+    check('riverWidthScaleK shrinks above the default (unlike terrainDetailK/riverCoarseEase, width eases BOTH ways)', riverWidthScaleK(6400) < 1);
+    check('riverWidthScaleK is capped both ways at TERRAIN_DETAIL_MAX_K', riverWidthScaleK(1e-6) === TERRAIN_DETAIL_MAX_K && riverWidthScaleK(1e9) === 1 / TERRAIN_DETAIL_MAX_K);
+    check('riverWidthScaleK is identical for any tiny-enough mapWidthKm once the cap saturates (1/5/10km all read the same)', riverWidthScaleK(1) === riverWidthScaleK(5) && riverWidthScaleK(5) === riverWidthScaleK(10));
+
+    // buildRiverNetwork: the SAME synthetic discharge pattern, only state.mapWidthKm differs — the
+    // channel's stamped footprint (in CELLS) must grow at a smaller mapWidthKm and match the width
+    // formula's own cap exactly (confirms the wiring, not just the standalone function).
+    check('buildRiverNetwork stamps a wider channel footprint (in cells) at a small mapWidthKm than at the default', (() => {
+      const W = 64, H = 64, sea = 0.42;
+      const fld = new Float32Array(W * H);
+      // a single east-flowing trunk valley: high ground north/south, a descending channel along one row
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const distToRow = Math.abs(y - H / 2);
+        fld[y * W + x] = Math.min(1, sea + 0.05 + distToRow * 0.02 - x * 0.0005);
+      }
+      const flow = new Float32Array(W * H);
+      for (let x = 0; x < W; x++) flow[(H / 2) * W + x] = (x + 1) * 50;   // accumulating discharge west→east
+      const savedMWK = state.mapWidthKm, savedGW = GW;
+      GW = W;   // riverWidthScaleK/terrainDetailK/riverCoarseEase read the module GW, not buildRiverNetwork's own W param
+      try {
+        state.mapWidthKm = 800;   // reference — must reproduce the exact pre-v2.07 footprint
+        const netRef = buildRiverNetwork(fld, flow, W, H, sea, { world: false, riverDensity: 1 });
+        state.mapWidthKm = 5;     // well below the default — width must scale up
+        const netSmall = buildRiverNetwork(fld, flow, W, H, sea, { world: false, riverDensity: 1 });
+        const y0 = H / 2, x0 = W - 5;   // a high-discharge cell near the outlet
+        function footprint(net) { let r = 0; for (let dy = 1; dy < 20; dy++) { if (y0 + dy >= H || net.intensity[(y0 + dy) * W + x0] <= 0) break; r = dy; } return r; }
+        const fRef = footprint(netRef), fSmall = footprint(netSmall);
+        return fRef > 0 && fSmall > fRef;
+      } finally { state.mapWidthKm = savedMWK; GW = savedGW; }
+    })());
+    check('carveRiverValleys\' own channel-carve width (halfW cap) also scales with riverWidthScaleK, matching buildRiverNetwork\'s convention', (() => {
+      const savedMWK = state.mapWidthKm;
+      try {
+        state.mapWidthKm = 800; const capRef = 4 * riverWidthScaleK(state.mapWidthKm);
+        state.mapWidthKm = 5;   const capSmall = 4 * riverWidthScaleK(state.mapWidthKm);
+        return capRef === 4 && capSmall === 4 * TERRAIN_DETAIL_MAX_K;
+      } finally { state.mapWidthKm = savedMWK; }
+    })());
+  }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);

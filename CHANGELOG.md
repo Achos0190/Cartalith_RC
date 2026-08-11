@@ -12,6 +12,69 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.07 — River channel width made real-km-aware
+
+Owner: "check the scaling from the base. That when setting the width of the map to 1/5/10/100 km
+etc scales all features accordingly. So that a river becomes a bigger feature progressively."
+Measured before writing any fix — see `docs/research/scale-invariant-terrain.md`'s own v1.60
+precedent for the general defect shape this belongs to. Engine only (`buildRiverNetwork`,
+`carveRiverValleys`). Hash vs v2.06 **ALL IDENTICAL** at the app's own default (mapWidthKm=800, any
+resolution, including the `hash_gen1.js` battery's own 512px scenario) — a deliberate, measured
+re-baseline above/below that, same class as v1.60/v1.101/v2.05.
+
+- **Root cause, confirmed by direct source inspection then by live measurement.**
+  `buildRiverNetwork`'s channel half-width formula (`(0.6+3.0*mag*mag+0.45*(o-1))*slopeFac`, clamped
+  `[0.5,9]` cells) and `carveRiverValleys`' own valley-carve width (`0.8+0.5*(o-1)`, clamped `[0,4]`
+  cells) are both expressed and CAPPED purely in GRID CELLS — neither references `cellKm` or
+  `mapWidthKm` anywhere. So the same Strahler-order/discharge channel always occupies the same
+  fraction of the map regardless of what real km that map represents — the exact v1.60 defect
+  ("relief samples fractal noise at a frequency fixed as a fraction of grid width, never a real km
+  wavelength"), in a subsystem `terrainDetailK`/`riverCoarseEase`/`lodDetailFreqK` never reached
+  (each already-existing sibling eases relief GENERATION or DETECTION frequency; none of them touch
+  a channel's rendered/carved WIDTH). Measured live (isolated: one fixed generated world, only
+  `state.mapWidthKm` varied, same channel cell inspected): at 1/5/10 km the SAME channel's footprint
+  stayed pinned at 85 cells (a fixed fraction of the map) while its real-km extent should instead
+  have been growing — a river never became "a bigger feature" the way the owner's request describes.
+- **`riverWidthScaleK(mapWidthKm)`** — the fifth sibling of the `terrainDetailK`/`riverCoarseEase`/
+  `lodDetailFreqK` family, sharing their `TERRAIN_DETAIL_MAX_K` cap magnitude by the same convention
+  those two already established (one shared constant, independently-named/tunable functions), but
+  unlike every ONE-SIDED sibling (each eases only one side of the reference for a reason specific to
+  ITS OWN subsystem), river width is a pure geometric km↔cell conversion with no such asymmetry, so
+  it eases BOTH ways: `min(16, max(1/16, 800/mapWidthKm))`. Below the reference, a fixed real width
+  is a bigger fraction of a smaller map (wider in cells, up to 16x); above it, a smaller fraction
+  (narrower in cells, down to 1/16x) — a world-scale map correctly stops exaggerating a river into
+  an implausible dozens-of-km-wide band. Deliberately `mapWidthKm` ALONE, never blended with `gw` —
+  `riverCoarseEase`'s own CHANGELOG already found that blending `gw` re-baselines this file's
+  low-resolution test previews (`hash_gen1.js`'s own "default" battery runs at 512px, not the
+  literal 2048px app default, while leaving `mapWidthKm` at 800); that exact trap applies here too.
+  No-op (returns 1, bit-identical) at the literal default `mapWidthKm=800`, at ANY resolution.
+- **Wired at both places a channel's width is computed**: `buildRiverNetwork`'s render-facing
+  half-width (drives the water-color/depth blend everyone sees by default) and `carveRiverValleys`'
+  own valley-carve half-width (drives the ACTUAL terrain height carve — `state.carveRivers`, on by
+  default) both multiply through `riverWidthScaleK(state.mapWidthKm)`, with their existing cell caps
+  (9 and 4 respectively) scaled by the SAME factor so the cap-vs-raw-value RATIO — and therefore the
+  reference-scale behavior — is preserved exactly. Kept as two separate call sites rather than one
+  shared helper: the render width and the carve width already had independently-tuned formulas/caps
+  before this fix, and unifying them was not asked for.
+- **Verified two ways**: an isolated live test (one fixed generated world, `state.mapWidthKm` swept
+  with the SAME channel/threshold otherwise untouched) confirmed the footprint stays pinned at the
+  cap across 1/5/10 km (all hit `riverWidthScaleK`'s own 16x ceiling) while growing proportionally
+  in real km; and new unit tests exercise `riverWidthScaleK` in isolation (no-op at default, grows
+  below, shrinks above, capped both ways) plus a synthetic single-trunk-valley `buildRiverNetwork`
+  call proving the wiring itself (not just the standalone function) produces a measurably wider
+  stamped footprint at a small `mapWidthKm` than at the default.
+- **Known scope cuts, disclosed**: `burnChannels`' own tile-refinement channel-burning width (the
+  OPT-IN Tiled-LOD deep-zoom detail pass, `state.viz`-gated `_lodBurnRivers`, off by default) is left
+  untouched — a separate, lower-traffic code path from the two fixed here, which cover what a user
+  changing the map-width setting actually sees by default. `drawRiverWays`' vector-overlay stroke
+  width (`state.viz.riverWays`, also off by default) is likewise untouched — v1.29's own comment
+  explicitly designs it as a scale-invariant CARTOGRAPHIC SYMBOL ("a river is a SYMBOL whose pen
+  width barely changes with scale"), a deliberately different convention from the raster fill this
+  fix addresses, not an oversight. Point features (craters, volcanoes, settlement spacing) were
+  already real-km-aware since v1.60/v0.6x-era code — only the LINEAR river-width case was missing
+  this treatment; base relief SHAPE/frequency at extreme sub-~12.5km-cell scales stays capped at
+  `terrainDetailK`'s own pre-existing, disclosed `TERRAIN_DETAIL_MAX_K=16` ceiling (unchanged here).
+
 ### v2.06 — LOD tile cache: shallow zoom levels are pinned, never evicted (zoom-out re-render fix)
 
 Owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out tiles had

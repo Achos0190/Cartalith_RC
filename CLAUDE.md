@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.06**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.07**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.06.html` | **Current** unified tool (~30.2k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.05.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.07.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.06.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,38 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### River channel width made real-km-aware (v2.07)
+
+Owner: "check the scaling from the base... when setting the width of the map to 1/5/10/100 km etc
+scales all features accordingly. So that a river becomes a bigger feature progressively." Engine
+only (`buildRiverNetwork`/`carveRiverValleys`). Hash vs v2.06 ALL IDENTICAL at the app's own default
+(mapWidthKm=800, any resolution — including `hash_gen1.js`'s own 512px "default" scenario).
+
+- **Root cause**: `buildRiverNetwork`'s channel half-width and `carveRiverValleys`' valley-carve
+  half-width are both expressed and CAPPED purely in grid cells — no `cellKm`/`mapWidthKm`
+  reference anywhere. The same channel always occupies the same fraction of the map regardless of
+  its real km — v1.60's defect, in a subsystem `terrainDetailK`/`riverCoarseEase`/`lodDetailFreqK`
+  never reached (they ease generation/detection FREQUENCY, never a channel's rendered/carved WIDTH).
+  Measured: a fixed world's channel held at 85 cells across 1/5/10 km — never "bigger."
+- **`riverWidthScaleK(mapWidthKm)`** — the fifth `terrainDetailK` family sibling, sharing its
+  `TERRAIN_DETAIL_MAX_K` cap by the same shared-constant convention. Unlike every ONE-SIDED sibling,
+  width eases BOTH ways (`min(16,max(1/16,800/mapWidthKm))`) — a pure km↔cell conversion has no
+  reason to favor one direction. `mapWidthKm` alone, never blended with `gw` — the same
+  `riverCoarseEase`-established low-res-test-preview trap applies. No-op at the literal default.
+- **Wired at both width computations**: `buildRiverNetwork`'s render half-width and
+  `carveRiverValleys`' carve half-width each multiply through it, with their existing cell caps (9
+  and 4) scaled by the SAME factor so the cap-to-raw ratio — and reference-scale behavior — holds
+  exactly. Two call sites, not unified — their formulas/caps were already independently tuned.
+- **Verified**: an isolated live sweep (one fixed world, only `state.mapWidthKm` varied) confirmed
+  the footprint pins at the 16x cap across 1/5/10km while its real-km extent grows proportionally;
+  new unit tests cover the standalone function plus a synthetic single-trunk-valley
+  `buildRiverNetwork` call proving the wiring itself.
+- **Known scope cuts**: `burnChannels`' Tiled-LOD channel-burn width and `drawRiverWays`' vector-
+  overlay stroke (a deliberate v1.29 scale-invariant cartographic symbol) are untouched — both
+  opt-in, off by default, lower-traffic than the two default-on paths this fix covers. Point
+  features (craters/volcanoes/settlements) were already real-km-aware since v1.60. Base relief
+  shape at extreme sub-~12.5km-cell scales stays at `terrainDetailK`'s own pre-existing cap.
 
 ### LOD tile cache: shallow zoom levels are pinned, never evicted (v2.06)
 

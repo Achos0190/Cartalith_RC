@@ -9,11 +9,32 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.06.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.07.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v2.05` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.06` are kept and never edited.
+- **v2.07 — river channel width made real-km-aware.** Owner: "check the scaling from the base...
+  when setting the width of the map to 1/5/10/100 km etc scales all features accordingly. So that a
+  river becomes a bigger feature progressively." Root cause: `buildRiverNetwork`'s render half-width
+  and `carveRiverValleys`' valley-carve half-width were both expressed and CAPPED purely in grid
+  cells, no `cellKm`/`mapWidthKm` reference anywhere — the same channel always occupied the same
+  fraction of the map regardless of its real km (v1.60's defect, in a subsystem
+  `terrainDetailK`/`riverCoarseEase`/`lodDetailFreqK` never reached — those ease relief/detail
+  FREQUENCY, never a channel's WIDTH). Measured: a fixed world's channel held at 85 cells across
+  1/5/10km — never "bigger." Fix: `riverWidthScaleK(mapWidthKm)`, the fifth `terrainDetailK`-family
+  sibling (shares its `TERRAIN_DETAIL_MAX_K` cap), but eased BOTH ways (unlike every one-sided
+  sibling) since width is a pure geometric km↔cell conversion: `min(16,max(1/16,800/mapWidthKm))`,
+  `mapWidthKm` alone (not blended with `gw`, matching `riverCoarseEase`'s own established low-res-
+  test-preview safety reasoning), no-op at the literal default. Wired at both width computations,
+  each with its existing cell cap scaled by the SAME factor so reference-scale behavior is exactly
+  preserved. Engine-only, hash vs v2.06 ALL IDENTICAL at default (incl. `hash_gen1.js`'s own 512px
+  battery). `tests/run.sh` 1062/1062 (+7), `tests/run_um.sh` 852/852. Verified via an isolated live
+  sweep (one fixed world, only mapWidthKm varied) plus new unit tests covering the standalone
+  function and a synthetic single-trunk-valley wiring check. Known scope cuts: `burnChannels`' LOD
+  tile-refinement burn width and `drawRiverWays`' vector-overlay stroke (a deliberate v1.29 scale-
+  invariant cartographic-symbol design) both untouched — opt-in, off by default. See CHANGELOG/
+  CLAUDE.md for the full writeup.
 - **v2.06 — LOD tile cache: shallow zoom levels are pinned, never evicted (zoom-out re-render
   fix).** Owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out
   tiles had already been rendered before. They should be stored and recalled." Measured before
