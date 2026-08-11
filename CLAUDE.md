@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.09**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.10**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.09.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.08.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.10.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.09.html` | Previous Gen1 versions (kept; never edit in place) |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
@@ -997,6 +997,38 @@ reference world did. Three causes, one lesson.
 - **Every verdict carries a `basis` string.** A bare "none" cannot be told from a broken threshold —
   that is precisely why this survived several versions.
 
+
+### Ocean current coastal deflection widened + LOD bake depth 6 (v2.10)
+
+Two owner-reported items from one message. Engine-only (`computeOceanCurrent`'s `deflectFlow`
+call) for the first; pure additive markup for the second. Hash vs v2.09 diverges at the default
+(`currents:true`) — isolated: with `currents=false` on both sides (pinned-seed A/B), `field`/
+`temp`/`rain`/`flow` are byte-identical, same as v1.82's own precedent.
+
+- **Ocean current "bumping into shore" instead of curving.** Root-caused by measurement (synthetic
+  straight coastline + uniform onshore wind, swept through `deflectFlow`) before any fix. NOT the
+  debug-view arrow spacing (ruled out first, a real but different effect) — the owner's follow-up
+  confirmed the actual field itself runs straight in. Cause: `computeOceanCurrent` passed
+  `blockBlur:1` to `deflectFlow`, so the coastline gradient that TRIGGERS redirection is only
+  non-negligible in the ~1-2 cells touching the coast — measured: the onshore component stays
+  within a few percent of its raw undeflected value from open water down to ~4 cells out, then
+  snaps to near-zero in the final few cells. Not a curve — a last-instant correction. Fix:
+  `blockBlur:1`→`6`, a ONE-TIME (not per-iteration) cost widening the gradient's reach so cells
+  further out start sensing the coast earlier. Swept 1/4/6/8: far-field (no land nearby) stays
+  bit-identical across every value — the widened blur never smears the open ocean, only the
+  near-coast band — and the improvement plateaus by 6. `buildWind`'s own separate `deflectFlow`
+  call (terrain wind, different tuning) untouched. Verified: mid-approach tangential:onshore ratio
+  0.49→0.79; at-coast flow now genuinely tangential-dominant; curve is monotonic (no overshoot).
+  4 new unit tests, `tests/run.sh` 1070/1070, `tests/run_um.sh` 852/852.
+- **LOD bake depth 6.** The `#bakeAllDepth` picker topped out at LOD 0–5 even though the handler
+  already clamped to `Math.min(8,...)` (matching `state.lodMaxLevel`'s own ceiling) — level 6 was
+  reachable by the code, just not offered. Added `<option value="6">LOD 0–6 · 5461 tiles
+  (huge!)</option>` (Σ4^z, z=0..6, matching the existing options' own tile-count convention). No
+  other change; hash unaffected (markup outside any `<script>` block).
+- **Known scope cuts**: `blockBlur:6` is measured/disclosed, not independently sourced against a
+  real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
+  hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
+  at extreme map scales — a separate, disclosed display-only limitation.
 
 ### LOD/bake terrain checkerboard from coarse-cell-quantized curvature (v2.09)
 

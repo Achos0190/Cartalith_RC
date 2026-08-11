@@ -4251,6 +4251,54 @@ if (typeof carveRiverValleys === 'function') {
     })());
   }
 
+  /* ---------- v2.10: computeOceanCurrent's coastal deflection widened from a last-cell snap to a
+     genuine gradual curve (owner: "part of ocean flow sometimes seems to focus on one part of the
+     coast and doesn't deflect or curve from it"). Synthetic straight coastline (land x<WW/2, ocean
+     x>=WW/2) with a uniform wind blowing due west (straight onshore) everywhere — the simplest
+     possible "does this curve before it arrives, or just before it's swallowed" reproduction. ---------- */
+  if (typeof computeOceanCurrent === 'function') {
+    function _v210SyntheticCoast() {
+      const WW = 80, WH = 40, sea = 0.42;
+      const elevC = new Float32Array(WW * WH);
+      for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) elevC[y * WW + x] = x < WW / 2 ? 0.7 : 0.2;
+      const wxA = new Float32Array(WW * WH), wyA = new Float32Array(WW * WH);
+      for (let i = 0; i < WW * WH; i++) { wxA[i] = -1.0; wyA[i] = 0.0; }
+      const cur = computeOceanCurrent(wxA, wyA, elevC, WW, WH, false, sea, () => 30, { western: false });
+      const y0 = WH >> 1;
+      return { cur, WW, y0, at: (dx) => y0 * WW + Math.floor(WW / 2) + dx };
+    }
+    check('computeOceanCurrent: at a MODERATE distance from shore (dx=5, not yet at the coast) the current is already substantially deflected tangentially, not still running mostly onshore', (() => {
+      const { cur, at } = _v210SyntheticCoast();
+      const i5 = at(5), u5 = Math.abs(cur.u[i5]), v5 = Math.abs(cur.v[i5]);
+      // the pre-fix (blockBlur:1) signature measured v/u≈0.49 at dx=5 — onshore still dominant this
+      // far out, all the real curving compressed into the last 1-2 cells. Post-fix measures ≈0.79.
+      return v5 / u5 > 0.6;
+    })());
+    check('computeOceanCurrent: right at the coast the flow is now mostly tangential (genuinely turned), not still mostly onshore', (() => {
+      const { cur, at } = _v210SyntheticCoast();
+      const i0 = at(0), u0 = Math.abs(cur.u[i0]), v0 = Math.abs(cur.v[i0]);
+      return v0 > u0;
+    })());
+    check('computeOceanCurrent: far offshore (outside the coastal deflection band) is UNCHANGED by the wider blur — matches the raw Ekman-rotated wind-driven value, so the fix is localized to the coast, not a whole-basin smear', (() => {
+      const { cur, at } = _v210SyntheticCoast();
+      const i15 = at(15);
+      const cA = Math.cos(25 * Math.PI / 180), sA = Math.sin(25 * Math.PI / 180);
+      const rawU = (-1 * cA - 0 * sA) * 0.55, rawV = (-1 * sA + 0 * cA) * 0.55;
+      return Math.abs(cur.u[i15] - rawU) < 0.02 && Math.abs(cur.v[i15] - rawV) < 0.02;
+    })());
+    check('computeOceanCurrent: the deflection is a smooth, monotonic curve from open water to the coast (no oscillation/overshoot introduced by the wider blur)', (() => {
+      const { cur, at } = _v210SyntheticCoast();
+      let prevU = Math.abs(cur.u[at(15)]);
+      let monotonic = true;
+      for (let dx = 14; dx >= 0; dx--) {
+        const u = Math.abs(cur.u[at(dx)]);
+        if (u > prevU + 1e-6) { monotonic = false; break; }   // onshore magnitude must never INCREASE moving toward shore
+        prevU = u;
+      }
+      return monotonic;
+    })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

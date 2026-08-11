@@ -9,11 +9,29 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
   ("Add files via upload") — the pre-merge development history (the `elevation_foundation`
   v0.036–v0.144 lineage, its branches and PRs) lives in the older `cartalith-gen1` repository
   and in `CHANGELOG.md` here, not in this repo's git log.
-- **Current tool file: `Cartalith Gen1 v2.09.html`.** One self-contained HTML file, four
+- **Current tool file: `Cartalith Gen1 v2.10.html`.** One self-contained HTML file, four
   script blocks (generator engine / civ-politics layer / asset library / urban-morphology
   engine, new in v0.95 — see CLAUDE.md's "Merged-file architecture"). The merge is DONE —
   there is no build step; the file is hand-evolved. New version = new file. Older `v0.57`/
-  `v0.6`/`v0.61`–`v2.08` are kept and never edited.
+  `v0.6`/`v0.61`–`v2.09` are kept and never edited.
+- **v2.10 — ocean current coastal deflection widened + LOD bake depth 6.** Two owner items from one
+  message. (1) Owner: "part of ocean flow sometimes seems to focus on one part of the coast and
+  doesn't deflect or curve from it" → follow-up: "Im seeing the directly bumping into land/shore
+  scenario." Root-caused by measurement (synthetic straight coastline + uniform onshore wind swept
+  through `deflectFlow`), not assumed: `computeOceanCurrent` passed `blockBlur:1`, so the coastline
+  gradient that triggers redirection was only non-negligible in ~1-2 cells touching the coast —
+  the flow ran essentially undeflected until the last few cells, then snapped tangential all at
+  once (a last-instant correction, not a curve — exactly the reported symptom). Fixed by raising
+  `blockBlur` to 6 (a one-time, not per-iteration, cost); swept 1/4/6/8 and confirmed the far-field
+  (open-ocean, no land nearby) value stays bit-identical across every value tested, so the fix is
+  confined to the near-coast band, never smears the open ocean. `buildWind`'s own separate
+  `deflectFlow` call (terrain wind) untouched. (2) Owner: "let's export LOD tiles to level 6 as max
+  render" — the `#bakeAllDepth` picker topped out at LOD 0–5 though the handler already clamped to
+  8; added the missing `LOD 0–6 · 5461 tiles` option (pure markup, no logic change). Hash vs v2.09
+  diverges at the default (`currents:true` feeds `field`/`temp`/`rain`/`flow`) — isolated via a
+  pinned-seed A/B with `currents=false` on both sides: byte-identical, confirming the change is
+  confined to the ocean-current path (same isolation precedent as v1.82). `tests/run.sh`
+  1070/1070 (+4), `tests/run_um.sh` 852/852. See CHANGELOG/CLAUDE.md for the full writeup.
 - **v2.09 — LOD/bake terrain checkerboard from coarse-cell-quantized curvature.** Owner: "Terrain
   rendering/Painting is quickly blockey/pixilated especially when zooming in with LOD."
   Root-caused by direct measurement (screenshots + instrumented render pipeline), confirmed

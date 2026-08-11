@@ -12,6 +12,66 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.10 — Ocean current coastal deflection widened + LOD bake depth 6
+
+Two owner-reported items from one message. Civ/UI-only for the second item; engine-only for the
+first (`computeOceanCurrent`'s `deflectFlow` call). Hash vs v2.09 **diverges** at the default
+(`state.climate.currents:true` by default, feeding `field`/`temp`/`rain`/`flow` via
+`carveRiverValleys` — same class of deliberate, measured re-baseline as v1.78/v1.82) — isolated:
+with `state.climate.currents=false` on both sides (a pinned-seed A/B, own harness, not
+`hash_gen1.js` itself since it has no currents-off scenario), `field`/`temp`/`rain`/`flow` are
+byte-identical, confirming the change is confined to the ocean-current path exactly like v1.82's
+own isolation precedent.
+
+- **Ocean current coastal deflection.** Owner: "part of ocean flow sometimes seems to focus on one
+  part of the coast and doesn't deflect or curve from it. Is that correct behaviour?" — followed up:
+  "Im seeing the directly bumping into land/shore scenario." Root-caused by direct measurement (a
+  synthetic straight coastline + uniform onshore wind, swept through `deflectFlow` in isolation and
+  through the full `computeOceanCurrent` pipeline) before writing any fix — not assumed from reading
+  the code.
+  - **Not a sampling artifact.** First ruled out the Ocean debug view's own quiver-arrow spacing
+    (`gap≈GW/24`, hundreds of km at world scale, vs. the coastal band's own narrow width) as a
+    red herring for the "focuses on one part of the coast" report — real, but a DIFFERENT symptom
+    from "bumping into land," which the owner's follow-up specifically confirmed.
+  - **Root cause**: `computeOceanCurrent`'s `deflectFlow` call passed `blockBlur:1` — the coastline
+    block-field gradient (`bgx,bgy`, what actually TRIGGERS redirection) is then only non-negligible
+    in the ~1-2 cells immediately touching the coast. Measured on the synthetic coastline: at
+    `blockBlur:1` the onshore component (`u`) stays within a few percent of its raw, undeflected
+    Ekman-rotated value all the way from dx=15 (open water) down to dx≈4, THEN drops sharply to
+    near-zero over the final 4 cells. That is not a curve — for 90%+ of the approach the flow is
+    unaffected, and the whole redirection happens as a last-instant snap right at the coast, which
+    reads exactly as "runs straight at the shore."
+  - **Fix**: `blockBlur:1` → `blockBlur:6` — the ONE-TIME (not per-iteration) blur pass building the
+    block-field gradient before `deflectFlow`'s 20-iteration loop, so cells further offshore start
+    sensing the approaching coast earlier, giving the tangential-redirect term room to act gradually
+    instead of all at once. Swept 1/4/6/8: the far-field asymptote (no land nearby ⇒ zero
+    deflection ⇒ the raw wind-driven value) measured bit-for-bit identical across every value tested
+    — confirming the widened blur only reaches near the coast, never smears the open ocean — and the
+    improvement visibly plateaus by 6, the value shipped (reasoned/measured, not independently
+    calibrated against a real continental-shelf width). `buildWind`'s own separate `deflectFlow` call
+    (terrain-coupled wind, its own tuning) is untouched — only `computeOceanCurrent`'s call changed.
+  - **Verified**: at dx=5 (mid-approach, nowhere near the coast) the tangential:onshore ratio went
+    from ≈0.49 (still mostly onshore) to ≈0.79 (mostly turned already); right at the coast the flow
+    is now genuinely tangential-dominant (`|v|>|u|`, was the reverse); the curve from open water to
+    shore is monotonic (no oscillation/overshoot introduced).
+  - **Tests**: 4 new unit assertions (`test_tail.js`) on the same synthetic-coastline reproduction —
+    mid-approach deflection, at-coast tangential dominance, far-field bit-identity to the raw Ekman
+    value, and monotonicity. `tests/run.sh` 1070/1070 (+4), `tests/run_um.sh` 852/852.
+  - **Known scope cuts**: `blockBlur:6` is a measured, disclosed choice, not an independently sourced
+    continental-shelf width; `buildWind`'s own terrain-wind deflection tuning is untouched (a
+    different physical mechanism); the Ocean debug view's own coarse arrow-sampling grid (the first,
+    ruled-out hypothesis) is unchanged — it can still miss the (now wider, but still real-km-bounded)
+    coastal band between sample points at extreme map scales, a separate, disclosed display-only
+    limitation from the underlying field fix here.
+- **LOD bake depth 6.** Owner: "let's export LOD tiles to level 6 as max render." The `#bakeAllDepth`
+  "Bake depth" picker (Finalize world → Bake ALL levels & finalize world) topped out at "LOD 0–5 ·
+  1365 tiles (large!)" even though the handler itself already clamped to `Math.min(8,...)` (matching
+  `state.lodMaxLevel`'s own 8-level ceiling) — level 6 was reachable by the code, just not offered
+  in the picker. Added `<option value="6">LOD 0–6 · 5461 tiles (huge!)</option>` — pure additive
+  markup, the escalating tile-count math is `Σ(4^z, z=0..6)=5461` (matches the existing options'
+  own `Σ(4^z)` convention), no other change. Hash unaffected (HTML markup outside any `<script>`
+  block).
+
 ### v2.09 — LOD/bake terrain checkerboard from coarse-cell-quantized curvature
 
 Owner: "Terrain rendering/Painting is quickly blockey/pixilated especially when zooming in with
