@@ -10,6 +10,12 @@ This is a **new project**, not a refactor of the existing HTML file. Nothing in
 `Cartalith Gen1 v*.html` changes as a result of this effort, and this folder's docs do not
 modify that project's own working rules — they exist alongside it.
 
+**Also in this folder**: a frozen reference copy of the HTML app
+(`reference/Cartalith Gen1 v2.10.html`) with a generated function index
+(`reference/FUNCTION_INDEX.md`, 1094 top-level functions across all 4 script blocks), and a
+`skills/` folder with Claude Code skills for this effort — see `SKILLS.md` and the
+"What's in this folder" table in this directory's own `CLAUDE.md`.
+
 ## Why this exists
 
 The owner wants Cartalith to run as dedicated, performant, cross-platform native
