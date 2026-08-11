@@ -40,6 +40,7 @@ not replace reading `README.md` and `DECISIONS.md` properly.
 | `PARITY_TESTING.md` | golden-value testing against the JS engine |
 | `REFERENCES.md` | external libraries and projects |
 | `TOOLCHAIN.md` | setup, in order |
+| `setup.sh` | automates the installable parts of `TOOLCHAIN.md`; checklists the rest |
 | `ROADMAP.md` | phases after the MVP |
 | `SKILLS.md` | which skills to install, vendored or not, and why |
 | `skills/ponytail/` | vendored anti-over-engineering skill (MIT) |
@@ -55,8 +56,8 @@ not replace reading `README.md` and `DECISIONS.md` properly.
 2. Check whether the frozen snapshot is still current. If the repository root has
    moved on, decide with the owner whether to re-freeze — a newer version may have
    fixed something relevant.
-3. Create the new repository and work through `TOOLCHAIN.md`'s Phase 0 before
-   porting any engine logic.
+3. Create the new repository, run `setup.sh`, then work through `TOOLCHAIN.md`'s
+   Phase 0 before porting any engine logic.
 4. Copy the five skills into that repository's `.claude/skills/`, and install
    GodotPrompter alongside them (`SKILLS.md`).
 5. Copy `docs/research/` — at least the six documents `PROVENANCE.md` names.

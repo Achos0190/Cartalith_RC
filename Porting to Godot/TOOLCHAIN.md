@@ -3,6 +3,14 @@
 Everything needed before writing Rust or Godot code. Written for the cloud
 session that builds (`DECISIONS.md` §5); applies equally to a local setup.
 
+**Run `setup.sh` first.** It installs the Rust targets, `cargo-xwin`, and
+`cargo-ndk` — the parts that are just tool installs with no licence to accept
+— and prints a checklist for the two parts that stay manual: Godot itself and
+the Android SDK/NDK, both gated behind a licence only the owner can accept,
+and both version-sensitive in ways a script shouldn't guess at. Re-run it any
+time; every step is idempotent. What follows explains what the script does
+and why, plus everything it deliberately leaves for you.
+
 **Verify every version before pinning it.** This document was written against a
 knowledge cutoff, and Godot, `gdext`, `cargo-ndk`, `cargo-xwin`, and the NDK all
 move. Where a version appears below, read it as "current when written," not as a

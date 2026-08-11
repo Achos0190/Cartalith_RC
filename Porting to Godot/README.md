@@ -41,8 +41,9 @@ before revisiting any of these.
 | `ROADMAP.md` | phases after the MVP |
 | `SKILLS.md` | which Claude Code skills to install, and why |
 
-Also here: `reference/` holds a frozen copy of the HTML app with a generated index
-of all 1,094 top-level functions, and `skills/` holds the skills themselves.
+Also here: `setup.sh` automates the installable half of `TOOLCHAIN.md`;
+`reference/` holds a frozen copy of the HTML app with a generated index of all
+1,094 top-level functions; `skills/` holds the skills themselves.
 
 ## Working discipline
 
