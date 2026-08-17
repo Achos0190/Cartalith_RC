@@ -2,8 +2,10 @@
 """Generate assets/sample_pack.zip — a reference CC0 asset pack for the elevation foundation's
 in-app importer (docs/ASSET_PACK_FORMAT.md). Stdlib only; deterministic.
 
-Emits 7 tileable 256px ground textures + 9 alpha icon sprites + pack.json + pack.csv + CREDITS.md,
-zipped with ZIP_STORED so the app's `unzipStore` (and the headless test suite) read it without inflate.
+Emits 7 tileable 256px ground textures + 21 alpha icon sprites (v1.20: 10 icon slots — mountain,
+hill, and 8 vegetation/scatter kinds — each with 2-3 deterministic variants) + pack.json + pack.csv
++ CREDITS.md, zipped with ZIP_STORED so the app's `unzipStore` (and the headless test suite) read
+it without inflate.
 
 Run:  python3 assets/make_sample_pack.py
 """
@@ -194,6 +196,98 @@ def broadleaf(variant):
         return (0,0,0,0)
     return raster(112, 128, fn)
 
+# --------------------------------------------------------------------- v1.20: expanded vegetation/scatter
+
+def rainforest(variant):
+    """Broad two-lobed jungle canopy — denser/wider than broadleaf."""
+    off = (-0.16, 0.16)[variant]
+    def fn(u, v):
+        if v > 0.82 and abs(u-0.5) < 0.05:
+            return (60, 42, 30, 255)
+        for cx, cy, rx in ((0.5+off*0.6, 0.36, 0.34), (0.5-off*0.9, 0.44, 0.30)):
+            dx, dy = (u-cx)/rx, (v-cy)/0.36
+            if dx*dx + dy*dy < 1.0:
+                shade = 0 if u < 0.5 else -14
+                return (clampi(26+shade), clampi(84+shade), clampi(44+shade), 255)
+        return (0,0,0,0)
+    return raster(120, 132, fn)
+
+def savanna_tree(variant):
+    """Flat-topped acacia silhouette: thin trunk + wide flat umbrella canopy."""
+    wdt = (0.86, 0.72)[variant]
+    def fn(u, v):
+        if v > 0.62 and abs(u-0.5) < 0.028:
+            return (86, 64, 40, 255)
+        cy = 0.42
+        x = (u-0.5) / (wdt*0.5)
+        if abs(x) > 1 or v < cy-0.10 or v > cy+0.09:
+            return (0,0,0,0)
+        top = math.sqrt(max(0, 1 - x*x))
+        if v > cy - 0.10*top:
+            shade = 0 if u < 0.5 else -14
+            return (clampi(118+shade), clampi(122+shade), clampi(64+shade), 255)
+        return (0,0,0,0)
+    return raster(128, 112, fn)
+
+def wetland_tree(variant):
+    """Cluster of narrow trunks under a low ragged canopy — mangrove/cypress-ish."""
+    n_trunks = (3, 4)[variant]
+    def fn(u, v):
+        for k in range(n_trunks):
+            tx = 0.5 + (k - (n_trunks-1)/2) * 0.16
+            if v > 0.55 and abs(u-tx) < 0.02:
+                return (58, 62, 40, 255)
+        cx, cy = 0.5, 0.44
+        dx, dy = (u-cx)/0.42, (v-cy)/0.34
+        r = dx*dx + dy*dy
+        ragged = 0.9 + 0.1*math.sin(math.atan2(dy, dx)*7)
+        if r < ragged:
+            shade = 0 if u < 0.5 else -12
+            return (clampi(46+shade), clampi(78+shade), clampi(56+shade), 255)
+        return (0,0,0,0)
+    return raster(116, 120, fn)
+
+def shrub(variant):
+    """Small squat rounded bush blob — no trunk."""
+    rx = (0.42, 0.36)[variant]
+    def fn(u, v):
+        cx, cy = 0.5, 0.58
+        dx, dy = (u-cx)/rx, (v-cy)/0.34
+        r = dx*dx + dy*dy
+        bump = 0.88 + 0.12*math.sin(math.atan2(dy, dx)*6)
+        if r < bump:
+            shade = 0 if u < 0.5 else -12
+            return (clampi(88+shade), clampi(102+shade), clampi(54+shade), 255)
+        return (0,0,0,0)
+    return raster(96, 72, fn)
+
+def cactus(variant):
+    """Columnar saguaro silhouette with 1-2 side arms."""
+    arms = (1, 2)[variant]
+    def fn(u, v):
+        w = 0.11
+        if abs(u-0.5) < w and v > 0.08:
+            shade = 0 if u < 0.5 else -14
+            return (clampi(66+shade), clampi(108+shade), clampi(70+shade), 255)
+        if arms >= 1 and abs(u-0.28) < w*0.8 and 0.28 < v < 0.62:
+            return (60, 100, 64, 255)
+        if arms >= 2 and abs(u-0.72) < w*0.8 and 0.18 < v < 0.5:
+            return (60, 100, 64, 255)
+        return (0,0,0,0)
+    return raster(96, 160, fn)
+
+def boulder(variant):
+    """Two-lobe overlapping rock cluster."""
+    off = (0.22, 0.30)[variant]
+    def fn(u, v):
+        for cx, cy, rx, ry in ((0.5-off, 0.66, 0.34, 0.26), (0.5+off*0.9, 0.7, 0.28, 0.22)):
+            dx, dy = (u-cx)/rx, (v-cy)/ry
+            if dx*dx + dy*dy < 1.0:
+                shade = 0 if u < 0.5 else -16
+                return (clampi(118+shade), clampi(114+shade), clampi(106+shade), 255)
+        return (0,0,0,0)
+    return raster(120, 88, fn)
+
 # ----------------------------------------------------------------------------- assemble pack
 def build():
     here = os.path.dirname(os.path.abspath(__file__))
@@ -201,10 +295,16 @@ def build():
     for slot in ['grass','rock','sand','snow','wetland','canopy','parchment']:
         files['textures/%s.png' % slot] = make_texture(slot)
     icons = {
-        'mountain':       [mountain(0), mountain(1), mountain(2)],
-        'hill':           [hill(0), hill(1)],
-        'tree_conifer':   [conifer(0), conifer(1)],
-        'tree_broadleaf': [broadleaf(0), broadleaf(1)],
+        'mountain':        [mountain(0), mountain(1), mountain(2)],
+        'hill':            [hill(0), hill(1)],
+        'tree_conifer':    [conifer(0), conifer(1)],
+        'tree_broadleaf':  [broadleaf(0), broadleaf(1)],
+        'tree_rainforest': [rainforest(0), rainforest(1)],
+        'tree_savanna':    [savanna_tree(0), savanna_tree(1)],
+        'tree_wetland':    [wetland_tree(0), wetland_tree(1)],
+        'shrub':           [shrub(0), shrub(1)],
+        'cactus':          [cactus(0), cactus(1)],
+        'boulder':         [boulder(0), boulder(1)],
     }
     manifest_icons = {}
     for slot, arr in icons.items():

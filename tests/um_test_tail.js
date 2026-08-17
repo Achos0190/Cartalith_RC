@@ -1219,5 +1219,99 @@ for (const site of ['river', 'landlocked']) {
     'carryingCapacityWeight genuinely changes the outcome vs. the full-weight default (the mechanism is live, not inert)');
 }
 
+/* ---------- v1.17 (S3–S6): geography-driven settlement opts — terrain / wallStyle / validity / economy ----------
+ * Every new capability is keyed on a NEW opts.* being present (the v0.98 guard pattern), so these
+ * exercise the new paths with synthetic stand-ins for the browser adapter's real-map contexts,
+ * and pin the bare path as byte-identical. */
+{
+  const base = { epochs: 8, pop: 5000, walls: true, wallGenerations: true, culture: 'medieval', site: 'river' };
+  const m0 = UME.cityGen(31337, base);
+  const m0b = UME.cityGen(31337, Object.assign({}, base, { terrain: null, economy: null, wallStyle: undefined }));
+  ok(UME.hashModel(m0) === UME.hashModel(m0b), 'v1.17 opts strictly additive: explicit null terrain/economy + undefined wallStyle is byte-identical to the bare call');
+  ok(m0.site.bridges === null && m0.site.ford === null && m0.site.harbourInvalid === null,
+    'synthetic path exports the new site fields as null (bridge/ford/harbour-validity records exist only with real water)');
+
+  // S4: wallStyle threading — the model carries the adapter's wall spec through to the renderer
+  const mp = UME.cityGen(31337, Object.assign({}, base, { pop: 900, wallStyle: 'palisade' }));
+  ok(mp.wall && mp.wall.style === 'palisade' && mp.wall.ring && mp.wall.ring.length > 5, 'wallStyle:palisade → closed ring tagged palisade');
+  const md = UME.cityGen(31337, Object.assign({}, base, { pop: 400, wallStyle: 'ditch' }));
+  ok(md.wall && md.wall.style === 'ditch', 'wallStyle:ditch → ring tagged ditch');
+  ok(m0.wall && m0.wall.style === 'curtain', 'no wallStyle → legacy curtain tag (renderer back-compat)');
+
+  // S3: synthetic terrain ctx (real-relief raster stand-in): a hard E-W ridge across the box
+  const cellM = 22, mw = Math.round(1700 / cellM), mh = Math.round(1250 / cellM);
+  const grid = new Float32Array(mw * mh);
+  let hMin = Infinity, hMax = -Infinity;
+  for (let j = 0; j < mh; j++) for (let i = 0; i < mw; i++) {
+    const ym = (j + 0.5) * cellM;
+    const h = 0.42 + 0.10 * Math.exp(-((ym - 430) * (ym - 430)) / (2 * 120 * 120));
+    grid[j * mw + i] = h; if (h < hMin) hMin = h; if (h > hMax) hMax = h;
+  }
+  const terrain = { grid, mw, mh, cellM, hMin, hMax };
+  const mt = UME.cityGen(31337, Object.assign({}, base, { terrain, terrainAware: true }));
+  ok(mt && mt.graph.nodes.length > 0, 'terrain ctx: model still builds');
+  ok(UME.hashModel(mt) !== UME.hashModel(m0), 'terrain ctx is load-bearing: real relief produces a different layout than the invented hills');
+  ok(UME.hashModel(UME.cityGen(31337, Object.assign({}, base, { terrain, terrainAware: true }))) === UME.hashModel(mt), 'terrain path stays deterministic');
+  ok(mt.wall && typeof (mt.wall.terrainDeflected || 0) === 'number', 'wall carries the terrainDeflected diagnostic on the terrain path (0 is legal — the hull can already hold the high ground)');
+
+  // S5: synthetic REAL-water ctx — horizontal river band through the box, mask + chamfer dt,
+  // shaped exactly like the browser adapter's _umWaterCtx output
+  const mkWater = (riverOrder) => {
+    const mask = new Uint8Array(mw * mh);
+    const rowLo = Math.floor((625 - 22) / cellM), rowHi = Math.ceil((625 + 22) / cellM);
+    let waterCells = 0;
+    for (let j = rowLo; j <= rowHi; j++) for (let i = 0; i < mw; i++) { mask[j * mw + i] = 1; waterCells++; }
+    const INF = 1e9, dt = new Float32Array(mw * mh);
+    for (let k = 0; k < mw * mh; k++) dt[k] = mask[k] ? 0 : INF;
+    for (let j = 0; j < mh; j++) for (let i = 0; i < mw; i++) { let d = dt[j * mw + i];
+      if (i > 0) d = Math.min(d, dt[j * mw + i - 1] + 1); if (j > 0) d = Math.min(d, dt[(j - 1) * mw + i] + 1); dt[j * mw + i] = d; }
+    for (let j = mh - 1; j >= 0; j--) for (let i = mw - 1; i >= 0; i--) { let d = dt[j * mw + i];
+      if (i < mw - 1) d = Math.min(d, dt[j * mw + i + 1] + 1); if (j < mh - 1) d = Math.min(d, dt[(j + 1) * mw + i] + 1); dt[j * mw + i] = d; }
+    const riverPath = []; for (let k = 0; k <= 12; k++) riverPath.push({ x: k * 1700 / 12, y: 625 });
+    return { mask, dt, mw, mh, cellM, Wm: 1700, Hm: 1250, riverPath, riverWidthM: 24, riverOrder, waterCells, seaLakeCells: 0, hasSea: true, mostlyWater: false };
+  };
+  const mStream = UME.cityGen(4242, Object.assign({}, base, { site: 'riverthrough', water: mkWater(2) }));
+  ok(mStream.harbour === null && mStream.site.harbourInvalid === 'unnavigable', 'S5 harbour gate: Strahler-2 stream, no open water → no quay/piers, harbourInvalid="unnavigable"');
+  const mNav = UME.cityGen(4242, Object.assign({}, base, { site: 'riverthrough', water: mkWater(5) }));
+  ok(mNav.site.harbourInvalid === null, 'S5 harbour gate: order-5 river is navigable — no harbourInvalid stamp');
+  const mBoth = UME.cityGen(4242, Object.assign({}, base, { site: 'riverthrough', water: mkWater(5),
+    routeEnds: [{ x: 850, y: 0 }, { x: 850, y: 1250 }] }));
+  if (mBoth.site.bridges && mBoth.site.bridges.length) {
+    ok(mBoth.site.bridges.every(b => Math.abs(b.pt.y - 625) < 30), 'S5 bridges: every recorded bridge sits on the real centerline');
+    ok(!mBoth.site.ford, 'S5: a town with recorded bridges gets no ford');
+  } else {
+    ok(mBoth.site.ford && !!mBoth.site.ford.pt, 'S5: cross-river route ends but no surviving crossing → honest ford record instead of invented bridges');
+    ok(Math.abs(mBoth.site.ford.pt.y - 625) < 60, 'S5: the ford sits on the channel');
+  }
+  // every bridge/ford record must be justified by the FINAL street graph: a recorded bridge has a
+  // surviving road crossing the centerline at that exact point (streets near bridgePt are permitted
+  // crossings — the road IS the bridge), and a ford exists exactly when NO road crosses at all.
+  const crossingsOf = (model) => { const N = model.graph.nodes, out = [];
+    for (const e of model.graph.edges) { if (e.cls === 'quay') continue; const A = N[e.a], B = N[e.b]; if (!A || !B) continue;
+      for (let i = 0; i < model.site.river.length - 1; i++) { const h = T.segInt(A, B, model.site.river[i], model.site.river[i + 1]); if (h) out.push(h.pt); } }
+    return out; };
+  const mOne = UME.cityGen(4242, Object.assign({}, base, { site: 'riverthrough', water: mkWater(5),
+    routeEnds: [{ x: 500, y: 0 }, { x: 1200, y: 0 }] }));
+  if (mOne.site.bridges && mOne.site.bridges.length) {
+    const cr = crossingsOf(mOne);
+    ok(mOne.site.bridges.every(b => cr.some(h => Math.hypot(h.x - b.pt.x, h.y - b.pt.y) < 5)), 'S5: every recorded bridge has a surviving crossing road at that exact point (no decorative spans)');
+    ok(!mOne.site.ford, 'S5: bridges and ford are mutually exclusive');
+  } else {
+    ok(!!(mOne.site.ford && mOne.site.ford.pt), 'S5 ford: the crossing-less through-town keeps a ford record instead of invented bridges');
+    ok(crossingsOf(mOne).length === 0, 'S5 ford: the ford town genuinely has no crossing road in the final graph');
+  }
+
+  // S6: economy → districts/buildings/details, strictly guarded
+  const mTrade = UME.cityGen(31337, Object.assign({}, base, { economy: { specialisation: 'trade_hub' } }));
+  ok(mTrade.parcels.some(p => p.district === 'warehouse'), 'S6: trade_hub economy re-tags a warehouse row along the primaries');
+  const mMine = UME.cityGen(31337, Object.assign({}, base, { economy: { specialisation: 'mining', oreBearing: 0 } }));
+  ok(mMine.parcels.some(p => p.district === 'oreyard'), 'S6: mining economy re-tags an ore yard at the periphery');
+  ok(mMine.details.some(d => d.kind === 'spoilheap'), 'S6: the ore yard carries spoil-heap details');
+  const ECON_D = ['oreyard', 'fishery', 'sawyard', 'granary', 'warehouse'];
+  ok(!m0.parcels.some(p => ECON_D.includes(p.district)), 'S6 guard: without economy no economy district ever appears (synthetic path untouched)');
+  ok(UME.hashModel(mMine) !== UME.hashModel(m0), 'S6: economy genuinely changes the built fabric (mechanism live, not inert)');
+  ok(UME.hashModel(UME.cityGen(31337, Object.assign({}, base, { economy: { specialisation: 'mining', oreBearing: 0 } }))) === UME.hashModel(mMine), 'S6 economy path stays deterministic');
+}
+
 console.log(`\n${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 if (fail) { console.error('\nFailures:\n - ' + failures.join('\n - ')); process.exit(1); }

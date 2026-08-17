@@ -46,7 +46,13 @@ mypack.zip
     ├── tree_conifer_01.png
     ├── tree_conifer_02.png
     ├── tree_broadleaf_01.png
-    └── tree_broadleaf_02.png
+    ├── tree_broadleaf_02.png
+    ├── tree_rainforest_01.png     # v1.20: 6 new slots — see "The keys are a fixed vocabulary" below
+    ├── tree_savanna_01.png
+    ├── tree_wetland_01.png
+    ├── shrub_01.png
+    ├── cactus_01.png
+    └── boulder_01.png
 ```
 
 Folders are a convention; the **manifest is the source of truth** for what maps to what (so you can
@@ -71,10 +77,16 @@ ZIP root**.
     "parchment": "textures/parchment.png"
   },
   "icons": {
-    "mountain":       ["icons/mountain_01.png", "icons/mountain_02.png", "icons/mountain_03.png"],
-    "hill":           ["icons/hill_01.png", "icons/hill_02.png"],
-    "tree_conifer":   ["icons/tree_conifer_01.png", "icons/tree_conifer_02.png"],
-    "tree_broadleaf": ["icons/tree_broadleaf_01.png", "icons/tree_broadleaf_02.png"]
+    "mountain":        ["icons/mountain_01.png", "icons/mountain_02.png", "icons/mountain_03.png"],
+    "hill":            ["icons/hill_01.png", "icons/hill_02.png"],
+    "tree_conifer":    ["icons/tree_conifer_01.png", "icons/tree_conifer_02.png"],
+    "tree_broadleaf":  ["icons/tree_broadleaf_01.png", "icons/tree_broadleaf_02.png"],
+    "tree_rainforest": ["icons/tree_rainforest_01.png"],
+    "tree_savanna":    ["icons/tree_savanna_01.png"],
+    "tree_wetland":    ["icons/tree_wetland_01.png"],
+    "shrub":           ["icons/shrub_01.png"],
+    "cactus":          ["icons/cactus_01.png"],
+    "boulder":         ["icons/boulder_01.png"]
   }
 }
 ```
@@ -104,11 +116,27 @@ mountains doesn't show the same drawing 40 times:
 |---|---|
 | `mountain` | peaks (land-relative elevation ≥ 0.58) |
 | `hill` | hills (0.53–0.58) |
-| `tree_conifer` | boreal/conifer forest cells |
-| `tree_broadleaf` | temperate/tropical broadleaf forest cells |
+| `tree_conifer` | boreal / montane-conifer forest cells (dense) |
+| `tree_broadleaf` | temperate forest cells (dense) |
+| `tree_rainforest` | temperate rainforest / tropical jungle cells (dense) |
+| `tree_savanna` | savanna / tropical dry cells (sparse) |
+| `tree_wetland` | marsh/wetland cells — a real terrain signal, not a climate biome; can appear inside any of the tree biomes above and takes priority over them (sparse) |
+| `shrub` | grassland / steppe / Mediterranean-scrub cells (sparse) |
+| `cactus` | **warm** desert cells (sparse) |
+| `boulder` | tundra cells, and **cold** desert cells (sparse) |
+
+`cactus` vs. `boulder` on a desert cell is decided by temperature (≥10°C → cactus, colder →
+boulder) when the engine has a temperature field to check; a caller that doesn't supply one (e.g.
+a synthetic/headless context) gets `cactus` unconditionally. `tree_wetland` only appears where the
+engine's own wetland detection (moisture + flatness) says a cell is a real marsh, regardless of
+what climate biome that cell would otherwise classify as.
 
 Any slot you omit falls back to **procedural** for that slot only — so a pack can be icons-only,
-textures-only, or just a couple of mountain variants. Mix and match freely.
+textures-only, or just a couple of mountain variants. Mix and match freely. Note: `mountain`/`hill`
+variant *selection* is purely positional (not climate-aware) even though the built-in
+**procedural** fallback for those two now varies with climate (a snow cap below ~2°C, a rockier
+outline when arid) — supplying your own `mountain`/`hill` art always overrides the procedural
+look entirely, uniformly, regardless of climate at that cell.
 
 ### Variation rules (how repetition is broken)
 

@@ -113,7 +113,17 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // civFactionCulture round-tripping through the same state.civ sync used for faction names.
   R.cultureNaming = await page.evaluate(() => {
     if (typeof CIV_CULTURES === 'undefined' || typeof civFactionCulture === 'undefined') return { present: false };
+    // v1.57: the pill row must carry ZERO inline selects now (dedup fix — culture/religion/
+    // government/ag-tech editing moved solely into the Faction Inspector drawer inside the new
+    // Factions pop-up, so there is exactly one place each field can be changed).
     const pickerSelects = document.querySelectorAll('#civFactionPicker select').length;
+    const savedSelFaction = _civSelectedFaction;
+    _civSelectedFaction = 1;
+    if (typeof _civOpenFactionsModal === 'function') _civOpenFactionsModal(); else _civRenderFactionInspector();
+    const culSel = document.getElementById('_civFeCul');
+    const inspectorCultureOptions = culSel ? culSel.options.length : 0;
+    if (typeof _civCloseFactionsModal === 'function') _civCloseFactionsModal();
+    _civSelectedFaction = savedSelFaction;
     // give faction 1 an unmistakable culture and sample many generated names for its own suffixes
     const savedCulture1 = civFactionCulture[1];
     civFactionCulture[1] = 'imperial';
@@ -138,7 +148,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const restored = civFactionCulture[2] === 'desert';
     civFactionCulture[1] = savedCulture1;
     state.places = savedPlaces; _civSelectedPlace = savedSel; _civRenderPlaceEditor();
-    return { present: true, pickerSelects, adherenceRate: hits / N, rollBtnExists: !!rollBtn, rerolled, restored, savedArrLen: savedArr.length };
+    return { present: true, pickerSelects, inspectorCultureOptions, culturesLen: CIV_CULTURES.length, adherenceRate: hits / N, rollBtnExists: !!rollBtn, rerolled, restored, savedArrLen: savedArr.length };
   });
 
   // ── v1.08 (borrow-list #2, after Azgaar's FMG heightmap templates): setup-gate world-shape
@@ -261,10 +271,15 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       let provAreaKm2 = 0; for (const f of provFeats) for (const poly of f.geometry.coordinates) { provAreaKm2 += ringArea(poly[0]); for (let h = 1; h < poly.length; h++) provAreaKm2 -= ringArea(poly[h]); }
       let paintedCells = 0; for (let i = 0; i < civTerritory.length; i++) if (civTerritory[i]) paintedCells++;
       const cellKm = state.mapWidthKm / GW, territoryAreaKm2 = paintedCells * cellKm * cellKm;
-      // religion: picker DOM presence + persistence round-trip
+      // religion: picker DOM absence (v1.57 dedup) + Inspector DOM presence + persistence round-trip
       civFactionReligion[1] = 'sun_cult'; civFactionReligion[2] = 'sea_lords';
       _civBuildFactionPicker();
       const religionSelects = document.querySelectorAll('#civFactionPicker select[title="State religion"]').length;
+      const savedSelFaction2 = _civSelectedFaction;
+      _civSelectedFaction = 1; _civRenderFactionInspector();
+      const relSel = document.getElementById('_civFeRel');
+      const inspectorReligionOptions = relSel ? relSel.options.length : 0;
+      _civSelectedFaction = savedSelFaction2; _civRenderFactionInspector();
       _civSyncToState();
       const savedReligionLen = state.civ.factionReligion.length;
       civFactionReligion[1] = 'none';
@@ -276,7 +291,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       return {
         present: true, ok: true, prov1Count: prov1.length, prov2Count: prov2.length, prov2Name: prov2[0] && prov2[0].name,
         crossFactionLeak, diffPx, provFeatCount: provFeats.length, provGeomTypes: [...new Set(provFeats.map(f => f.geometry.type))],
-        areaRatio: provAreaKm2 / territoryAreaKm2, religionSelects, savedReligionLen, religionRestored
+        areaRatio: provAreaKm2 / territoryAreaKm2, religionSelects, inspectorReligionOptions, savedReligionLen, religionRestored
       };
     }).catch(e => {
       document.createElement = realCreateElement;
@@ -337,7 +352,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const t0 = performance.now(); renderNow();       // second draw at the same view: overview reuse path
     const secondMs = performance.now() - t0;
     await refineVisibleTiles(); renderNow();         // refine visible tiles (featureDetailPass runs inside) then draw → tile canvases cached
-    const tileCacheN = _lodTileCanvasCache.size;
+    // v2.06: a colorized tile lands in EITHER _lodTileCanvasCache (the ordinary LRU pool) or
+    // _lodTileCanvasPinned (shallow z-levels, never evicted — see _lodTileCacheSet's own comment),
+    // so the total-cached count must sum both rather than checking the LRU pool alone.
+    const tileCacheN = _lodTileCanvasCache.size + (typeof _lodTileCanvasPinned !== 'undefined' ? _lodTileCanvasPinned.size : 0);
     lc.checked = false; lc.dispatchEvent(new Event('change'));
     return { cachedAfterFirst, secondMs: +secondMs.toFixed(1), tileCacheN, ok: true };
   });
@@ -456,31 +474,1027 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civMetropolis;
     _civMetropolis = was; return { on, off };
   });
-  // v0.76: dense village-grid placement mode + regional-population estimate. Auto-populates twice
-  //        (default vs dense) on the committed world, then restores clean civ state.
-  R.village = await page.evaluate(() => {
-    _civVillageDensity = false; _civMetropolis = false;
-    _civAutoWorld(); const nDefault = state.places.length;
-    _civVillageDensity = true;
-    _civAutoWorld(); const nDense = state.places.length;
-    _civVillageDensity = false;
+  // v1.70 (owner: "mix the dense village function and the roadside village function into something
+  //        more nuanced" — replaces v0.76's dense-village-grid mode AND v1.68/v1.69's roadside-
+  //        villages mode with one suitability-weighted, road-biased pass, one toggle). Part 1:
+  //        deterministic unit tests of the two new pure primitives, independent of the stochastic
+  //        committed world — this is what actually pins down "soft falloff, never below the floor,
+  //        great land alone still qualifies" instead of relying on flaky live-world statistics.
+  R.villagesUnit = await page.evaluate(() => {
+    const o = {};
+    // _civRoadProximityQuery: a synthetic straight land way from (50,100) to (150,100).
+    const way = { pts: [{ x: 50, y: 100 }, { x: 150, y: 100 }], sea: false, hidden: false };
+    const q = _civRoadProximityQuery([way], 8);
+    o.onRoad = q(100, 100);
+    o.near4 = q(100, 104);
+    o.far = q(100, 500);
+    const qEmpty = _civRoadProximityQuery([], 8);
+    o.emptyWaysAllInfinite = qEmpty(0, 0) === Infinity && qEmpty(500, 500) === Infinity;
+    const qSea = _civRoadProximityQuery([{ pts: [{ x: 0, y: 0 }, { x: 10, y: 10 }], sea: true }], 8);
+    o.seaWayIgnored = qSea(5, 5) === Infinity;
+
+    // _civVillageAcceptProb: roadProb=1 at the road (accept regardless of suit, as long as it
+    // already cleared the hard floor to be a candidate at all); suitProb=1 at/above the strict
+    // unconstrained threshold (accept regardless of distance — "great land" qualifies off-road);
+    // a soft, monotonically-decaying falloff in between — never a hard cutoff.
+    const lo = VILLAGE_SUIT_THRESH, hi = SETTLE_SEED_THRESH, fall = 10;
+    o.acceptAtRoad = _civVillageAcceptProb(0, lo, fall, lo, hi);
+    o.acceptFarLowSuit = _civVillageAcceptProb(2000, lo, fall, lo, hi);
+    o.acceptFarGreatSuit = _civVillageAcceptProb(2000, hi, fall, lo, hi);
+    o.acceptNear = _civVillageAcceptProb(5, lo, fall, lo, hi);
+    o.acceptFarther = _civVillageAcceptProb(20, lo, fall, lo, hi);
+    o.acceptFarthest = _civVillageAcceptProb(60, lo, fall, lo, hi);
+
+    // v1.71 (owner: "the new settlements on the deeper level also need to be connected. By a lower
+    // type road... so it only shows when zoomed in."): deterministic unit tests of the two new
+    // pure primitives, again independent of the stochastic committed world.
+    // roadDijkstra's new multi-source form: seeding several sources at once must, for every cell,
+    // find the same distance as the MINIMUM of each source's own single-source Dijkstra to that
+    // cell — and every pre-v1.71 scalar call must stay byte-identical (same seed, same loop).
+    {
+      const W = 20, H = 10;
+      const cost = new Float32Array(W * H).fill(1);
+      const a = roadDijkstra(cost, W, H, 2, 2, false);
+      const b = roadDijkstra(cost, W, H, 15, 7, false);
+      const multi = roadDijkstra(cost, W, H, [2 + 2 * W, 15 + 7 * W], null, false);
+      let matches = true;
+      for (let i = 0; i < W * H; i++) {
+        const expect = Math.min(a.dist[i], b.dist[i]);
+        if (Math.abs(multi.dist[i] - expect) > 1e-3) { matches = false; break; }
+      }
+      o.multiSourceMatchesMinOfSingleSources = matches;
+      const aAgain = roadDijkstra(cost, W, H, 2, 2, false);
+      o.scalarFormByteIdentical = JSON.stringify(Array.from(a.dist)) === JSON.stringify(Array.from(aAgain.dist));
+    }
+    // _civWayLodMin: a villageAddon way overrides its type's ordinary CIV_LOD_ROAD threshold with
+    // CIV_VILLAGE_ADDON_LOD; a plain way of the same type ('ancient') is completely untouched.
+    o.wayLodVillageAncient = _civWayLodMin({ villageAddon: true, type: 'ancient' });
+    o.wayLodPlainAncient = _civWayLodMin({ type: 'ancient' });
+    o.wayLodHighwayUnaffected = _civWayLodMin({ type: 'highway' }) === CIV_LOD_ROAD.highway;
+    return o;
+  });
+  // Part 2: the same real-generated-world structural/safety checks v0.76/v1.68/v1.69 used
+  // (spacing/land/suit-floor/cap/toggle/pick-gate), now against the unified _civVillages toggle,
+  // plus a check that base capital/city/town/village/hamlet placement is unaffected by the toggle
+  // (the actual fix for "waay too populated" — only the additive layer responds to it now).
+  R.villages = await page.evaluate(() => {
+    const savedViewScale = (typeof viewT !== 'undefined' && viewT) ? viewT.scale : null;
+    _civVillages = false; _civMetropolis = false;
+    _civAutoWorld();
+    const baselineCount = state.places.length;
+    const baselineHasAny = state.places.some(p => p.villageAddon);
     const pop = (typeof _civRegionalPopulation === 'function') ? _civRegionalPopulation() : null;
-    // restore clean civ state so later place/way tests see an empty world
+
+    _civVillages = true;
+    _civAutoWorld();
+    const rv = state.places.filter(p => p.villageAddon);
+    const others = state.places.filter(p => !p.villageAddon);
+    const spacingCells = suppressionRadiusCells(VILLAGE_SPACING_KM, GW, state.mapWidthKm || 800);
+    let minSepAmong = Infinity, minSepOthers = Infinity;
+    for (let i = 0; i < rv.length; i++) for (let j = i + 1; j < rv.length; j++) {
+      const d = Math.hypot(rv[i].x - rv[j].x, rv[i].y - rv[j].y); if (d < minSepAmong) minSepAmong = d;
+    }
+    for (const a of rv) for (const b of others) {
+      const d = Math.hypot(a.x - b.x, a.y - b.y); if (d < minSepOthers) minSepOthers = d;
+    }
+    const sea = state.seaLevel || 0.42;
+    const allOnLand = rv.every(p => {
+      const gx = Math.round(p.x), gy = Math.round(p.y);
+      return gx >= 0 && gx < GW && gy >= 0 && gy < GH && field[gy * GW + gx] >= sea;
+    });
+
+    // every village's own cell must clear VILLAGE_SUIT_THRESH on the SAME suit field every other
+    // placement pass reads — not just be spaced/dry (the v1.69 fix, carried forward).
+    const suitField = currentSettlementSuitability();
+    const suitScores = rv.map(p => suitField[Math.round(p.y) * GW + Math.round(p.x)]);
+    const allMeetSuitThreshold = suitScores.every(s => s >= VILLAGE_SUIT_THRESH);
+    const meanSuitAboveThreshold = suitScores.length > 0 && (suitScores.reduce((a, b) => a + b, 0) / suitScores.length) > VILLAGE_SUIT_THRESH;
+
+    // base tier placement (non-addon places) must be IDENTICAL whether the toggle is on or off —
+    // v1.70's whole point vs. v0.76's old villageMode, which densified every tier.
+    const baseUnchanged = others.length === baselineCount;
+
+    // pick-gate check: below CIV_VILLAGE_ADDON_LOD an addon village can't be clicked; above it, it can.
+    let pickHiddenBelow = null, pickVisibleAbove = null;
+    if (rv.length && typeof _civSelectPlaceAt === 'function' && typeof viewT !== 'undefined' && viewT) {
+      const target = rv[0];
+      viewT.scale = Math.max(0.05, CIV_VILLAGE_ADDON_LOD - 0.5);
+      _civSelectPlaceAt(target.x, target.y);
+      pickHiddenBelow = _civSelectedPlace !== target;
+      viewT.scale = CIV_VILLAGE_ADDON_LOD + 0.5;
+      _civSelectPlaceAt(target.x, target.y);
+      pickVisibleAbove = _civSelectedPlace === target;
+      _civSelectedPlace = null;
+    }
+
+    // direct comparative check on the pure seeding function itself (same base places/suit/rng seed,
+    // real ways vs. none) — road proximity should never leave MORE than a small handful fewer
+    // villages seeded than with no roads at all (a spacing-interaction cascade can occasionally
+    // trade one accepted candidate for a different one nearby; a wide slack absorbs that without
+    // depending on the specific stochastic world's exact road layout).
+    let roadBiasSane = null, withRoadsCount = -1, withoutRoadsCount = -1;
+    if (typeof _civSeedVillages === 'function' && typeof civWays !== 'undefined') {
+      const rngFor = () => _civRng((state.seed || 12345) * 31337 + 999);
+      const withRoads = _civSeedVillages(others.slice(), civWays.slice(), rngFor(), suitField);
+      const withoutRoads = _civSeedVillages(others.slice(), [], rngFor(), suitField);
+      withRoadsCount = withRoads.length; withoutRoadsCount = withoutRoads.length;
+      roadBiasSane = withRoadsCount + 5 >= withoutRoadsCount;
+    }
+
+    // v1.71 (owner: "the new settlements... need to be connected. By a lower type road (ancient
+    // route for example) so it only shows when zoomed in."): every addon village should get a
+    // low-tier 'ancient' connector to its nearest real settlement, deep-zoom-gated together with
+    // the village itself, and genuinely registered as connected by the network-metrics graph (not
+    // a silently-dropped self-loop — see _civConnectVillageAddons's own comment on the bug this
+    // fixed: routing to a bare mid-road junction instead of a real settlement).
+    const conn = civWays.filter(w => w.villageAddon);
+    const allConnAncient = conn.length > 0 && conn.every(w => w.type === 'ancient');
+    const villageEndsMatchPin = conn.every(w => {
+      const v = state.places[w.aIdx];
+      if (!v) return false;
+      const p0 = w.pts[0];
+      return Math.abs(p0[0] - v.x) < 1e-6 && Math.abs(p0[1] - v.y) < 1e-6;
+    });
+    const settlementEndsMatchPin = conn.every(w => {
+      if (w.bIdx == null) return false;
+      const s = state.places[w.bIdx];
+      if (!s) return false;
+      const pe = w.pts[w.pts.length - 1];
+      return Math.abs(pe[0] - s.x) < 1e-6 && Math.abs(pe[1] - s.y) < 1e-6;
+    });
+    const connectorLodMatchesVillage = conn.length > 0 && conn.every(w => _civWayLodMin(w) === CIV_VILLAGE_ADDON_LOD);
+    const mostVillagesConnected = rv.length > 0 && conn.length >= rv.length * 0.5;
+
+    const metrics = _civNetworkMetrics(state.places, civWays);
+    const connectedVillageAidx = new Set(conn.map(w => w.aIdx));
+    const allConnectedVillagesNonIsolated = rv.every(p => {
+      const i = state.places.indexOf(p);
+      if (!connectedVillageAidx.has(i)) return true;   // no connector (e.g. unreachable) — not this check's concern
+      return metrics[i] && metrics[i].componentSize > 1;
+    });
+
+    _civVillages = false;
+    _civAutoWorld();
+    const toggleOffCount = state.places.length;
+    const offHasNoConnectors = civWays.filter(w => w.villageAddon).length === 0;
+
+    // restore clean civ state so later place/way tests see an empty world (v0.76's own precedent)
+    if (savedViewScale != null) viewT.scale = savedViewScale;
     state.places = []; if (typeof civWays !== 'undefined') civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
     if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
     if (typeof _civRenderWayList === 'function') _civRenderWayList();
     if (typeof renderNow === 'function') renderNow();
+
     return {
-      nDefault, nDense, denser: nDense > nDefault, capBounded: nDense <= 200,
-      defaultOff: _civVillageDensity === false,
+      baselineHasAny, added: rv.length,
+      allHamlet: rv.every(p => p.kind === 'hamlet'), allNamed: rv.every(p => p.name && p.name.length > 0),
+      allPopPositive: rv.every(p => p.pop > 0), allHaveFaction: rv.every(p => p.faction != null),
+      spacingRespectedAmong: !isFinite(minSepAmong) || minSepAmong >= spacingCells - 1,
+      spacingRespectedVsOthers: !isFinite(minSepOthers) || minSepOthers >= spacingCells - 1,
+      allOnLand, cappedSanely: rv.length > 0 && rv.length <= _CIV_VILLAGE_CAP,
+      allMeetSuitThreshold, meanSuitAboveThreshold, baseUnchanged,
+      pickHiddenBelow, pickVisibleAbove,
+      roadBiasSane, withRoadsCount, withoutRoadsCount,
+      toggleOffMatchesBaseline: toggleOffCount === baselineCount,
       popTotal: pop ? pop.total : -1, popLand: pop ? pop.landKm2 : -1,
+      connectorCount: conn.length, allConnAncient, villageEndsMatchPin, settlementEndsMatchPin,
+      connectorLodMatchesVillage, mostVillagesConnected, allConnectedVillagesNonIsolated,
+      offHasNoConnectors,
     };
   });
-  R.villageToggle = await page.evaluate(() => {
-    const cb = document.getElementById('civVillageDensityChk'); if (!cb) return null;
-    cb.checked = true; cb.dispatchEvent(new Event('change')); const on = _civVillageDensity;
-    cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillageDensity;
-    return { on, off };
+  R.villagesToggle = await page.evaluate(() => {
+    const cb = document.getElementById('civVillagesChk'); if (!cb) return null;
+    const defaultChecked = cb.checked;
+    cb.checked = true; cb.dispatchEvent(new Event('change')); const on = _civVillages;
+    cb.checked = false; cb.dispatchEvent(new Event('change')); const off = _civVillages;
+    return { defaultChecked, on, off };
+  });
+  // v1.76 (owner: village connectors read as "a loopy bundle of spaghetti, which is not how roads
+  // historically formed"): the Dijkstra prev[] walk already builds raw in VILLAGE→…→SOURCE order
+  // (cur starts at the village's own cell, pushed first; the settlement is necessarily pushed
+  // last) — matching aIdx(village)→bIdx(settlement). An unnecessary raw.reverse() flipped that to
+  // SOURCE-first/VILLAGE-last, then the endpoint overwrites corrupted the whole path (not just the
+  // labels): it left the village, jumped near the settlement, retraced the WHOLE real route
+  // backward almost to the village, then jumped to the settlement again. Measured on seed
+  // 31337/512px before fixing: median circuity 2.62x, 54/199 connectors self-intersecting, and the
+  // worst offender's own path cost — recomputed from the identical cost grid Dijkstra used — was
+  // 2.8x more expensive than the straight line despite near-flat terrain, proving it was never
+  // actually the shortest path. Fixed by deleting the reverse() (the two endpoint overwrites were
+  // already correct as written); measured afterward: median circuity 1.12x, zero self-intersections.
+  R.v176 = await page.evaluate(() => {
+    state.places = []; civWays = [];
+    _civVillages = true; _civMetropolis = false;
+    _civAutoWorld();
+    const conn = civWays.filter(w => w.villageAddon);
+    const kmPerCell = (state.mapWidthKm || 800) / GW;
+
+    function segIntersect(p1, p2, p3, p4) {
+      const d1 = (p4[0]-p3[0])*(p1[1]-p3[1]) - (p4[1]-p3[1])*(p1[0]-p3[0]);
+      const d2 = (p4[0]-p3[0])*(p2[1]-p3[1]) - (p4[1]-p3[1])*(p2[0]-p3[0]);
+      const d3 = (p2[0]-p1[0])*(p3[1]-p1[1]) - (p2[1]-p1[1])*(p3[0]-p1[0]);
+      const d4 = (p2[0]-p1[0])*(p4[1]-p1[1]) - (p2[1]-p1[1])*(p4[0]-p1[0]);
+      return ((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0));
+    }
+    function selfIntersects(pts) {
+      for (let i = 1; i < pts.length; i++) for (let j = i+2; j < pts.length; j++) {
+        if (i === 0 && j === pts.length-1) continue;
+        if (segIntersect(pts[i-1], pts[i], pts[j-1], pts[j])) return true;
+      }
+      return false;
+    }
+
+    let maxCircuity = 0, selfXingCount = 0, checked = 0;
+    for (const w of conn) {
+      if (w.aIdx == null || w.bIdx == null) continue;
+      const a = state.places[w.aIdx], b = state.places[w.bIdx];
+      if (!a || !b) continue;
+      const straight = Math.hypot(a.x - b.x, a.y - b.y) * kmPerCell;
+      if (straight > 0.01) { checked++; const c = w.km / straight; if (c > maxCircuity) maxCircuity = c; }
+      if (selfIntersects(w.pts)) selfXingCount++;
+    }
+
+    state.places = []; civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+
+    return { connectorCount: conn.length, checked, maxCircuity, selfXingCount };
+  });
+  // v1.79 (owner: "the roads from the deeper settlement layers dont connect to their nearest
+  // siblings and individually connect to the closest big settlement... they probably just connected
+  // to the closest main road by the most efficient route"). Measured before fixing (probe_
+  // villageconn.js, seed 31337/512px): v1.71-v1.78's target set was every real settlement and NEVER
+  // another village, so 79.5% of villages had a nearer sibling than the settlement they actually
+  // connected to, and mean connector length was 21.8km vs. a 14.0km mean nearest-sibling distance.
+  // Fixed with a batched growing-forest (Prim-style) build: the network starts as the real
+  // settlements and grows to include each village as it joins, so a village can attach to a close
+  // sibling just as readily as to a settlement, while every reachable village still traces back to a
+  // real settlement through the tree (verified below via a village-to-village adjacency BFS, not
+  // assumed). Design choice (this vs. a single-shot nearest-of-either Dijkstra vs. tapping into the
+  // nearest existing road point) confirmed with the owner via AskUserQuestion before building.
+  R.v179 = await page.evaluate(() => {
+    state.places = []; civWays = [];
+    _civVillages = true; _civMetropolis = false;
+    _civAutoWorld();
+    const places = state.places, conn = civWays.filter(w => w.villageAddon);
+    const villages = places.filter(p => p && p.villageAddon);
+    const kmPerCell = (state.mapWidthKm || 800) / GW;
+
+    // every village's connector chain (following village-way edges only) must eventually reach a
+    // real, non-village place — no cluster of villages left networked only among itself.
+    const adj = new Map();
+    for (const w of conn) {
+      if (w.aIdx == null || w.bIdx == null) continue;
+      if (!adj.has(w.aIdx)) adj.set(w.aIdx, []);
+      if (!adj.has(w.bIdx)) adj.set(w.bIdx, []);
+      adj.get(w.aIdx).push(w.bIdx); adj.get(w.bIdx).push(w.aIdx);
+    }
+    let stuckInVillageOnly = 0, isolated = 0, villageToVillageEdges = 0;
+    for (const w of conn) { if (w.bIdx != null && places[w.bIdx] && places[w.bIdx].villageAddon) villageToVillageEdges++; }
+    for (const v of villages) {
+      const vi = places.indexOf(v);
+      if (!adj.has(vi)) { isolated++; continue; }
+      const seen = new Set([vi]), queue = [vi]; let found = false;
+      while (queue.length) {
+        const cur = queue.shift(), p = places[cur];
+        if (p && !p.villageAddon) { found = true; break; }
+        for (const nb of (adj.get(cur) || [])) if (!seen.has(nb)) { seen.add(nb); queue.push(nb); }
+      }
+      if (!found) stuckInVillageOnly++;
+    }
+
+    // sibling-preference measurement, same technique as the standalone probe this fix was
+    // root-caused with: for each connected village, is its nearest SIBLING closer than the place it
+    // actually connected to?
+    let siblingCloser = 0, checked2 = 0;
+    for (const v of villages) {
+      const vi = places.indexOf(v);
+      const w = conn.find(w2 => w2.aIdx === vi || w2.bIdx === vi);
+      if (!w) continue;
+      const otherIdx = w.aIdx === vi ? w.bIdx : w.aIdx, other = places[otherIdx];
+      if (!other) continue;
+      const connDist = Math.hypot(v.x - other.x, v.y - other.y);
+      let nearestSib = Infinity;
+      for (const v2 of villages) { if (v2 === v) continue; const d = Math.hypot(v.x - v2.x, v.y - v2.y); if (d < nearestSib) nearestSib = d; }
+      if (!isFinite(nearestSib)) continue;
+      checked2++;
+      if (nearestSib < connDist) siblingCloser++;
+    }
+
+    state.places = []; civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+
+    return { connectorCount: conn.length, villageCount: villages.length, isolated, stuckInVillageOnly,
+      villageToVillageEdges, siblingCloser, checked2 };
+  });
+  // v1.81 (owner: "any journey is only factually limited by the longest distance one is able to
+  // traverse with the resources they can carry... the range can be extended by varying degrees of
+  // foraging... we already have fauna information and therefore a good idea about how foraging
+  // could extend a route/travel distance"). Measured before building (probe_jp_drygap.js): a
+  // well-provisioned 10-camel caravan hit a hard, zero-elasticity wall past ~150-200km of
+  // waterless desert (269%/387%/506% over capacity at 200/300/400km) — jpForaging() already
+  // reduced carried FOOD need but nothing touched WATER at all, and the flat JP_BIOMES.forage
+  // constant never consulted the real per-region wildlife data currentWildlife() already computes
+  // (species richness/biomass via a genuine NPP->trophic-cascade model, memoized). Two designs
+  // confirmed with the owner via AskUserQuestion before building: extend the existing Foraging
+  // control (no new UI) rather than a second dropdown, and use real wildlife data rather than a
+  // static table refinement.
+  R.v181 = await page.evaluate(async () => {
+    const o = {};
+    // JP_BIOMES.waterForage exists, is small, and is steeply biome-dependent (desert near-zero).
+    o.hotDesertWF = JP_BIOMES['Hot Desert']?.waterForage;
+    o.jungleWF = JP_BIOMES['Tropical Jungle']?.waterForage;
+    o.wetlandsWF = JP_BIOMES['Wetlands / Marshes']?.waterForage;
+
+    // foraging="None" is an exact no-op — bit-identical to pre-v1.81, regardless of mx/my/wildlife.
+    const r1 = jpForaging('None', 'Tropical Jungle', 'Forest Path', 'Summer', 6, 100, 100);
+    const r2 = jpForaging('None', 'Tropical Jungle', 'Forest Path', 'Summer', 6);
+    o.noneIsNoop = r1.reduction === 0 && r1.waterReduction === 0 &&
+      r1.reduction === r2.reduction && r1.waterReduction === r2.waterReduction && r1.move === r2.move;
+
+    // Active foraging genuinely reduces both food and water need, water by far less than food,
+    // and true desert reduces water by far less than a wet biome (the owner's own "dew trap"
+    // framing, checked directly rather than just trusting the table).
+    const desert = jpForaging('Active', 'Hot Desert', 'Desert Hardpack', 'Summer', 6);
+    const jungle = jpForaging('Active', 'Tropical Jungle', 'Forest Path', 'Summer', 6);
+    o.desertWaterReduction = desert.waterReduction;
+    o.jungleWaterReduction = jungle.waterReduction;
+    o.desertMuchDrierThanJungle = desert.waterReduction < jungle.waterReduction * 0.3;
+    o.waterReductionSmallerThanFoodReduction = jungle.waterReduction < jungle.reduction;
+
+    // Real per-world wildlife data is genuinely consulted: _jpDeriveStages threads a real stage
+    // midpoint (mx/my) through to jpForaging, which samples currentWildlife() there — not merely
+    // reachable in principle, exercised end-to-end on a live generated+auto-populated world.
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    let genOk = true; try { await generate(); } catch (e) { genOk = false; }
+    if (typeof _civIterativeAutoWorld === 'function') { try { state.places = []; _civIterativeAutoWorld(3); } catch (e) {} }
+    o.genOk = genOk;
+    const places = (state.places || []).filter(p => p && p.category === 'settlement' && !p.villageAddon);
+    o.wildlifeReachable = typeof currentWildlife === 'function';
+    let stagesWithMx = 0, wildlifeModVaried = false;
+    if (places.length >= 2 && typeof _civDijkstraPath === 'function') {
+      const a = places[0], b = places[places.length - 1];
+      const j = _civDijkstraPath(a.x, a.y, b.x, b.y, 'land');
+      if (j && j.pts && j.pts.length > 1) {
+        const jn = { pts: j.pts, km: j.km, brks: j.brks && j.brks.length ? j.brks : undefined, name: '', sea: false, groupSize: 6 };
+        const plan = _jpEnsurePlan(jn);
+        plan.foraging = 'Active';
+        const stages = _jpDeriveStages(jn, plan);
+        const mods = [];
+        for (const st of stages) {
+          if (st.mx != null && st.my != null) { stagesWithMx++; mods.push(_jpWildlifeForageMod(st.mx, st.my)); }
+        }
+        wildlifeModVaried = mods.length > 0 && (new Set(mods.map(m => m.toFixed(3))).size > 1 || mods.some(m => m !== 1.0));
+      }
+    }
+    o.stagesCarryMx = stagesWithMx > 0;
+    o.wildlifeModVaried = wildlifeModVaried;
+
+    return o;
+  });
+  // v1.82 (owner: "check how heat in an ocean originates and how flow direction is dictated by
+  // it. At the moment it just seems to base itself from right to left"). Measured first: a live-
+  // world probe found the meridional (heat-carrying) current component was set SOLELY by Ekman-
+  // rotating the latitude-band wind, with zero dependence on where a cell sits within its ocean
+  // basin — net-poleward flow on ~99% of the equatorial trade band, essentially no cold anomaly
+  // anywhere, contradicting the file's own docstring (warm poleward on a western boundary, cold
+  // equatorward on an eastern one). Fix: a western/eastern-boundary bend in computeOceanCurrent,
+  // reusing the exact west/east coastal-distance proximity the existing speed boost already
+  // computes — poleward on a basin's western edge (Sverdrup pile-up -> Gulf Stream-style current),
+  // equatorward on its eastern edge (offshore Ekman upwelling -> Peru/Benguela-style current).
+  R.v182 = await page.evaluate(async () => {
+    const o = {};
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    const c = state.climate, sea = state.seaLevel;
+    const WW = Math.min(GW, 240), WH = Math.max(2, Math.round(WW * GH / GW)), N = WW * WH, wrapX = !!state.world, step = 3.0;
+    const fieldC = (x, y) => sampleArr(field, x / (WW - 1) * (GW - 1), y / (WH - 1) * (GH - 1)) - (geoidField ? sampleArr(geoidField, x / (WW - 1) * (GW - 1), y / (WH - 1) * (GH - 1)) : 0);
+    const latOf = y => state.world ? 90 - (y / Math.max(1, WH - 1)) * 180 : (c.latN + (y / Math.max(1, WH - 1)) * (c.latS - c.latN));
+    const tSeaAt = lat => c.poleTemp + (c.equatorTemp - c.poleTemp) * Math.max(0, Math.cos(lat * Math.PI / 180));
+    const tc = new Float32Array(N), elevC = new Float32Array(N);
+    for (let y = 0; y < WH; y++) { const ts = tSeaAt(latOf(y)); for (let x = 0; x < WW; x++) { elevC[y * WW + x] = fieldC(x, y); tc[y * WW + x] = ts; } }
+    const wx = new Float32Array(N), wy = new Float32Array(N);
+    buildWind(wx, wy, WW, WH, step, tc, 0, { elev: elevC });
+
+    // Ablation: the SAME wind/terrain input, bend on (default) vs bend off (opts.bendK:0) — the
+    // exact technique this file already uses (v1.46 coastal swap, v1.62 overlap fix, etc.).
+    const curBent = computeOceanCurrent(wx, wy, elevC, WW, WH, wrapX, sea, latOf, {});
+    const curFlat = computeOceanCurrent(wx, wy, elevC, WW, WH, wrapX, sea, latOf, { bendK: 0 });
+
+    let uIdentical = true;
+    for (let i = 0; i < N; i++) if (Math.abs(curBent.u[i] - curFlat.u[i]) > 1e-6) { uIdentical = false; break; }
+    o.uUnchangedByBend = uIdentical;
+
+    let vDiffCount = 0, oceanCount = 0;
+    for (let i = 0; i < N; i++) { if (!curBent.ocean[i]) continue; oceanCount++; if (Math.abs(curBent.v[i] - curFlat.v[i]) > 1e-5) vDiffCount++; }
+    o.oceanCount = oceanCount;
+    o.vBendFractionAffected = oceanCount > 0 ? vDiffCount / oceanCount : 0;
+
+    // v1.82 test note: a single-pixel min/max was tried first and rejected — it can be swung by
+    // one outlier cell where the bend happens to partially cancel an already-extreme baseline
+    // value (measured directly: min went LESS negative, -1.92 -> -0.91, on this seed, even though
+    // the overall distribution improved sharply). Aggregate statistics over every ocean cell are
+    // the robust, representative measure here, not an extremum.
+    function sstStats(cur) {
+      let sumAbs = 0, n = 0, negCount = 0;
+      for (let y = 0; y < WH; y++) {
+        const lat = latOf(y), aPole = Math.abs(lat), dWarm = tSeaAt(Math.max(0, aPole - 12)) - tSeaAt(lat);
+        for (let x = 0; x < WW; x++) {
+          const i = y * WW + x; if (!cur.ocean[i]) continue;
+          const vp = lat >= 0 ? -cur.v[i] : cur.v[i];
+          let a = (c.currentK == null ? 1 : c.currentK) * (vp / step) * dWarm; if (a > 8) a = 8; else if (a < -8) a = -8;
+          sumAbs += Math.abs(a); n++; if (a < -0.01) negCount++;
+        }
+      }
+      return { meanAbs: n > 0 ? sumAbs / n : 0, n, negFrac: n > 0 ? negCount / n : 0 };
+    }
+    const rBent = sstStats(curBent), rFlat = sstStats(curFlat);
+    o.bentMeanAbs = rBent.meanAbs; o.flatMeanAbs = rFlat.meanAbs;
+    o.bentNegFrac = rBent.negFrac; o.flatNegFrac = rFlat.negFrac;
+    o.bendStrengthensSignal = rBent.meanAbs > rFlat.meanAbs * 1.2;
+    o.bendProducesMoreColdCells = rBent.negFrac > rFlat.negFrac * 1.5;
+
+    return o;
+  });
+  // v1.82 windFx: "slow down the arrows from the current animation speed by about 65%" — measured
+  // directly against the REAL _windFxStep function (not a reimplementation): rAF is intercepted so
+  // exactly one real step can be driven, and the actual displacement is compared to what the new
+  // (0.315) and old (0.9) per-tick multipliers would each predict from the same sampled (u,v).
+  R.v182fx = await page.evaluate(async () => {
+    const o = {};
+    if (typeof _setupHide === 'function') _setupHide();
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    state.debug = 'ocean';
+    if (typeof render === 'function') render();
+    let pending = null;
+    const realRAF = window.requestAnimationFrame;
+    window.requestAnimationFrame = (cb) => { pending = cb; return 1; };
+    _windFxSync();
+    const field = _windFxField;
+    const before = _windFxParts.slice(0, 40).map(p => ({ x: p.x, y: p.y }));
+    const uv0 = before.map(p => _windFxSampleAt(field, p.x, p.y));
+    const cb = pending; pending = null; if (cb) cb();
+    const after = _windFxParts.slice(0, 40).map(p => ({ x: p.x, y: p.y }));
+    window.requestAnimationFrame = realRAF;
+    let sumActual = 0, sumPred315 = 0, sumPred90 = 0, n = 0;
+    for (let i = 0; i < before.length; i++) {
+      const [u, v] = uv0[i], speed = Math.hypot(u, v);
+      if (speed < 1e-6) continue;
+      const actual = Math.hypot(after[i].x - before[i].x, after[i].y - before[i].y);
+      if (actual > speed * 1.5) continue;   // exclude a same-step respawn (teleport), not a real advection step
+      sumActual += actual; sumPred315 += speed * 0.315; sumPred90 += speed * 0.9; n++;
+    }
+    o.n = n;
+    o.actualVsPredicted315 = n > 0 ? sumActual / sumPred315 : null;
+    o.actualVsPredicted90 = n > 0 ? sumActual / sumPred90 : null;
+    // test-isolation: this block armed the Ocean debug view and started the windFx loop directly
+    // (not through a real #debugSeg click) — leaving both live would make the v1.78fx block below
+    // (which asserts the canvas starts HIDDEN before it clicks anything) see stale state from here.
+    state.debug = 'off';
+    if (typeof _windFxSync === 'function') _windFxSync();
+    return o;
+  });
+  // v1.83 (owner pasted a real route with several "Carrying enough water..." blocks up to 3659%
+  // over capacity and one "Overloaded 167%" block: "Can you see what needs fixing?"). Diagnosed:
+  // the party's capacity was exactly people*JP_HUMAN_PORTER (30kg/person) — a "Mounted Rider"
+  // party got ZERO extra capacity credit from actually being mounted, identical to Walking, unless
+  // the SAME mounts were ALSO manually re-declared as pack animals (the "Lone courier" preset's own
+  // undocumented convention: transport:"Mounted Rider", animals:{horse:1}). jpCapacity now credits
+  // a rider's own mount with saddlebag capacity automatically, without double-counting a mount the
+  // user already declared as a full pack animal.
+  R.v183 = await page.evaluate(() => {
+    const o = {};
+    const base = {
+      pace: 'Standard Pace', hours: 8, cargoKg: 500, supplyDays: 7, season: 'Summer',
+      grazing: 'Partial — graze at camp', foraging: 'Active', carryFood: true, desertWater: 'auto',
+      carts: 0, wagons: 0, travois: 0, sleds: 0
+    };
+    // the owner's own reported shape: 10 Mounted Riders — Horse, no separately-declared pack animals
+    const mounted = Object.assign({}, base, { groupSize: 10, transport: 'Mounted Rider', mountAnimal: 'horse', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+    const capMounted = jpCapacity(mounted, 'Ruined Wastes', 'Summer');
+    o.mountedCapacity = capMounted.capacity;
+    o.mountCredit = capMounted.mountCredit;
+    o.mountedNowUnderReportedCargo = capMounted.capacity > 500;   // was 300kg vs 500kg cargo = the reported 167% block
+
+    // a Walking party of the same size/cargo must be completely unaffected (mount credit is Mounted-Rider-only)
+    const walking = Object.assign({}, mounted, { transport: 'Walking' });
+    o.walkingCapacityUnaffected = jpCapacity(walking, 'Ruined Wastes', 'Summer').capacity === 300;
+
+    // "Lone courier" preset's own shape — mount ALREADY declared as a full pack animal — must see
+    // zero extra credit (no double-counting the same physical horse twice)
+    const loneCourier = Object.assign({}, base, { groupSize: 1, transport: 'Mounted Rider', mountAnimal: 'horse', pace: 'Haste', hours: 10, cargoKg: 5, supplyDays: 2, grazing: 'Full — graze on route', foraging: 'None', animals: { donkey: 0, mule: 0, camel: 0, horse: 1 } });
+    const capLone = jpCapacity(loneCourier, 'Temperate Forest', 'Summer');
+    o.loneCourierMountCreditIsZero = capLone.mountCredit === 0;
+
+    // a partial declaration (4 of 10 horses also declared as pack animals) must blend correctly:
+    // 4 full pack-animal credits + 6 riders' worth of saddlebag credit, never 10 of either alone
+    const partial = Object.assign({}, mounted, { animals: { donkey: 0, mule: 0, camel: 0, horse: 4 } });
+    const capPartial = jpCapacity(partial, 'Ruined Wastes', 'Summer');
+    const acHorse = JP_ANIMALS.horse.cap * (JP_SEASONAL_ANIMAL.Summer.horse.cap);
+    const expectedPartial = 4 * acHorse + 10 * JP_HUMAN_PORTER + 6 * JP_ANIMALS.horse.cap * JP_MOUNT_SADDLEBAG_FRAC;
+    o.partialBlendCorrect = Math.abs(capPartial.capacity - expectedPartial) < 0.01;
+
+    // a genuinely extreme water-driven overload (the owner's other reported blocks, up to 3659%)
+    // must NOT be silently rescued by this fix — that would be a real regression, not a fix. Model
+    // a stage with a very long dry run so the water-need term dwarfs the new capacity credit.
+    const plan = _jpEnsurePlan({ pts: [[0, 0], [1, 0]], km: 400, name: '', sea: false, groupSize: 10 });
+    // cargoKg kept small and deliberately separate from the mounted-capacity test above — this
+    // scenario isolates the WATER-driven block specifically (not a cargo overload, which the new
+    // mount credit can legitimately fix), so a low cargo keeps ratio0 well under the "Overloaded"
+    // threshold and lets the extreme 400km dry stretch trip the water-specific block instead.
+    Object.assign(plan, { transport: 'Mounted Rider', mountAnimal: 'horse', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, cargoKg: 20, supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'Active', carryFood: true, desertWater: 'auto', pace: 'Standard Pace', hours: 8 });
+    const extremeSt = { km: 400, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard', infra: 'Sparse Settlements', biome: 'Hot Desert', dryKm: 400 };
+    const rExtreme = jpCalcLand(extremeSt, plan);
+    o.extremeGapStillBlocked = !!rExtreme.blocked && /Carrying enough water/.test(rExtreme.blocked);
+
+    return o;
+  });
+  // v1.84 (owner: "water should only become an actual weight in arid biomes/climates... for other
+  // journeys it should technically not be counted. Water is usually abundant and always collectable
+  // in meaningful quantities"): jpHumanWaterCarryDays now returns 0 (not the old flat 2-day reserve)
+  // for any biome that isn't desertLike, so a non-desert stage carries zero water as mass anywhere it
+  // used to be counted — jpCapacity's breakdown, jpAutoPickTransport's animal-count solver, the
+  // jpCalcLand convergence loop's waterNeeded term, and the _jpPlan route-summary "Supply forecast"
+  // water total. A genuine desert stage is untouched throughout (byte-identical to v1.83).
+  R.v184 = await page.evaluate(() => {
+    const o = {};
+    const base = {
+      pace: 'Standard Pace', hours: 8, cargoKg: 20, supplyDays: 7, season: 'Summer',
+      grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true, desertWater: 'auto',
+      animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0
+    };
+
+    // (a) jpHumanWaterCarryDays / jpCapacity: zero water weight for a non-desert biome, unchanged
+    // (flat 4-day reserve) for a desert biome — the capacity NUMBER itself (carrying capability) is
+    // untouched either way, only what's counted as carried mass.
+    const nonDesertPlan = Object.assign({}, base, { groupSize: 10 });
+    const capForest = jpCapacity(nonDesertPlan, 'Temperate Forest', 'Summer');
+    o.nonDesertHumanWaterIsZero = capForest.breakdown.humanWater === 0;
+    const capDesert = jpCapacity(nonDesertPlan, 'Hot Desert', 'Summer');
+    o.desertHumanWaterStillCounted = capDesert.breakdown.humanWater > 0;
+    // capacity (what the party CAN carry) does not depend on biome at all — only totalMass does
+    o.capacityUnaffectedByBiome = capForest.capacity === capDesert.capacity;
+
+    // (b) jpAutoPickTransport: the Walking/Baggage-Train animal-count solver reads the same helper —
+    // a non-desert dominant biome must size the party without any water term inflating cargo/supplyMass.
+    const jn = { pts: [[0, 0], [1, 0]], km: 100, name: '', sea: false, groupSize: 4 };
+    const planAuto = _jpEnsurePlan(jn);
+    Object.assign(planAuto, { transport: 'Walking', cargoKg: 20, supplyDays: 7, autoPromote: false });
+    const stagesAuto = _jpDeriveStages(jn, planAuto);
+    if (stagesAuto.length && stagesAuto[0].cat === 'land') {
+      stagesAuto[0].biome = 'Temperate Forest';
+      const pick = jpAutoPickTransport(jn);
+      o.autoPickRanWithoutError = !!pick && pick.ok !== undefined;
+    } else { o.autoPickRanWithoutError = true; }   // no land stage on this synthetic route — not this test's concern
+
+    // (c) jpCalcLand's convergence loop: a severe measured dry run on a non-desert biome must NOT add
+    // any water mass — same claim as the R.v156 block's nonDesertGapStillZeroCarriedWater, checked
+    // again directly against jpCapacity's own breakdown for a second, independent confirmation.
+    const stForest110 = { km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 110 };
+    const rForest = jpCalcLand(stForest110, Object.assign({}, base, { groupSize: 4 }));
+    o.convergenceLoopZeroWaterNonDesert = !rForest.blocked && rForest.cap.breakdown.humanWater === 0;
+
+    // (d) the formula trace explicitly frames non-desert water as "assumed abundant", not silent —
+    // and a genuine desert stage keeps its real dry-run trace line.
+    o.nonDesertTraceExplainsAbundance = !rForest.blocked && /assumed abundant/.test(rForest.formula);
+    const stDesert50 = { km: 500, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Hot Desert', dryKm: 50 };
+    const rDesert = jpCalcLand(stDesert50, Object.assign({}, base, { groupSize: 4, animals: { donkey: 0, mule: 0, camel: 1, horse: 0 } }));
+    o.desertTraceStillShowsRealGap = !rDesert.blocked && /longest dry run 50 km/.test(rDesert.formula);
+
+    // (e) _jpPlan's route-summary water total (plan.waterL) must not count a non-desert stage's water
+    // even though it reads r.cap.humanWaterRate directly rather than the gated breakdown — the exact
+    // "last mile" bug this version's own investigation flagged (a second, independent recomputation).
+    const jn2 = { pts: [[0, 0], [3, 0]], km: 300, name: '', sea: false, groupSize: 10 };
+    const plan2 = _jpEnsurePlan(jn2);
+    Object.assign(plan2, { transport: 'Walking', cargoKg: 10, supplyDays: 7, carryFood: true });
+    const stages2 = _jpDeriveStages(jn2, plan2);
+    if (stages2.length && stages2[0].cat === 'land') {
+      stages2.forEach(s => { if (s.cat === 'land') { s.biome = 'Temperate Forest'; s.dryKm = 0; } });
+      const summary = _jpPlan(jn2);
+      o.routeSummaryWaterExcludesNonDesert = !!summary && summary.waterL === 0;
+    } else { o.routeSummaryWaterExcludesNonDesert = true; }
+
+    return o;
+  });
+  // v1.85 (owner: "gravity, axial tilt and how long days are on the world all these things inform
+  // how much energy a sun sets in a world and how much it keeps... the heating of the ocean and
+  // resulting ocean currents and subsequent wind are all based in grounded values"). Grounds the
+  // equator-pole temperature CONTRAST (climEffectiveEquatorTemp) in axial tilt (North & Coakley 1979
+  // 2nd-order EBM obliquity term, critical crossing at arccos(1/√3)≈54.7356° — Rose/Cronin/Bitz 2017)
+  // and rotation rate (reuses circulationCells()'s own Ω=24/rotationHours), both normalized to 1.0 at
+  // this file's Earth defaults (23.4°, 24h) so the bit-identical-at-defaults invariant holds by
+  // construction — verified directly here, not just by the separate hash_gen1.js A/B run.
+  R.v185 = await page.evaluate(async () => {
+    const o = {};
+    const savedTilt = state.planet.axialTiltDeg, savedRot = state.planet.rotationHours;
+    try {
+      state.planet.axialTiltDeg = 23.4; state.planet.rotationHours = 24;
+      o.defaultsAreExactlyOne = insolationContrastK() === 1 && rotationContrastK() === 1
+        && climEffectiveEquatorTemp() === state.climate.equatorTemp;
+
+      // critical obliquity: the real, documented crossing where the annual-mean contrast term
+      // itself vanishes (arccos(1/sqrt(3)) ≈ 54.7356°) — not an arbitrary constant.
+      const critDeg = Math.acos(1 / Math.sqrt(3)) * 180 / Math.PI;
+      state.planet.axialTiltDeg = critDeg;
+      o.criticalObliquityIsZero = Math.abs(insolationContrastK()) < 1e-9;
+      o.criticalObliquityMatchesDocumentedValue = Math.abs(critDeg - 54.7356) < 0.01;
+
+      // direction: lower tilt sharpens the equator-pole contrast, higher tilt (up to the UI's own
+      // 45° cap) flattens it — monotonic across the slider's whole reachable range.
+      state.planet.rotationHours = 24;
+      const tilts = [0, 10, 23.4, 30, 45].map(t => { state.planet.axialTiltDeg = t; return insolationContrastK(); });
+      o.tiltMonotonicDecreasing = tilts.every((k, i) => i === 0 || k < tilts[i - 1]);
+      o.tiltStaysWithinUiRangeNeverFlips = tilts.every(k => k > 0);   // the 45° UI cap never reaches the 54.7356° reversal
+
+      // rotation: faster rotation sharpens the contrast, slower flattens it — reusing the SAME Ω the
+      // pre-existing circulationCells() already derives from rotationHours.
+      state.planet.axialTiltDeg = 23.4;
+      const rots = [6, 12, 24, 48, 96].map(rh => { state.planet.rotationHours = rh; return rotationContrastK(); });
+      o.rotationMonotonicDecreasing = rots.every((k, i) => i === 0 || k < rots[i - 1]);
+      o.rotationReusesCirculationCellsOmega = rotationContrastK.toString().includes('24') && circulationCells.toString().includes('rotationHours');
+
+      // live, end-to-end: refreshClimate() — the SAME full pipeline stage generate() itself uses,
+      // not just the raw computeTemperature() sub-step — on the ALREADY-generated world (whatever
+      // it is at this point in the shared suite; no GW/resW/allocate/generate() touched, so nothing
+      // here can leak into later tests, the same restraint currentWindField/refreshClimate checks
+      // elsewhere in this suite already rely on). Using the full pipeline (not just
+      // computeTemperature alone) matters for the restore check below: generate()'s own tempField
+      // already has applyOceanCurrents()'s SST anomaly folded in, which a bare computeTemperature()
+      // call doesn't reproduce — comparing against that with only computeTemperature() re-run would
+      // report a false "leak" that's really just skipping a pipeline stage, not a real one.
+      const tempBefore = tempField.slice(), rainBefore = rainField.slice();
+      state.planet.axialTiltDeg = 23.4; state.planet.rotationHours = 24; refreshClimate();
+      let tSumDefault = 0; for (let i = 0; i < tempField.length; i++) tSumDefault += tempField[i];
+      const tMeanDefault = tSumDefault / tempField.length;
+
+      state.planet.axialTiltDeg = 45; state.planet.rotationHours = 24; refreshClimate();
+      let tSumMaxTilt = 0; for (let i = 0; i < tempField.length; i++) tSumMaxTilt += tempField[i];
+      const tMeanMaxTilt = tSumMaxTilt / tempField.length;
+      o.liveGenerateRespondsToTilt = tMeanMaxTilt < tMeanDefault - 1;   // real, correctly-signed divergence
+
+      state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; refreshClimate();
+      let restoreDiff = 0; for (let i = 0; i < tempField.length; i++) restoreDiff += Math.abs(tempField[i] - tempBefore[i]);
+      let rainRestoreDiff = 0; for (let i = 0; i < rainField.length; i++) rainRestoreDiff += Math.abs(rainField[i] - rainBefore[i]);
+      o.tempFieldFullyRestored = (restoreDiff / tempField.length) < 1e-6 && (rainRestoreDiff / rainField.length) < 1e-6;   // leaves no trace for downstream tests
+    } finally { state.planet.axialTiltDeg = savedTilt; state.planet.rotationHours = savedRot; }
+    return o;
+  });
+  // v1.86 (owner: "bug hunt and optimisation pass" — an audit pass, not an owner-reported symptom).
+  // Found via static analysis then confirmed by direct reproduction before any fix: currentFloodField
+  // and currentWindThrowField were keyed on state.tect.seed, which a same-seed regenerate (sea level/
+  // tectonic sliders/world-structure archetype) never changes, instead of _fieldGen (the file's own
+  // established convention — see currentSlopeField's own v1.17 comment claiming the flood field
+  // "above" already used it, which it didn't). Worse and more consequential: computeTemperature()/
+  // simulateWeather() — reachable independently via a climate-slider drag or the standalone "Simulate
+  // weather" button, neither of which touches _fieldGen — never invalidated the ELEVEN-field
+  // biome/soil/lithology/resource/carrying-capacity/settlement-suitability/wildlife/NPP/population-
+  // density/wetland cache family that only computeFlow()/generate() (and, since an earlier owner
+  // report, the sea-level slider) ever cleared. currentFloodField() feeds buildSettlementSuitability's
+  // flood penalty AND _civSnapToWaterEdge directly, so this was silently mis-scoring settlement
+  // placement after exactly the "tweak a slider, hit Simulate weather" workflow the tool exists for.
+  // Bit-identical to v1.85 (hash_gen1.js ALL IDENTICAL) — this only changes WHEN a derived cache
+  // recomputes, never the deterministic value it recomputes to.
+  // Uses the ambient, already-generated world in place throughout — no GW/resW/allocate() touched,
+  // and every mutation (climate params, field[]) is restored via the SAME real functions that would
+  // naturally undo it (refreshClimate(), computeFlow()), not a raw allocate()+no-regenerate reset.
+  // v1.85's own R.v185 test hit exactly this trap once already this session (a GW/resW round-trip
+  // that never re-ran generate() on restore corrupted a much later, unrelated test's civ state) —
+  // this test deliberately avoids it from the start rather than re-discovering it.
+  R.v186 = await page.evaluate(async () => {
+    const o = {};
+    const sum = a => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s; };
+    const savedEq = state.climate.equatorTemp, savedPo = state.climate.poleTemp;
+    const tempBefore = tempField.slice(), rainBefore = rainField.slice();
+    try {
+      // (a) a drastic climate swing + a pure weather re-simulation (no regenerate) must genuinely
+      // change biome classification, carrying capacity and the wind-throw debug field — all of which
+      // read tempField/rainField, directly or transitively.
+      const carryBefore = sum(currentCarryingCapacity());
+      const bioBefore = Array.from(buildBiomeRaster()).join(',');
+      const wtBefore = sum(currentWindThrowField());
+      state.climate.equatorTemp = 5; state.climate.poleTemp = -45;
+      simulateWeather(state.climate.wIters);
+      o.carryingCapacityRespondsToWeatherResim = sum(currentCarryingCapacity()) !== carryBefore;
+      o.biomeRasterRespondsToWeatherResim = Array.from(buildBiomeRaster()).join(',') !== bioBefore;
+      o.windThrowRespondsToWeatherResim = sum(currentWindThrowField()) !== wtBefore;
+    } finally {
+      // Restore climate state AND the raw tempField/rainField arrays directly (.set(), not a
+      // second refreshClimate() call). A re-run was tried first and measured EXACTLY reproducible
+      // in isolation (5 successive refreshClimate() calls, zero diff each) — but not reliably
+      // reproducible as the very next operation after this specific drastic a swing, on the real,
+      // many-tests-deep ambient world this probe runs against inside the full suite (confirmed via
+      // a direct A/B: the identical non-determinism reproduces on UNMODIFIED v1.85 with only this
+      // test added, so it's a pre-existing property of refreshClimate() on a perturbed-then-restored
+      // state, not a regression in the v1.86 fix this test exists to verify). Setting the arrays
+      // back directly sidesteps needing refreshClimate() to be bit-reproducible at all — this
+      // probe's OWN restoration doesn't depend on a property of the engine it isn't testing.
+      state.climate.equatorTemp = savedEq; state.climate.poleTemp = savedPo;
+      tempField.set(tempBefore); rainField.set(rainBefore);
+      let tD = 0; for (let i = 0; i < tempField.length; i++) tD += Math.abs(tempField[i] - tempBefore[i]);
+      let rD = 0; for (let i = 0; i < rainField.length; i++) rD += Math.abs(rainField[i] - rainBefore[i]);
+      o.climateFullyRestored = tD === 0 && rD === 0;
+    }
+
+    // (b) a direct terrain edit (the sculptCommit() shape: mutate field[], then computeFlow()) at
+    // the SAME seed must change the flood field — the old seed-only key could never see this.
+    const fieldBefore = field.slice(), flowBefore = flowField.slice(), seedBefore = state.tect.seed;
+    try {
+      const floodBefore = sum(currentFloodField());
+      const cx = (GW / 2) | 0, cy = (GH / 2) | 0, R2 = Math.max(6, (GW / 8) | 0);
+      for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d < R2) field[y * GW + x] = Math.max(0, field[y * GW + x] - 0.35 * (1 - d / R2));
+      }
+      computeFlow(true);
+      o.floodFieldRespondsToTerrainEditSameSeed = sum(currentFloodField()) !== floodBefore;
+      o.seedGenuinelyUnchanged = state.tect.seed === seedBefore;
+    } finally {
+      // Restore field[] AND flowField[] directly via .set() — NOT by restoring field[] and calling
+      // computeFlow() a second time. Measured directly: computeFlow(true) is NOT idempotent across
+      // two calls even when field[] ends up bit-identical before each — flowDiffMean ~0.86 on a real
+      // world, a real, pre-existing (not introduced by v1.84-v1.86) property of computeFlow's own
+      // seeding/accumulation, unrelated to anything this test is verifying. Restoring both arrays
+      // directly sidesteps needing computeFlow() to be re-run-idempotent, the same lesson part (a)'s
+      // restoration already applied to tempField/rainField/refreshClimate().
+      field.set(fieldBefore); flowField.set(flowBefore);
+      let fD = 0; for (let i = 0; i < field.length; i++) fD += Math.abs(field[i] - fieldBefore[i]);
+      let flD = 0; for (let i = 0; i < flowField.length; i++) flD += Math.abs(flowField[i] - flowBefore[i]);
+      o.terrainFullyRestored = fD === 0 && flD === 0;
+    }
+
+    // (c) buildWindThrowField reuses buildBiomeRaster() rather than reclassifying per cell — a
+    // mountain lake (above sea level but water per currentWaterBodies()) now reads as non-forest
+    // canopy consistently with the biome raster, not via a separate, disagreeing classification.
+    o.windThrowUsesSharedBiomeRaster = buildWindThrowField.toString().includes('buildBiomeRaster()');
+    return o;
+  });
+  // v1.77 (owner-supplied PoC, middle scope: "wind/current terrain-coupling + gyres, world-wrap-
+  // aware, must feed rain/climate — not sit decoratively beside it"). Root-caused first: buildWind
+  // was purely latitude-band + temperature-driven pressure/Coriolis, with ZERO direct terrain
+  // blocking (wind blew straight through mountains); oceanSSTAnomaly used the WIND's own y-
+  // component directly AS a "current" — no Ekman rotation, no distinct 2D current field, no gyre
+  // structure. deflectFlow (ported from the PoC's deflect()) steers a flow field away from a
+  // blocking scalar field; computeOceanCurrent Ekman-rotates the (possibly deflected) wind and
+  // deflects it again against a hard coastline + shelf friction + western-intensification.
+  // v1.78: the v1.77 state.climate.terrainWind opt-in is GONE — owner: "wind and current should
+  // always be coupled to terrain" — buildWind/oceanSSTAnomaly always deflect wherever elevation is
+  // available, no toggle. This is a deliberate, measured re-baseline of the DEFAULT render (hash vs
+  // v1.77 differs at every scenario — confirmed the delta is isolated to the climate→rain→
+  // river-carving feedback chain, not an unrelated regression: field itself now differs too, because
+  // carveRiverValleys() (already in the default generate() pipeline) carves against the new rainfall
+  // pattern — a real, correct, closed-loop consequence, not a bug).
+  R.v178 = await page.evaluate(() => {
+    const o = {};
+    o.checkboxGone = !document.getElementById('terrainWind');
+    o.stateFieldGone = state.climate.terrainWind === undefined;
+
+    // synthetic north-south ridge on a coarse working grid, isolated from pressK/decl so only the
+    // terrain-deflection term is being measured. "off" = no elevation supplied (opts null, the one
+    // remaining case buildWind leaves undeflected — e.g. Region-mode manual wind); "on" = real elev.
+    const WW = 240, WH = 120, sea = state.seaLevel;
+    const elev = new Float32Array(WW * WH);
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const dx = Math.abs(x - WW / 2);
+      elev[y * WW + x] = sea + 0.05 + (dx < 12 ? (12 - dx) / 12 * 0.5 : 0);
+    }
+    const tc = new Float32Array(WW * WH); for (let i = 0; i < tc.length; i++) tc[i] = 10;
+    const savedWorld = state.world, savedPressK = state.climate.pressK;
+    state.world = true; state.climate.pressK = 0;
+
+    const wxOff = new Float32Array(WW * WH), wyOff = new Float32Array(WW * WH);
+    buildWind(wxOff, wyOff, WW, WH, 3.0, tc, 0, null);
+    const wxOn = new Float32Array(WW * WH), wyOn = new Float32Array(WW * WH);
+    buildWind(wxOn, wyOn, WW, WH, 3.0, tc, 0, { elev });   // no toggle needed — elev alone is enough
+    state.world = savedWorld; state.climate.pressK = savedPressK;
+
+    let nearRidgeDiff = 0, nearN = 0, farDiff = 0, farN = 0;
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const i = y * WW + x, d = Math.hypot(wxOn[i] - wxOff[i], wyOn[i] - wyOff[i]);
+      const dx = Math.abs(x - WW / 2);
+      if (dx < 15) { nearRidgeDiff += d; nearN++; } else if (dx > 60) { farDiff += d; farN++; }
+    }
+    o.nearRidgeMeanDiff = nearRidgeDiff / nearN;
+    o.farMeanDiff = farDiff / farN;
+
+    // world-wrap seam continuity: ridge kept away from the seam, so x=0/x=WW-1 sit in flat terrain
+    // and a wrap bug (vs. legitimate ridge-crest flow-splitting) would show up as a real discontinuity
+    let seamDiff = 0;
+    for (let y = 0; y < WH; y++) seamDiff += Math.hypot(wxOn[y*WW+0]-wxOn[y*WW+(WW-1)], wyOn[y*WW+0]-wyOn[y*WW+(WW-1)]);
+    o.seamMeanDiff = seamDiff / WH;
+
+    // must genuinely feed rain/temp on a REAL generated world (unconditionally now — no toggle to flip)
+    const rainCopy = rainField.slice(), tempCopy = tempField.slice();
+    refreshClimate();
+    let rainDiff = 0, tempDiff = 0;
+    for (let i = 0; i < rainCopy.length; i++) { rainDiff += Math.abs(rainField[i]-rainCopy[i]); tempDiff += Math.abs(tempField[i]-tempCopy[i]); }
+    o.rainStableOnReRun = rainDiff / rainCopy.length < 1e-9;   // determinism: re-running refreshClimate on the SAME field must reproduce the SAME rain/temp
+
+    // Layer views must show the SAME real mechanism, not a stale undeflected/proxy shortcut
+    const wf = currentWindField(), of = currentOceanField();
+    o.windFieldMaxSpeed = wf.maxSpeed;
+    let oceanDiffersFromWind = false, oceanCells = 0;
+    for (let i = 0; i < of.ocean.length; i++) if (of.ocean[i]) {
+      oceanCells++;
+      // of.u/v is a real 2D current (Ekman-rotated + coastal-deflected), not the wind's own vector —
+      // sampled on the SAME coarse grid, so a direct index compare is valid without reprojection
+      const wi = Math.min(wf.u.length - 1, i);
+      if (Math.abs(of.u[i] - wf.u[wi]) > 1e-6 || Math.abs(of.v[i] - wf.v[wi]) > 1e-6) oceanDiffersFromWind = true;
+    }
+    o.oceanCells = oceanCells;
+    o.oceanCurrentIsRealNotWindProxy = oceanDiffersFromWind;
+
+    return o;
+  });
+  // v1.78: animated wind/current particle streaks (owner-requested PoC parity — "animated streaks").
+  // #windFxCanvas is a self-contained overlay, own rAF loop, self-terminating on state.debug leaving
+  // wind/ocean — started/stopped via the SAME #debugSeg click path a real user takes.
+  // v1.80 (owner: "no animation in the flow layers"): this block originally checked cv.style.display
+  // (the INLINE style) rather than the actual rendered/COMPUTED style — _windFxStart() cleared the
+  // inline style to '' expecting that to reveal the canvas, but the #windFxCanvas CSS rule itself sets
+  // display:none, so '' just falls back to the stylesheet and the canvas stayed invisible. `'' !==
+  // 'none'` was still true, so this exact assertion passed while the animation was genuinely broken —
+  // confirmed by real-screenshot frame-diffing (zero byte-diff across 5 frames) before fixing. Now
+  // reads getComputedStyle(cv).display, the only thing that actually reflects on-screen visibility.
+  R.v178fx = await page.evaluate(async () => {
+    const o = {};
+    const cv = document.getElementById('windFxCanvas');
+    o.canvasExists = !!cv;
+    o.hiddenByDefault = cv ? getComputedStyle(cv).display === 'none' : null;
+    o.runningBeforeClick = _windFxRunning;
+    document.querySelector('#debugSeg button[data-d="wind"]').click();
+    await new Promise(r => setTimeout(r, 60));   // let the first rAF tick land
+    o.runningOnWind = _windFxRunning;
+    o.visibleOnWind = getComputedStyle(cv).display !== 'none';
+    o.hasParticlesOnWind = _windFxParts.length > 0;
+    document.querySelector('#debugSeg button[data-d="ocean"]').click();
+    await new Promise(r => setTimeout(r, 60));
+    o.runningOnOcean = _windFxRunning;
+    o.oceanParticleCount = _windFxParts.length;
+    document.querySelector('#debugSeg button[data-d="off"]').click();
+    await new Promise(r => setTimeout(r, 60));
+    o.stoppedOnOff = !_windFxRunning;
+    o.hiddenOnOff = getComputedStyle(cv).display === 'none';
+    return o;
+  });
+  // v1.72 bug-hunt: three defects in the v1.71 village-connector layer, each measured before fixing.
+  // A: the way serialization whitelist dropped `villageAddon`, so a save→reload turned every deep-zoom
+  //    connector back into an ordinary 'ancient' way visible from zoom 0.7 while its village stayed
+  //    hidden until 2.4 — a web of roads leading to invisible settlements.
+  // B: "Generate Roads" kept only `w.manual` ways (destroying all connectors) and passed the villages
+  //    themselves to the trunk-network builder (because 'hamlet' is in CIV_SETTLE_KEYS), producing
+  //    normally-visible roads to them and defeating the deep-zoom design outright.
+  // C: the way list is not virtualized, so ~199 unnamed auto connectors buried the ~53 authored roads.
+  R.v172 = await page.evaluate(() => {
+    const o = {};
+    state.places = []; civWays = [];
+    _civVillages = true; _civMetropolis = false;
+    _civAutoWorld();
+    o.connectors = civWays.filter(w => w.villageAddon).length;
+
+    // --- A: save/load round trip ---
+    _civSyncToState();
+    o.A_savedKeepsFlag = state.civ.ways.some(w => w.villageAddon === true);
+    _civSyncFromState();
+    const reloaded = civWays.filter(w => w.villageAddon);
+    o.A_survivesReload = reloaded.length === o.connectors && reloaded.length > 0;
+    // the defect was observable purely as a LOD regression, so assert on that directly
+    const ancient = civWays.filter(w => w.type === 'ancient');
+    o.A_noRoadOutrunsItsVillage = ancient.length > 0 && ancient.every(w => _civWayLodMin(w) >= CIV_VILLAGE_ADDON_LOD);
+
+    // --- B: Generate Roads ---
+    _civAutoRoutes();
+    o.B_connectorsSurvive = civWays.filter(w => w.villageAddon).length > 0;
+    const vIdx = new Set(); state.places.forEach((p, i) => { if (p.villageAddon) vIdx.add(i); });
+    const touching = civWays.filter(w => vIdx.has(w.aIdx) || vIdx.has(w.bIdx));
+    o.B_everyVillageWayIsDeepZoom = touching.length > 0 && touching.every(w => _civWayLodMin(w) >= CIV_VILLAGE_ADDON_LOD);
+    // the trunk network must not have been rebuilt over the villages
+    o.B_noTrunkWayTouchesAVillage = !touching.some(w => !w.villageAddon);
+
+    // --- C: way list density ---
+    _civRenderWayList();
+    const el = document.getElementById('civWayList');
+    const topLevelCards = el ? el.children.length : -1;
+    const connectorCount = civWays.filter(w => w.villageAddon && !w.hidden).length;
+    o.C_topLevelCards = topLevelCards;
+    o.C_connectorCount = connectorCount;
+    o.C_listNotFlooded = topLevelCards < connectorCount / 2;
+    const det = el ? el.querySelector('details') : null;
+    o.C_disclosureExists = !!det;
+    o.C_disclosureStartsClosed = det ? det.open === false : false;
+    o.C_connectorsStillReachable = det ? det.querySelectorAll('input[type=text]').length === connectorCount : false;
+
+    // restore clean civ state (v0.76's own precedent)
+    _civVillages = false;
+    state.places = []; civWays = []; if (typeof civJourneys !== 'undefined') civJourneys = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+    return o;
+  });
+  // v1.73 (bug hunt): v1.28 added trait-badge clearance to the label DRAW path but not to v1.12's
+  // label-collision RESERVATION, so a 'below' label on a trait-bearing settlement painted outside
+  // the box it reserved. _civTraitDrop is now the single definition both sides read.
+  R.v173 = await page.evaluate(() => {
+    const sz = 8, sc = 1.5;
+    const bare = { name: 'X', traits: [] };
+    const withT = { name: 'X', traits: ['port'] };
+    const expected = Math.max(2.2, sz * 0.42) * 2 + 1.2 * sc;   // the literal v1.28 draw formula
+    return {
+      zeroWithoutTraits: _civTraitDrop(bare, sz, sc) === 0 && _civTraitDrop(null, sz, sc) === 0,
+      positiveWithTraits: _civTraitDrop(withT, sz, sc) > 0,
+      matchesDrawnFormula: Math.abs(_civTraitDrop(withT, sz, sc) - expected) < 1e-9,
+      scalesWithSize: _civTraitDrop(withT, 20, sc) > _civTraitDrop(withT, 4, sc),
+    };
+  });
+  /* v1.74 — LOD zoom freeze. Three claims, each asserted on the mechanism the owner actually feels:
+     (1) a colorized tile is a STATIC image, so nothing that leaves _lodRenderKey unchanged may cause a
+         re-colorization — the cache must be big enough to hold the pixels of every tile whose heightmap
+         we are still holding;
+     (2) rapid camera input must coalesce to one composite per animation frame, not one per event;
+     (3) an interactive frame is budgeted (so it can never block for seconds) while a direct renderNow()
+         still composites the whole view in one go for non-interactive callers.
+     Runs entirely on the pure/queryable surface — the tile pixels themselves are canvas work, which this
+     file's own headless carve-out leaves to manual verification. */
+  R.v174 = await page.evaluate(async () => {
+    const prevTile = _lodTile, prevOn = _lodOn, prevZoom = _lodZoom;
+    // (1) cache sizing — budget by pixels so the cap tracks _lodTile instead of costing 16x more at 2048
+    _lodTile = 1024; const cap1024 = lodTileCanvasMax();
+    _lodTile = 2048; const cap2048 = lodTileCanvasMax();
+    _lodTile = 512; const cap512 = lodTileCanvasMax();
+    _lodTile = 65536; const capHuge = lodTileCanvasMax();   // absurd tile size must still leave a usable floor
+    _lodTile = prevTile;
+
+    // (2) coalescing: many requests inside one tick must produce exactly ONE composite
+    _lodOn = true;
+    let composites = 0, budgetsSeen = [];
+    const realDraw = window.drawLODView;
+    window.drawLODView = function () { composites++; budgetsSeen.push(_lodFrameBudget); return true; };
+    for (let i = 0; i < 25; i++) requestLodRender();
+    const pendingFlagSet = _lodRafPending === true;
+    const compositesBeforeFrame = composites;
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const compositesAfterOneFrame = composites;
+
+    // (3) an interactive frame carries a budget; a direct renderNow() does not
+    const interactiveBudget = budgetsSeen.length ? budgetsSeen[0] : null;
+    const clearedAfterFrame = _lodFrameBudget === null;
+    composites = 0; budgetsSeen = [];
+    renderNow();
+    const directBudget = budgetsSeen.length ? budgetsSeen[0] : 'no-composite';
+
+    window.drawLODView = realDraw;
+    _lodOn = prevOn; _lodZoom = prevZoom; _lodTile = prevTile;
+    return {
+      // 68 = the measured distinct-tile working set of the reported 1->17.81 gesture (probe_distinct.js)
+      capCoversMeasuredWorkingSet: cap1024 >= 68,
+      capExceedsDataCache: cap1024 > _lodCacheMax,
+      capTracksTileSize: cap2048 < cap1024 && cap512 > cap1024,
+      capHasFloor: capHuge >= 6,
+      // the static-image invariant, asserted on the key rather than on pixels: zoom/pan must not be in it
+      renderKeyIgnoresCamera: (() => { const a = _lodRenderKey(); _lodZoom = prevZoom * 4; _lodCx += 5; const b = _lodRenderKey(); _lodZoom = prevZoom; _lodCx -= 5; return a === b; })(),
+      renderKeyCoversVisualState: (() => {
+        const a = _lodRenderKey(); const s = state.seaLevel; state.seaLevel = s + 0.01;
+        const b = _lodRenderKey(); state.seaLevel = s; return a !== b;
+      })(),
+      coalescedNotImmediate: compositesBeforeFrame === 0 && pendingFlagSet,
+      exactlyOneCompositePerFrame: compositesAfterOneFrame === 1,
+      interactiveFrameIsBudgeted: typeof interactiveBudget === 'number' && interactiveBudget > 0,
+      budgetClearedAfterFrame: clearedAfterFrame,
+      directRenderNowUnbudgeted: directBudget === null,
+    };
+  });
+  // v1.75 (bug hunt, HANDOFF-flagged latent issue from v1.72): _civHierarchicalNetwork stamps a
+  // way's aIdx/bIdx as positions in whatever `places` array it was called with; _civAutoRoutes
+  // called it with the settles-FILTERED array while _civConnectVillageAddons (same function, a
+  // few lines later) uses the FULL state.places array — two index bases landing in one civWays
+  // list. Force a genuine divergence rather than hope for one: insert POIs AHEAD of the real
+  // settlements in state.places, so a settles-local index misread as a state.places index
+  // deterministically resolves to a POI (kind not in CIV_SETTLE_KEYS) instead of silently landing
+  // on some other settlement that would make the bug invisible.
+  R.v175 = await page.evaluate(() => {
+    state.places = []; civWays = [];
+    _civVillages = false;
+    _civAutoWorld();
+    const realSettlementCount = state.places.length;
+    const pois = [0, 1, 2, 3, 4].map(i => ({ kind: 'landmark', name: 'POI' + i, x: 5 + i, y: 5 + i, traits: [] }));
+    state.places = [...pois, ...state.places];
+    _civAutoRoutes();
+    const landWays = civWays.filter(w => !w.sea && w.aIdx != null && w.bIdx != null);
+    const allResolveToRealSettlements = landWays.length > 0 && landWays.every(w => {
+      const a = state.places[w.aIdx], b = state.places[w.bIdx];
+      return a && b && CIV_SETTLE_KEYS.has(a.kind) && CIV_SETTLE_KEYS.has(b.kind) && !a.villageAddon && !b.villageAddon;
+    });
+    const out = { landWaysChecked: landWays.length, allResolveToRealSettlements, poisCount: pois.length, realSettlementCount };
+    state.places = []; civWays = [];
+    if (typeof _civRenderSettlementList === 'function') _civRenderSettlementList();
+    if (typeof _civRenderWayList === 'function') _civRenderWayList();
+    if (typeof renderNow === 'function') renderNow();
+    return out;
   });
   // v0.81: the regional-population readout is now AUTO-filled by auto-populate (no user button). Run a
   //        populate, confirm the readout shows a number, then restore clean civ state.
@@ -727,23 +1741,29 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     }
     return { vacuous: false, short, exact };
   });
-  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',faction:0,pop:100,traits:[]}]; });
+  await page.evaluate(() => { state.places = [{x:10,y:10,name:'Test',kind:'town',category:'settlement',faction:0,pop:100,traits:[]}]; });
 
   // ---- v0.65 (§4.7, complete): pinned inspector hosts the label/icon edit form; single selection ----
   // v0.90 (owner request: "editing a settlement should open a pop-up in the viewscreen"): a selected
   // place now opens #placeEditPopup floating over the map instead of rendering into #inspectorBody —
   // labels/icons are unchanged (still the sidebar-pinned inspector).
-  await page.evaluate(() => { _civSelectedPlace = state.places[0]; _civRenderPlaceEditor(); });
+  // v1.16: the sidebar settlement list was replaced by the virtualized Settlements-page table
+  // (#stSpacer) — switch to that sub-page so the table is populated before checking it.
+  await page.evaluate(() => {
+    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.querySelector('#civSubBar [data-civsub="settlements"]').click();
+    _civSelectedPlace = state.places[0]; _civRenderPlaceEditor();
+  });
   await page.waitForTimeout(100);
   R.editorInPopup = await page.$eval('#placeEditPopup', el => !!el.querySelector('#_civPeName') && el.style.display === 'block');
   R.editorNotInInspector = await page.$eval('#inspectorBody', el => !el.querySelector('#_civPeName'));
   R.popupOnScreen = await page.evaluate(() => { const r = document.getElementById('placeEditPopup').getBoundingClientRect(); return r.x >= 0 && r.x < window.innerWidth && r.y >= 0 && r.y < window.innerHeight; });
-  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('civSettlementList').querySelector('#_civPeName') === null);
+  R.noInlineEditorInList = await page.evaluate(() => document.getElementById('stSpacer').querySelector('#_civPeName') === null);
   await page.fill('#_civPeName', 'Renamed');
   await page.dispatchEvent('#_civPeName', 'input');
   await page.waitForTimeout(100);
   R.liveModelUpdate = await page.evaluate(() => state.places[0].name === 'Renamed');
-  R.liveRowPatch = await page.evaluate(() => document.getElementById('civSettlementList').textContent.includes('Renamed'));
+  R.liveRowPatch = await page.evaluate(() => document.getElementById('stSpacer').textContent.includes('Renamed'));
   await page.evaluate(() => {
     state.labels.push({x:5,y:5,name:'ALabel'});
     _civSelectLabel(state.labels[0]);
@@ -1027,10 +2047,11 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const sec = document.getElementById('explTimelineSection');
     const controlsInExplore = !!(sec && sec.querySelector('#civTlYear') && sec.querySelector('#civTlAddYearBtn')
       && sec.querySelector('#civTimelinePanel') && sec.querySelector('#civSimulateBtn') && sec.querySelector('#explTimelineSlider'));
-    const polity = [...document.querySelectorAll('#genCiv details.cat-acc')].find(d => {
-      const s = d.querySelector('summary'); return s && s.textContent.trim() === 'Polity';
-    });
-    const controlsNotInPolity = !!polity && !polity.querySelector('#civTlYear') && !polity.querySelector('#civSimulateBtn');
+    // v1.16: Civilization → Polity was folded into Generation → Territories by the sub-page redesign
+    // (#civSubGeneration); the invariant this guards — timeline/simulate controls never duplicated
+    // inside Civilization — still holds, so check the whole #genCiv subtree rather than a section
+    // literally named "Polity".
+    const controlsNotInPolity = !document.querySelector('#genCiv #civTlYear') && !document.querySelector('#genCiv #civSimulateBtn');
 
     civTimeline.length = 0; civYear = 0;
     civAddYear(10);
@@ -1507,8 +2528,27 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
       if (Math.abs(lodOn[i] - lodOff[i]) + Math.abs(lodOn[i + 1] - lodOff[i + 1]) + Math.abs(lodOn[i + 2] - lodOff[i + 2]) > 6) lodDiffPx++;
     }
 
+    // v1.14 (owner report: "a multitude of rivers... in close proximity, as if two different engines
+    // are trying to achieve the very same thing... poor unnatural looking"): confirmed root cause —
+    // surfaceColor's own per-pixel raster network blend and drawRiverWays' vector spline both traced
+    // the SAME _riverNet and both rendered whenever riverWays was on (the v0.94 comment literally said
+    // "both render"), and the vector path's Catmull-Rom smoothing + sinuosity jitter visibly diverges
+    // from the raster's raw cell-centerline blend, reading as a second, parallel river. Fix: surfaceColor
+    // now skips its raster blend whenever the vector overlay is about to draw the same network right
+    // after it (state.viz.riverWays on) — direct regression guard: calling surfaceColor at an identical
+    // river cell with riverWays on vs off must still differ (on ⇒ raw/no blend, off ⇒ blended), proving
+    // the skip branch is live and doesn't quietly get short-circuited back to "always blend".
+    let dedupDiffer = null;
+    if (found) {
+      const di = spotY * GW + spotX, vw = field[di];
+      state.viz.riverWays = true; const onC = surfaceColor(spotX, spotY, di, vw);
+      state.viz.riverWays = false; const offC = surfaceColor(spotX, spotY, di, vw);
+      state.viz.riverWays = true;
+      dedupDiffer = (Math.abs(onC[0] - offC[0]) + Math.abs(onC[1] - offC[1]) + Math.abs(onC[2] - offC[2])) > 3;
+    }
+
     _lodOn = false; _lodZoom = 1; applyView(); renderNow();
-    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx };
+    return { checkboxReflectsDefault, foundRiverSpot: found, mainDiffPx, lodDiffPx, dedupDiffer };
   });
 
   // v0.94 (owner report: "when using a very long route where a split or partial is possible by sea
@@ -1522,12 +2562,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // all-land; v0.94 committed 35-50% water on the SAME pairs) must show a materially higher water
   // fraction than the old behavior — asserted against a fixed threshold safely between the two
   // observed values, not a live A/B (the new cost constants are `const`, not toggleable at runtime).
+  // v1.60: the original pairs' waterFrac collapsed to 0 once the crater/volcano radius ceiling
+  // (v1.60 Stage A — a single crater/volcano can no longer balloon past ~12% of the grid) legitimately
+  // reshaped this seed's coastline near those specific pixels — the routing FIX itself is untouched
+  // (v1.60 is civ-layer-blind; _civDijkstraPath/mixed-mode cost is byte-identical), only the terrain
+  // this particular hardcoded pair happened to sit on changed. Re-found via the same independent-probe
+  // methodology against the current terrain (state.mapWidthKm pinned — this test must not depend on
+  // whatever a prior smoke block left it at).
   R.routingSeaShortcut = await page.evaluate(async () => {
-    state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
+    state.mapWidthKm = 800; state.tect.seed = 424242; state.resW = 1024; GW = 1024; GH = gridH(GW); allocate();
     await generate();
     const pairs = [
-      { x1: 810, y1: 530, x2: 754, y2: 602 },   // v0.93 waterFrac 0.051 -> v0.94 0.349 (independently measured)
-      { x1: 798, y1: 494, x2: 758, y2: 606 },   // v0.93 waterFrac 0.061 -> v0.94 0.500
+      { x1: 308, y1: 332, x2: 302, y2: 434 },   // v1.60 waterFrac 0.897 (mixed 86.4km vs land-only 99.3km)
+      { x1: 569, y1: 494, x2: 566, y2: 599 },   // v1.60 waterFrac 0.919 (mixed 83.1km vs land-only 111.5km)
     ];
     const out = pairs.map(p => {
       const mixed = _civDijkstraPath(p.x1, p.y1, p.x2, p.y2, 'mixed');
@@ -1815,6 +2862,4110 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     return out;
   });
 
+  R.sculpt = await page.evaluate(async () => {
+    const out = {};
+    // (1) tab mechanics: the 4th Generate sub-tab shows its panel, hides World, and arms the editor
+    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    out.panelShown = getComputedStyle(document.getElementById('genSculpt')).display !== 'none';
+    out.worldHidden = getComputedStyle(document.getElementById('genWorld')).display === 'none';
+    out.featureButtons = document.querySelectorAll('#sculptFeatureSeg button').length;
+    out.presetButtons = document.querySelectorAll('#sculptPresetSeg button').length;
+    out.editorActive = _sculptEditorActive();
+
+    // (2) paint → draft: neither `field` nor the rendered pixels change until commit (non-destructive)
+    state.debug = 'off'; renderNow();
+    const beforeField = field.slice(), beforePixels = img.data.slice();
+    _sculptType = 'mountains'; _sculptSel = -1;
+    const cx = GW / 2, cy = GH / 2;
+    _sculptCapturing = true; _sculptPts = [{ x: cx - 30, y: cy }, { x: cx, y: cy }, { x: cx + 30, y: cy }];
+    sculptFinishStroke();
+    out.draftLeavesFieldUntouched = field.every((v, i) => v === beforeField[i]);
+    out.draftLeavesRenderUntouched = img.data.every((v, i) => v === beforePixels[i]);
+    out.stampCountAfterPaint = sculptStamps.length;
+
+    // (3) commit: bakes the stack (field changes), a real renderNow ran (pixels change in the same
+    //     pass — the currently-open view, here the default Biome map, updates immediately)
+    const undoBefore = undoStack.length;
+    sculptCommit();
+    out.commitChangesField = !field.every((v, i) => v === beforeField[i]);
+    out.commitChangesRender = !img.data.every((v, i) => v === beforePixels[i]);
+    out.commitClearsStamps = sculptStamps.length === 0;
+    out.commitPushedUndo = undoStack.length === undoBefore + 1;
+
+    // (4) Ctrl+Z (field-level undo, since the draft above was already committed) reverts the bake
+    const committedField = field.slice();
+    undoLast();
+    out.undoRevertsField = field.every((v, i) => v === beforeField[i]);
+    out.undoDifferedFromCommitted = !field.every((v, i) => v === committedField[i]);
+
+    // (5) LOD cursor/overlay: painting under Tiled LOD draws the stamp-footprint overlay without
+    //     throwing (drawLODView's own tail calls this every frame while a stamp/stroke is live)
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
+    _sculptType = 'hills'; _sculptSel = -1;
+    _sculptCapturing = true; _sculptPts = [{ x: GW / 2 - 10, y: GH / 2 }, { x: GW / 2 + 10, y: GH / 2 }];
+    sculptFinishStroke();
+    let overlayThrew = false;
+    try { sculptDrawLODOverlay(lodViewRect()); } catch (e) { overlayThrew = true; }
+    out.lodOverlayDrawsWithoutError = !overlayThrew;
+    sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];   // discard the LOD-mode draft directly (no confirm() dialog)
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+
+    // (6) zoom-relative brush size: brushSize is stored in GRID CELLS, so its real-world (km)
+    //     footprint is a pure function of state.mapWidthKm/GW — independent of view zoom — and the
+    //     UI readout reflects that live as the slider (or the map's real-world width) changes.
+    const brushEl = document.getElementById('sBrush'), kmEl = document.getElementById('sBrushKm');
+    brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));
+    const kmAt32 = kmEl.textContent;
+    out.kmReadoutAt32 = /≈ [\d.]+ km radius/.test(kmAt32);
+    const numAt32 = parseFloat(kmAt32.replace('≈', '').trim());
+    brushEl.value = 64; brushEl.dispatchEvent(new Event('input'));
+    const numAt64 = parseFloat(kmEl.textContent.replace('≈', '').trim());
+    out.kmReadoutDoublesWithBrushSize = Math.abs(numAt64 - 2 * numAt32) < 0.05;
+    brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));   // restore
+
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    return out;
+  });
+
+  // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
+  R.v117 = await page.evaluate(async () => {
+    const out = {};
+    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.getElementById('civAutoPopulateBtn').click();
+    await new Promise(r => setTimeout(r, 150));
+    const settlements = state.places.filter(p => p && p.category === 'settlement');
+    out.nSettlements = settlements.length;
+    out.allHaveSpecialisation = settlements.length > 0 && settlements.every(p => typeof p.specialisation === 'string');
+    // S4 wall-spec ladder spot checks (pure function)
+    const mk = (kind, pop, traits, extra) => Object.assign({ x: settlements[0].x, y: settlements[0].y, kind, pop, traits: traits || [], category: 'settlement' }, extra || {});
+    out.fortressStone = _umWallSpec(mk('fortress', 300, [])) === 'stone';
+    out.plainHamletNone = _umWallSpec(mk('hamlet', 80, [])) === 'none';
+    out.overrideFalseWins = _umWallSpec(mk('capital', 15000, [], { umWalls: false })) === 'none';
+    // S6: settlement function reaches the layout engine in-browser
+    const c = _umPlaceContext(Object.assign({}, settlements[0], { specialisation: 'trade_hub' }));
+    out.economyInCtx = !!(c.economy && c.economy.specialisation === 'trade_hub');
+    const m = UME.cityGen(c.seed, c);
+    out.warehouseTagged = !!m && m.parcels.some(par => par.district === 'warehouse');
+    // S7: Site-profile raster view
+    const btn = document.querySelector('#debugSeg button[data-d="siteprofile"]');
+    out.siteprofileBtn = !!btn;
+    if (btn) { btn.click(); await new Promise(r => setTimeout(r, 250)); }
+    out.siteprofileState = state.debug;
+    out.siteprofileLegend = (document.getElementById('legend') || { innerHTML: '' }).innerHTML.includes('buildable');
+    document.querySelector('#debugSeg button[data-d="off"]').click();
+    await new Promise(r => setTimeout(r, 120));
+    // S7: settlement-diagnostics overlay draws on the civ canvas
+    const ccv = document.getElementById('civCanvas');
+    const snap = () => { const d = ccv.getContext('2d').getImageData(0, 0, ccv.width, ccv.height).data; let h = 2166136261 >>> 0; for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    const before = snap();
+    const chk = document.getElementById('civDiagnosticsChk');
+    out.diagChk = !!chk;
+    if (chk) { chk.checked = true; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 250)); }
+    out.diagDraws = snap() !== before;
+    if (chk) { chk.checked = false; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 120)); }
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    return out;
+  });
+
+  // ── v1.18: Interactive City Viewer (Explore mode) ──
+  R.v118 = await page.evaluate(async () => {
+    const out = {};
+    const settlements = state.places.filter(p => p && p.category === 'settlement');
+    let target = null;
+    for (const p of settlements) { if (_umModelForNow(p)) { target = p; break; } }
+    out.foundTarget = !!target;
+    if (!target) return out;
+
+    // regression guard: an empty-terrain click still fills the plain sidebar summary, modal stays shut.
+    // Pick a corner cell provably far from EVERY settlement (not a hardcoded coord) — by this point
+    // in the suite, many earlier phases have left small synthetic worlds/test settlements behind,
+    // so a fixed low coordinate like (3,3) can coincide with a leftover pin and give a false failure.
+    const cvSafeR2 = Math.max(100, (GW / 50) * (GW / 50));
+    let emptyGx = 3, emptyGy = 3, triedCorner = false;
+    for (const [cx, cy] of [[3, 3], [GW - 3, 3], [3, GH - 3], [GW - 3, GH - 3], [Math.floor(GW / 2), 3]]) {
+      if (settlements.every(p => (p.x - cx) ** 2 + (p.y - cy) ** 2 > cvSafeR2)) { emptyGx = cx; emptyGy = cy; triedCorner = true; break; }
+    }
+    out.foundSafeEmptySpot = triedCorner;
+    document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset</div>';
+    _civInfoAt(emptyGx, emptyGy);
+    out.emptyClickFillsPanel = document.getElementById('civInfoPanel').innerHTML !== '<div class="hint">reset</div>';
+    out.emptyClickModalClosed = !document.getElementById('cityViewerModal').classList.contains('open');
+
+    /* v1.32 (owner: Explore "opens the settlement view in full screen instead of the pop-up window
+       akin to the generate pane"): a genuine settlement-pin click now opens the ANCHORED POPUP —
+       city-layout card on top, editable parameters below — exactly as Civilization mode does, and no
+       longer forces the full-screen viewer. This block previously asserted the opposite; the
+       expectation moved with the behaviour, it was not merely relaxed. */
+    document.getElementById('civInfoPanel').innerHTML = '<div class="hint">reset2</div>';
+    _civInfoAt(Math.round(target.x), Math.round(target.y));
+    out.settlementClickOpensPopup = document.getElementById('placeEditPopup').style.display === 'block';
+    out.settlementClickLeavesModalShut = !document.getElementById('cityViewerModal').classList.contains('open');
+    out.settlementClickSkipsPlainPanel = document.getElementById('civInfoPanel').innerHTML === '<div class="hint">reset2</div>';
+    document.getElementById('placeEditPopup').style.display = 'none'; _civSelectedPlace = null;
+
+    // the viewer is still fully functional — it is now reached on request (the popup's button)
+    out.viewerOpensOnRequest = _civOpenCityViewer(target) !== false &&
+      document.getElementById('cityViewerModal').classList.contains('open');
+
+    // info panel renders real sections, including the honest "not modeled" notes (never fabricated)
+    const infoHtml = document.getElementById('cvInfoPanel').innerHTML;
+    out.infoSectionsPresent = ['General', 'Economy', 'Infrastructure', 'Military', 'Religion', 'Demographics', 'History'].every(s => infoHtml.includes(s));
+    out.infoHonestNotes = infoHtml.includes('not yet modeled') && infoHtml.includes('not modeled');
+
+    // camera pan/zoom mutate state
+    const cv = document.getElementById('cvCanvas');
+    const s0 = _cvCam.scale;
+    _cvZoomAt(cv.width / 2, cv.height / 2, 1.3);
+    out.zoomChangesScale = _cvCam.scale !== s0;
+
+    // LOD tiers reveal different pixels as the camera scale crosses a threshold
+    const hashCanvas = () => { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let h = 2166136261 >>> 0; for (let i = 0; i < d.length; i += 97) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    _cvCam = _cvFitCam(_cvModel, cv.width, cv.height); _cvCam.scale = 0.2; _cvRender();
+    const hOverview = hashCanvas();
+    _cvCam.scale = 3.5; _cvRender();
+    out.lodTiersDiffer = hashCanvas() !== hOverview;
+
+    // the Edit button routes to the EXISTING (untouched) Civilization-mode editor
+    document.getElementById('cvEditBtn').click();
+    await new Promise(r => setTimeout(r, 100));
+    out.editOpensExistingPopup = document.getElementById('placeEditPopup').style.display !== 'none';
+    _civClosePlacePopup();
+
+    // close paths: × button and Escape both work; camera state clears
+    document.getElementById('cvCloseBtn').click();
+    out.closeButtonWorks = !document.getElementById('cityViewerModal').classList.contains('open') && _cvCam === null;
+    _civOpenCityViewer(target);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    out.escapeWorks = !document.getElementById('cityViewerModal').classList.contains('open');
+
+    // zero regression: the Civilization-mode settlement editor (_civOpenPlacePopup) still works,
+    // completely independent of the new viewer
+    _civSelectedPlace = target;
+    _civOpenPlacePopup();
+    out.civModeEditorUnaffected = document.getElementById('placeEditPopup').style.display !== 'none' && !!document.getElementById('placeEditPopupBody');
+    _civClosePlacePopup(); _civSelectedPlace = null;
+
+    return out;
+  });
+
+  // ── v1.19: Sculpt editor touch pan joystick (owner: "put a small graphic joystick in the
+  // bottom right corner just as the cartalith v1.915 has" — on mobile, a single-finger drag over
+  // the canvas is captured as a paint stroke, so there was no gesture left to pan with while
+  // painting). Real touch-drag gestures aren't meaningfully simulable headlessly (the project's
+  // own carve-out for canvas/touch interaction), so these assertions call the joystick's own pan
+  // functions directly — exactly as a real pointerdown/pointermove would — and check the camera
+  // state they drive, reusing the exact _lodOn on/off/reset convention already used throughout
+  // this suite.
+  R.v119 = await page.evaluate(async () => {
+    const out = {};
+    const pad = document.getElementById('sculptNavpad'), stick = document.getElementById('sculptNavStick'), knob = document.getElementById('sculptNavKnob');
+    out.domPresent = !!(pad && stick && knob);
+
+    // entering Sculpt on a non-touch (headless) browser never shows the joystick — isMobile is false
+    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    await new Promise(r => setTimeout(r, 50));
+    out.sculptActiveOnTab = _sculptEditorActive();
+    out.hiddenOnDesktop = getComputedStyle(pad).display === 'none';
+
+    // v1.22 (owner: "the joystick works in the opposite direction that we push"): pushing the knob
+    // RIGHT makes the VIEW travel right — i.e. content scrolls left, so viewT.panX DECREASES (the
+    // joystick moves the camera the way you push, not the drag-the-content convention the v1.19 port
+    // wrongly used). At the default cover-fit scale there's no slack to pan into (_viewClampFill snaps
+    // straight back), so zoom in first — exactly what a real user would do before nudging the stick.
+    _lodOn = false;
+    const vwr = view.getBoundingClientRect();
+    zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 3);
+    const px0 = viewT.panX;
+    _sculptNavSetKnob(20, 0);                                     // push right
+    await new Promise(r => setTimeout(r, 150));
+    out.pushRightPansViewRight = viewT.panX < px0;                // v1.22: panX decreases ⇒ view travels right
+    _sculptNavResetKnob();
+    const pxStopped = viewT.panX;
+    await new Promise(r => setTimeout(r, 150));
+    out.resetActuallyStopsLoop = viewT.panX === pxStopped;
+
+    // dead zone: a tiny push doesn't start panning at all
+    const px1 = viewT.panX;
+    _sculptNavSetKnob(1, 1);
+    await new Promise(r => setTimeout(r, 100));
+    out.deadZoneIgnoresTinyPush = viewT.panX === px1;
+    _sculptNavResetKnob();
+    zoomAt(vwr.left + vwr.width / 2, vwr.top + vwr.height / 2, 1 / 3);   // restore the default fit scale
+
+    // knob deflection is clamped to MAX_OFFSET and recenters on release (parse the px values —
+    // Chromium re-serializes .style.transform with its own comma/space convention, so compare the
+    // numbers it wrote, not an exact literal string)
+    const knobXY = () => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(knob.style.transform); return m ? [+m[1], +m[2]] : null; };
+    _sculptNavSetKnob(999, 0);
+    const kXY = knobXY();
+    out.knobClampsOffset = !!kXY && Math.abs(kXY[0] - 24) < 0.01 && Math.abs(kXY[1]) < 0.01;
+    _sculptNavResetKnob();
+    const kXY2 = knobXY();
+    out.knobResetsToCenter = !!kXY2 && kXY2[0] === 0 && kXY2[1] === 0;
+
+    // under Tiled LOD, the SAME stick drives _lodCx/_lodCy instead (mirrors the existing _lodPan
+    // handler) — and v1.22's corrected direction holds here too: push right ⇒ _lodCx INCREASES (camera
+    // centre moves right ⇒ view travels right), the sign the `_lodCx -= _svx` branch produces once _svx
+    // is negated.
+    const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
+    _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 4; applyView(); renderNow();
+    const cx0 = _lodCx;
+    _sculptNavSetKnob(20, 0);                                     // push right
+    await new Promise(r => setTimeout(r, 150));
+    out.lodPanDrivesLodCx = _lodCx > cx0;                         // v1.22: push right ⇒ _lodCx increases ⇒ view travels right
+    _sculptNavResetKnob();
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
+
+    // leaving Sculpt/Generate and coming back cycles _sculptNavSync with no throw
+    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    document.querySelector('.tab[data-tab="explore"]').click();
+    document.querySelector('.tab[data-tab="generate"]').click();
+    await new Promise(r => setTimeout(r, 50));
+    out.noThrowOnTabCycle = true;
+
+    return out;
+  });
+
+  // ── v1.20: expanded natural-feature vocabulary (owner: "let's go up to 4/5 different possible
+  // tree types (and for other landscape types and features) that can be placed at relatively
+  // random") — trees grew from 2 to 5 biome-conditioned kinds, plus new shrub/cactus/boulder
+  // ground scatter, all also manually placeable via the Icon tool's "Feature icons" family
+  // exactly like the original 4. The auto-scatter placement logic itself (placeMapIcons) is
+  // covered in depth by the headless engine suite (tests/test_tail.js); this block only proves
+  // the manual-placement side (gallery/arm/place/draw) works end-to-end in the real UI.
+  R.v120 = await page.evaluate(async () => {
+    const out = {};
+    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#genSubBar [data-gsub="carto"]').click();
+    await new Promise(r => setTimeout(r, 50));
+
+    // the gallery is populated at load time with the default 'feature' family (v1.20.html:19671)
+    const gal = document.getElementById('carIconGallery');
+    const famSel = document.getElementById('carIconFam');
+    famSel.value = 'feature'; famSel.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 50));
+    out.featureTileCount = gal.querySelectorAll('figure.caropt:not(.none)').length;
+
+    // arm one of the NEW kinds and place it — same {x,y,fam,slot,scale} shape the real
+    // click-to-place handler constructs (v1.20.html ~7911-7914), just without simulating exact
+    // canvas pointer coordinates
+    const before = state.mapIcons.length;
+    _carIconGalleryPick('feature', 'cactus');
+    out.armedCactus = !!_carIconArmed && _carIconArmed.fam === 'feature' && _carIconArmed.slot === 'cactus';
+    const gx = Math.floor(GW / 2), gy = Math.floor(GH / 2);
+    state.mapIcons.push({ x: gx, y: gy, fam: _carIconArmed.fam, slot: _carIconArmed.slot, scale: 1 });
+    renderNow();
+    out.placedCactus = state.mapIcons.length === before + 1 && state.mapIcons[state.mapIcons.length - 1].slot === 'cactus';
+
+    // it draws (pack sprite or the generic circle+glyph fallback) without throwing
+    let threw = false;
+    try { drawCivLayerAuto(); } catch (e) { threw = true; }
+    out.drawsWithoutThrow = !threw;
+
+    // every new feature-icon key has a real glyph fallback (no missing entries)
+    out.allNewKeysHaveGlyphs = ['tree_rainforest', 'tree_savanna', 'tree_wetland', 'shrub', 'cactus', 'boulder']
+      .every(k => CIV_FEATURE_ICON_TYPES.some(t => t.key === k && t.glyph));
+
+    // the sample pack's 10 icon slots exactly match the engine's PACK_ICON_SLOTS vocabulary
+    out.packIconSlotsCount = PACK_ICON_SLOTS.length;
+
+    // clean up: remove the placed test icon and disarm so it doesn't leak into later assertions
+    state.mapIcons.pop();
+    _carIconGalleryPick(null);
+    renderNow();
+
+    return out;
+  });
+
+  // ── v1.21: sprite-sheet slicer zoom/pan (owner: "I'd like zoom and pan buttons and an option
+  // for the viewer to zoom. That way it should be easier to work accurately with larger
+  // resolution sheets.") — SpriteSheetImporter lives inside the Asset Library's own IIFE (block 3)
+  // and is deliberately not exposed on window, so this block drives it purely through the DOM/real
+  // input, the same way an actual user would, rather than reaching into module internals. Pan-drag
+  // and click-to-select use real Playwright mouse events (not page.evaluate-dispatched synthetic
+  // PointerEvents) because canvas.setPointerCapture requires a genuinely browser-tracked pointer.
+  R.v121 = {};
+  {
+    const b64 = await page.evaluate(async () => {
+      const cv = document.createElement('canvas'); cv.width = 4096; cv.height = 2731;
+      const cx = cv.getContext('2d');
+      for (let i = 0; i < 20; i++) { cx.fillStyle = `hsl(${i * 17},60%,50%)`; cx.fillRect((i % 5) * 800, Math.floor(i / 5) * 700, 780, 680); }
+      const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+      const buf = await blob.arrayBuffer();
+      let binary = ''; const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    });
+    await page.evaluate(() => { if (!document.getElementById('assetsHeaderBtn').classList.contains('on')) document.getElementById('assetsHeaderBtn').click(); });
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.getElementById('alSlicerBtn').click());
+    await page.waitForTimeout(100);
+    await page.setInputFiles('#alSheetPicker', { name: 'v121_big_sheet.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') });
+    await page.waitForTimeout(200);
+
+    R.v121.scaffold = await page.evaluate(() => ({
+      zoomToolbarShown: getComputedStyle(document.getElementById('alSlZoom')).display !== 'none',
+      hasPanBtn: !!document.querySelector('#alSlMode [data-m="pan"]'),
+      cvW0: document.getElementById('alSlCv').width, pct0: document.getElementById('alSlZoomPct').textContent,
+    }));
+
+    R.v121.zoomButtons = await page.evaluate(() => {
+      const before = document.getElementById('alSlCv').width;
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      const afterIn = { w: document.getElementById('alSlCv').width, pct: document.getElementById('alSlZoomPct').textContent, scrollable: document.getElementById('alSlWrap').scrollWidth > document.getElementById('alSlWrap').clientWidth };
+      document.getElementById('alSlZoomFit').click();
+      const afterFit = { w: document.getElementById('alSlCv').width, pct: document.getElementById('alSlZoomPct').textContent, scrollLeft: document.getElementById('alSlWrap').scrollLeft };
+      return { before, afterIn, afterFit };
+    });
+
+    // real-mouse Pan-mode drag
+    await page.evaluate(() => {
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.querySelector('#alSlMode [data-m="pan"]').click();
+      document.getElementById('alSlWrap').scrollLeft = 200; document.getElementById('alSlWrap').scrollTop = 150;
+    });
+    await page.waitForTimeout(50);
+    let r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const panBefore = await page.evaluate(() => ({ l: document.getElementById('alSlWrap').scrollLeft, t: document.getElementById('alSlWrap').scrollTop }));
+    await page.mouse.move(r.x + 300, r.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(r.x + 240, r.y + 230, { steps: 5 });
+    const panCursor = await page.evaluate(() => document.getElementById('alSlCv').className);
+    await page.mouse.up();
+    const panAfter = await page.evaluate(() => ({ l: document.getElementById('alSlWrap').scrollLeft, t: document.getElementById('alSlWrap').scrollTop, cls: document.getElementById('alSlCv').className }));
+    R.v121.pan = { before: panBefore, duringCursor: panCursor, after: panAfter,
+      movedCorrectly: (panBefore.l - (r.x + 240 - (r.x + 300))) === panAfter.l && (panBefore.t - (r.y + 230 - (r.y + 300))) === panAfter.t };
+
+    // cell-select still hits the right cell at a non-fit zoom (the real regression risk — proves
+    // evToSrc needed no changes for the new camera)
+    await page.evaluate(() => {
+      document.querySelector('#alSlMode [data-m="select"]').click();
+      document.getElementById('alSlZoomFit').click();
+      document.getElementById('alSlCols').value = 4; document.getElementById('alSlCols').dispatchEvent(new Event('input'));
+      document.getElementById('alSlRows').value = 4; document.getElementById('alSlRows').dispatchEvent(new Event('input'));
+      document.getElementById('alSlZoomIn').click(); document.getElementById('alSlZoomIn').click();
+      document.getElementById('alSlWrap').scrollLeft = 0; document.getElementById('alSlWrap').scrollTop = 0;
+    });
+    await page.waitForTimeout(80);
+    r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const selBefore = await page.evaluate(() => document.getElementById('alSlCount').textContent);
+    await page.mouse.click(r.x + 40, r.y + 40);
+    const selAfter = await page.evaluate(() => document.getElementById('alSlCount').textContent);
+    R.v121.selectAtZoom = { selBefore, selAfter, pct: await page.evaluate(() => document.getElementById('alSlZoomPct').textContent) };
+
+    // wheel-zoom-to-cursor
+    await page.evaluate(() => document.getElementById('alSlZoomFit').click());
+    await page.waitForTimeout(50);
+    const pctBefore = await page.evaluate(() => document.getElementById('alSlZoomPct').textContent);
+    r = await page.evaluate(() => { const b = document.getElementById('alSlCv').getBoundingClientRect(); return { x: b.left + 150, y: b.top + 100 }; });
+    await page.mouse.move(r.x, r.y);
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(80);
+    R.v121.wheelZoom = { pctBefore, pctAfter: await page.evaluate(() => document.getElementById('alSlZoomPct').textContent) };
+
+    await page.evaluate(() => document.getElementById('alSlClose').click());
+    await page.evaluate(() => { const b = document.getElementById('assetsHeaderBtn'); if (b && b.classList.contains('on')) b.click(); });
+  }
+
+  // ── v1.23: Journey Planner travel fixes + settlement pick-radius zoom scaling (block 2) ──
+  // BUG 1 (owner: "Coastal Waters faster than Open Sea — historically backwards"): a sea leg's daily
+  // distance must rank Open Sea above Coastal Waters (wind/current is a SEPARATE axis in JP_ROUTE.sea).
+  // BUG 2 (owner: "autoselect assigns a vessel to a leg it isn't fit for, only caught
+  // downstream"): the selector (_jpVesselFits) and validator (_jpVesselWaterBlock, which jpCalcWater now
+  // calls) share ONE source of truth, so an autoselected vessel can never be flagged invalid. All pure
+  // JP data/functions — no world/DOM needed beyond GW being defined (generated earlier in this run).
+  R.v123 = await page.evaluate(() => {
+    const out = {};
+    // v1.43 re-expressed these two: v1.23 asserted the raw JP_TERRAIN.sea multipliers, but that row no
+    // longer carries the whole ordering — the daily sailing window (JP_WATER_WINDOW) does, because
+    // §3.3's finding is that the zones differ in hours under way as much as in speed. Comparing the
+    // multipliers alone would now read Coastal 0.60 > Open 0.55 and "fail" a model that is correct.
+    // The owner's original report was about km/day (97 vs 82), so assert the COMPOSED km/day, which
+    // is what these tests should have measured in the first place — and is invariant to where in the
+    // composition the physics lives.
+    const seaKmDay = (terrain, vessel) => {
+      const st = { km: 500, cat: 'sea', terrain, routeCond: 'Neutral', infra: 'Stable Settlements', biome: 'Coastal Lowland' };
+      const pl = { vessel: vessel || 'Cog', pace: 'Standard Pace', season: 'Summer', groupSize: 4, cargoKg: 0, hours: 10, carryFood: false };
+      const r = jpCalcWater(st, pl); return r.blocked ? 0 : r.dailyKm;
+    };
+    out.sea = { sheltered: seaKmDay('Sheltered Bay'), coastal: seaKmDay('Coastal Waters'),
+                open: seaKmDay('Open Sea'), rough: seaKmDay('Rough Open Sea') };
+    out.openFasterThanCoastal = out.sea.open > out.sea.coastal;
+    out.shelteredNotFastest = out.sea.sheltered < out.sea.open;
+
+    const seaT = Object.keys(JP_TERRAIN.sea), rivT = Object.keys(JP_TERRAIN.river);
+    const stages = [...seaT.map(t => ({ cat: 'sea', terrain: t })), ...rivT.map(t => ({ cat: 'river', terrain: t }))];
+    let mismatches = 0, autoInvalid = 0, autoPicks = 0, checks = 0;
+    for (const st of stages) {
+      const pick = JP_VESSEL_PREFERENCE.find(n => _jpVesselFits(n, [st]));
+      if (pick) { autoPicks++; if (_jpVesselWaterBlock(JP_SHIPS[pick], st.cat, st.terrain, pick)) autoInvalid++; }
+      for (const n of Object.keys(JP_SHIPS)) {
+        checks++;
+        const fits = _jpVesselFits(n, [st]);
+        const blocked = !!_jpVesselWaterBlock(JP_SHIPS[n], st.cat, st.terrain, n);
+        if (fits === blocked) mismatches++;   // fits must be the exact negation of blocked
+      }
+    }
+    out.selValidatorMismatches = mismatches; out.autoInvalid = autoInvalid; out.autoPicks = autoPicks; out.checks = checks;
+
+    // end-to-end through the REAL validator: autoselect a vessel for an Open Sea leg, run jpCalcWater,
+    // confirm it is NOT blocked (proves jpCalcWater consumes the shared compat rule, not a stale copy)
+    const mkStage = (cat, terrain) => ({ km: 60, cat, terrain, routeCond: 'Neutral', infra: 'auto', biome: 'Temperate Forest' });
+    const mkPlan = (vessel) => ({ vessel, pace: 'Standard Pace', season: 'Summer', groupSize: 4, cargoKg: 0, hours: 10, carryFood: false });
+    const openStage = mkStage('sea', 'Open Sea');
+    const autoOpen = JP_VESSEL_PREFERENCE.find(n => _jpVesselFits(n, [openStage]));
+    out.autoOpenPick = autoOpen;
+    out.autoOpenNotBlocked = autoOpen ? !jpCalcWater(openStage, mkPlan(autoOpen)).blocked : false;
+    // the validator STILL fires for a genuinely infeasible manual pick (river-only barge on open sea)
+    out.manualInfeasibleStillBlocked = !!jpCalcWater(openStage, mkPlan('River Barge')).blocked;
+    // dhow spot-check: openSea-capable (historically correct — monsoon ocean trader), sea not river
+    out.dhow = { openSea: JP_SHIPS['Dhow'].openSea, fitsOpenSea: _jpVesselFits('Dhow', [openStage]),
+                 fitsCoastal: _jpVesselFits('Dhow', [mkStage('sea', 'Coastal Waters')]),
+                 fitsRiver: _jpVesselFits('Dhow', [mkStage('river', 'Calm River')]) };
+
+    // settlement pick radius must SHRINK as you zoom in (constant on-screen), off-LOD and under LOD
+    const sLod = _lodOn, sZoom = (typeof _lodZoom !== 'undefined' ? _lodZoom : 1), sScale = (viewT ? viewT.scale : 1);
+    _lodOn = false; if (viewT) viewT.scale = 1; const r1 = _civZoomPickR(20);
+    if (viewT) viewT.scale = 4; const r4 = _civZoomPickR(20);
+    _lodOn = true; _lodZoom = 8; const rLod = _civZoomPickR(20);
+    _lodOn = sLod; if (typeof _lodZoom !== 'undefined') _lodZoom = sZoom; if (viewT) viewT.scale = sScale;
+    out.pickR = { atZoom1: r1, atZoom4: r4, atLod8: rLod };
+    out.pickShrinksOnZoomIn = (r4 < r1) && (rLod < r1) && (Math.abs(r1 - 20) < 1e-9);
+    return out;
+  });
+
+  // ── v1.24: external QA report fixes (8 bugs), all confirmed real against this file before fixing ──
+  R.v124 = await page.evaluate(() => {
+    const out = {};
+
+    // BUG-1: World Structure slider `change` no longer throws ReferenceError (segOn was out of
+    // scope), and the archetype pill correctly flips to "custom" — the whole feature was dead.
+    const wsChk = document.getElementById('wsEnabled'); if (wsChk && !wsChk.checked) { wsChk.checked = true; wsChk.dispatchEvent(new Event('change')); }
+    let threwBug1 = false;
+    try { const el = document.getElementById('wsCont'); el.value = 70; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }
+    catch (e) { threwBug1 = true; }
+    out.bug1 = { threw: threwBug1, archetypeIsCustom: state.world_structure.archetype === 'custom',
+                 archetypeBtnOn: !!document.querySelector('#archetypeSeg button[data-arc="custom"].on') };
+
+    // BUG-2: Delete/Escape keydown must ignore keystrokes while typing (place editor Name/Pop/
+    // History fields) — previously one stray Delete forward-keypress silently deleted the settlement.
+    if (!state.places.some(p => p && p.category === 'settlement')) state.places.push({ x: Math.floor(GW/2), y: Math.floor(GH/2), category: 'settlement', name: 'Testville', kind: 'town', faction: 1, pop: 1000, traits: [] });
+    _civSelectedPlace = state.places.find(p => p && p.category === 'settlement');
+    if (typeof _civRenderPlaceEditor === 'function') _civRenderPlaceEditor();
+    const nameInput = document.getElementById('_civPeName');
+    const placesBefore = state.places.length;
+    if (nameInput) nameInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+    out.bug2 = { hadInput: !!nameInput, placeSurvived: state.places.length === placesBefore };
+
+    // BUG-3: showBusy/hideBusy now nest — the overlay must stay visible until every queued op's
+    // hideBusy() has actually fired, not just the first one. Force a clean depth-0 baseline first:
+    // earlier in this long smoke run a withBusy()-queued op (slider-triggered regenerate) may still
+    // be in flight on its own setTimeout/_busyChain tick, leaving _busyDepth non-zero by this point —
+    // this test is about the counter's OWN mechanics, not a race against unrelated pending app ops.
+    _busyDepth = 0; busy.style.display = 'none';
+    showBusy('op A'); showBusy('op B');
+    const stillVisibleAfterOneHide = (hideBusy(), busy.style.display === 'flex');
+    const hiddenAfterSecondHide = (hideBusy(), busy.style.display === 'none');
+    hideBusy(); // extra call must clamp, not go negative (would owe a future phantom hide)
+    showBusy('x'); const recoversNormally = busy.style.display === 'flex'; hideBusy();
+    out.bug3 = { stillVisibleAfterOneHide, hiddenAfterSecondHide, recoversNormally };
+
+    // BUG-4: destructive one-click actions (Clear labels/icons) must confirm() first — declining
+    // must leave the data untouched. (Delete-place button is popup-DOM-dependent; covered by code
+    // presence, not re-simulated here to keep this block fast/robust.)
+    state.labels.push({ x: 5, y: 5, name: 'Test Region', angle: 0, arc: 0, size: 16 });
+    state.mapIcons.push({ x: 5, y: 5, fam: 'feature', slot: 'shrub', scale: 1 });
+    const labelsBefore = state.labels.length, iconsBefore = state.mapIcons.length;
+    const origConfirm = window.confirm; let confirmCalls = 0;
+    window.confirm = () => { confirmCalls++; return false; };
+    document.getElementById('carClearLabelsBtn').click();
+    document.getElementById('carClearIconsBtn').click();
+    window.confirm = origConfirm;
+    out.bug4 = { confirmCalls, labelsSurvivedDecline: state.labels.length === labelsBefore, iconsSurvivedDecline: state.mapIcons.length === iconsBefore };
+
+    // BUG-5: a beforeunload guard exists and correctly reads "a world is live" (setup gate hidden).
+    out.bug5 = { hasFn: typeof _hasLiveWorld === 'function', reportsTrue: typeof _hasLiveWorld === 'function' && _hasLiveWorld() };
+
+    // BUG-6: the asset-pack thumbnail gallery has a host element again (was CSS-only, no HTML tag).
+    let threwBug6 = false; try { renderPackInspector(); } catch (e) { threwBug6 = true; }
+    out.bug6 = { hasEl: !!document.getElementById('packGrid'), threw: threwBug6 };
+
+    // BUG-7: shared HTML-escape helper exists and is actually wired into the settlements table row
+    // renderer (the class of bug: a `<b>`/`<img onerror>` name corrupting rendered markup).
+    const escOk = typeof _escHtml === 'function' && _escHtml('<img src=x onerror=1>') === '&lt;img src=x onerror=1&gt;';
+    const rowHtml = typeof _stRowHtml === 'function' ? _stRowHtml({ name: '<b>Evil</b>', type: 't', faction: '<i>F</i>', pop: 1, prosperity: 0, econRole: 'e', roads: 0, status: 's' }) : '';
+    out.bug7 = { escOk, rowEscaped: rowHtml.includes('&lt;b&gt;Evil&lt;/b&gt;') && rowHtml.includes('&lt;i&gt;F&lt;/i&gt;'), rowHasRawTag: rowHtml.includes('<b>Evil</b>') };
+
+    // BUG-8: a stuck Space-pan (Alt-Tab away while holding Space never delivers keyup) clears on
+    // window blur instead of requiring another Space tap.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    const setTrue = spaceDown;
+    window.dispatchEvent(new Event('blur'));
+    out.bug8 = { setTrue, clearedOnBlur: spaceDown === false };
+
+    return out;
+  });
+
+  // ── v1.25 (owner: "when selecting the preset worldshapes like volcanic, archipelago or
+  // islands the result isn't what is suggested"): deriveFromWorldStructure() derives plates/
+  // tectonicEnergy/volcanism from the archetype's bundle but never touched state.seaLevel — an
+  // independent user slider — so a low-continentality archetype (Archipelago 0.15, Volcanic
+  // 0.05) could still render MOSTLY LAND if the fixed default sea level (0.42) didn't happen to
+  // land at the right threshold against that world's own height distribution (independently
+  // verified: Archipelago rendered 71.5% land, Volcanic 60.6%, both MORE land than plain
+  // Classic's 56.5% — the opposite of what those names promise). Fixed by
+  // applyWorldStructureSeaLevel() — a histogram-quantile re-anchor of state.seaLevel to the
+  // archetype's promised land fraction, gated on world_structure.enabled, called inside
+  // generate() right after normalize()+the volcanism/craters clamp. Regression guard: at a fixed
+  // seed/small resolution, land fraction must now track each archetype's own continentality
+  // parameter (last test in the suite — no later assertion depends on the shared world after this).
+  R.v125 = await page.evaluate(async () => {
+    const out = { archetypes: {} };
+    state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    for (const arc of ['earth', 'supercontinent', 'archipelago', 'volcanic', 'rift']) {
+      state.tect.seed = 20260725;
+      _suApplyArchetype(arc);
+      await generate();
+      let land = 0;
+      for (let i = 0; i < field.length; i++) if (field[i] >= state.seaLevel) land++;
+      out.archetypes[arc] = {
+        continentality: state.world_structure.continentality,
+        landFraction: land / field.length,
+        seaLevel: state.seaLevel,
+        seaSliderReflectsState: Math.abs(+document.getElementById('sea').value - Math.round(state.seaLevel * 100)) <= 1
+      };
+    }
+    return out;
+  });
+
+  // ── v1.26 (owner: Nortantis-style raster asset scattering with per-asset control) ─────────────
+  // Until v1.25 the biome→asset mapping was HARD-CODED in placeMapIcons, so an asset's placement was
+  // fixed by which of the 10 frozen PACK_ICON_SLOTS it occupied — nothing user-tunable, and no asset
+  // outside that list could scatter at all. v1.26 makes that mapping DATA (ScatterRule), edited in the
+  // Asset Library inspector and pushed to the engine by a new Library→runtime bridge. Guard the three
+  // things that could silently break: (a) the legacy path stays reachable and byte-compatible when no
+  // rules are configured (this is what keeps the default map bit-identical), (b) the rules actually
+  // constrain placement, and (c) the density brush paints with the asset's own rule.
+  R.v126 = await page.evaluate(() => {
+    const out = {}, br = buildBiomeRaster();
+    const base = { sea: state.seaLevel, seed: state.tect.seed, tempField: tempField, wetlandMask: currentWetlandMask() };
+
+    // (a) no rules ⇒ legacy engine, four category arrays intact, plus the new unified Y-sorted items[]
+    const legacy = placeMapIcons(field, br, GW, GH, base);
+    out.legacyKeepsCategories = legacy.mountains.length > 0 && legacy.trees.length > 0;
+    out.legacyItemsEqualSum = legacy.items.length === (legacy.mountains.length + legacy.hills.length + legacy.trees.length + legacy.scatter.length);
+    let ySorted = true; for (let i = 1; i < legacy.items.length; i++) if (legacy.items[i].y < legacy.items[i - 1].y) { ySorted = false; break; }
+    out.legacyYSorted = ySorted;
+    // categories must genuinely interleave — that IS the v1.26 occlusion fix (a mountain no longer
+    // unconditionally paints over a tree standing south of it)
+    let interleaved = false; for (let i = 1; i < legacy.items.length; i++) if (legacy.items[i].cat !== legacy.items[i - 1].cat) { interleaved = true; break; }
+    out.legacyInterleaved = interleaved;
+    out.rulesNullByDefault = (assetRules === null) && (currentScatterRules() === null);
+
+    // (b) a rule restricted to one biome places ONLY there, never in water, within its size range
+    const ruled = placeMapIcons(field, br, GW, GH, Object.assign({}, base,
+      { rules: [Object.assign(defaultScatterRule(), { key: 'tree_broadleaf', biomes: [5], density: 1.0, minSize: 0.4, maxSize: 0.9 })] }));
+    out.ruledPlaced = ruled.items.length > 0;
+    out.ruledObeysBiome = ruled.items.every(it => br[it.y * GW + it.x] === 5);
+    out.ruledNeverInWater = ruled.items.every(it => field[it.y * GW + it.x] > state.seaLevel);
+    out.ruledSizeInRange = ruled.items.every(it => it.s >= 0.4 - 1e-6 && it.s <= 0.9 + 1e-6);
+    out.ruledLegacyArraysEmpty = ruled.mountains.length === 0 && ruled.trees.length === 0;
+    // density is monotonic
+    const cnt = d => placeMapIcons(field, br, GW, GH, Object.assign({}, base, { rules: [Object.assign(defaultScatterRule(), { key: 'shrub', density: d })] })).items.length;
+    out.densityMonotonic = cnt(1.0) > cnt(0.15);
+    // relief mode: elevation band + blue-noise spacing (no clumping/clipping)
+    const relief = placeMapIcons(field, br, GW, GH, Object.assign({}, base,
+      { rules: [Object.assign(defaultScatterRule(), { key: 'mountain', mode: 'relief', elevMin: 0.7, spacing: 8 })] }));
+    const landDen = (1 - state.seaLevel) || 1;
+    out.reliefObeysBand = relief.items.every(it => ((field[it.y * GW + it.x] - state.seaLevel) / landDen) >= 0.7);
+    let minD = 1e9;
+    for (let i = 0; i < relief.items.length; i++) for (let j = i + 1; j < relief.items.length; j++) {
+      const dx = relief.items[i].x - relief.items[j].x, dy = relief.items[i].y - relief.items[j].y;
+      const d = Math.sqrt(dx * dx + dy * dy); if (d < minD) minD = d;
+    }
+    out.reliefRespectsSpacing = relief.items.length < 2 || minD >= 8;
+
+    // weighted variants: a zero weight is never selected; NO weights must reproduce the v1.25 hash pick
+    let picked0 = 0, sameAsLegacy = true;
+    for (let x = 0; x < 200; x++) { if (pickWeightedVariant(x, 7, 123, 3, [0, 1, 1]) === 0) picked0++;
+      if (pickWeightedVariant(x, 7, 123, 3, null) !== pickIconVariant(x, 7, 123, 3)) sameAsLegacy = false; }
+    out.weightZeroNeverPicked = picked0 === 0;
+    out.unweightedMatchesLegacy = sameAsLegacy;
+
+    // (c) the Library→runtime bridge, and pack-import autopopulation
+    const gen0 = _scatterRulesGen;
+    applyLibraryAssets({ icons: {}, custom: {}, rules: { shrub: Object.assign(defaultScatterRule(), { density: 0.5 }) } });
+    out.bridgeSetRules = !!(assetRules && assetRules.shrub) && _scatterRulesGen > gen0;
+    assetRules.shrub.enabled = false;
+    out.bridgeFiltersDisabled = currentScatterRules() === null;   // disabled asset never reaches the engine
+    applyLibraryAssets(null);
+    autopopulateScatterRules({ icons: { tree_conifer: [{ w: 8, h: 8 }] }, custom: { MySet: { ruin: [{ w: 8, h: 8 }] } } });
+    out.autoBindsDefaultBiomes = !!(assetRules && assetRules.tree_conifer && assetRules.tree_conifer.enabled)
+      && assetRules.tree_conifer.biomes.join(',') === '3,4';               // boreal+conifer = the v1.25 hard-coded mapping
+    out.autoCustomStartsDisabled = assetRules['custom::MySet::ruin'].enabled === false;   // no invented intent
+    out.customKeySpelling = scatterRuleKey('ruin', 'MySet') === 'custom::MySet::ruin'
+      && iconSlotForItem({ key: 'custom::S::a' }) === 'custom::S::a'
+      && iconSlotForItem({ cat: 'tree', kind: 'conifer' }) === 'tree_conifer';
+    applyLibraryAssets(null);
+    return out;
+  });
+
+  // density brush: one stamp scatters MANY icons, on land, spaced, sized from the asset's own rule
+  R.v126brush = await page.evaluate(() => {
+    const out = {}, saved = state.mapIcons.slice();
+    state.mapIcons.length = 0;
+    _carIconArmed = { fam: 'feature', slot: 'tree_conifer', set: undefined };
+    _carIconBrush.on = true; _carIconBrush.r = 14; _carIconBrush.density = 0.8;
+    let lx = -1, ly = -1;
+    for (let y = 2; y < GH - 2 && lx < 0; y++) for (let x = 2; x < GW - 2; x++) if (field[y * GW + x] > state.seaLevel + 0.05) { lx = x; ly = y; break; }
+    const n = _carIconBrushStamp(lx, ly);
+    out.paintedMultiple = n > 1;
+    out.allOnLand = state.mapIcons.every(ic => field[ic.y * GW + ic.x] > state.seaLevel);
+    out.allCorrectSlot = state.mapIcons.every(ic => ic.slot === 'tree_conifer');
+    const ss = state.mapIcons.map(ic => ic.scale);
+    out.sizeVaries = new Set(ss.map(v => v.toFixed(3))).size > 1;
+    out.sizeFromRule = ss.every(v => v >= 0.7 - 1e-6 && v <= 1.2 + 1e-6);   // defaultScatterRule min/max
+    let minD = 1e9;
+    for (let i = 0; i < state.mapIcons.length; i++) for (let j = i + 1; j < state.mapIcons.length; j++) {
+      const dx = state.mapIcons[i].x - state.mapIcons[j].x, dy = state.mapIcons[i].y - state.mapIcons[j].y;
+      const d = Math.sqrt(dx * dx + dy * dy); if (d < minD) minD = d;
+    }
+    out.noOverlap = state.mapIcons.length < 2 || minD >= 1.2;
+    out.withinBrush = state.mapIcons.every(ic => Math.hypot(ic.x - lx, ic.y - ly) <= 15);
+    state.mapIcons.length = 0; for (const ic of saved) state.mapIcons.push(ic);
+    _carIconBrush.on = false; _carIconArmed = null;
+    return out;
+  });
+
+  // ── v1.27: senior-review bug fixes on the v1.26 scatter system ───────────────────────────────
+  // Six defects found reviewing v1.26, each with a regression guard here. The rule table is loaded
+  // from assetlib/library.json inside a user-supplied .zip, so normalizeScatterRule is an untrusted
+  // input boundary — most of these are about it failing safe.
+  R.v127 = await page.evaluate(() => {
+    const out = {}, br = buildBiomeRaster(), wm = currentWetlandMask();
+    const base = { sea: state.seaLevel, seed: state.tect.seed, tempField: tempField, wetlandMask: wm };
+    const run = rules => placeMapIcons(field, br, GW, GH, Object.assign({}, base, { rules }));
+
+    // FIX 1: wetland and biome are ANDed in scatter mode (v1.26 let requireWetland REPLACE the
+    // biome test in this mode only, silently discarding the user's biome picks).
+    const wetB = {}; for (let i = 0; i < wm.length; i++) if (wm[i] === 1) wetB[br[i]] = (wetB[br[i]] || 0) + 1;
+    const target = Object.keys(wetB).map(Number).filter(b => b > 0).sort((a, b) => wetB[b] - wetB[a])[0];
+    out.hasWetlandBiome = target != null;
+    if (target != null) {
+      const both = run([Object.assign(defaultScatterRule(), { key: 'tree_wetland', requireWetland: true, biomes: [target], density: 1.0 })]);
+      const wetOnly = run([Object.assign(defaultScatterRule(), { key: 'tree_wetland', requireWetland: true, biomes: [], density: 1.0 })]);
+      out.andSatisfiesBoth = both.items.length > 0 && both.items.every(it => { const i = it.y * GW + it.x; return wm[i] === 1 && br[i] === target; });
+      out.biomeNarrows = both.items.length < wetOnly.items.length;   // proves the biome term really filters
+    }
+
+    // FIX 2: normalizeScatterRule rejects non-finite input and keeps a legitimate 0.
+    const bad = normalizeScatterRule({ enabled: 1, mode: 'nonsense', density: 'abc', minSize: 'x', maxSize: null,
+      spacing: 'NaN', elevMin: 'zzz', biomes: 'not-an-array', variantWeights: 'nope' }, 'shrub');
+    out.normAllFinite = Number.isFinite(bad.density) && Number.isFinite(bad.minSize) && Number.isFinite(bad.maxSize);
+    out.normSane = bad.mode === 'scatter' && bad.spacing === null && bad.elevMin === null
+      && Array.isArray(bad.biomes) && bad.biomes.length === 0 && bad.variantWeights === null && bad.enabled === true;
+    out.zeroDensityKept = normalizeScatterRule({ density: 0 }, 'shrub').density === 0;      // `+x||dflt` used to eat 0
+    out.densityClamped = normalizeScatterRule({ density: 99 }, 'shrub').density === 3;
+    // FIX 2b: normalize must not alias its own defaults object (Object.assign(base,r) returned base,
+    // so every `base.<field>` fallback read the garbage it was meant to replace).
+    out.noAliasing = normalizeScatterRule({ minSize: 'x' }, 'shrub').minSize === defaultScatterRule().minSize;
+    // a NaN density must not scatter on literally every land cell (the v1.26 failure mode)
+    const nanRule = normalizeScatterRule({ density: 'abc', biomes: [] }, 'shrub'); nanRule.key = 'shrub';
+    let landCells = 0; for (let i = 0; i < field.length; i++) if (field[i] > state.seaLevel) landCells++;
+    out.nanDensityBounded = run([nanRule]).items.length < landCells * 0.5;
+
+    // FIX 3: a rule that bypassed normalize (direct caller / unit test) with NaN spacing must not
+    // collapse the relief bucket grid into one bucket (O(1) neighbour test → O(n²) scan).
+    const t0 = performance.now();
+    const reliefNaN = run([{ key: 'mountain', enabled: true, mode: 'relief', biomes: [], minSize: 0.5, maxSize: 1,
+      density: NaN, spacing: NaN, elevMin: 0.6, elevMax: null, requireWetland: false, variantWeights: null }]);
+    out.reliefNaNSurvives = reliefNaN.items.length > 0 && (performance.now() - t0) < 2000;
+
+    // FIX 4: the bridge retires art it previously owned (deleting every variant in the Library used
+    // to leave the old bitmaps live in assetPack forever).
+    applyLibraryAssets(null);
+    const fake = [{ w: 8, h: 8, bmp: document.createElement('canvas') }];
+    applyLibraryAssets({ icons: { shrub: fake }, custom: { Set1: { ruin: fake } }, rules: {} });
+    const installed = !!assetPack.icons.shrub && !!(assetPack.custom && assetPack.custom.Set1);
+    applyLibraryAssets({ icons: {}, custom: {}, rules: {}, dropIcons: ['shrub'], dropCustom: ['Set1::ruin'] });
+    out.bridgeRetires = installed && !assetPack.icons.shrub && !(assetPack.custom && assetPack.custom.Set1);
+    applyLibraryAssets(null);
+
+    // FIX 5: scatter priority is specificity-ordered, so the winner no longer depends on the order
+    // rules happened to be inserted into the table.
+    if (target != null) {
+      const broad = Object.assign(defaultScatterRule(), { key: 'BROAD', biomes: [], density: 1.0 });
+      const narrow = Object.assign(defaultScatterRule(), { key: 'NARROW', biomes: [target], density: 1.0 });
+      const keysIn = res => { const s = {}; for (const it of res.items) if (br[it.y * GW + it.x] === target) s[it.key] = 1; return Object.keys(s).sort().join(','); };
+      out.priorityStable = keysIn(run([broad, narrow])) === keysIn(run([narrow, broad]));
+      out.prioritySpecificWins = keysIn(run([broad, narrow])) === 'NARROW';
+    }
+    return out;
+  });
+
+  // FIX 6: the brush bounds its dart count, so a max-radius/max-density stamp can't blow a frame.
+  R.v127brush = await page.evaluate(() => {
+    const out = {}, saved = state.mapIcons.slice();
+    state.mapIcons.length = 0;
+    _carIconArmed = { fam: 'feature', slot: 'tree_conifer', set: undefined };
+    _carIconBrush.on = true; _carIconBrush.r = 60; _carIconBrush.density = 2.0;   // slider maxima
+    let lx = -1, ly = -1;
+    for (let y = 80; y < GH - 80 && lx < 0; y++) for (let x = 80; x < GW - 80; x++) if (field[y * GW + x] > state.seaLevel + 0.05) { lx = x; ly = y; break; }
+    const t0 = performance.now(); const n = _carIconBrushStamp(lx, ly); const ms = performance.now() - t0;
+    out.stillPaints = n > 0;
+    out.bounded = ms < 500;
+    out.allOnLand = state.mapIcons.every(ic => field[ic.y * GW + ic.x] > state.seaLevel);
+    state.mapIcons.length = 0; for (const ic of saved) state.mapIcons.push(ic);
+    _carIconBrush.on = false; _carIconArmed = null;
+    return out;
+  });
+
+  // ── v1.28: wire up the three families the Asset Library reserved but nothing ever drew ────────
+  // Before this pass, Settlement traits, Biome textures and Terrain textures all had Library storage,
+  // an inspector card and an export slot, but no render path: 'trait' was skipped by the pack manifest
+  // importer and never drawn beside a pin, and neither texture family appeared in PACK_TEX_SLOTS.
+  // These guards install distinctive synthetic art and assert the rendered pixels actually change.
+  R.v128 = await page.evaluate(() => {
+    const out = {};
+    const solid = (r, g, b, n) => { n = n || 8; const d = new Uint8ClampedArray(n * n * 4);
+      for (let i = 0; i < n * n; i++) { d[i*4] = r; d[i*4+1] = g; d[i*4+2] = b; d[i*4+3] = 255; }
+      return { w: n, h: n, data: d }; };
+    const px = (x, y) => { const d = document.getElementById('view').getContext('2d').getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2]]; };
+    const savedPack = assetPack;
+    let LX = -1, LY = -1;
+    for (let y = 40; y < GH - 40 && LX < 0; y++) for (let x = 40; x < GW - 40; x++) if (field[y*GW+x] > state.seaLevel + 0.08) { LX = x; LY = y; break; }
+    out.foundCell = LX >= 0;
+
+    // frozen-vocabulary alignment: a slot's index IS its CART_* paint value, so a length drift here
+    // would silently map art to the wrong biome/terrain
+    out.vocabAligned = PACK_BIOME_SLOTS.length === CART_BIOMES.length
+      && PACK_TERRAIN_SLOTS.length === CART_TERRAINS.length
+      && PACK_STRUCT_SLOTS.trait.length === CIV_TRAITS.length
+      && CIV_TRAITS.every(t => PACK_STRUCT_SLOTS.trait.includes(t.key));
+
+    if (LX >= 0) {
+      // BIOME texture: painted cell must take the texture's TRUE colour, not the flat palette swatch
+      const pb = getPaintLayer('biome');
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) pb[(LY+dy)*GW+(LX+dx)] = 2;   // Temperate Forest
+      _paintGen++; assetPack = null; _assetGen++; renderNow();
+      const bioFlat = px(LX, LY);
+      applyLibraryAssets({ biomes: { temperate_forest: solid(255, 0, 255) } }); renderNow();
+      const bioTex = px(LX, LY);
+      out.biomeTexture = (bioTex[0] - bioFlat[0]) > 40 && (bioTex[2] - bioFlat[2]) > 40;
+      // and removing the pack falls back to the flat swatch (keeps a pack-less world unchanged)
+      assetPack = null; _assetGen++; renderNow();
+      const back = px(LX, LY);
+      out.biomeFallback = Math.abs(back[0]-bioFlat[0]) < 3 && Math.abs(back[1]-bioFlat[1]) < 3 && Math.abs(back[2]-bioFlat[2]) < 3;
+      pb.fill(0); _paintGen++;
+
+      // TERRAIN texture: same, on the other painted layer
+      const pt = getPaintLayer('terrain');
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) pt[(LY+dy)*GW+(LX+dx)] = 1;   // Paved Road
+      _paintGen++; renderNow();
+      const terFlat = px(LX, LY);
+      applyLibraryAssets({ terrains: { paved: solid(0, 255, 255) } }); renderNow();
+      const terTex = px(LX, LY);
+      out.terrainTexture = (terTex[1] - terFlat[1]) > 40 && (terTex[2] - terFlat[2]) > 40;
+      pt.fill(0); _paintGen++; assetPack = null; _assetGen++; renderNow();
+    }
+
+    // _assetGen must participate in the bake/tile cache keys, or a freshly imported pack would only
+    // appear once some unrelated key component happened to change (the v0.86/v0.88 bug class)
+    const g0 = _assetGen; applyLibraryAssets({ biomes: {} });
+    out.assetGenBumps = _assetGen > g0;
+    out.assetGenInKeys = _lodRenderKey().split('|').length >= 12;
+
+    // TRAITS: 'administrative' was assigned by the economy code and had a Library slot, but was
+    // missing from CIV_TRAITS entirely, so it could never be toggled or drawn.
+    out.administrativeAdded = CIV_TRAITS.some(t => t.key === 'administrative');
+    out.traitFnsExist = typeof _traitSprite === 'function' && typeof _civDrawTraitBadges === 'function';
+    const cv = document.createElement('canvas'); cv.width = cv.height = 160; const cx = cv.getContext('2d');
+    const place = { x: 0, y: 0, kind: 'town', name: '', faction: 1, traits: [] };
+    const ink = c => { let n = 0; const d = c.getImageData(0, 0, 160, 160).data; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; };
+    cx.clearRect(0, 0, 160, 160); _civDrawSettlementPin(cx, 80, 80, place, false, { skipLabel: true });
+    const bare = ink(cx);
+    place.traits = ['fortified', 'mining', 'port'];
+    cx.clearRect(0, 0, 160, 160); _civDrawSettlementPin(cx, 80, 80, place, false, { skipLabel: true });
+    out.traitBadgesDrawn = ink(cx) > bare;
+    // with real trait art the badge uses the sprite rather than the glyph fallback
+    const red = document.createElement('canvas'); red.width = red.height = 8;
+    { const g = red.getContext('2d'); g.fillStyle = '#ff0000'; g.fillRect(0, 0, 8, 8); }
+    applyLibraryAssets({ structures: { trait: { fortified: [{ w: 8, h: 8, bmp: red }] } } });
+    place.traits = ['fortified'];
+    cx.clearRect(0, 0, 160, 160); _civDrawSettlementPin(cx, 80, 80, place, false, { skipLabel: true });
+    const d2 = cx.getImageData(0, 0, 160, 160).data; let redPx = 0;
+    for (let i = 0; i < d2.length; i += 4) if (d2[i] > 200 && d2[i+1] < 60 && d2[i+2] < 60) redPx++;
+    out.traitSpriteUsed = redPx > 0;
+
+    assetPack = savedPack; _assetGen++; renderNow();
+    return out;
+  });
+
+  /* ── v1.29: eight owner-reported bugs (river ways, zoom focal point, LOD seam/refine, 3D lakes) ── */
+  R.v129 = await page.evaluate(() => {
+    const out = {};
+
+    // B1 — every range input suppresses the touch long-press callout, not just the ones inside .row.
+    // `-webkit-touch-callout` is an iOS-Safari property that Chromium does not expose on
+    // getComputedStyle, so it is checked in the stylesheet instead; touch-action/user-select are
+    // standard and are checked on the resolved style of every real slider in the document.
+    { const ranges = [...document.querySelectorAll('input[type=range]')];
+      out.rangeCount = ranges.length;
+      out.rangesSuppressSelect = ranges.length > 0 && ranges.every(r => {
+        const cs = getComputedStyle(r);
+        return cs.touchAction === 'none' && (cs.userSelect === 'none' || cs.webkitUserSelect === 'none');
+      });
+      // Chromium does not implement -webkit-touch-callout, so it drops the declaration at parse time
+      // and neither getComputedStyle nor CSSRule.style can see it. Assert against the authored CSS
+      // source instead — the property only has to reach a real iOS browser, not this one.
+      const css = [...document.querySelectorAll('style')].map(s => s.textContent).join('\n');
+      out.calloutSuppressed = /(^|[^.\w])input\[type=range\]\s*\{[^}]*-webkit-touch-callout\s*:\s*none/m.test(css); }
+
+    // B2 — a receiver chain that jumps the world seam is split, never stroked across the map
+    { const W = 20;
+      const wrapped = [[{x:1.5,y:5.5},{x:2.5,y:5.5},{x:19.5,y:5.5},{x:18.5,y:5.5}]];
+      const s = splitRiverPolylines(wrapped, W, null);
+      out.seamSplit = s.length === 2 && s[0].length === 2 && s[1].length === 2;
+      const straight = [[{x:1.5,y:1.5},{x:2.5,y:1.5},{x:3.5,y:1.5}]];
+      out.seamNoOp = splitRiverPolylines(straight, W, null).length === 1
+                  && splitRiverPolylines(straight, W, null)[0].length === 3;
+      // B7 — the reach inside open water is dropped, the banks either side survive as separate runs
+      // (a run of fewer than 2 points is not a strokable line, so both sides need 2+ non-lake points)
+      const acrossLake = [[]]; for (let k = 0; k <= 8; k++) acrossLake[0].push({x:k+0.5,y:1.5});
+      const lake = p => p.x > 3 && p.x < 6;
+      const cut = splitRiverPolylines(acrossLake, W, lake);
+      out.lakeSplit = cut.length === 2 && cut.every(r => r.length >= 2 && r.every(p => !lake(p)))
+                   && cut[0][cut[0].length-1].x < 4 && cut[1][0].x > 5;
+    }
+
+    // B3 — on-screen river-way width no longer grows 1:1 with zoom
+    { const widths = [];
+      const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+      const probe = document.getElementById('view');
+      const before = probe.width;
+      // measure the formula directly at both camera conventions rather than re-rasterising
+      const baseW0 = Math.max(0.6, GW / 620);
+      const lodW = z => baseW0 * Math.sqrt(Math.max(1, z));          // under LOD: canvas px
+      const offW = z => baseW0 / Math.sqrt(Math.max(0.35, Math.min(5, z)));  // off LOD: grid units, CSS then scales by z
+      out.widthDampedLod = lodW(8) < baseW0 * 8 && lodW(8) > baseW0;                 // still grows, sub-linearly
+      out.widthDampedOff = (offW(4) * 4) < baseW0 * 4 && (offW(4) * 4) > baseW0;     // on-screen = offW*z
+      out.widthUnityAtZoom1 = Math.abs(lodW(1) - baseW0) < 1e-9 && Math.abs(offW(1) - baseW0) < 1e-9;
+      out.probeUntouched = probe.width === before; widths.length = 0; cv.width = 1;
+    }
+
+    // B4 — LOD zoom keeps the point under the cursor fixed instead of zooming about the centre
+    { const lc = document.getElementById('lodChk'); lc.checked = true; lc.dispatchEvent(new Event('change'));
+      _lodZoom = 2; _lodCx = GW / 2; _lodCy = GH / 2; renderNow();
+      const r = document.getElementById('view').getBoundingClientRect();
+      const cxp = r.left + r.width * 0.25, cyp = r.top + r.height * 0.25;   // a quarter in from the top-left
+      const worldAt = () => { const v = lodViewRect(); return [v.x0 + 0.25 * (v.x1 - v.x0), v.y0 + 0.25 * (v.y1 - v.y0)]; };
+      const [wx0, wy0] = worldAt();
+      const centreBefore = _lodCx;
+      _lodZoomAt(cxp, cyp, 2); renderNow();
+      const [wx1, wy1] = worldAt();
+      out.zoomHoldsCursor = Math.abs(wx1 - wx0) < 0.75 && Math.abs(wy1 - wy0) < 0.75;
+      out.zoomMovedCentre = Math.abs(_lodCx - centreBefore) > 0.5;   // proves it is not the old centre-zoom
+      // and a centred call still behaves exactly like the old centre-zoom
+      _lodZoom = 2; _lodCx = GW / 2; _lodCy = GH / 2;
+      _lodZoomAt(r.left + r.width / 2, r.top + r.height / 2, 2);
+      out.zoomCentreUnchanged = Math.abs(_lodCx - GW / 2) < 0.75 && Math.abs(_lodCy - GH / 2) < 0.75;
+    }
+
+    // B5 — the mobile joystick's LOD pan now schedules a refine (it never did), as does zoom-reset
+    { out.joyRefineWired = /scheduleLodRefine/.test(_sculptNavPanLoop.toString());
+      _lodZoom = 4; _lodCx = GW / 2; _lodCy = GH / 2;
+      if (_lodRefineTimer) { clearTimeout(_lodRefineTimer); _lodRefineTimer = null; }
+      document.getElementById('zoomReset').click();
+      out.resetSchedulesRefine = _lodRefineTimer != null;
+      if (_lodRefineTimer) { clearTimeout(_lodRefineTimer); _lodRefineTimer = null; }
+    }
+
+    // B5 — two adjacent tiles now agree at the world column they share (this WAS the seam).
+    // z=1 (two columns across the whole world) guarantees both tiles are in bounds and both contain
+    // ocean, which is where the per-tile sea-floor blur used to disagree.
+    { const z = 1, ts = 512, opts = lodTileOpts();
+      const { tileRGBA } = _lodBuildTileRGBA();
+      const A = pyramidTile(field, GW, GH, z, 0, 0, ts, opts), B = pyramidTile(field, GW, GH, z, 1, 0, ts, opts);
+      const bA = pyramidTileBounds(GW, GH, z, 0, 0), bB = pyramidTileBounds(GW, GH, z, 1, 0);
+      const rA = tileRGBA(A.data, A.w, A.h, bA.x, bA.y, bA.w, bA.h);
+      const rB = tileRGBA(B.data, B.w, B.h, bB.x, bB.y, bB.w, bB.h);
+      const colMAD = (p, xp, q, xq) => { let s = 0, n = 0;
+        for (let y = 0; y < A.h; y += 2) { const a = (y * A.w + xp) * 4, b = (y * B.w + xq) * 4;
+          s += Math.abs(p[a] - q[b]) + Math.abs(p[a+1] - q[b+1]) + Math.abs(p[a+2] - q[b+2]); n++; }
+        return s / n; };
+      const shared = colMAD(rA, A.w - 1, rB, 0);
+      const interior = (colMAD(rA, A.w - 2, rA, A.w - 1) + colMAD(rB, 0, rB, 1)) / 2;
+      out.seamShared = +shared.toFixed(3); out.seamInterior = +interior.toFixed(3);
+      out.tilesSeamless = shared <= Math.max(1.0, interior);   // the shared column is no worse than ordinary neighbours
+    }
+
+    // B6 — the 3D height source flattens inland lakes to their pooled surface, not just the ocean
+    { const wb = currentWaterBodies();
+      let li = -1; for (let i = 0; i < wb.length; i++) if (wb[i] === 2 && _lakeFill[i] > field[i] + 1e-4) { li = i; break; }
+      out.foundLake = li >= 0;
+      state.view3d.flatSea = true; state.viz.showLakes = true;
+      const flat = _v3dHeightSource();
+      out.lakeFlattened = li < 0 ? true : Math.abs(flat[li] - _lakeFill[li]) < 1e-6 && flat[li] > field[li];
+      out.notInPlace = flat !== field || li < 0;                 // never mutates the real heightmap
+      state.view3d.flatSea = false;
+      out.offReturnsField = _v3dHeightSource() === field;        // toggle off ⇒ untouched, zero allocation
+      state.view3d.flatSea = true;
+      state.viz.showLakes = false;
+      out.showLakesOffRespected = _v3dHeightSource() === field;  // contradicting the 2D map is not allowed
+      state.viz.showLakes = true;
+    }
+
+    // B7 — a cell the lake floods sub-cell is treated as water by the settlement snap
+    { const wb = currentWaterBodies();
+      let lx = -1, ly = -1;
+      for (let y = 1; y < GH - 1 && lx < 0; y++) for (let x = 1; x < GW - 1; x++) {
+        const i = y * GW + x; if (wb[i] !== 0) continue;
+        if (_civLakeFlooded(x, y, wb)) { lx = x; ly = y; break; }
+      }
+      out.foundFloodBand = lx >= 0;
+      out.floodBandIsWet = lx < 0 ? true : (_civSnapLand(lx, ly, 12) == null || (_civSnapLand(lx, ly, 12)[0] !== lx || _civSnapLand(lx, ly, 12)[1] !== ly));
+    }
+
+    { const lc = document.getElementById('lodChk'); lc.checked = false; lc.dispatchEvent(new Event('change')); }
+    return out;
+  });
+
+  /* ── v1.30: one suitability function (view == placer), flood wired in, per-settlement trade ── */
+  R.v130 = await page.evaluate(async () => {
+    const out = {};
+    // the second, divergent scorer is gone — nothing may reintroduce a private copy
+    out.extendedRetired = (typeof _civExtendedSuitability === 'undefined');
+    out.oneThreshold = typeof SETTLE_SEED_THRESH === 'number';
+
+    // the advisory seeds the debug view draws ARE the candidates auto-populate scores from:
+    // same field object, same threshold
+    const fieldA = currentSettlementSuitability(), fieldB = currentSettlementSuitability();
+    out.sameFieldObject = fieldA === fieldB;                       // cached, so the view and placer cannot drift
+    const seedsView = findSettlementSeeds(fieldA, GW, GH, { thresh: SETTLE_SEED_THRESH });
+    out.seedCount = seedsView.length;
+    out.seedsExist = seedsView.length > 0;
+
+    // flood is now a real term: high-flood cells score below otherwise-identical dry ones
+    { const flood = currentFloodField();
+      let wet = -1, dry = -1;
+      for (let i = 0; i < flood.length && (wet < 0 || dry < 0); i++) {
+        if (field[i] < state.seaLevel) continue;
+        if (flood[i] > 0.75 && wet < 0) wet = i;
+        if (flood[i] < 0.15 && dry < 0) dry = i;
+      }
+      out.foundFloodPair = wet >= 0 && dry >= 0;
+      // measured through the pure function so the comparison isolates the flood term
+      if (wet >= 0) {
+        const n = GW * GH, zero = new Float32Array(n), ones = new Float32Array(n).fill(1);
+        const slopeN = new Float32Array(n).fill(0.5);
+        const K = currentCarryingCapacity(), Wa = currentWaterAccess(), So = currentSoil();
+        const a = buildSettlementSuitability(So, Wa, K, field, slopeN, GW, GH, state.seaLevel, { ctx: { flood: zero } });
+        const b = buildSettlementSuitability(So, Wa, K, field, slopeN, GW, GH, state.seaLevel, { ctx: { flood: ones } });
+        out.floodPenalises = b[wet] < a[wet];
+      }
+    }
+
+    // per-settlement trade: derived from this settlement's own hinterland/specialisation/food,
+    // not copied from its faction
+    { const places = (state.places || []).filter(p => p && p.category === 'settlement');
+      out.havePlaces = places.length > 0;
+      if (places.length) {
+        const trades = places.map(p => _civPlaceTrade(p));
+        out.anyTrade = trades.some(t => t.exports.length || t.imports.length);
+        out.noGoodBothWays = trades.every(t => t.exports.every(k => t.imports.indexOf(k) < 0));
+        out.everyTradeHasBasis = trades.every(t => (!t.exports.length && !t.imports.length) || t.basis.length > 0);
+        // …and it is genuinely per-settlement: at least two settlements disagree, OR there is only one
+        const sigs = new Set(trades.map(t => t.exports.join('|') + '/' + t.imports.join('|')));
+        out.variesBySettlement = places.length < 2 || sigs.size > 1;
+        // a settlement with a specialisation exports its primary good
+        const spec = places.find(p => p.specialisation && p.specialisation !== 'none' && _CIV_SPEC_EXPORT[p.specialisation]);
+        out.specExports = !spec || _civPlaceTrade(spec).exports.indexOf(_CIV_SPEC_EXPORT[spec.specialisation]) >= 0;
+        // the inspector actually renders it
+        const html = _civFormatPlaceInsp(places[0]);
+        out.inspectorRenders = typeof html === 'string' && /Exports|Prosperity/.test(html);
+      }
+    }
+    return out;
+  });
+
+  /* ---- v1.31: resource vocabulary + crustal-abundance scarcity, charcoal-limited iron, the §9 trade
+     checklist, §8 archetypes, §6 pastoral/arable tension, §7 navigability, §10.7 subsistence density.
+     All civ-layer (block 2) or opts-gated block-1 additions, so this is the smoke suite's job, not the
+     headless one. Runs against the world the earlier blocks already generated and auto-populated. ---- */
+  R.v131 = await page.evaluate(async () => {
+    const o = {};
+    // vocabulary grew, append-only (the original six keep their indices)
+    o.keyCount = RESOURCE_KEYS.length;
+    o.appendOnly = ['copper','tin','iron','gold','salt','timber'].every((k, i) => RESOURCE_KEYS[i] === k);
+    o.namesAligned = RESOURCE_NAMES.length === RESOURCE_KEYS.length && RESOURCE_COLS.length === RESOURCE_KEYS.length;
+    o.civKeysTrack = CIV_RESOURCE_KEYS.length === RESOURCE_KEYS.length;
+    // §10.1 scarcity: the cut is monotonic in crustal abundance, so tin is scarcer than copper than iron
+    o.cutIron = resourceScarcityCut('iron'); o.cutCopper = resourceScarcityCut('copper');
+    o.cutTin = resourceScarcityCut('tin');   o.cutGold = resourceScarcityCut('gold');
+    o.scarcityOrdered = o.cutGold < o.cutTin && o.cutTin < o.cutCopper && o.cutCopper < o.cutIron;
+    o.cutsBounded = [o.cutIron, o.cutGold].every(v => v > 0 && v <= 0.45);
+    // applyResourceScarcity only ever removes, never invents
+    (() => {
+      const W = 8, H = 8, n = W * H, fld = new Float32Array(n).fill(1), a = new Float32Array(n);
+      for (let i = 0; i < n; i++) a[i] = i / n;
+      const before = Array.from(a);
+      applyResourceScarcity(a, fld, W, H, 0.42, 0.25);
+      let invented = 0, kept = 0;
+      for (let i = 0; i < n; i++) { if (a[i] > 0 && before[i] === 0) invented++; if (a[i] > 0) kept++; }
+      o.scarcityNeverInvents = invented === 0;
+      o.scarcityThins = kept < n && kept > 0;
+      o.scarcityKeepsStrongest = a[n - 1] > 0 && a[0] === 0;
+    })();
+    // the new fields exist on a real world and are finite + in range
+    const pots = currentResourcePotentials(), nn = GW * GH;
+    o.allFieldsPresent = RESOURCE_KEYS.every(k => pots[k] && pots[k].length === nn);
+    o.allFinite = RESOURCE_KEYS.every(k => { const a = pots[k]; for (let i = 0; i < nn; i++) if (!isFinite(a[i]) || a[i] < 0 || a[i] > 1) return false; return true; });
+    // scarce resources genuinely occupy less of the map than common ones
+    const share = k => { let c = 0, land = 0; for (let i = 0; i < nn; i++) { if (field[i] < state.seaLevel) continue; land++; if (pots[k][i] > 0.25) c++; } return land ? c / land : 0; };
+    o.shareObsidian = share('obsidian'); o.shareClay = share('clay'); o.shareSilver = share('silver');
+    o.rarityShowsOnMap = o.shareObsidian < o.shareClay && o.shareSilver < o.shareClay;
+    // the channel atlas covers every key (the frozen-literal bug this version fixed)
+    const groups = channelAtlasGroups(); const atlasKeys = new Set();
+    for (const g of groups) for (const c of g.channels) atlasKeys.add(c.key);
+    o.atlasCoversAll = RESOURCE_KEYS.every(k => atlasKeys.has(k));
+    // world means: no NaN (mkResMap was a frozen six-key literal indexed with fifteen keys)
+    const agg = _civFactionAggregates();
+    o.worldMeanNoNaN = RESOURCE_KEYS.every(k => isFinite(agg.worldMeanResource[k]));
+    // §10.7 subsistence density
+    o.modeOrdered = SUBSISTENCE_MODES.every((m, i) => i === 0 || m.lo >= SUBSISTENCE_MODES[i - 1].lo);
+    o.modeOcean = subsistenceModeAt(0.9, 1, 0, 0.9) === 0;
+    o.modeIntensive = subsistenceModeAt(0.9, 0.9, 5, 0.9) === 3;
+    o.modeMarginal = subsistenceModeAt(0.02, 0.05, 5, 0.05) === 0;
+    o.densityMonotonic = agrarianDensityKm2(0.9, 0.9, 5, 0.9) > agrarianDensityKm2(0.2, 0.2, 5, 0.2);
+    // the normalisation holds the world total at the pre-v1.31 K x AGRARIAN_MAX_KM2 basis
+    (() => {
+      const dens = currentAgrarianDensity(), K = currentCarryingCapacity();
+      let a = 0, b = 0; for (let i = 0; i < nn; i++) { if (field[i] < state.seaLevel) continue; a += dens[i]; b += K[i] * AGRARIAN_MAX_KM2; }
+      o.densityTotalPreserved = b > 0 && Math.abs(a - b) / b < 0.001;
+      // but the DISTRIBUTION genuinely changed - density is no longer a fixed multiple of K
+      let ratios = []; for (let i = 0; i < nn; i += 97) { if (field[i] < state.seaLevel || K[i] < 0.05) continue; ratios.push(dens[i] / K[i]); }
+      o.densityVaries = ratios.length > 4 && (Math.max(...ratios) - Math.min(...ratios)) > 1;
+    })();
+    // §10.2/§10.3 charcoal-limited iron
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    o.ratioSane = CHARCOAL_PER_IRON_KG > 5 && CHARCOAL_PER_IRON_KG < 8 && CHARCOAL_KG_PER_HA_YR < CHARCOAL_KG_PER_HA_YR_MAX;
+    if (places.length) {
+      const sm = places.map(p => _civPlaceSmelting(p));
+      o.smeltFinite = sm.every(x => isFinite(x.ironKgYr) && isFinite(x.charcoalKgYr) && x.ironKgYr >= 0);
+      o.smeltIsMin = sm.every(x => x.ironKgYr <= x.oreKgYr * ORE_TO_BLOOM_RECOVERY + 1e-6 && x.ironKgYr <= x.charcoalKgYr / CHARCOAL_PER_IRON_KG + 1e-6);
+      o.smeltLabels = sm.every(x => x.limitedBy === 'ore' || x.limitedBy === 'fuel');
+      /* v1.60: "at least one settlement is fuel-limited" is a statistical property of whatever world
+         happens to be ambient at this point in the long sequential smoke run (currently the v1.11
+         submap-resample leftover: seed 55555, resW 512, mapWidthKm~400) — the crater/volcano radius
+         ceiling clamp (v1.60 Stage A: a single crater/volcano can no longer balloon past ~12% of the
+         grid, a universal, non-scale-gated correctness fix) legitimately reshaped that seed's geology
+         enough to move every iron settlement to ore-limited. Not a terrain-generation regression: an
+         independent probe (seed 12345, resW 256, mapWidthKm 800 — the same seed this feature's own
+         CHANGELOG entry was verified against) reproduces "2 of 3 iron settlements fuel-limited" on
+         BOTH v1.59 and v1.60. Isolate the measurement on that dedicated fresh world instead of relying
+         on fragile shared ambient state, the same test-isolation discipline v1.24 BUG-3 / v1.46 / v1.58
+         already established for this exact "small fixed sample is fragile to noise" failure shape.
+         v1.78: the isolation above was itself incomplete — it never saved/restored
+         `state.world_structure.enabled`, which an earlier, unrelated World Structure archetype smoke
+         block leaves `true`. That drives `state.seaLevel` to 0.482 (via `applyWorldStructureSeaLevel`)
+         instead of the default 0.42 and perturbs tectonic params via `deriveFromWorldStructure`, which
+         reshapes this seed's geology enough to move every iron settlement off fuel-limited — the exact
+         same "ambient state leaks into an 'isolated' test" shape this comment already warns about, one
+         flag deeper. Now forced off for the duration, restored afterward. */
+      {
+        const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+        const savedWS = state.world_structure.enabled;
+        try {
+          state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+          state.world_structure.enabled = false;
+          await generate();
+          state.places = []; _civIterativeAutoWorld(3);
+          const fuelPlaces = (state.places || []).filter(p => p && p.category === 'settlement');
+          const fuelSm = fuelPlaces.map(p => _civPlaceSmelting(p));
+          o.someFuelLimited = fuelSm.some(x => x.ironKgYr > 0 && x.limitedBy === 'fuel');
+        } finally {
+          state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+          state.tect.seed = savedSeed; state.world_structure.enabled = savedWS; await generate();
+          state.places = savedPlaces;
+        }
+      }
+      o.coppiceScales = sm.every(x => x.ironKgYr === 0 || x.coppiceHaNeeded > 0);
+      // §9 checklist + §8 archetype + §6 + §7
+      const tr = places.map(p => _civPlaceTrade(p));
+      o.checklistShape = tr.every(t => t.checklist.length === CIV_TRADE_CATEGORIES.length &&
+        t.checklist.every(c => typeof c.met === 'boolean' && ['critical','important','ordinary'].indexOf(c.severity) >= 0));
+      o.noGoodBothWays = tr.every(t => t.exports.every(g => t.imports.indexOf(g) < 0));
+      o.archetypesValid = tr.every(t => t.archetype === null || CIV_SETTLEMENT_ARCHETYPES.some(a => a.key === t.archetype));
+      o.someArchetype = tr.some(t => t.archetype !== null);
+      // §6: shares are fractions, manure uplift bounded, mode labelled
+      o.pastoralShapes = tr.every(t => !t.pastoral || (t.pastoral.pastureShare >= 0 && t.pastoral.pastureShare <= 1 &&
+        t.pastoral.cropShare >= 0 && t.pastoral.cropShare <= 1 && t.pastoral.manureUplift >= 0 &&
+        t.pastoral.manureUplift <= MANURE_MAX_UPLIFT && ['arable','pastoral','mixed'].indexOf(t.pastoral.mode) >= 0));
+      o.pastoralSharesDisjoint = tr.every(t => !t.pastoral || t.pastoral.pastureShare + t.pastoral.cropShare <= 1.001);
+      // §7: bulk goods without navigable water can only reach 'local'; luxuries always reach far
+      o.navShapes = tr.every(t => t.navigability && ['sea','river','stream','none'].indexOf(t.navigability.kind) >= 0);
+      o.bulkGatedByWater = tr.every(t => t.exports.every(g => {
+        const r = t.reach[g];
+        if (CIV_GOOD_LUXURY[g]) return r === 'long';
+        if (CIV_GOOD_BULK[g] && !t.navigability.navigable) return r === 'local';
+        return ['local','regional','long'].indexOf(r) >= 0;
+      }));
+      o.luxuryAlwaysTravels = _civGoodReach('gems', { navigable: false, kind: 'none' }) === 'long';
+      o.bulkNeedsWater = _civGoodReach('grain', { navigable: false, kind: 'none' }) === 'local' &&
+                         _civGoodReach('grain', { navigable: true, kind: 'sea' }) === 'long';
+    }
+    return o;
+  });
+
+  /* ---- v1.32: overlay scroll guard, faction export thresholds, real-km coastal/river detection,
+     Explore opening the anchored popup instead of the fullscreen viewer. ---- */
+  R.v132 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+
+    // A: an overlay layered over the canvas must not have its wheel eaten by the map zoom handler
+    o.guardExists = typeof _overCanvasOverlay === 'function';
+    if (o.guardExists) {
+      const ob = document.getElementById('onboard');
+      const card = ob && ob.querySelector('.card');
+      o.gateIsCanvasChild = !!(ob && ob.closest('.canvas-wrap'));
+      o.gateCardScrollable = !!(card && getComputedStyle(card).overflowY === 'auto');
+      o.guardMatchesGate = !!(card && _overCanvasOverlay({ target: card }));
+      o.guardIgnoresCanvas = !_overCanvasOverlay({ target: document.getElementById('view') });
+    }
+
+    // B: faction exports must be reachable. The old rule needed territoryMean - worldMean > 0.15
+    // absolute, which after v1.31's scarcity thinning no faction could ever satisfy.
+    let agg = _civFactionAggregates();
+    o.territoryCells0 = agg.byFaction.reduce((s2, f) => s2 + (f.territoryCells || 0), 0);
+    /* A faction with no territory has a resource mean of 0 for everything, so "exports nothing" is the
+       CORRECT answer and the export rule is untested. Generate territories first if this world has
+       none, so the assertion is measuring the threshold rather than an empty polity. */
+    if (!o.territoryCells0) {
+      const tb = document.getElementById('civAutoPolityBtn');
+      if (tb) { tb.click(); await new Promise(r => setTimeout(r, 2500)); }
+      if (typeof _civAggGen !== 'undefined') _civAggGen++;
+      agg = _civFactionAggregates();
+    }
+    o.territoryCells = agg.byFaction.reduce((s2, f) => s2 + (f.territoryCells || 0), 0);
+    o.nFactions = agg.byFaction.length;
+    o.factionsWithExports = agg.byFaction.filter(f => f.exports && f.exports.length).length;
+    /* 'food' comes from the food-surplus branch, not the resource-threshold branch, so counting it
+       would let this assertion pass without ever exercising the rule the owner reported broken. */
+    o.factionsWithResourceExports = agg.byFaction.filter(f => (f.exports || []).some(k => k !== 'food')).length;
+    o.factionsWithImports = agg.byFaction.filter(f => f.imports && f.imports.length).length;
+    o.exportsAreValidKeys = agg.byFaction.every(f => (f.exports || []).every(k => k === 'food' || CIV_RESOURCE_KEYS.indexOf(k) >= 0));
+    o.noGoodBothWays = agg.byFaction.every(f => (f.exports || []).every(k => (f.imports || []).indexOf(k) < 0));
+
+    // D/E: coastal + river classification must agree with the authoritative distance fields
+    if (places.length) {
+      let wrongCoastal = 0, badRiver = 0, kinds = {};
+      for (const p of places) {
+        const k = _umSiteKindFromTerrain(p); kinds[k] = (kinds[k] || 0) + 1;
+        const sp = _umSiteProfile(p);
+        if (!sp) continue;
+        const coastal = (k === 'coast' || k === 'bay' || k === 'riverthrough');
+        // a town called coastal whose chamfer-DT coast distance is many box-lengths away is the bug
+        if (coastal && isFinite(sp.coastDistKm) && sp.coastDistKm > _umWaterNearKm() * 4) wrongCoastal++;
+        // an order/width filled in for a river that is nowhere near is the 618km readout
+        if (sp.riverOrder > 0 && isFinite(sp.riverDistKm) && sp.riverDistKm > UM_RIVER_CONTEXT_KM) badRiver++;
+      }
+      o.kinds = kinds; o.wrongCoastal = wrongCoastal; o.badRiver = badRiver;
+      o.profileFinite = places.every(p => { const sp = _umSiteProfile(p); return !sp ||
+        (isFinite(sp.buildableFrac) && sp.buildableFrac >= 0 && sp.buildableFrac <= 1 &&
+         isFinite(sp.slopeN) && sp.slopeN >= 0 && (sp.riverOrder === 0 || isFinite(sp.riverDistKm))); });
+      // the thresholds are real-km, so they must not change when only the grid resolution does
+      o.boxKmSane = _umSiteBoxKm() > 0.5 && _umSiteBoxKm() < 5 && _umWaterNearKm() > _umSiteBoxKm();
+    }
+
+    // C: an Explore pin hit opens the anchored popup (with the city card on top), not the fullscreen modal
+    if (places.length) {
+      const p = places[0];
+      _civSelectedPlace = p; _civSelectedRowRefs = null;
+      _civOpenPlacePopup();
+      const el = document.getElementById('placeEditPopup');
+      o.popupOpens = !!(el && el.style.display === 'block');
+      o.popupHasCityCard = !!(el && el.querySelector('#peCityPreview'));
+      o.popupHasCityButton = !!(el && el.querySelector('#peCityOpen'));
+      o.popupHasEditableFields = !!(el && el.querySelector('#placeEditPopupBody input'));
+      const modal = document.getElementById('cityViewerModal');
+      o.fullscreenNotForced = !modal || getComputedStyle(modal).display === 'none';
+      if (el) el.style.display = 'none';
+      _civSelectedPlace = null;
+    }
+    return o;
+  });
+
+  /* ---- v1.33: one shared trade rule across every reporting surface, plus the food-shed ceiling ---- */
+  R.v133 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+
+    // AUDIT: the settlement rule and the faction rule must be the SAME rule, not two copies
+    o.sharedRuleExists = typeof _civResourceTradeBalance === 'function';
+    if (o.sharedRuleExists) {
+      const agg = _civFactionAggregates(), wm = agg.worldMeanResource;
+      // a mean well above the world mean exports; well below imports; identical means do neither
+      const hi = {}, lo = {}, same = {};
+      for (const k of CIV_RESOURCE_KEYS) { hi[k] = (wm[k] || 0) * 3 + 0.5; lo[k] = 0; same[k] = wm[k] || 0; }
+      const bHi = _civResourceTradeBalance(hi, wm), bLo = _civResourceTradeBalance(lo, wm), bSame = _civResourceTradeBalance(same, wm);
+      o.ruleExportsWhenRich = bHi.exports.length > 0 && bHi.imports.length === 0;
+      o.ruleImportsWhenPoor = bLo.imports.length > 0 && bLo.exports.length === 0;
+      o.ruleNeutralWhenAverage = bSame.exports.length === 0;
+      // and the settlement path must agree with the shared rule on the same inputs
+      if (places.length) {
+        const p = places[0], rc = _civPlaceResourceContext(p);
+        const direct = _civResourceTradeBalance(rc.mean, wm);
+        const viaTrade = _civPlaceTrade(p);
+        o.settlementUsesSharedRule = direct.exports.every(k => viaTrade.exports.indexOf(k) >= 0);
+      }
+    }
+
+    // FOOD SHED: transport decay must follow the cost model, water must beat land
+    o.decayLand50 = _civFoodDeliverable(50, 'land');
+    o.decayLand300 = _civFoodDeliverable(300, 'land');
+    o.decaySea800 = _civFoodDeliverable(800, 'sea');
+    o.decayLand800 = _civFoodDeliverable(800, 'land');
+    o.decayMonotonic = _civFoodDeliverable(10, 'land') > _civFoodDeliverable(100, 'land');
+    o.waterBeatsLand = o.decaySea800 > o.decayLand800 && _civFoodDeliverable(400, 'river') > _civFoodDeliverable(400, 'land');
+    o.decayHalvesAtDoubleKm = Math.abs(_civFoodDeliverable(FOOD_DOUBLE_KM.land, 'land') - 0.5) < 1e-6;
+    o.modePicksCheapest = _civFoodMode({ kind: 'sea' }, { kind: 'sea' }) === 'sea' &&
+                          _civFoodMode({ kind: 'sea' }, { kind: 'none' }) === 'land' &&
+                          _civFoodMode({ kind: 'river' }, { kind: 'sea' }) === 'river';
+
+    if (places.length) {
+      const sheds = places.map(p => _civFoodShed(p));
+      o.shedsFinite = sheds.every(f => isFinite(f.supported) && f.supported >= 0 &&
+        isFinite(f.localCapacity) && isFinite(f.hinterlandCapacity) && isFinite(f.importCapacity));
+      o.shedSumsCorrectly = sheds.every(f => Math.abs(f.supported - (f.localCapacity + f.hinterlandCapacity + f.importCapacity)) < 1);
+      // the hinterland (countryside) must actually contribute — an earlier cut counted only other
+      // settlements' surplus and crushed every capital to its own catchment disc
+      o.hinterlandContributes = sheds.some(f => f.hinterlandCapacity > 0);
+      // after the reconciliation pass every settlement must be within its shed, and the pass must be
+      // a fixed point (running it again changes nothing)
+      /* Run the pass FIRST: this smoke world's settlements may not have come through the
+         auto-populate path that applies it, so asserting sustainability before running it would be
+         testing the placement, not the reconciliation. Then assert it converged AND is idempotent. */
+      _civApplyFoodShedCeilings();
+      /* A settlement may legitimately sit above its shed if the shed supports fewer than the pass's
+         floor (FOOD_SHED_MIN_POP) — the pass deliberately will not cap a place out of existence, so
+         "sustainable" has to allow for that rather than treating the floor as a failure. */
+      const withinShed = p => { const f = _civFoodShed(p); return f.sustainable || (p.pop || 0) <= FOOD_SHED_MIN_POP; };
+      o.allSustainable = places.every(withinShed);
+      o.flooredCount = places.filter(p => !_civFoodShed(p).sustainable).length;
+      const again = _civApplyFoodShedCeilings();
+      o.passIsFixedPoint = again.length === 0;
+      o.stillSustainable = places.every(withinShed);
+      // a deficit is only reported as an import when something can actually deliver it
+      o.deficitNotAutoImport = places.every(p => {
+        const t = _civPlaceTrade(p);
+        if (t.imports.indexOf('food') < 0) return true;
+        return !t.foodShed || t.foodShed.importCapacity > 0 || t.foodShed.hinterlandCapacity > 0;
+      });
+    }
+    return o;
+  });
+
+  /* ---- v1.34: surplus derived from the 9:1 farmer ratio + soil, and the chain proven acyclic ---- */
+  R.v134 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+
+    // PARAMETERS: every figure traceable to the research note
+    o.farmersPerUrbanite = FARMERS_PER_URBANITE;
+    o.yieldRange = [GRAIN_YIELD_MIN_KG_HA, GRAIN_YIELD_MAX_KG_HA];
+    o.doubleKm = { land: FOOD_DOUBLE_KM.land, river: FOOD_DOUBLE_KM.river, sea: FOOD_DOUBLE_KM.sea };
+    o.paramsSane = FARMERS_PER_URBANITE === 9 &&
+      GRAIN_YIELD_MIN_KG_HA === 470 && GRAIN_YIELD_MAX_KG_HA === 1000 &&
+      FOOD_DOUBLE_KM.land === 160 &&
+      Math.abs(FOOD_DOUBLE_KM.river / FOOD_DOUBLE_KM.land - 5.5) < 0.01 &&
+      Math.abs(FOOD_DOUBLE_KM.sea / FOOD_DOUBLE_KM.land - 50) < 0.01 &&
+      FOOD_LOCAL_RADIUS_KM === 50 && GRAIN_YIELD_RATIO_TYPICAL === 4.34;
+    // one source of truth for yield (v1.31's lone 500 kg/ha alias is now derived from the range)
+    o.yieldUnified = Math.abs(grainKgPerHaMedieval() - (GRAIN_YIELD_MIN_KG_HA + GRAIN_YIELD_MAX_KG_HA) / 2) < 1e-9;
+
+    // SURPLUS: median land reproduces 1/9 exactly; marginal land yields nothing; rich land is capped
+    const ref = currentSoilReference();
+    o.soilRef = ref;
+    o.surplusAtMedian = foodSurplusRatio(ref, ref);
+    o.medianIsBaseline = Math.abs(o.surplusAtMedian - 1 / FARMERS_PER_URBANITE) < 1e-9;
+    o.marginalYieldsNothing = foodSurplusRatio(0, ref) === 0 || ref <= 0.001;
+    o.richIsCapped = foodSurplusRatio(1, ref) <= FOOD_SURPLUS_RATIO_MAX + 1e-9;
+    o.surplusMonotonic = foodSurplusRatio(Math.min(1, ref + 0.3), ref) > foodSurplusRatio(ref, ref) - 1e-9;
+    // calibration must follow the world's own soil, not assume a 0.5 midpoint (the v1.34 first-cut bug)
+    o.calibratesToWorld = Math.abs(foodSurplusRatio(0.2, 0.2) - foodSurplusRatio(0.8, 0.8)) < 1e-9;
+
+    if (places.length) {
+      // ACYCLIC: a settlement's own population must never change its own food supply. This is the
+      // "don't let it feed itself" property — terrain -> rural pop -> surplus -> urban ceiling, one way.
+      const p = places.slice().sort((a, b) => (b.pop || 0) - (a.pop || 0))[0];
+      const before = _civFoodShed(p);
+      const origPop = p.pop;
+      p.pop = origPop * 10;
+      const after = _civFoodShed(p);
+      p.pop = origPop;
+      o.ownPopDoesNotFeedItself = Math.abs(after.supported - before.supported) < 1e-6 &&
+                                  Math.abs(after.hinterlandCapacity - before.hinterlandCapacity) < 1e-6 &&
+                                  Math.abs(after.localCapacity - before.localCapacity) < 1e-6;
+      // and growing a settlement must not raise ANOTHER settlement's ceiling (no mutual inflation)
+      if (places.length > 1) {
+        const q = places.find(x => x !== p);
+        const qBefore = _civFoodShed(q).supported;
+        p.pop = origPop * 10;
+        const qAfter = _civFoodShed(q).supported;
+        p.pop = origPop;
+        o.growthDoesNotInflateNeighbours = qAfter <= qBefore + 1e-6;
+      }
+      // the ceiling pass is monotonically non-increasing — it may only ever cap, never grow
+      const popsBefore = places.map(x => x.pop || 0);
+      _civApplyFoodShedCeilings();
+      o.passNeverGrows = places.every((x, k) => (x.pop || 0) <= popsBefore[k] + 1e-9);
+      // urbanisation lands in the historically observed 5-20% band rather than ballooning
+      const rp = _civRegionalPopulation ? _civRegionalPopulation() : null;
+      const settled = places.reduce((a, x) => a + (x.pop || 0), 0);
+      o.urbanShare = rp && rp.total ? settled / rp.total : null;
+      /* Bounded, not pinned to the historical band: by this point ~340 earlier assertions have
+         resampled, extracted and otherwise mutated this world, so its soil/terrain is not a clean
+         sample to measure urbanisation against. The strict 5-20% band is checked on a freshly
+         generated world by tests/perf/probe_foodshed.js instead. What must hold HERE is that the
+         ceiling pass bounds the settled population at all. */
+      const popsAfter = places.reduce((a, x) => a + (x.pop || 0), 0);
+      o.urbanShareBounded = o.urbanShare == null || (o.urbanShare > 0 && o.urbanShare < 1.0);
+      o.passReducesOrHolds = popsAfter <= popsBefore.reduce((a, b) => a + b, 0) + 1e-9;
+    }
+    return o;
+  });
+
+  /* ---- v1.35: water access must agree with the terrain and with attached sea lanes ---- */
+  R.v135 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    o.cellKm = (state.mapWidthKm || 800) / GW;
+    // every water threshold must be expressible on this grid — below one cell it is unsatisfiable
+    o.reachKm = _umWaterReachKm();
+    o.reachAtLeastOneCell = o.reachKm >= o.cellKm;
+    if (places.length) {
+      let mismatch = 0, kinds = {}, noBasis = 0;
+      for (const p of places) {
+        const nav = _civPlaceNavigability(p), sk = _umSiteKindFromTerrain(p);
+        kinds[nav.kind] = (kinds[nav.kind] || 0) + 1;
+        if (!nav.basis) noBasis++;
+        // a settlement the terrain calls coastal/riverine must never report "no water"
+        if ((sk === 'coast' || sk === 'bay' || sk === 'riverthrough' || sk === 'river') && nav.kind === 'none') mismatch++;
+      }
+      o.kinds = kinds; o.mismatch = mismatch; o.everyKindHasBasis = noBasis === 0;
+      // riverOrder must actually populate — the v1.34 gate was finer than a cell, so it was always 0
+      o.riverOrdersNonZero = places.filter(p => { const sp = _umSiteProfile(p); return sp && sp.riverOrder > 0; }).length;
+      // an attached sea lane is decisive, whatever the distance fields round to
+      const p0 = places[0];
+      const ways = (typeof civWays !== 'undefined' && civWays) ? civWays : (state.ways || []);
+      ways.push({ sea: true, type: 'sea-lane', pts: [{ x: p0.x, y: p0.y }, { x: p0.x + 20, y: p0.y + 20 }], km: 60 });
+      const withLane = _civPlaceNavigability(p0);
+      ways.pop();
+      o.seaLaneWins = withLane.kind === 'sea' && withLane.basis === 'sea route';
+      // and a lane that does NOT touch the settlement must not count
+      ways.push({ sea: true, type: 'sea-lane', pts: [{ x: p0.x + 900, y: p0.y + 900 }, { x: p0.x + 950, y: p0.y + 950 }], km: 60 });
+      const farLane = _civPlaceNavigability(p0);
+      ways.pop();
+      o.farLaneIgnored = farLane.kind !== 'sea' || farLane.basis !== 'sea route';
+    }
+    return o;
+  });
+
+  /* ---- v1.36: water-edge placement + natural-corridor (crossroads) attraction ---- */
+  R.v136 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    const sea = state.seaLevel, flood = currentFloodField(), wb = currentWaterBodies();
+    const flowHi = GW * GH * 0.0004;
+    const wet = (x, y) => { if (x < 0 || y < 0 || x >= GW || y >= GH) return false; const i = y * GW + x;
+      return field[i] < sea || (wb && wb[i] === 2) || (flowField && flowField[i] > flowHi); };
+
+    // the snap must never place a settlement in water or in the channel bottom
+    if (places.length) {
+      o.noneInWater = places.every(p => { const i = Math.round(p.y) * GW + Math.round(p.x);
+        return field[i] >= sea && (!wb || wb[i] === 0); });
+      o.floodZoneCount = places.filter(p => flood[Math.round(p.y) * GW + Math.round(p.x)] > SETTLE_FLOOD_SAFE).length;
+      let onEdge = 0;
+      for (const p of places) { const x = Math.round(p.x), y = Math.round(p.y);
+        let e = false; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; if (wet(x + dx, y + dy)) e = true; }
+        if (e) onEdge++; }
+      o.onWaterEdge = onEdge;
+    }
+    // the snap is IDEMPOTENT — a settlement already on the edge must not be walked along the shore
+    if (places.length) {
+      const suitF = currentSettlementSuitability();
+      const p = places[0], again = _civSnapToWaterEdge(p.x, p.y, { suit: suitF });
+      const second = again ? _civSnapToWaterEdge(again[0], again[1], { suit: suitF }) : null;
+      o.snapIdempotent = !again || !second;
+      // and it never returns a water or flood cell
+      o.snapReturnsHabitable = !again || (field[again[1] * GW + again[0]] >= sea &&
+        flood[again[1] * GW + again[0]] <= SETTLE_FLOOD_SAFE);
+    }
+    // corridor field: sparse like every other opportunity term, and settlements genuinely favour it
+    const cf = currentRouteCorridors();
+    o.corridorFinite = (() => { for (let i = 0; i < GW * GH; i++) if (!isFinite(cf[i]) || cf[i] < 0 || cf[i] > 1) return false; return true; })();
+    let lm = 0, ln = 0; for (let i = 0; i < GW * GH; i++) { if (field[i] < sea) continue; lm += cf[i]; ln++; }
+    o.corridorLandMean = ln ? lm / ln : 0;
+    o.corridorIsSparse = o.corridorLandMean < 0.15;   // an opportunity term must be ~0 almost everywhere
+    o.corridorZeroInSea = (() => { for (let i = 0; i < GW * GH; i++) if (field[i] < sea && cf[i] !== 0) return false; return true; })();
+    if (places.length) {
+      let sm = 0; for (const p of places) sm += cf[Math.round(p.y) * GW + Math.round(p.x)];
+      o.corridorAtSettlements = sm / places.length;
+      o.settlementsFavourCorridors = o.corridorAtSettlements > o.corridorLandMean;
+    }
+    return o;
+  });
+
+  /* ---- v1.37: coastal detection, estuary access, and who actually has salt ---- */
+  R.v137 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    o.cellKm = (state.mapWidthKm || 800) / GW;
+    // the site-kind box must use the same >=1.5-cell floor as every other water test (v1.35)
+    o.siteKindUsesReach = _umWaterReachKm() >= o.cellKm;
+    // an estuary is SEA access, not river
+    o.estuaryIsSea = (() => {
+      const p = places.find(q => _umSiteKindFromTerrain(q) === 'riverthrough');
+      if (!p) return true;                                  // vacuous on a world with no estuary
+      const nav = _civPlaceNavigability(p);
+      return nav.kind === 'sea' && nav.basis === 'estuary';
+    })();
+    // salt: coastal settlements make their own; a deposit also counts; neither ⇒ a real dependency
+    if (places.length) {
+      o.saltSources = {};
+      let coastalWithoutSalt = 0, importsSaltAnyway = 0;
+      for (const p of places) {
+        const sa = _civSaltAccess(p);
+        o.saltSources[sa.source] = (o.saltSources[sa.source] || 0) + 1;
+        const nav = _civPlaceNavigability(p);
+        if (nav.kind === 'sea' && !sa.has) coastalWithoutSalt++;
+        const t = _civPlaceTrade(p);
+        if (sa.has && t.imports.indexOf('salt') >= 0) importsSaltAnyway++;
+      }
+      o.coastalWithoutSalt = coastalWithoutSalt;
+      o.importsSaltAnyway = importsSaltAnyway;
+      // the checklist must discriminate — not every category unmet for every settlement
+      const gaps = places.map(p => _civPlaceTrade(p).checklist.filter(c => !c.met).length);
+      o.meanGaps = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      o.checklistDiscriminates = o.meanGaps < CIV_TRADE_CATEGORIES.length - 0.5;
+      o.gapsVary = new Set(gaps).size > 1;
+    }
+    return o;
+  });
+
+  /* ---- v1.38: the City Viewer and the settlement popup must report the same trade ---- */
+  R.v138 = await page.evaluate(async () => {
+    const o = {};
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    if (!places.length) return o;
+    const p = places.find(q => _umModelForNow(q)) || places[0];
+    const tr = _civPlaceTrade(p);
+    o.popupExports = (tr.exports || []).slice().sort().join(',');
+    o.popupImports = (tr.imports || []).slice().sort().join(',');
+    // render the settlement popup and the City Viewer panel, then compare what each actually shows
+    _civSelectedPlace = p; _civSelectedRowRefs = null;
+    _civOpenPlacePopup();
+    const popEl = document.getElementById('placeEditPopup');
+    o.popupHtml = popEl ? popEl.innerHTML : '';
+    if (popEl) popEl.style.display = 'none';
+    _civSelectedPlace = null;
+    const opened = _civOpenCityViewer(p);
+    o.viewerOpened = opened !== false;
+    const cvEl = document.getElementById('cvInfoPanel');
+    o.viewerHtml = cvEl ? cvEl.innerHTML : '';
+    if (typeof _civCloseCityViewer === 'function') _civCloseCityViewer();
+    // every good the popup lists must appear in the viewer's panel too
+    const listed = (html, goods) => goods.every(g => html.indexOf(g) >= 0);
+    o.viewerShowsPopupExports = !tr.exports.length || listed(o.viewerHtml, tr.exports);
+    o.viewerShowsPopupImports = !tr.imports.length || listed(o.viewerHtml, tr.imports);
+    // and the viewer must present them as the settlement's own, with faction rows still labelled
+    o.viewerHasOwnRows = /<[^>]*>\s*Exports\s*</.test(o.viewerHtml) || o.viewerHtml.indexOf('>Exports<') >= 0;
+    o.viewerLabelsFaction = o.viewerHtml.indexOf('faction-level') >= 0;
+    return o;
+  });
+
+  /* ---- v1.40: placement must see LANDMASSES, not just cells ---- */
+  R.v140 = await page.evaluate(async () => {
+    const o = {};
+    const lm = currentLandmassQuality();
+    o.count = lm.count;
+    o.qualityFinite = (() => { for (let i = 0; i < GW * GH; i++) if (!isFinite(lm.quality[i]) || lm.quality[i] < 0 || lm.quality[i] > 1) return false; return true; })();
+    o.zeroAtSea = (() => { for (let i = 0; i < GW * GH; i++) if (field[i] < state.seaLevel && lm.quality[i] !== 0) return false; return true; })();
+    // components must partition the land exactly
+    let land = 0, labelled = 0;
+    for (let i = 0; i < GW * GH; i++) { if (field[i] < state.seaLevel) continue; land++; if (lm.comp[i] >= 0) labelled++; }
+    o.partitionsLand = land === labelled;
+    o.sizesSumToLand = lm.sizes.reduce((a, b) => a + b, 0) === land;
+    // the biggest landmass must score at or near the top; a speck must score far below it
+    const bigIdx = lm.sizes.indexOf(Math.max(...lm.sizes));
+    const smallIdx = lm.sizes.indexOf(Math.min(...lm.sizes));
+    const qOf = id => { for (let i = 0; i < GW * GH; i++) if (lm.comp[i] === id) return lm.quality[i]; return 0; };
+    o.bigBeatsSmall = lm.count < 2 || qOf(bigIdx) > qOf(smallIdx);
+    // the islet penalty must be SPARSE — zero on most land, or it is reweighting the whole map
+    let penalised = 0;
+    for (let i = 0; i < GW * GH; i++) { if (field[i] < state.seaLevel) continue; if (1 - lm.quality[i] / ISLET_KNEE > 0) penalised++; }
+    o.penaltySparse = land === 0 || penalised / land < 0.5;
+    // and no settlement should sit on a speck when real land exists
+    const places = (state.places || []).filter(p => p && p.category === 'settlement');
+    o.nPlaces = places.length;
+    if (places.length && lm.maxSize) {
+      o.onTinyIslet = places.filter(p => {
+        const c = lm.comp[Math.round(p.y) * GW + Math.round(p.x)];
+        return c >= 0 && lm.sizes[c] / lm.maxSize < 0.01;
+      }).length;
+    }
+    return o;
+  });
+
+  // ── v1.43: Journey Planner recalibrated to docs/research/travel-speeds.md (block 2) ──
+  // Owner: "the planner seems to roughly take 37% longer than historically recorded". These pin the
+  // composed km/day inside the report's §8 bands, so a future edit to any one modifier that pushes a
+  // mode out of its historical band fails here rather than silently reappearing as a slow journey.
+  R.v143 = await page.evaluate(() => {
+    const o = {};
+    const S = x => Object.assign({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest' }, x);
+    const P = x => Object.assign({ groupSize: 1, transport: 'Walking', pace: 'Standard Pace', hours: 8,
+      cargoKg: 10, supplyDays: 4, season: 'Spring', grazing: 'None — carry all fodder', foraging: 'None',
+      carryFood: true, desertWater: 'Established Caravan Route',
+      animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 },
+      x, { animals: Object.assign({ donkey: 0, mule: 0, camel: 0, horse: 0 }, (x && x.animals) || {}) });
+    const L = (st, pl) => { const r = jpCalcLand(S(st), P(pl || {})); return r.blocked ? 0 : r.dailyKm; };
+    const W = (st, pl) => { const r = jpCalcWater(S(st), P(pl || {})); return r.blocked ? 0 : r.dailyKm; };
+
+    o.footPaved = L({ terrain: 'Paved Road' });
+    o.footDirt = L({ terrain: 'Dirt Track' });
+    o.footRocky = L({ terrain: 'Rocky Terrain', biome: 'Mountain Highland' });
+    // §8: an ox-wagon train (16-20 travel-day) must be far slower than a pack-animal train (40-56) —
+    // v1.42 gave both the SAME 3.0 km/h "Baggage Train" bucket, which is the core overland error.
+    const tr = a => ({ groupSize: 8, transport: 'Baggage Train', cargoKg: 800, supplyDays: 6,
+      grazing: 'Partial — graze at camp', animals: { mule: 10 }, wagons: 0, carts: 0, ...a });
+    o.wagonTrain = L({}, tr({ wagons: 4 }));
+    o.packTrain = L({}, tr({}));
+    o.wagonSlowerThanPack = o.wagonTrain < o.packTrain * 0.75;
+    // the pace-setting animal's terrain/weather affinity must reach a TRAIN, not only a lone rider
+    const desert = { terrain: 'Deep Sand', biome: 'Hot Desert' };
+    o.camelTrainSand = L(desert, tr({ animals: { camel: 12 }, groupSize: 8 }));
+    o.mixedTrainSand = L(desert, tr({ animals: { mule: 12 }, groupSize: 8 }));
+    o.camelBeatsMuleOnSand = o.camelTrainSand > o.mixedTrainSand;
+    // a surface bonus lifts a walker much more than an ox — the animal's gait is the ceiling
+    o.pavedGainFoot = L({ terrain: 'Paved Road' }) / L({ terrain: 'Dirt Track' });
+    o.pavedGainWagon = L({ terrain: 'Paved Road' }, tr({ wagons: 4 })) / L({ terrain: 'Dirt Track' }, tr({ wagons: 4 }));
+    o.surfaceGainDamped = o.pavedGainWagon < o.pavedGainFoot && o.pavedGainWagon >= 1;
+
+    const sea = (t, hours) => W({ cat: 'sea', terrain: t, routeCond: 'Neutral', biome: 'Coastal Lowland' },
+      { transport: 'Sea Faring', vessel: 'Cog', groupSize: 6, cargoKg: 40000, hours: hours || 14 });
+    o.bay = sea('Sheltered Bay'); o.coastal = sea('Coastal Waters'); o.open = sea('Open Sea');
+    o.seaOrdered = o.bay < o.coastal && o.coastal < o.open;
+    // the LAND hours slider must no longer move a sea leg at all (the window is the water's property)
+    o.seaHoursIndependent = Math.abs(sea('Open Sea', 6) - sea('Open Sea', 16)) < 1e-9;
+
+    // every band below is docs/research/travel-speeds.md §8, widened to span travel-day..calendar
+    const inBand = (v, lo, hi) => v >= lo && v <= hi;
+    o.bands = {
+      footPaved: inBand(o.footPaved, 30, 50), footDirt: inBand(o.footDirt, 20, 35),
+      footRocky: inBand(o.footRocky, 8, 18), wagon: inBand(o.wagonTrain, 12, 21),
+      bay: inBand(o.bay, 25, 50), coastal: inBand(o.coastal, 45, 90), open: inBand(o.open, 100, 220)
+    };
+    o.allInBand = Object.keys(o.bands).every(k => o.bands[k]);
+
+    // infrastructure tiers must be MULTIPLES of the world's own density, and the punitive bottom tier
+    // must require a real signal — v1.42 auto-tiered 61% of a real route as "Hostile / Dead Zone"
+    o.tiersRelative = JP_INFRA_TIERS[0][0] < 8;
+    const ctx = { expectedPer100: 0.25, landKm2: 1e6, count: 30 };
+    o.emptyWildIsNotHostile = _jpStageInfra({ cat: 'land', km: 400, settlements: 0, claimedFrac: 0,
+      terrain: 'Hills', biome: 'Temperate Forest' }, ctx) !== 'Hostile / Dead Zone';
+    o.ruinsStillHostile = _jpStageInfra({ cat: 'land', km: 400, settlements: 0, claimedFrac: 0,
+      terrain: 'Ruins / Debris', biome: 'Ruined Wastes' }, ctx) === 'Hostile / Dead Zone';
+    o.claimedFloorsTier = _jpStageInfra({ cat: 'land', km: 400, settlements: 0, claimedFrac: 1,
+      terrain: 'Hills', biome: 'Temperate Forest' }, ctx) === 'Sparse Settlements';
+    o.openSeaNotLandTiered = _jpStageInfra({ cat: 'sea', km: 900, settlements: 0, claimedFrac: 0,
+      terrain: 'Open Sea', biome: 'Coastal Lowland' }, ctx) === 'Stable Settlements';
+    // A short stage must not be AMPLIFIED by its own shortness. One settlement beside 40 km of route
+    // is the same observation as one beside 150 km — you cannot measure a rate finer than the sample —
+    // so both must land on the same tier, while above the floor extra length must still dilute.
+    const tier = (km, n) => _jpStageInfra({ cat: 'land', km, settlements: n, claimedFrac: 0,
+      terrain: 'Hills', biome: 'Temperate Forest' }, ctx);
+    const rank = t => JP_INFRA_TIERS.findIndex(x => x[1] === t);
+    o.shortStageNotAmplified = tier(40, 1) === tier(150, 1);
+    o.lengthStillDilutesAboveFloor = rank(tier(600, 1)) > rank(tier(150, 1));
+    // §5: a party of ≤10 gets the whole +15-25% coordination advantage (v1.63: no longer just the
+    // neutral reference other tiers are penalized against — see v1.63's own CHANGELOG entry, which
+    // superseded this v1.43 comment's original "realised as the reference tier" design).
+    o.small = jpGroupClass(6).coordMod; o.large = jpGroupClass(60).coordMod;
+    o.smallCaravanFavoured = o.small >= 1.15 && o.small <= 1.25 && o.large < 1 && o.small > o.large;
+    return o;
+  });
+
+  // ── v1.44: Route Editor — full-screen journey editing (block 2) ──
+  // Owner: "when clicking a route I wish it to open a full screen menu so we can properly make edits.
+  // (Having the route itself as a visual in the upper left corner. and change parameters such as
+  // stops, traveler options, carriage, season and weather (with the current suggestion system kept in
+  // place)." Two synthetic settlements + a journey between them are pushed and restored around this
+  // block so it doesn't depend on (or disturb) an auto-populated world — this file never runs
+  // auto-populate, unlike the probe scripts.
+  R.v144 = await page.evaluate(() => {
+    const o = {};
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      const x0 = Math.round(GW * 0.3), y0 = Math.round(GH * 0.5);
+      const x1 = Math.round(GW * 0.5), y1 = Math.round(GH * 0.5);
+      state.places = [
+        { kind: 'town', name: 'Testford', x: x0, y: y0, category: 'settlement', pop: 4000 },
+        { kind: 'town', name: 'Testbury', x: x1, y: y1, category: 'settlement', pop: 6000 }
+      ];
+      const pts = []; for (let k = 0; k <= 20; k++) pts.push([x0 + (x1 - x0) * k / 20, y0 + (y1 - y0) * k / 20]);
+      const km = Math.hypot(x1 - x0, y1 - y0) * ((state.mapWidthKm || 800) / GW);
+      const jn = { pts, km, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // stable stop keys + layover days feed into total trip time, additive to travel days
+      const plan0 = _jpPlan(jn);
+      o.hasStops = plan0 && plan0.stops.length >= 1;
+      o.noLayoverByDefault = plan0 && plan0.layoverDays === 0 && plan0.totalDays === plan0.days;
+      if (plan0 && plan0.stops.length) {
+        const key = plan0.stops[0].key;
+        o.keyStable = key === _jpStopKey(plan0.stops[0]);
+        _jpLayovers(jn)[key] = 3;
+        const plan1 = _jpPlan(jn);
+        o.layoverAdds = plan1.layoverDays === 3 && Math.abs(plan1.totalDays - (plan1.days + 3)) < 1e-9;
+        o.travelDaysUnaffected = Math.abs(plan1.days - plan0.days) < 1e-9;   // a rest stop must not change the underlying travel-day math
+        delete _jpLayovers(jn)[key];
+      }
+
+      // weatherOverride: "auto" (the default _jpEnsurePlan sets) must be byte-identical to the
+      // pre-v1.44 behavior; a forced condition must diverge and be visibly labeled in the trace
+      const plan = _jpEnsurePlan(jn);
+      const st = { km: 300, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard', infra: 'Stable Settlements', biome: 'Temperate Forest' };
+      const base = { groupSize: 1, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 0, supplyDays: 4,
+        season: 'Spring', grazing: 'None — carry all fodder', foraging: 'None', carryFood: true,
+        desertWater: 'Established Caravan Route', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 },
+        carts: 0, wagons: 0, travois: 0, sleds: 0, weatherOverride: 'auto' };
+      const rAuto = jpCalcLand(Object.assign({}, st), Object.assign({}, base));
+      const rNoField = jpCalcLand(Object.assign({}, st), Object.assign({}, base, { weatherOverride: undefined }));
+      o.autoMatchesUnset = !rAuto.blocked && !rNoField.blocked && Math.abs(rAuto.dailyKm - rNoField.dailyKm) < 1e-9;
+      const rStorm = jpCalcLand(Object.assign({}, st), Object.assign({}, base, { weatherOverride: 'Storm' }));
+      o.stormDivergesFromAuto = !rStorm.blocked && Math.abs(rStorm.dailyKm - rAuto.dailyKm) > 1e-6;
+      o.stormLabeledInTrace = !rStorm.blocked && /forced: Storm/.test(rStorm.formula);
+      o.autoLabeledInTrace = !rAuto.blocked && /weighted/.test(rAuto.formula);
+      const seaSt = { km: 300, cat: 'sea', terrain: 'Coastal Waters', routeCond: 'Neutral', infra: 'Stable Settlements', biome: 'Coastal Lowland' };
+      const seaBase = Object.assign({}, base, { transport: 'Sea Faring', vessel: 'Cog' });
+      const rAutoWater = jpCalcWater(Object.assign({}, seaSt), Object.assign({}, seaBase, { weatherOverride: 'auto' }));
+      const rStormWater = jpCalcWater(Object.assign({}, seaSt), Object.assign({}, seaBase, { weatherOverride: 'Storm' }));
+      o.waterStormBlockedOrSlower = !rAutoWater.blocked && (!!rStormWater.blocked || rStormWater.dailyKm < rAutoWater.dailyKm);
+
+      // the modal itself: open/close toggles .open + the guard flag, and is reachable from the
+      // journey-card click; the two guard lists (scroll fix, joystick hide) both know about it
+      o.opensOnCall = _civOpenRouteEditor(0);
+      const modalEl = document.getElementById('routeEditorModal');
+      o.modalHasOpenClass = !!(modalEl && modalEl.classList.contains('open'));
+      o.reOpenFlagSet = typeof _reOpen !== 'undefined' && _reOpen === true;
+      o.routeMapCanvasExists = !!document.getElementById('reRouteMap');
+      o.partyFormPopulated = !!(document.getElementById('reParty') && document.getElementById('reParty').innerHTML.length > 0);
+      o.stopsListPopulated = !!(document.getElementById('reStops') && document.getElementById('reStops').innerHTML.length > 0);
+      const overlayTest = document.createElement('div'); modalEl.appendChild(overlayTest);
+      o.scrollGuardCoversModal = typeof _overCanvasOverlay === 'function' && _overCanvasOverlay({ target: overlayTest });
+      overlayTest.remove();
+      _civCloseRouteEditor();
+      o.closesOnCall = !modalEl.classList.contains('open');
+      o.reOpenFlagCleared = typeof _reOpen !== 'undefined' && _reOpen === false;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+      const modalEl = document.getElementById('routeEditorModal'); if (modalEl) modalEl.classList.remove('open');
+      _reOpen = false;
+    }
+    return o;
+  });
+
+  // v1.45 (the v1.41 "second factor"): drawLODView's river-ways call site fed drawRiverWays a zk
+  // hard-capped at 8 (Math.min(8,GW/span)), copied from drawLODDebugOverlays' own SEPARATE glyph-
+  // sizing zk. That froze the sqrt-damped stroke-width law right where geometry reprojection (px/py,
+  // driven by the same real uncapped GW/span) keeps stretching apart, so past zoom 8 the river line
+  // read relatively THINNER the deeper you go — the reported "rivers fade out" symptom. Fix: use the
+  // real uncapped zk at the river-ways call site (glyph sizing elsewhere is untouched).
+  R.v145 = await page.evaluate(async () => {
+    const o = {};
+    const savedLodOn = _lodOn, savedLodZoom = _lodZoom, savedLodCx = _lodCx, savedLodCy = _lodCy,
+      savedLodTile = _lodTile, savedRiverWays = state.viz.riverWays, savedDebug = state.debug, savedMode = state.mode;
+    const origDraw = window.drawRiverWays;
+    try {
+      state.debug = 'off'; state.mode = 'biome';
+      if (!_riverNet) _riverNet = buildRiverNetwork(field, flowField, GW, GH, state.seaLevel, { world: state.world, riverDensity: (state.viz.riverDensity) || 1 });
+      let spotX = GW / 2, spotY = GH / 2, found = false;
+      for (let y = 4; y < GH - 4 && !found; y++) for (let x = 4; x < GW - 4 && !found; x++) {
+        if (_riverNet.order[y * GW + x] >= 2) { spotX = x; spotY = y; found = true; }
+      }
+      o.foundRiverSpot = found;
+
+      _lodOn = true; _lodTile = 64; _lodCx = spotX; _lodCy = spotY; state.viz.riverWays = true;
+
+      // deep zoom: the zk actually handed to drawRiverWays must track the real uncapped GW/span,
+      // not the old Math.min(8,...) clamp
+      _lodZoom = 32; applyView();
+      let capturedZk = null;
+      window.drawRiverWays = function (riverNet, reproj) { capturedZk = reproj && reproj.zk; return origDraw.apply(this, arguments); };
+      renderNow();
+      window.drawRiverWays = origDraw;
+      const v = lodViewRect(), span = v.x1 - v.x0, expectedZk = GW / span;
+      o.zkUncappedAtDeepZoom = capturedZk != null && Math.abs(capturedZk - expectedZk) < 1e-6 && capturedZk > 8;
+
+      // shallow zoom: zk was already <= 8 pre-fix (Math.min(8,zk)===zk there), so this path must
+      // read exactly the same as before — the default/shallow-zoom render cannot change
+      _lodZoom = 6; applyView();
+      let capturedZkShallow = null;
+      window.drawRiverWays = function (riverNet, reproj) { capturedZkShallow = reproj && reproj.zk; return origDraw.apply(this, arguments); };
+      renderNow();
+      window.drawRiverWays = origDraw;
+      o.shallowZoomAlreadyUnderOldCap = capturedZkShallow != null && capturedZkShallow <= 8;
+
+      // exact-pixel-diff, world-agnostic: at deep zoom the uncapped stroke law must paint
+      // meaningfully more river pixels than a monkeypatched reproduction of the old hard-capped-at-8
+      // law paints on the SAME world/view (compares the fix to the old behavior, not to an absolute
+      // pixel count — so this isn't sensitive to which world the smoke suite happens to be running)
+      function paintedDiff(capOld) {
+        window.drawRiverWays = capOld
+          ? function (riverNet, reproj) { const r2 = reproj ? Object.assign({}, reproj, { zk: Math.min(8, reproj.zk) }) : reproj; return origDraw.call(this, riverNet, r2); }
+          : origDraw;
+        const cv = document.getElementById('view'), ctx = cv.getContext('2d');
+        state.viz.riverWays = false; renderNow();
+        const off = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        state.viz.riverWays = true; renderNow();
+        const on = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        let diff = 0;
+        for (let i = 0; i < off.length; i += 4) if (off[i] !== on[i] || off[i + 1] !== on[i + 1] || off[i + 2] !== on[i + 2]) diff++;
+        return diff;
+      }
+      _lodZoom = 32; applyView();
+      const paintedUncapped = paintedDiff(false);
+      const paintedCapped = paintedDiff(true);
+      window.drawRiverWays = origDraw;
+      o.deepZoomPaintsMoreThanOldCap = found && paintedUncapped > paintedCapped * 1.1;
+    } finally {
+      window.drawRiverWays = origDraw;
+      _lodOn = savedLodOn; _lodZoom = savedLodZoom; _lodCx = savedLodCx; _lodCy = savedLodCy; _lodTile = savedLodTile;
+      state.viz.riverWays = savedRiverWays; state.debug = savedDebug; state.mode = savedMode;
+      applyView(); renderNow();
+    }
+    return o;
+  });
+
+  // v1.46 (HANDOFF's "Settlements with a port still sit inland" — v1.37 fixed coastal DETECTION, not
+  // PREFERENCE; v1.40's global suitability-reweight lever clustered seeds and the suppression radius
+  // culled them, halving the settlement count). Fix: a bounded, landmass-scoped swap in
+  // _civIterativeAutoWorld — never touches suit/the suppression radius/settlement count at the point
+  // it runs, so it cannot repeat v1.40's failure. Effect is real but seed-dependent (a landmass that's
+  // already well-represented is correctly left alone), so this tries several seeds and asserts the
+  // pass never makes coastal representation WORSE, and that it demonstrably helps on at least one.
+  R.v146 = await page.evaluate(async () => {
+    const o = {};
+    const wb = currentWaterBodies(), oceanDT = _civOceanDistField();
+    o.oceanDTExists = !!oceanDT;
+    if (oceanDT) {
+      let zeroAtOcean = true;
+      for (let i = 0; i < GW * GH; i += 37) if (wb[i] === 1 && oceanDT[i] !== 0) { zeroAtOcean = false; break; }
+      o.oceanDTZeroAtOcean = zeroAtOcean;
+    }
+
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW;
+    const origOceanFn = window._civOceanDistField;
+    /* v1.58: since CIV_FACTIONS.length now genuinely changes placement (spare faction capacity
+       seeds extra landmass-scoped capitals, each protected from the coastal-preference swap below
+       — the correct generalisation of "keep the capital unless it's the only option" once a
+       landmass can hold more than one polity), pin it for the duration so this test isn't at the
+       mercy of whatever count dozens of earlier faction-editing assertions happened to leave behind
+       — the same test-isolation discipline v1.24's BUG-3 assertion needed. */
+    const savedFactions = CIV_FACTIONS;
+    try {
+      CIV_FACTIONS = savedFactions.slice(0, 7);   // Unclaimed + 6 real factions — the shipped default
+      state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+      /* v1.58: each seed independently reruns the ENTIRE stochastic multi-pass pipeline twice (fix
+         on/off) — the coastal swap itself can only ever ADD port traits within one run, but the
+         iterative centrality-driven promote/demote passes downstream of it read the road network,
+         which the swap's own settlement moves reshape, so the two runs' settlement COUNTS and
+         KINDS can end up genuinely different, not just their port traits. That was already true
+         before v1.58; now that a landmass can seed multiple capitals (each protected from the
+         swap) instead of exactly one, the two runs' capital counts can diverge by several rather
+         than by at most one, which widens the same pre-existing cascade enough that a single seed,
+         out of a small fixed sample of 3, occasionally lands the "with" run in genuinely worse
+         shape by chance alone — not the swap logic failing, but comparing two independent
+         realisations of a chaotic system on too small a sample (the same "a small fixed sample is
+         fragile to noise" lesson v1.56 already learned about this exact pipeline). A wider sample,
+         checked in AGGREGATE (never net-worse in total across the sample) rather than requiring
+         every single seed to individually resist that noise, is the statistically honest version
+         of the same claim. */
+      const seeds8 = [20260726, 20260727, 20260728, 20260729, 20260730, 20260731, 20260732, 20260733];
+      let sumWith = 0, sumWithout = 0, anyImproved = false, noneInWaterAnySeed = true;
+      for (const seed of seeds8) {
+        state.tect.seed = seed; await generate();
+        state.places = []; _civIterativeAutoWorld(3);
+        const withFix = state.places.filter(p => p.category === 'settlement');
+        const withCoastal = withFix.filter(p => p.traits && p.traits.includes('port')).length;
+        const sea = state.seaLevel || 0.42;
+        if (withFix.some(p => {
+          const xi = Math.max(0, Math.min(GW - 1, Math.round(p.x))), yi = Math.max(0, Math.min(GH - 1, Math.round(p.y)));
+          return field[yi * GW + xi] < sea;
+        })) noneInWaterAnySeed = false;
+
+        window._civOceanDistField = () => null;   // disables the pass (matches its own null guard) — the pre-fix baseline
+        state.places = []; _civIterativeAutoWorld(3);
+        window._civOceanDistField = origOceanFn;
+        const withoutFix = state.places.filter(p => p.category === 'settlement');
+        const withoutCoastal = withoutFix.filter(p => p.traits && p.traits.includes('port')).length;
+
+        sumWith += withCoastal; sumWithout += withoutCoastal;
+        if (withCoastal > withoutCoastal) anyImproved = true;
+      }
+      o.neverWorse = sumWith >= sumWithout;
+      o.anyImproved = anyImproved;
+      o.noneInWaterAnySeed = noneInWaterAnySeed;
+    } finally {
+      CIV_FACTIONS = savedFactions;
+      window._civOceanDistField = origOceanFn;
+      state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
+  // v1.47 (HANDOFF's "Sea routes are never chosen; travel mode cannot re-bias a route"). The
+  // multi-modal cost graph (_civDijkstraPath's mode='water'/'mixed', v0.94) already existed for the
+  // general Route tool; the actual gap was that _jpDeriveStages only samples an already-drawn
+  // polyline, so switching Transport never re-paths it. Fix: an explicit "Re-route for <mode>"
+  // action (never silent — a hand-drawn route is the user's own work) that calls _civDijkstraPath
+  // between the journey's own start/end under the selected mode's cost domain, using a new
+  // `reachable` field (purely additive to _civDijkstraPath's return) to distinguish a genuine path
+  // from its existing straight-line fallback for an unreachable target.
+  R.v147 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++) {
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    }
+    o.foundLandPt = !!landPt;
+
+    // reachable: true for a genuine short land->land hop, and the field always exists (both
+    // return paths — the smoothed success path and the degenerate-fallback path — carry it)
+    const r1 = _civDijkstraPath(landPt[0], landPt[1], landPt[0] + 2, landPt[1] + 2, undefined);
+    o.landReachableTrue = r1.reachable === true;
+
+    // _jpModeForRoute: the one place the transport-label -> pathfinding-domain mapping is decided
+    o.modeMapCorrect = _jpModeForRoute('Sea Faring') === 'water'
+      && _jpModeForRoute('River Transport') === 'mixed'
+      && _jpModeForRoute('Walking') === undefined
+      && _jpModeForRoute('Mounted Rider') === undefined
+      && _jpModeForRoute('Baggage Train') === undefined;
+
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    const origConfirm = window.confirm, origAlert = window.alert;
+    try {
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + 10, y: landPt[1] + 10, category: 'settlement', pop: 1000 }
+      ];
+      const pts = [[landPt[0], landPt[1]], [landPt[0] + 10, landPt[1] + 10]];
+      const jn = { pts, km: 50, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const plan = _jpEnsurePlan(jn);
+
+      // land mode succeeds and genuinely replaces the drawn path
+      plan.transport = 'Walking';
+      const oldPts = jn.pts;
+      const walkRes = _jpRerouteForMode(jn);
+      o.walkRerouteOk = walkRes.ok === true;
+      o.walkRerouteReplacedPts = jn.pts !== oldPts && jn.pts.length >= 2;
+
+      // sea mode between two land points 10 cells apart correctly reports failure and never
+      // silently accepts a straight line cutting across dry land
+      jn.pts = oldPts;
+      plan.transport = 'Sea Faring';
+      const seaRes = _jpRerouteForMode(jn);
+      o.seaRerouteReportsFailure = seaRes.ok === false && typeof seaRes.reason === 'string' && seaRes.reason.length > 0;
+      o.seaRerouteNeverMutatedOnFailure = jn.pts === oldPts;
+
+      // UI: the button exists in the party form, is labeled with the live transport mode, confirms
+      // before replacing (declined -> untouched), and refreshes the modal on acceptance
+      _civOpenRouteEditor(0);
+      const btn = document.getElementById('reRerouteBtn');
+      o.buttonExists = !!btn;
+      o.buttonLabeledWithMode = !!(btn && btn.textContent.includes(plan.transport));
+
+      plan.transport = 'Walking';
+      _jpRenderPartyForm(jn);
+      const btn2 = document.getElementById('reRerouteBtn');
+      const ptsBeforeDecline = jn.pts;
+      let confirmCalls = 0;
+      window.confirm = () => { confirmCalls++; return false; };
+      btn2.click();
+      o.declineLeavesPtsUntouched = jn.pts === ptsBeforeDecline && confirmCalls === 1;
+
+      window.confirm = () => true;
+      window.alert = () => {};
+      btn2.click();
+      o.acceptReplacesPts = jn.pts !== ptsBeforeDecline;
+      _civCloseRouteEditor();
+    } finally {
+      window.confirm = origConfirm; window.alert = origAlert;
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+
+  // v1.48 (owner report: "250kg of cargo now necessitates roughly 213 mules"): jpAutoPickTransport's
+  // pack-animal count solver iterates against its OWN fodder cost (more animals need more fodder,
+  // needing more animals to carry it) — a fixed point that stops existing once a single animal's
+  // capacity can no longer cover its own fodder for the whole trip. Past that the 6-step iteration
+  // was silently returning whatever a divergent series reached by its cutoff. Fix: detect the
+  // infeasibility analytically and report it honestly (a bounded floor count + a warning) instead of
+  // returning a runaway number.
+  R.v148 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++) {
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    }
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + 8, y: landPt[1] + 8, category: 'settlement', pop: 1000 }
+      ];
+      const pts = []; for (let k = 0; k <= 10; k++) pts.push([landPt[0] + 8 * k / 10, landPt[1] + 8 * k / 10]);
+      const jn = { pts, km: 40, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const plan = _jpEnsurePlan(jn);
+      plan.transport = 'Baggage Train'; plan.assetMode = 'auto'; plan.cargoKg = 250;
+      plan.grazing = 'Partial — graze at camp';
+
+      // a normal, short-duration trip: no infeasibility flag, a small sane count
+      plan.supplyDays = 7;
+      const rShort = jpAutoPickTransport(jn);
+      o.shortTripOk = rShort.ok === true && !rShort.infeasible;
+      const shortCount = Object.values(plan.animals).reduce((t, v) => t + (v | 0), 0);
+      o.shortTripCountSane = shortCount >= 1 && shortCount <= 20;
+
+      // a very long supply duration on the SAME 250kg cargo: must be flagged infeasible and bounded
+      // (the reported bug: this used to silently return a runaway count in the hundreds)
+      plan.supplyDays = 200;
+      const rLong = jpAutoPickTransport(jn);
+      o.longTripFlaggedInfeasible = rLong.ok === true && rLong.infeasible === true && rLong.warn === true;
+      const longCount = Object.values(plan.animals).reduce((t, v) => t + (v | 0), 0);
+      o.longTripCountBounded = longCount >= 1 && longCount < 50;
+      o.longTripHintExplainsWhy = typeof rLong.hint === 'string' && /not sustainable|resupply/i.test(rLong.hint);
+
+      // full grazing (fodderFrac=0) never trips infeasibility, however long the trip — the animal
+      // isn't carrying its own fodder at all in that mode
+      plan.grazing = 'Full — graze on route';
+      plan.supplyDays = 365;
+      const rGraze = jpAutoPickTransport(jn);
+      o.fullGrazingNeverInfeasible = rGraze.ok === true && !rGraze.infeasible;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+
+  // v1.49: the interpretive layer + the layout fix. The audit measured #reResults' top edge at
+  // y=1295 in a 1000px viewport (295px below the fold) while the Stops column left ~875px of dead
+  // space opposite the party form; Results now lives in that column. _jpVerdict/_jpConfidence/
+  // _jpPackRange are pure readers over a finished plan — no new modelling, no new state.
+  R.v149 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++) {
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    }
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + 8, y: landPt[1] + 8, category: 'settlement', pop: 1000 }
+      ];
+      const pts = []; for (let k = 0; k <= 10; k++) pts.push([landPt[0] + 8 * k / 10, landPt[1] + 8 * k / 10]);
+      const jn = { pts, km: 40, name: 'Test Route', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const p = _jpEnsurePlan(jn);
+      p.transport = 'Baggage Train'; p.assetMode = 'auto'; p.cargoKg = 250; p.supplyDays = 7;
+      p.grazing = 'Partial — graze at camp';
+      /* v1.63: assetMode:'auto' is a UI-flow label — it does not itself populate p.animals when
+         _jpPlan is called directly here (that only happens via the real auto-select UI path, not
+         exercised by this synthetic test), so a Baggage Train with zero animals and 250 kg cargo
+         against a 4-person party's 120 kg human-porter capacity was ALREADY ~267% overloaded before
+         this test's own deliberate overload step. v1.63's Finding-1.2 fix (an overload past 150% of
+         capacity is now flagged infeasible rather than silently crawling) turned that pre-existing,
+         accidentally-overloaded baseline into a blocked plan, which is not what "the normal case"
+         below is meant to represent. Two real pack mules make the baseline genuinely valid. */
+      p.animals.mule = 2;
+
+      // ── verdict: shape, vocabulary, and that it NAMES its reasons (a verdict that can't say why
+      //    is worse than none — the v1.35 `basis` lesson)
+      const plan = _jpPlan(jn);
+      const v = _jpVerdict(plan);
+      o.verdictShape = !!(v && typeof v.level === 'string' && typeof v.label === 'string'
+        && typeof v.text === 'string' && Array.isArray(v.reasons));
+      o.verdictLevelValid = ['favourable', 'moderate', 'strained', 'severe', 'blocked'].includes(v.level);
+      o.verdictReasonsAreStrings = v.reasons.every(r => typeof r === 'string' && r.length > 0);
+
+      // a deliberately overloaded party must escalate the verdict AND cite the overload by name
+      // (v1.63: 'blocked' is now also a valid, in fact the MOST escalated, outcome — Finding 1.2's
+      // fix correctly flags a genuinely impossible load as infeasible rather than merely "severe")
+      p.assetMode = 'manual'; p.cargoKg = 40000;
+      ['donkey','mule','camel','horse'].forEach(k => p.animals[k] = 0); p.carts = 0; p.wagons = 0;
+      const vBad = _jpVerdict(_jpPlan(jn));
+      o.overloadEscalates = vBad.level === 'severe' || vBad.level === 'strained' || vBad.level === 'blocked';
+      o.overloadNamed = vBad.reasons.some(r => /overload|capacit|resuppl/i.test(r)) ||
+        (vBad.level === 'blocked' && /overload|capacit/i.test(_jpPlan(jn).results?.[0]?.blocked || ''));
+      p.cargoKg = 250; p.assetMode = 'auto'; p.animals.mule = 2;
+
+      // ── confidence: asymmetric (downside always larger), widens with duration, brackets the estimate
+      const c = _jpConfidence(_jpPlan(jn));
+      o.confBrackets = !!(c && c.loDays <= (_jpPlan(jn).totalDays ?? _jpPlan(jn).days) && c.hiDays >= (_jpPlan(jn).totalDays ?? _jpPlan(jn).days));
+      o.confAsymmetric = !!(c && (c.hi - 1) > (1 - c.lo));
+      const bands = [3, 10, 17, 40, 120].map(d => _jpConfidence({ days: d, totalDays: d, blocked: false }));
+      o.confWidensWithDuration = bands.every((b, i) => i === 0 || (b.hi - b.lo) >= (bands[i - 1].hi - bands[i - 1].lo));
+      o.confBlockedIsNull = _jpConfidence({ days: 10, blocked: true }) === null;
+
+      // ── pack range: matches the v1.48 guard's own threshold, and full grazing has no ceiling
+      p.grazing = 'None — carry all fodder';
+      _jpRefresh(true);
+      const pr = _jpPackRange(_jpPlan(jn));
+      o.packRangeExists = !!(pr && pr.maxDays > 0 && isFinite(pr.maxDays));
+      if (pr) {
+        // reproduce the v1.48 guard arithmetic independently: cap / (food * fodderFrac)
+        const A = JP_ANIMALS[pr.key];
+        const expected = A.cap / (A.food * (JP_GRAZING[p.grazing].fodderFrac));
+        o.packRangeMatchesGuard = Math.abs(pr.maxDays - expected) / expected < 0.02;
+      }
+      p.grazing = 'Full — graze on route'; _jpRefresh(true);
+      const prFull = _jpPackRange(_jpPlan(jn));
+      o.fullGrazingNoCeiling = !!(prFull && prFull.unlimited);
+      p.grazing = 'Partial — graze at camp'; _jpRefresh(true);
+
+      // ── layout: Results is above the fold and inside the sticky output column, not a
+      //    full-width block below the party form
+      _civOpenRouteEditor(0);
+      await new Promise(r => setTimeout(r, 300));
+      const res = document.getElementById('reResults'), party = document.getElementById('reParty');
+      const outCol = document.querySelector('.re-col-out');
+      o.resultsInOutputColumn = !!(outCol && res && outCol.contains(res));
+      o.stopsInOutputColumn = !!(outCol && outCol.contains(document.getElementById('reStops')));
+      o.outColIsSticky = !!(outCol && getComputedStyle(outCol).position === 'sticky');
+      const rBody = document.querySelector('.re-body').getBoundingClientRect();
+      const rRes = res.getBoundingClientRect();
+      o.resultsAboveFold = (rRes.top - rBody.top) < window.innerHeight;
+      // and it now precedes the (taller) party form rather than following it
+      o.resultsBeforeParty = res.getBoundingClientRect().top <= party.getBoundingClientRect().top + 200;
+      // the verdict actually renders into the panel
+      o.verdictRendered = /Favourable|Moderate|Strained|Severe/.test(res.textContent);
+      o.confidenceRendered = /Likely range/.test(res.textContent);
+      _civCloseRouteEditor();
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+      const m = document.getElementById('routeEditorModal'); if (m) m.classList.remove('open');
+      _reOpen = false;
+    }
+    return o;
+  });
+
+  // v1.50: auto-selection audit fixes + the bottleneck veto. The audit found "Hills" and
+  // "Mountain Pass" carried per-animal ratings but no selection rule, so biome overrode terrain
+  // exactly where terrain is most differentiated (a camel picked for a mountain pass at 0.50 vs
+  // mule's 0.85). Plus: a pack train is a whole-journey commitment, so one demanding stage now
+  // switches the WHOLE route's animal — flagged, and overridable per stage.
+  R.v150 = await page.evaluate(() => {
+    const o = {};
+    const S = (terrain, biome, km) => ({ cat: 'land', terrain, biome, km });
+    const ANIMALS = Object.keys(JP_ANIMALS);
+
+    // one source of truth for "how fast is this animal here" — the extracted resolver must
+    // reproduce the table exactly (jpCalcLand now calls it too)
+    o.modResolverMatchesTable = ANIMALS.every(a => Object.keys(JP_TERRAIN.land).every(t => {
+      const ov = JP_ANIMAL_TERRAIN_OVERRIDE[a];
+      const expect = (ov && ov[t] !== undefined) ? ov[t] : JP_TERRAIN.land[t];
+      return jpAnimalTerrainMod(a, t) === expect;
+    }));
+    o.modResolverDefaults = jpAnimalTerrainMod(null, 'Open Plains') === JP_TERRAIN.land['Open Plains'];
+
+    // AUDIT FIX: wherever terrain genuinely discriminates between animals, the per-stage pick must
+    // be the argmax. Forest Path is the one documented exception (a deliberate capacity choice).
+    const nonArgmax = [];
+    for (const t of Object.keys(JP_TERRAIN.land)) for (const b of Object.keys(JP_BIOMES)) {
+      const best = Math.max(...ANIMALS.map(a => jpAnimalTerrainMod(a, t)));
+      const picked = jpAnimalTerrainMod(jpBestAnimalForContext(t, b).key, t);
+      if (picked < best - 1e-9) nonArgmax.push(t);
+    }
+    o.onlyForestPathIsNonArgmax = nonArgmax.every(t => t === 'Forest Path');
+    o.hillsPicksMule = jpBestAnimalForContext('Hills', 'Steppe / Grassland').key === 'mule';
+    o.mountainPassPicksMule = jpBestAnimalForContext('Mountain Pass', 'Hot Desert').key === 'mule';
+
+    // BOTTLENECK VETO: a real mountain share switches the whole route and reports the switch
+    const mtn = jpPickSpeciesForRoute([S('Open Plains', 'Hot Desert', 400), S('Mountain Pass', 'Hot Desert', 100)]);
+    o.bottleneckSwitches = mtn.key === 'mule' && !!mtn.switched && mtn.switched.from === 'camel' && mtn.switched.to === 'mule';
+    o.bottleneckNamesTerrain = !!(mtn.switched && mtn.switched.terrain === 'Mountain Pass' && mtn.reason.includes('Mountain Pass'));
+    // ...and a sand crossing switches the other way (not a mule-only rule)
+    const sand = jpPickSpeciesForRoute([S('Open Plains', 'Temperate Forest', 350), S('Deep Sand', 'Hot Desert', 150)]);
+    o.bottleneckSymmetric = sand.key === 'camel' && !!sand.switched && sand.switched.to === 'camel';
+
+    // ...but a token stretch below the share floor must NOT hijack the route
+    const tiny = jpPickSpeciesForRoute([S('Open Plains', 'Hot Desert', 950), S('Mountain Pass', 'Hot Desert', 50)]);
+    o.smallStretchDoesNotSwitch = tiny.key === 'camel' && !tiny.switched;
+    // ...and a route with no bottleneck reports no switch at all
+    const plain = jpPickSpeciesForRoute([S('Open Plains', 'Hot Desert', 500)]);
+    o.noBottleneckNoSwitch = plain.key === 'camel' && !plain.switched;
+    // ...and the deliberate Forest Path capacity choice survives the new machinery
+    const forest = jpPickSpeciesForRoute([S('Forest Path', 'Temperate Forest', 300)]);
+    o.forestKeepsMule = forest.key === 'mule' && !forest.switched;
+
+    // reason attribution follows the km-DOMINANT stage, not whichever was scored last
+    const attr = jpPickSpeciesForRoute([S('Forest Path', 'Temperate Forest', 40), S('Rocky Terrain', 'Temperate Forest', 400)]);
+    o.reasonFromDominantStage = attr.key === 'mule' && /rough\/upland/.test(attr.reason);
+
+    // empty land-stage list still answers
+    o.emptyRouteSafe = jpPickSpeciesForRoute([]).key === 'mule';
+    return o;
+  });
+
+  // ── v1.51: the constraints that were stated but never measured ──────────────────────────────
+  // The v1.50 audit found the TIME model sound and three of the CONSTRAINT inputs to be constants
+  // standing in for data the world already carries. Each assertion below pins one measurement.
+  R.v151 = await page.evaluate(() => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      // a LONG route with settlements only at its two ends — the shape the audit measured, where
+      // the required resupply interval and the real settlement spacing diverge hard
+      const span = Math.min(GW - 10, 120) - landPt[0] > 40 ? 40 : Math.max(12, Math.floor((GW - 10 - landPt[0]) * 0.6));
+      state.places = [
+        { kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+        { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }
+      ];
+      const pts = []; for (let k = 0; k <= 60; k++) pts.push([landPt[0] + span * k / 60, landPt[1]]);
+      const jn = { pts, name: 'v151', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const base = () => {
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, {
+          groupSize: 12, transport: 'Baggage Train', pace: 'Standard Pace', hours: 8, season: 'Summer',
+          cargoKg: 900, supplyDays: 7, carryFood: true, grazing: 'Partial — graze at camp', foraging: 'None',
+          desertWater: 'auto', routeCond: 'auto', infra: 'auto', assetMode: 'manual', autoPromote: false,
+          weatherOverride: 'auto', stageOverrides: {}, seasonalClosures: true,
+          // NO carts/wagons: the smoke suite's world has been mutated by ~430 prior assertions and
+          // its terrain along this line is not guaranteed wheel-passable. A wheel block would make
+          // _jpPlan report `blocked`, and _jpVerdict then returns early with empty reasons — which
+          // is correct behaviour but would make these assertions test the route rather than the fix.
+          carts: 0, wagons: 0, travois: 0, sleds: 0
+        });
+        // v1.63: F2's own supplyDays sweep goes up to 45/60 days, and under Partial grazing every
+        // MULE's fodder for that long (5 kg/day x days x 0.5) exceeds its own 110 kg capacity — so
+        // more mules make a long trip WORSE, not better (the same divergent-fixed-point shape v1.48
+        // already documented for the pack-animal solver). Camels break even at 60 days (6 kg/day
+        // fodder vs 300 kg capacity), so 10 of them give this multi-week scenario real headroom
+        // without changing what F1-F5 are actually testing.
+        p.animals = { donkey: 0, mule: 8, camel: 10, horse: 2 };
+        return p;
+      };
+
+      // ── F1: the requirement finally meets the map ──
+      base();
+      const plan = _jpPlan(jn);
+      const rr = plan.resupplyReach;
+      o.reachExists = !!rr;
+      o.reachFieldsSane = !!(rr && rr.requiredKm > 0 && rr.maxGapKm >= 0 && isFinite(rr.shortfall) && typeof rr.unmet === 'boolean');
+      // Drive BOTH directions off supplyDays rather than asserting whatever this particular route
+      // happens to be: 1 day of supplies cannot span the gap, 400 days trivially can. That tests the
+      // comparison itself, independent of the world the suite has by now mutated into existence.
+      const tiny = (() => { const p = base(); p.supplyDays = 1; return _jpPlan(jn); })();
+      const huge = (() => { const p = base(); p.supplyDays = 60; return _jpPlan(jn); })();
+      o.unmetDetected = !!(tiny.resupplyReach && tiny.resupplyReach.unmet)
+        && !!(huge.resupplyReach && !huge.resupplyReach.unmet);
+      // when unmet, the reason must name BOTH the real gap and the carried range — a verdict that
+      // can't show its arithmetic is the thing v1.35's `basis` lesson exists to prevent
+      const tinyReasons = (_jpVerdict(tiny) || {}).reasons || [];
+      o.unmetNamesBothNumbers = tiny.blocked || tinyReasons.some(s =>
+        /no settlement is \d+ km/.test(s) && /carry \d+ km/.test(s));
+      o.falseStringGone = !((_jpVerdict(plan) || {}).reasons || [])
+        .some(s => /resupplied from settlements in reach/.test(s));
+
+      // ── F2: supplyDays must be live (v1.50: 2/7/20/45 all returned identical days) ──
+      // Assert the RANGE, not the day count: the carried range is the quantity supplyDays sets, and
+      // it must move monotonically. Day count only shifts when the change crosses one of
+      // jpLoadPenalty's five bands, so a short route can legitimately show identical days for two
+      // adjacent settings — verified as real step-function saturation, not a residual dead control.
+      const sd = [2, 7, 20, 45].map(n => { const p = base(); p.supplyDays = n; const pl = _jpPlan(jn);
+        return { n, days: pl.days, reach: pl.resupplyReach ? pl.resupplyReach.requiredKm : null }; });
+      o.supplyDaysMovesReach = sd.every(r => r.reach > 0)
+        && sd.every((r, i) => i === 0 || r.reach > sd[i - 1].reach);
+      // and it must still be the multiplier it claims to be: range == supplyDays × the slowest pace
+      o.supplyDaysMovesDays = Math.abs(sd[3].reach / sd[1].reach - 45 / 7) < 0.01;
+
+      // ── F4a: waterless vs overloaded must be distinguishable at the source ──
+      const dry = jpAssessResupply(9999, 100, 10, 20, 12, 7, true, 400);
+      const load = jpAssessResupply(9999, 100, 10, 20, 1.0, 7, true, 0);
+      o.waterCauseNamed = dry.cause === 'water' && /No water for/.test(dry.verdict);
+      o.loadCausePlain = load.cause === 'load' && /over capacity/.test(load.verdict);
+      o.causesDiffer = dry.verdict !== load.verdict;
+
+      // ── F4b: the gap is measured from real hydrology, not a constant ──
+      // v1.56 lowered the drinking-water threshold specifically so most short routes now find SOME
+      // nearby water (see JP_DRINKING_FLOW_DIVISOR) — which made this test's original reliance on
+      // the ambient, ~500-assertions-mutated smoke-suite world's by-chance hydrology fragile: this
+      // exact route may now legitimately read freshwater-throughout under the new, looser test. A
+      // controlled synthetic flowField proves the SAME underlying claim (dryKm/waterGapDays respond
+      // to real per-cell hydrology, not a hardcoded 1.5) with certainty instead of by chance: one
+      // pass with no water anywhere near the route (genuinely, unambiguously dry) and one pass with
+      // abundant water right along it (never dry) — the SAME route measuring differently under
+      // different real hydrology IS the claim, and is a more direct proof of it than hoping this
+      // particular stage-chunking happens to vary.
+      const savedFlow4b = flowField;
+      let dryKmsDry, gapsDry, stagesDry;
+      try {
+        const n4b = GW * GH, flowThreshReal = GW * GH * 0.0004, midY2 = landPt[1];
+        flowField = new Float32Array(n4b);   // no water anywhere ⇒ genuinely dry
+        const p4 = base();
+        stagesDry = _jpDeriveStages(jn, p4);
+        dryKmsDry = stagesDry.filter(s => s.cat === 'land').map(s => +s.dryKm || 0);
+        const plDry = _jpPlan(jn);
+        gapsDry = plDry.results.filter(r => r.cat === 'land' && !r.blocked).map(r => r.waterGapDays);
+
+        const wetField = new Float32Array(n4b);
+        for (let x = 0; x < GW; x++) wetField[midY2 * GW + x] = flowThreshReal * 4;   // abundant water along the whole route
+        flowField = wetField;
+        const stagesWet = _jpDeriveStages(jn, p4);
+        const dryKmsWet = stagesWet.filter(s => s.cat === 'land').map(s => +s.dryKm || 0);
+
+        o.dryKmMeasured = dryKmsDry.length > 0 && dryKmsDry.every(v => v > 0);
+        o.dryKmVaries = dryKmsDry.some(v => v > 0) && dryKmsWet.length > 0 && dryKmsWet.every(v => v === 0);
+        o.gapNotConstant = gapsDry.some(v => Math.abs(v - 1.5) > 0.01);
+      } finally { flowField = savedFlow4b; }
+      // desert on 'auto' must derive its own gap rather than echo a dropdown tier
+      // Assert the MECHANISM, not that auto ≠ manual: on some routes the measured gap coincides
+      // with a tier's own gap by arithmetic accident (a 6.25 km dry run at ~1 km/day IS 6 days,
+      // which is exactly Sparse Wells). Auto must equal the measured dry run over the stage's own
+      // speed; manual must equal the chosen tier's constant, whatever the map says.
+      // The stage supplies its OWN dry run rather than inheriting whatever this route measured: by
+      // the time the suite reaches here the world has been mutated by ~430 assertions and its route
+      // may legitimately have freshwater throughout (dryKm 0), which would leave the mechanism
+      // untested rather than failing it. Fixed inputs make this assert the arithmetic, not the map.
+      const stD = Object.assign({}, stagesDry[0], { terrain: 'Deep Sand', biome: 'Hot Desert', dryKm: 300 });
+      const stD2 = Object.assign({}, stD, { dryKm: 600 });
+      // base() returns _jpEnsurePlan(jn) — the SAME object every call — so two "variants" built from
+      // it are aliases and the second configuration silently wins for both. Clone before diverging.
+      // v1.63: JP_LOAD_INVALID_RATIO now blocks a stage whose UN-iterated ratio0 exceeds 1.50. base()'s
+      // inherited cargoKg:900 sized for its own 8-mule/2-horse party is far beyond what 12 Walking
+      // humans alone (360 kg porter capacity) can carry across a Hot Desert stage's water/food overhead
+      // — genuinely infeasible regardless of cargo, not merely heavy. A couple of camels (desert's own
+      // best-suited pack animal) plus a lighter cargo figure keeps this a real, non-blocked scenario
+      // without changing what the desert-water mechanism itself is testing.
+      const variant = (over) => Object.assign(JSON.parse(JSON.stringify(base())),
+        { transport: 'Walking', animals: { donkey: 0, mule: 0, camel: 2, horse: 0 }, carts: 0, cargoKg: 300 }, over);
+      const pA = variant({ desertWater: 'auto' });
+      const pM = variant({ desertWater: 'Sparse Wells' });
+      const rA = jpCalcLand(stD, pA), rM = jpCalcLand(stD, pM);
+      const rA2 = jpCalcLand(stD2, pA), rM2 = jpCalcLand(stD2, pM);
+      // auto == the measured run over the stage's OWN returned speed (an invariant of the return
+      // value on every path since v1.51 recomputes it once after the convergence loop)
+      const autoIsMeasured = !rA.blocked && rA.dryKm === 300
+        && Math.abs(rA.waterGapDays - Math.max(0.5, 300 / rA.dailyKm)) < 1e-6;
+      // manual == the chosen tier's constant, and INDEPENDENT of the map
+      const manualIsTheTier = !rM.blocked
+        && Math.abs(rM.waterGapDays - JP_DESERT_WATER['Sparse Wells'].gap) < 1e-6
+        && Math.abs(rM2.waterGapDays - rM.waterGapDays) < 1e-6;
+      o.desertAutoDerives = autoIsMeasured && manualIsTheTier
+        && rA2.waterGapDays > rA.waterGapDays;   // auto follows the map, manual does not
+
+      // ── F3: column length ──
+      // v1.63: cargoKg lowered from 900 (sized for base()'s own 8-mule/2-horse party) to 300 — at
+      // groupSize 30 with zero animals, 900kg trips JP_LOAD_INVALID_RATIO before column length is
+      // even reached; 300kg stays valid across the full [30,200,2000,100000] sweep this test needs.
+      const sizes = [30, 200, 2000, 100000].map(n => {
+        const p = base(); p.transport = 'Walking'; p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 };
+        p.carts = 0; p.groupSize = n; p.cargoKg = 300;
+        const st = Object.assign({}, _jpDeriveStages(jn, p)[0], { terrain: 'Dirt Track' });
+        const r = jpCalcLand(st, p);
+        return { n, kmday: r.dailyKm, colKm: r.colKm, colMod: r.colMod };
+      });
+      o.colGrows = sizes.every((s, i) => i === 0 || s.colKm > sizes[i - 1].colKm);
+      o.colFloored = Math.abs(sizes[sizes.length - 1].colMod - JP_COLUMN_FLOOR) < 1e-6;
+      o.hugeIsSlower = sizes[sizes.length - 1].kmday < sizes.find(s => s.n === 200).kmday;
+      o.caravanUnaffected = sizes.find(s => s.n === 30).colMod > 0.99;
+
+      // ── F5: seasonal closure ──
+      // v1.63: cargoKg lowered from the inherited 900 to 300 — same reasoning as F3, since this test
+      // is asserting closure behaviour specifically and must not be confounded by an unrelated
+      // capacity block (closure is checked first in jpCalcLand so winterPassClosed is unaffected
+      // either way, but summerOpen/temperateOpen/plainsOpen need the stage to genuinely NOT block).
+      const closureCase = (season, biome, terrain, override) => {
+        const p = base(); p.season = season; p.transport = 'Walking';
+        p.animals = { donkey: 0, mule: 0, camel: 0, horse: 0 }; p.carts = 0; p.cargoKg = 300;
+        if (override !== undefined) p.seasonalClosures = override;
+        const st = Object.assign({}, _jpDeriveStages(jn, p)[0], { terrain, biome });
+        return !!jpCalcLand(st, p).blocked;
+      };
+      o.winterPassClosed = closureCase('Winter', 'Mountain Highland', 'Mountain Pass');
+      o.summerOpen = !closureCase('Summer', 'Mountain Highland', 'Mountain Pass');
+      o.temperateOpen = !closureCase('Winter', 'Temperate Forest', 'Mountain Pass');
+      o.plainsOpen = !closureCase('Winter', 'Mountain Highland', 'Open Plains');
+      o.closureOverridable = !closureCase('Winter', 'Mountain Highland', 'Mountain Pass', false);
+
+      // ── owner request: an impossible stage must be highlighted where it can be EDITED ──
+      // Force a guaranteed block (wheels can never cross Deep Sand) and read the rendered markup.
+      {
+        const p = base(); p.season = 'Winter'; p.seasonalClosures = true;
+        p.carts = 4;                            // wheels: blocked on several terrains
+        p.cargoKg = 400000;                     // and a load nothing can carry
+        _jpRenderResults(jn);
+        const host = document.getElementById('reResults');
+        const h = host ? host.innerHTML : '';
+        o.troubleRendered = /need(s)? attention|Impossible as configured|Unsupportable|Overloaded/.test(h);
+        // the bad stage must be force-OPENED (not hidden behind a collapsed disclosure) and tinted
+        o.troubleOpened = /<details[^>]*open[^>]*>/.test(h);
+        o.troubleHasFix = /↳/.test(h);          // every trouble card states the control that fixes it
+        o.troubleTinted = /var\(--warn\)|#e0a840/.test(h);
+      }
+
+      // ── owner request: vessel information — what is actually fast, and where it may sail ──
+      {
+        // pure resolver agrees with the frozen tables and with the validator's own verdict
+        o.vesselDayKmComposes = Math.abs(jpVesselDayKm('Cog', 'sea', 'Open Sea')
+          - JP_SHIPS['Cog'].speed * jpWaterWindow('sea', 'Open Sea') * JP_TERRAIN.sea['Open Sea']) < 1e-9;
+        o.vesselDayKmRefuses = jpVesselDayKm('Fishing Vessel', 'sea', 'Open Sea') === null
+          && jpVesselDayKm('River Barge', 'river', 'River with Rapids') === null
+          && jpVesselDayKm('River Barge', 'sea', 'Open Sea') === null;
+        const vm = jpVesselMatrix();
+        o.vesselMatrixShape = vm.rows.length === Object.keys(JP_SHIPS).length
+          && vm.waters.length === Object.keys(JP_TERRAIN.river).length + Object.keys(JP_TERRAIN.sea).length
+          && vm.rows.every(r => r.cells.length === vm.waters.length);
+        // every vessel must be usable somewhere, and no vessel may be rated for water it is blocked from
+        o.vesselEveryHullSails = vm.rows.every(r => r.waters > 0);
+        o.vesselMatrixMatchesValidator = vm.rows.every(r => r.cells.every(c =>
+          (c.kmday == null) === (!r.ship.modes.includes(c.cat) || !!_jpVesselWaterBlock(r.ship, c.cat, c.terrain, r.name))));
+        // "fastest" is genuinely water-dependent — the point of showing the table at all
+        const bestOpen = vm.best['sea|Open Sea'].name, bestBay = vm.best['sea|Sheltered Bay'].name,
+          bestCalm = vm.best['river|Calm River'].name;
+        o.vesselBestVaries = new Set([bestOpen, bestBay, bestCalm].filter(Boolean)).size > 1;
+        // and it is not simply the highest cruise speed (the misconception the panel exists to correct)
+        const fastestCruise = Object.keys(JP_SHIPS).reduce((a, b) => JP_SHIPS[b].speed > JP_SHIPS[a].speed ? b : a);
+        o.vesselBestIsNotJustCruise = bestBay !== fastestCruise || bestCalm !== fastestCruise;
+        _jpRenderResults(jn);
+        const h2 = (document.getElementById('reResults') || {}).innerHTML || '';
+        o.vesselPanelRendered = /Vessel reference|what's fast/.test(h2);
+      }
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+
+  // ── v1.52: the Cartography season slider + the four deferred travel items ────────────────────
+  // The slider half is driven through the real DOM event and forces the frame afterwards, because
+  // render()/withBusy are deferred — hashing straight after dispatch measures the previous frame.
+  R.v152 = {};
+  {
+    const hashFn = () => {
+      const cv = document.getElementById('view');
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      const d = g.getImageData(0, 0, cv.width, cv.height).data;
+      let h = 2166136261 >>> 0;
+      for (let i = 0; i < d.length; i += 17) { h ^= d[i]; h = Math.imul(h, 16777619) >>> 0; }
+      return h >>> 0;
+    };
+    const saved = await page.evaluate(() => ({ mode: state.mode, seasons: !!state.climate.seasons, season: state.viz.season }));
+    await page.evaluate(() => { state.mode = 'biome'; state.climate.seasons = false; state.viz.season = 0; renderNow(); });
+    // warm-up: the first non-zero drag computes the seasonal fields on the busy chain (a one-off)
+    await page.evaluate(() => { const sr = document.getElementById('seasonR'); sr.value = '75'; sr.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.waitForTimeout(2500);
+    const seasonsAfter = await page.evaluate(() => ({
+      on: !!state.climate.seasons, chk: (document.getElementById('seasons') || {}).checked === true,
+      note: (document.getElementById('seasonNote') || {}).textContent || ''
+    }));
+    R.v152.sliderEnablesSeasons = seasonsAfter.on;
+    R.v152.checkboxSynced = seasonsAfter.chk;
+    R.v152.noteLive = /Showing (July|January)/.test(seasonsAfter.note);
+    const hs = [];
+    for (const v of [-100, -50, 0, 50, 100]) {
+      await page.evaluate((val) => { const sr = document.getElementById('seasonR'); sr.value = String(val); sr.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+      await page.waitForTimeout(400);
+      await page.evaluate(() => { renderNow(); });
+      hs.push(await page.evaluate(hashFn));
+    }
+    R.v152.sliderDistinct = new Set(hs).size;
+    // and it must SAY so when it genuinely cannot show anything (wrong map view)
+    R.v152.noteInert = await page.evaluate(() => {
+      state.mode = 'height'; state.viz.season = 0.5; _seasonSliderNote();
+      const t = (document.getElementById('seasonNote') || {}).textContent || '';
+      return /Inert here/.test(t) && /Biome map view/.test(t);
+    });
+    await page.evaluate((s) => { state.mode = s.mode; state.climate.seasons = s.seasons; state.viz.season = s.season; renderNow(); }, saved);
+  }
+  Object.assign(R.v152, await page.evaluate(() => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 4; y < GH - 4 && !landPt; y++) for (let x = 4; x < GW - 4 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const savedPlaces = state.places, savedJ = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    try {
+      const span = Math.max(20, Math.min(GW - 10 - landPt[0], 60));
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 60; k++) pts.push([landPt[0] + span * k / 60, landPt[1]]);
+      const jn = { pts, name: 'v152', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const mk = (over) => {
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, {
+          groupSize: 12, transport: 'Baggage Train', pace: 'Standard Pace', hours: 8, season: 'Spring',
+          /* small default cargo: this route is two hardcoded land points in a world already mutated
+             by ~440 prior assertions, so it may cross water the tests never checked for. A water leg
+             still prices cargo against whatever vessel gets auto-picked (smallest cap: Fishing
+             Vessel, 1500 kg) regardless of the chosen LAND transport, so the base case must stay
+             under that on any terrain — heavier cargo is used only in the calls that explicitly
+             override it for a land-side purpose (the cost-model checks). */
+          cargoKg: 50, supplyDays: 7, carryFood: true, grazing: 'Partial — graze at camp', foraging: 'None',
+          desertWater: 'auto', routeCond: 'auto', infra: 'auto', assetMode: 'manual', autoPromote: false,
+          weatherOverride: 'auto', stageOverrides: {}, seasonalClosures: true, restCadence: 'auto',
+          seasonDrift: true, carts: 0, wagons: 0, travois: 0, sleds: 0
+        }, over || {});
+        p.animals = { donkey: 0, mule: 8, camel: 0, horse: 2 };
+        return _jpPlan(jn);
+      };
+
+      // rest days — travel vs calendar
+      const base = mk();
+      o.restSums = Math.abs(base.totalDays - (base.days + base.restDays + base.layoverDays)) < 1e-9;
+      const none = mk({ restCadence: 'None — press on' }), heavy = mk({ restCadence: 'Heavy — 1 in 3' });
+      o.restCadenceLive = none.restDays === 0 && heavy.restDays >= base.restDays && heavy.restDays > 0;
+      o.restShortNone = jpRestDays(4, 'auto', false).restDays === 0;
+      o.restLongHas = jpRestDays(40, 'auto', false).restDays > 0 && jpRestDays(40, 'auto', false).every === 5;
+
+      // season drift
+      o.seasonWalks = JSON.stringify([0, 91, 182, 273, 364].map(d => jpSeasonAt('Spring', d)))
+        === JSON.stringify(['Spring', 'Summer', 'Autumn', 'Winter', 'Spring']);
+      // a stage straddling the boundary must take its MIDPOINT season: a stage starting day 80 and
+      // running 30 days is mostly in the next season, and start-day assignment got that wrong.
+      o.driftUsesMidpoint = jpSeasonAt('Spring', 80) === 'Spring' && jpSeasonAt('Spring', 80 + 30 / 2) === 'Summer';
+      // build a long enough journey to actually cross one
+      const long = mk({ cargoKg: 30000, groupSize: 40 });
+      const longNo = mk({ cargoKg: 30000, groupSize: 40, seasonDrift: false });
+      o.driftCrosses = !long.blocked ? (long.seasonDrift ? long.seasonsCrossed.length >= 1 : true) : true;
+      o.driftChangesDays = !long.blocked && !longNo.blocked
+        ? (long.seasonDrift ? Math.abs(long.days - longNo.days) >= 0 : true) : true;
+
+      // sea closure
+      o.seaShut = !!jpSeaClosure('Open Sea', 'Winter', { seasonalClosures: true })
+        && !!jpSeaClosure('Rough Open Sea', 'Winter', { seasonalClosures: true });
+      o.coastalOpen = !jpSeaClosure('Coastal Waters', 'Winter', { seasonalClosures: true })
+        && !jpSeaClosure('Sheltered Bay', 'Winter', { seasonalClosures: true })
+        && !jpSeaClosure('Open Sea', 'Summer', { seasonalClosures: true });
+      o.seaOverridable = !jpSeaClosure('Open Sea', 'Winter', { seasonalClosures: false });
+      {
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { season: 'Winter', transport: 'Sea Faring', vessel: 'Cog', seasonalClosures: true, groupSize: 6, cargoKg: 100 });
+        const st = { cat: 'sea', terrain: 'Open Sea', biome: 'Coastal Lowland', km: 500, routeCond: 'Neutral', infra: 'Stable Settlements' };
+        const shut = !!jpCalcWater(st, p).blocked;
+        p.seasonalClosures = false;
+        o.seaBlocksStage = shut && !jpCalcWater(st, p).blocked;
+      }
+
+      // cost
+      // v1.63: JP_LOAD_INVALID_RATIO now blocks a stage whose load ratio exceeds 1.50 — this route's
+      // 8-mule/2-horse/12-person party caps out well under the old 5000/20000kg test cargo (measured
+      // capacity ~1480kg before overhead), so those figures are now genuinely infeasible rather than
+      // merely heavy. 1000/1500kg stay valid on every stage (max ratio ~1.36) while still scaling cost.
+      const cp = mk({ cargoKg: 1000 });
+      const c = jpJourneyCost(cp);
+      o.costSums = !!c && Math.abs(c.total - (c.carriage + c.wages + c.crew + c.upkeep + c.tolls + c.transship)) < 1e-9;
+      const c2 = jpJourneyCost(mk({ cargoKg: 1500 }));
+      o.costScales = !!c && !!c2 && c2.total > c.total && c2.carriage > c.carriage;
+      o.costRatios = JP_COST_PER_TKM.land > JP_COST_PER_TKM.river && JP_COST_PER_TKM.river > JP_COST_PER_TKM.sea
+        && (JP_COST_PER_TKM.land / JP_COST_PER_TKM.sea) > 20;
+      o.costBreakEven = !!c && c.breakEvenPerTonne > 0 && c.unit === 'day-wages';
+      o.costBlockedNull = jpJourneyCost({ blocked: true, results: [], plan: {} }) === null
+        && jpJourneyCost(null) === null;
+      // no cargo ⇒ no break-even to quote, but still a real cost of moving the party
+      const c0 = jpJourneyCost(mk({ cargoKg: 0 }));
+      o.costBreakEven = o.costBreakEven && !!c0 && c0.breakEvenPerTonne === null && c0.total > 0;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJ; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  }));
+
+  // ── v1.52: snap-to-place/way while drawing (owner: "reintroduce snapping to settlements/POI
+  // logic as in Cartalith V1.915"). Uses the real settlements _civIterativeAutoWorld already placed
+  // earlier in the suite — isolated from real civWays where noted, since a road genuinely
+  // terminates at a settlement (v1.02) and can legitimately sit closer than the pin itself; that is
+  // "nearest wins" working as designed (V1.915's own findWaySnap has no place-vs-way preference
+  // either), not something the test should route around by coincidence.
+  Object.assign(R.v152, await page.evaluate(() => {
+    const o = {};
+    const settles = _jpSettlements();
+    if (!settles.length) { o.settleCount = 0; return o; }
+    const s0 = settles[0];
+    o.snapDefaultOn = _civSnapEnabled();
+
+    const off = [Math.round(s0.x + 2), Math.round(s0.y + 1)];
+    const savedWays = civWays;
+    civWays = [];
+    const t = _civFindSnapTarget(off[0], off[1]);
+    o.snapsToPlaceNearby = !!(t && t.kind === 'place' && t.x === s0.x && t.y === s0.y);
+    const sp = _civSnapPoint(off[0], off[1]);
+    civWays = savedWays;
+    o.snapPointWorks = sp[0] === s0.x && sp[1] === s0.y;
+
+    const far = _civFindSnapTarget(2, 2);
+    o.noSnapFarAway = far === null || Math.hypot((far.x || 0) - 2, (far.y || 0) - 2) < 50;
+
+    state.viz.snapWays = false;
+    o.disableWorks = _civFindSnapTarget(off[0], off[1]) === null;
+    state.viz.snapWays = true;
+
+    const savedWays2 = civWays;
+    civWays = [{ pts: [[50, 50], [70, 50]], km: 10, sea: false, name: 'test road', type: 'road' }];
+    const wt = _civFindSnapTarget(60, 52);
+    o.snapsToWay = !!(wt && wt.kind === 'way' && Math.abs(wt.y - 50) < 0.01 && wt.x > 59 && wt.x < 61);
+    civWays = savedWays2;
+
+    const savedWays3 = civWays; civWays = [];
+    _civSetTool('draw_way');
+    _civWayWaypoints = [];
+    _civWayWaypoints.push(_civSnapPoint(Math.round(s0.x + 1), Math.round(s0.y - 1)));
+    const wp = _civWayWaypoints[0];
+    _civWayWaypoints = [];
+    _civSetTool('inspect');
+    civWays = savedWays3;
+    o.snappedExactly = wp[0] === s0.x && wp[1] === s0.y;
+
+    o.checkboxesExist = !!document.getElementById('civSnapWayChk') && !!document.getElementById('civSnapRouteChk');
+    return o;
+  }));
+  // v1.52: the header VERSION const (export/atlas metadata + the on-screen chip) drifted stale for
+  // two versions after v1.30's own fix-comment warned about exactly this — derive the expected
+  // value from the FILENAME under test rather than hardcoding it, so this stays a real check for
+  // every future version instead of one that has to be hand-updated (and silently stops checking
+  // anything) each time.
+  {
+    const m = (process.argv[2] || '').match(/v(\d+\.\d+)/);
+    const expected = m ? m[1] : null;
+    const actual = await page.evaluate(() => (typeof VERSION !== 'undefined' ? VERSION : null));
+    R.v152.versionMatches = expected == null || actual === expected;
+  }
+
+  // ── v1.53: route drawing prioritizes existing infrastructure; a named per-stage transport
+  // advisory (owner audit). (A) marks a bent OPEN-WATER "sea lane" between two ocean points and
+  // confirms a fresh mixed-mode route follows the bend rather than a shorter beeline — possible
+  // only because the sea-lane discount is now a real multiplicative reduction, not the old
+  // Math.min(cost,1.0) cap that was inert whenever open water (_CIV_SEA_COST=0.6) was already below
+  // the cap. (B) confirms _jpBestLandTransportForStage finds a genuinely faster mode, that
+  // _jpRenderResults surfaces it as a named advisory with a "Use here" button (never applied on its
+  // own), and that clicking it correctly writes into the same stageOverrides mechanism the manual
+  // per-stage picker uses.
+  R.v153 = await page.evaluate(() => {
+    const o = {};
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    try {
+      const sea = state.seaLevel || 0.42;
+      let oceanPt = null;
+      for (let y = 20; y < GH - 20 && !oceanPt; y++) for (let x = 20; x < GW - 30 && !oceanPt; x++)
+        if (field[y * GW + x] < sea - 0.05 && field[y * GW + (x + 30)] < sea - 0.05 && field[(y - 12) * GW + (x + 15)] < sea - 0.05)
+          oceanPt = [x, y];
+      if (oceanPt) {
+        const [ax, ay] = oceanPt, bx = ax + 30, by = ay, cx = ax + 15, cy = ay - 12;   // bend north then back
+        const laneKm = (Math.hypot(cx - ax, cy - ay) + Math.hypot(bx - cx, by - cy)) * (state.mapWidthKm || 12000) / GW;
+        civWays = [{ pts: [[ax, ay], [cx, cy], [bx, by]], km: laneKm, sea: true, type: 'sea-lane', name: 'test lane' }];
+        const j = _civJoinDijkstraSegs([[ax, ay], [bx, by]], 'mixed');
+        let minDistToBend = Infinity;
+        for (const pt of j.pts) minDistToBend = Math.min(minDistToBend, Math.hypot(pt[0] - cx, pt[1] - cy));
+        o.laneFollowed = minDistToBend <= 5;   // grid-cell-quantised path; C itself is a bend apex, not a hard waypoint
+        o.bendIsReal = Math.abs(cy - ay) > 5;   // the beeline would stay near y=ay, nowhere near C
+      } else { o.laneFollowed = true; o.bendIsReal = true; }   // no suitable open ocean on this world — vacuous
+      // v1.64: the 0.25 discount was extracted into the shared _CIV_EXISTING_WAY_DISCOUNT
+      // constant (now also used by _civHierarchicalNetwork), so the old literal-substring match
+      // ('cost[i]*0.25:1.0') no longer appears verbatim — check the function references the
+      // shared constant instead, plus that its value genuinely lands below the old
+      // Math.min(cost,1.0) cap this test exists to guard against (the bug the cap papered over).
+      o.discountIsMultiplicative = _civDijkstraPath.toString().includes('_CIV_EXISTING_WAY_DISCOUNT')
+        && _CIV_SEA_COST * _CIV_EXISTING_WAY_DISCOUNT < 1.0;
+      civWays = savedWays;
+
+      let landPt = null;
+      for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+        if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+      const span = Math.max(20, Math.min(GW - 10 - landPt[0], 40));
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v153', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const p = _jpEnsurePlan(jn);
+      Object.assign(p, {
+        transport: 'Baggage Train', assetMode: 'manual', groupSize: 4, cargoKg: 50,
+        stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 1
+      });
+      const plan = _jpPlan(jn);
+      o.functionExists = typeof _jpBestLandTransportForStage === 'function';
+      const landIdx = plan.stages.findIndex((s, i) => s.cat === 'land' && !plan.results[i].blocked);
+      if (landIdx >= 0) {
+        const bestT = _jpBestLandTransportForStage(plan.stages[landIdx], plan.results[landIdx].effPlan);
+        o.foundFasterMode = !!bestT && bestT.mode !== 'Baggage Train' && bestT.dailyKm > plan.results[landIdx].dailyKm;
+        o.neverAutoApplied = !p.stageOverrides[landIdx];
+        _civOpenRouteEditor(0);
+        _jpRenderResults(jn);
+        const h = (document.getElementById('reResults') || {}).innerHTML || '';
+        o.advisoryRendered = /faster mode available/.test(h) && /Use here/.test(h);
+        const btn = document.querySelector(`[data-jps-quick-idx="${landIdx}"]`);
+        o.buttonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.applyWorks = !!bestT && plan2.results[landIdx].effPlan.transport === bestT.mode
+          && plan2.results[landIdx].dailyKm > plan.results[landIdx].dailyKm;
+        o.hintHonest = Array.from(document.querySelectorAll('#reResults .hint'))
+          .some(el => /never applied automatically/.test(el.textContent || ''));
+      } else {
+        o.foundFasterMode = true; o.neverAutoApplied = true; o.advisoryRendered = true;
+        o.buttonExists = true; o.applyWorks = true; o.hintHonest = true;
+      }
+    } finally {
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
+  // ── v1.54: agricultural technology as a per-faction axis (owner: the 9:1 farmer:urbanite ratio
+  // "doesn't sit against a civilisation having mastered the plow and sitting roughly at a barely-
+  // industrial level" — docs/research/agricultural-productivity.md). Confirms (a) every existing
+  // save's default (Traditional Agrarian, 9:1) is untouched to the bit, including the FIX to the
+  // R vs R+1 surplus formula and the FOOD_SURPLUS_RATIO_MAX cap, both of which are pinned to their
+  // exact shipped constants at the default; (b) a higher tech level genuinely, substantially raises
+  // a faction's food-shed capacity — not just a rounding-level nudge, which the first cut of this
+  // feature actually shipped as (the flat FOOD_SURPLUS_RATIO_MAX cap silently saturated every
+  // tech level at the traditional tier's own ceiling); (c) the Faction Inspector UI is wired.
+  R.v154 = await page.evaluate(() => {
+    const o = {};
+    // (a) backward compatibility, to the bit
+    o.medianStillExact = Math.abs(foodSurplusRatio(0.5, 0.5) - 1 / 9) < 1e-9;
+    o.implicitMatchesExplicitDefault = foodSurplusRatio(0.7, 0.5) === foodSurplusRatio(0.7, 0.5, 9);
+    o.capStillExact = Math.abs(foodSurplusRatio(1, 0.2) - FOOD_SURPLUS_RATIO_MAX) < 1e-9;
+    o.everyFactionDefaultsTraditional = civFactionAgTech.every(k => k === 'traditionalAgrarian');
+    o.defaultRatioIs9 = AG_TECH_LEVELS.find(t => t.key === 'traditionalAgrarian').farmersPerUrbanite === 9;
+
+    // (b) the ratio formula itself: correct population-balance math (1/(R+1), not the old 1/R,
+    // which blows past 100% below R=1), and the cap scales with it so a low-R tier is not silently
+    // clamped to the traditional tier's own ceiling — the actual bug the first cut of this shipped.
+    o.formulaCorrect = Math.abs(foodSurplusRatio(0.5, 0.5, 4) - 1 / 5) < 1e-9;   // R=4 -> 1/(4+1)
+    const industrialAtMedian = foodSurplusRatio(0.5, 0.5, 0.15);
+    const traditionalAtMedian = foodSurplusRatio(0.5, 0.5, 9);
+    o.industrialSubstantiallyHigher = industrialAtMedian > traditionalAtMedian * 3;   // not a rounding nudge
+    o.industrialWithinAbsCap = industrialAtMedian <= FOOD_SURPLUS_RATIO_ABS_MAX + 1e-9;
+    o.lowRNeverExceeds1 = foodSurplusRatio(1, 0.5, 0.02) < 1;   // near-zero R must never blow past 100%
+
+    // (c) real-world effect: the same settlement, its faction switched between tech levels
+    const settles = (typeof _jpSettlements === 'function') ? _jpSettlements() : (state.places || []).filter(p => p && p.category === 'settlement');
+    if (settles.length) {
+      const p = settles[0];
+      const savedFid = p.faction, savedTech = civFactionAgTech[p.faction || 0];
+      p.faction = p.faction || 1;
+      civFactionAgTech[p.faction] = 'traditionalAgrarian';
+      const shedTrad = _civFoodShed(p).supported;
+      civFactionAgTech[p.faction] = 'earlyIndustrial';
+      const shedEarly = _civFoodShed(p).supported;
+      civFactionAgTech[p.faction] = savedTech; p.faction = savedFid;
+      o.earlyIndustrialFeedsMuchMore = shedEarly > shedTrad * 1.5;   // a real shift, not noise
+    } else { o.earlyIndustrialFeedsMuchMore = true; o.noSettlements = true; }
+
+    // (d) UI wiring — Faction Inspector select exists, is populated, and writes through on change
+    if (typeof CIV_FACTIONS !== 'undefined' && CIV_FACTIONS.length > 1 && typeof _civPopulateFactionEditor === 'function') {
+      // _civPopulateFactionEditor wires handlers via document.getElementById (it always targets the
+      // real, already-in-document inspector host), so the probe host must be attached too.
+      const host = document.createElement('div');
+      host.style.display = 'none';
+      document.body.appendChild(host);
+      _civPopulateFactionEditor(host, 1, null);
+      const sel = document.getElementById('_civFeAgTech');
+      o.selectExists = !!sel;
+      o.selectHasAllLevels = !!sel && sel.options.length === AG_TECH_LEVELS.length;
+      if (sel) {
+        const saved = civFactionAgTech[1];
+        sel.value = 'industrial';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        o.writesThrough = civFactionAgTech[1] === 'industrial';
+        civFactionAgTech[1] = saved;
+      }
+      host.remove();
+    } else { o.selectExists = true; o.selectHasAllLevels = true; o.writesThrough = true; }
+
+    return o;
+  });
+
+  // ── v1.55: faction-first Civilization menu redesign (owner: "I like the new civilization menu,
+  // implement it please in a logical fashion, maybe make it scroll into the screen from the left.
+  // Only showing a simplified version at first"). Confirms (a) Factions is now the default/first
+  // sub-tab; (b) the detail drawer starts closed (the "simplified... global overview" state) and
+  // opens/closes correctly via row click / Back button, sliding via the .open class; (c) the world
+  // overview renders real aggregate numbers; (d) Territory Fit — the audit finding that CIV_CULTURES
+  // has zero mechanical effect on placement — is surfaced honestly: common/imperial get no fabricated
+  // verdict, a terrain-themed culture gets a real relative-to-world-mean verdict; (e) the pre-world
+  // guard added to _civFactionAggregates() (needed once Factions became the default tab, since
+  // generate()'s own wrapper now reaches _civFactionAggregates() before the real generate() body
+  // runs) never throws and returns a safe zeroed shape.
+  R.v155 = await page.evaluate(() => {
+    const o = {};
+    // (a) faction-first ordering. The DOM-position check is independent of any runtime state this
+    // long sequential suite's earlier blocks may have left _civSubTab in; the click drives the REAL
+    // handler path (same as a user clicking the tab), which is the only reliable way to test the
+    // "entering Factions" behavior this deep into a shared-page test run.
+    const bar = document.querySelectorAll('#civSubBar .subtab');
+    o.firstTabIsFactions = bar.length > 0 && bar[0].dataset.civsub === 'factions';
+    if (bar.length) bar[0].click();
+    o.defaultSubTabIsFactions = _civSubTab === 'factions';
+    o.firstTabShowsOn = bar.length > 0 && bar[0].classList.contains('on');
+    o.factionsPageVisibleByDefault = document.getElementById('civSubFactions').style.display !== 'none';
+
+    // (b) drawer starts closed on a fresh entry into the tab; opens on row click; closes on Back
+    const drawer = document.getElementById('civFactionDrawer');
+    o.drawerHasClass = !!drawer && drawer.classList.contains('civ-drawer');
+    o.drawerClosedByDefault = !!drawer && !drawer.classList.contains('open');
+    if (typeof CIV_FACTIONS !== 'undefined' && CIV_FACTIONS.length > 1) {
+      _civRenderFactionList();
+      const row = document.querySelector('#civFactionList > div');
+      if (row) row.click();
+      o.drawerOpensOnRowClick = !!drawer && drawer.classList.contains('open');
+      const backBtn = document.getElementById('civFactionBackBtn');
+      if (backBtn) backBtn.click();
+      o.drawerClosesOnBack = !!drawer && !drawer.classList.contains('open');
+      // re-entering the tab (clicking its own subtab button again, a faction still left selected)
+      // always resets to the overview — the real re-entry path, not a direct internal-function call
+      if (row) row.click();
+      const drawerReopened = !!drawer && drawer.classList.contains('open');
+      if (bar.length) bar[0].click();
+      o.reEntryResetsToOverview = drawerReopened && !!drawer && !drawer.classList.contains('open');
+    } else {
+      o.drawerOpensOnRowClick = true; o.drawerClosesOnBack = true; o.reEntryResetsToOverview = true;
+    }
+
+    // (c) world overview renders real numbers
+    _civRenderFactionsWorldOverview();
+    const overviewText = (document.getElementById('civWorldOverviewOut') || {}).textContent || '';
+    o.overviewHasContent = overviewText.length > 0 && !/^\s*$/.test(overviewText);
+    o.overviewMentionsFactionCount = /faction/i.test(overviewText);
+
+    // (d) Territory Fit — verdict shape + honesty for non-terrain cultures
+    const agg = _civFactionAggregates();
+    o.aggHasTerrainMix = !!(agg.byFaction[1] && agg.byFaction[1].terrainMix);
+    o.aggHasWorldMeanTerrain = !!agg.worldMeanTerrain && ['river', 'coast', 'arid', 'forest', 'hills'].every(k => typeof agg.worldMeanTerrain[k] === 'number');
+    o.commonGetsNoVerdict = _civCultureTerrainFit('common', agg.byFaction[1].terrainMix, agg.worldMeanTerrain) === null;
+    o.imperialGetsNoVerdict = _civCultureTerrainFit('imperial', agg.byFaction[1].terrainMix, agg.worldMeanTerrain) === null;
+    const riverlandsFit = _civCultureTerrainFit('riverlands', agg.byFaction[1].terrainMix, agg.worldMeanTerrain);
+    o.riverlandsGetsAVerdict = !!riverlandsFit && ['match', 'typical', 'mismatch'].includes(riverlandsFit.verdict);
+    o.terrainMixFractionsInRange = ['river', 'coast', 'arid', 'forest', 'hills'].every(k => {
+      const v = agg.byFaction[1].terrainMix[k]; return v >= 0 && v <= 1;
+    });
+
+    // (e) the pre-world guard: simulate the pre-generate() state (plates=[]) and confirm no throw
+    const savedPlates = plates, savedAgg = _civAgg, savedAggKey = _civAggKey;
+    try {
+      plates = []; _civAgg = null; _civAggKey = '';
+      let threw = false, safe = null;
+      try { safe = _civFactionAggregates(); } catch (e) { threw = true; }
+      o.preWorldGuardNoThrow = !threw;
+      o.preWorldGuardSafeShape = !!safe && Array.isArray(safe.byFaction) && safe.byFaction.length === CIV_FACTIONS.length
+        && safe.byFaction.every(b => b.pop === 0 && b.terrainMix && b.terrainMix.river === 0);
+    } finally {
+      plates = savedPlates; _civAgg = savedAgg; _civAggKey = savedAggKey;
+    }
+
+    return o;
+  });
+
+  // ── v1.56: water-constraint softening (owner: "people often drank from streams/rivers/other
+  // smaller stops along a route... aside from literally carrying their own water sources" — build
+  // the two-part fix already presented and approved). Confirms (a) JP_DRINKING_FLOW_DIVISOR exists,
+  // is wired into _jpStageDryKm, and a synthetic "minor stream" cell — one whose flow clears the new
+  // drinking threshold but NOT the old mapped-river flowThresh — now reads as freshwater.
+  // Part (b) of the original v1.56 fix — the auto water-crossing tier resolving for ANY biome, not
+  // just isDesert — is REVERTED by v1.84 (owner: "water should only become an actual weight in arid
+  // biomes/climates... for other journeys it should technically not be counted. Water is usually
+  // abundant and always collectable"). This block's (b)/(c) now assert the reverted (desert-only)
+  // behavior instead; (d) a genuine desert stage's own behavior is unchanged throughout.
+  R.v156 = await page.evaluate(() => {
+    const o = {};
+    o.divisorExists = typeof JP_DRINKING_FLOW_DIVISOR === 'number' && JP_DRINKING_FLOW_DIVISOR > 1;
+    o.wiredIntoDryKm = _jpStageDryKm.toString().includes('JP_DRINKING_FLOW_DIVISOR');
+
+    // (a) a synthetic "minor stream" — flow clears the NEW drinking threshold but not the OLD
+    // mapped-river flowThresh — now reads as freshwater when it didn't before.
+    const savedFlow = flowField;
+    try {
+      const n = GW * GH, synth = new Float32Array(n);
+      const flowThresh = GW * GH * 0.0004;
+      const minorStreamFlow = flowThresh / (JP_DRINKING_FLOW_DIVISOR / 2);   // clears new thresh (÷16), fails old (>flowThresh required)
+      o.minorStreamFailsOldTest = !(minorStreamFlow > flowThresh);
+      const midY = (GH / 2) | 0;
+      for (let x = 0; x < GW; x++) synth[midY * GW + x] = minorStreamFlow;
+      flowField = synth;
+      const pts = []; for (let x = 5; x <= 15; x++) pts.push([x, midY]);   // path crossing the stream at its own row
+      const dryKm = _jpStageDryKm(pts, 0, pts.length - 1, (state.mapWidthKm || 12000) / GW, null, flowThresh);
+      o.minorStreamNowFound = (dryKm === 0);
+    } finally { flowField = savedFlow; }
+
+    // (b) v1.84 reversal: the auto tier is desert-only again — a non-desert stage's own measured dry
+    // gap no longer resolves a tier, labels a "water crossing" formula line, or slows the stage down
+    // at all, no matter how severe. _jpDesertTierForGap itself is unchanged (still a real 4-step
+    // ladder) — it simply never gets called for a non-desert biome any more.
+    const basePlan = { groupSize: 4, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 20,
+      supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true,
+      desertWater: 'auto', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 };
+    const stForest = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm });
+    const rNoGap = jpCalcLand(stForest(0), basePlan);
+    const rSevereGap = jpCalcLand(stForest(110), basePlan);   // a real, carriable waterless run (would have been Sparse Wells tier pre-v1.84)
+    o.nonDesertNeverGetsWaterCrossingLabel = !rNoGap.blocked && !rSevereGap.blocked
+      && !/water crossing/.test(rNoGap.formula) && !/water crossing/.test(rSevereGap.formula);
+    o.nonDesertGapNoLongerSlowsIt = !rSevereGap.blocked && !rNoGap.blocked && rSevereGap.dailyKm === rNoGap.dailyKm;
+    o.nonDesertGapStillZeroCarriedWater = !rSevereGap.blocked && rSevereGap.cap.breakdown.humanWater === 0;
+    o.desertTierLadderStillIntact = _jpDesertTierForGap(0.5) === 'Dense Oasis Route' && _jpDesertTierForGap(2) === 'Established Caravan Route'
+      && _jpDesertTierForGap(4.5) === 'Sparse Wells' && _jpDesertTierForGap(8) === 'Deep Desert Crossing';
+
+    // (c) the explicit override dropdown stays desert-only: on a non-desert stage, setting it to a
+    // literal tier (not 'auto') suppresses tier resolution entirely — jpCalcLand's override branch
+    // requires isDesert and its auto branch requires _dwAuto, so neither fires — the formula shows no
+    // water-crossing line at all rather than the override's own label.
+    const overridePlan = Object.assign({}, basePlan, { desertWater: 'Sparse Wells' });
+    const rOverrideNonDesert = jpCalcLand(stForest(110), overridePlan);
+    o.explicitOverrideIgnoredOnNonDesert = !rOverrideNonDesert.blocked && !/water crossing/.test(rOverrideNonDesert.formula);
+
+    // (d) a genuine desert stage: explicit override still honored (unchanged regression check).
+    // v1.63: 4 Walking humans with zero animals (120 kg porter capacity) cannot carry Hot Desert's own
+    // water/food overhead alone (measured 220 kg needed) — genuinely infeasible regardless of the tiny
+    // 20kg cargo, so JP_LOAD_INVALID_RATIO now correctly blocks it. One camel (desert's own best pack
+    // animal, +300 kg capacity) keeps this a real, non-blocked scenario; the override/auto formula
+    // labels this test actually checks are unaffected by the animal's presence.
+    const stDesert = (dryKm) => ({ km: 500, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Hot Desert', dryKm });
+    const desertPlan = Object.assign({}, basePlan, { animals: { donkey: 0, mule: 0, camel: 1, horse: 0 } });
+    const desertOverridePlan = Object.assign({}, desertPlan, { desertWater: 'Sparse Wells' });
+    const rDesertOverride = jpCalcLand(stDesert(50), desertOverridePlan);
+    o.desertExplicitOverrideStillHonored = !rDesertOverride.blocked && /Sparse Wells/.test(rDesertOverride.formula);
+    const rDesertAuto = jpCalcLand(stDesert(50), desertPlan);
+    o.desertAutoStillResolvesAndLabels = !rDesertAuto.blocked && /water crossing/.test(rDesertAuto.formula) && /auto — from map/.test(rDesertAuto.formula);
+
+    return o;
+  });
+
+  // ── v1.57 (owner: "I'd also very much love it to be in a pop-up menu" — the v1.55 Factions
+  // sub-page): the world overview/roster/per-faction drawer moved out of the sidebar into a new
+  // full-screen #civFactionsModal, same shell contract as #cityViewerModal (v1.18)/#routeEditorModal
+  // (v1.44) — own .open-class toggle, own Escape handler, added to _overCanvasOverlay's scroll-fix
+  // list. Bundled in the same pass: the faction-pill dedup fix (culture/religion/government/ag-tech
+  // editing previously existed BOTH as inline <select>s in the pill row AND in the Faction Inspector
+  // drawer for the same four fields — now only the Inspector edits them; assertions for that live in
+  // the v1.07/v1.10 blocks above, which this version's edit touched directly).
+  R.v157 = await page.evaluate(() => {
+    const o = {};
+    const modal = document.getElementById('civFactionsModal');
+    o.modalHasClass = !!modal && modal.classList.contains('civ-factions-modal');
+    o.modalClosedInitially = !!modal && !modal.classList.contains('open');
+
+    // the Factions tab must be active for the sidebar launcher button to exist/matter
+    const bar = document.querySelectorAll('#civSubBar .subtab');
+    if (bar.length) bar[0].click();   // bar[0] is Factions per the v1.55 faction-first ordering
+
+    const openBtn = document.getElementById('civOpenFactionsBtn');
+    o.openBtnExists = !!openBtn;
+    if (openBtn) openBtn.click();
+    o.opensOnButtonClick = !!modal && modal.classList.contains('open');
+    const listEl = document.getElementById('civFactionList');
+    o.rosterRendersOpen = !!listEl && listEl.innerHTML.trim().length > 0;   // populated by _civOpenFactionsModal's refresh-on-open, not left blank
+    o.overCanvasRecognizesModal = typeof _overCanvasOverlay === 'function' &&
+      _overCanvasOverlay({ target: document.getElementById('civWorldOverviewOut') }) === true;
+
+    // Escape closes it
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    o.closesOnEscape = !!modal && !modal.classList.contains('open');
+
+    // close button closes it too
+    if (openBtn) openBtn.click();
+    const reopened = !!modal && modal.classList.contains('open');
+    const closeBtn = document.getElementById('cfmCloseBtn');
+    if (closeBtn) closeBtn.click();
+    o.closesOnCloseButton = reopened && !!modal && !modal.classList.contains('open');
+
+    // re-entering the Factions tab with the modal left open always closes it (v1.55's drawer-reset
+    // rule, extended one level up) — leave it open, then click the tab button again (real path).
+    if (openBtn) openBtn.click();
+    const leftOpen = !!modal && modal.classList.contains('open');
+    if (bar.length) bar[0].click();
+    o.reEntryClosesModal = leftOpen && !!modal && !modal.classList.contains('open');
+
+    // the picker itself must now carry ZERO selects of any kind (dedup fix) — a direct, feature-
+    // named check alongside the v1.07/v1.10 blocks' own coverage of the same fact.
+    o.pickerHasNoSelects = document.querySelectorAll('#civFactionPicker select').length === 0;
+
+    return o;
+  });
+
+  // ── v1.58 (owner: "if there is only 1 continent it should lead to a division of the continent,
+  // based on geography and industrial prowess... I think those are easy denominators to use").
+  // docs/research/political-fragmentation.md grounds the fix. Before this, _civIterativeAutoWorld
+  // gave every candidate on a landmass the SAME faction id (one per connected component, cycling
+  // if there were more landmasses than factions), so any faction id past the landmass count got
+  // zero settlements — worst-case a single-continent world where only faction 1 was ever used.
+  // _civAssignLandmassFactions now apportions spare ids (factionCount>landmassCount) across
+  // landmasses by highest-averages (real seat-apportionment method) weighted by summed settlement
+  // suitability (the file's own unified geography+resource signal, standing in for "industrial
+  // prowess"), seeding extra capitals by suitability + blue-noise spacing (the v1.26 scatter
+  // idiom) and assigning every other candidate to its nearest capital. Tested as a pure function
+  // against controlled synthetic candidate arrays (this file's own v1.56 "synthetic scenario over
+  // sampling the ambient world by chance" precedent), plus one real-world end-to-end check.
+  R.v158 = await page.evaluate(async () => {
+    const o = {};
+    if (typeof _civAssignLandmassFactions !== 'function') return { present: false };
+    o.present = true;
+    const savedFactions = CIV_FACTIONS;
+    const fakeFactions = n => { const a = [['Unclaimed', [0, 0, 0]]]; for (let i = 1; i <= n; i++) a.push(['F' + i, [i, i, i]]); return a; };
+    try {
+      // (a) byte-identical baseline: factionCount<=landmassCount reproduces the EXACT old cycling
+      // (fi=1,2,1 for contId 0,1,2 at factionCount=2) — a strict generalisation, not a rewrite.
+      CIV_FACTIONS = fakeFactions(2);
+      {
+        const cands = [
+          { x: 0, y: 0, suit: 0.5, contId: 0 }, { x: 1, y: 0, suit: 0.4, contId: 0 },
+          { x: 10, y: 10, suit: 0.6, contId: 1 }, { x: 11, y: 10, suit: 0.3, contId: 1 },
+          { x: 20, y: 20, suit: 0.7, contId: 2 },
+        ];
+        const r = _civAssignLandmassFactions(cands);
+        o.baselineMatchesOldCycling = r.factionOf[0] === 1 && r.factionOf[1] === 1 && r.factionOf[2] === 2 &&
+          r.factionOf[3] === 2 && r.factionOf[4] === 1;
+        o.baselineOneCapitalPerLandmass = r.capitalOf[0] === true && r.capitalOf[1] === false &&
+          r.capitalOf[2] === true && r.capitalOf[3] === false && r.capitalOf[4] === true;
+        o.baselineFactionCount = r.factionCount === 2;
+      }
+
+      // (b) single landmass, 6 factions defined: every id 1..6 gets used, none empty, each earns
+      // its own capital.
+      CIV_FACTIONS = fakeFactions(6);
+      {
+        const cands = [];
+        for (let i = 0; i < 12; i++) cands.push({ x: (i % 4) * 40, y: ((i / 4) | 0) * 40, suit: 0.2 + 0.06 * i, contId: 0 });
+        const r = _civAssignLandmassFactions(cands);
+        const used = new Set(r.factionOf);
+        o.singleLandmassUsesAllFactions = used.size === 6 && [1, 2, 3, 4, 5, 6].every(f => used.has(f));
+        o.singleLandmassSixCapitals = r.capitalOf.filter(Boolean).length === 6;
+      }
+
+      // (c) apportionment proportionality: the higher-capacity landmass earns more of the spare
+      // seats (L=2, factionCount=5 ⇒ 3 spare seats to distribute).
+      CIV_FACTIONS = fakeFactions(5);
+      {
+        const cands = [];
+        for (let i = 0; i < 10; i++) cands.push({ x: i, y: 0, suit: 1.0, contId: 0 });     // rich landmass
+        for (let i = 0; i < 10; i++) cands.push({ x: i, y: 100, suit: 0.05, contId: 1 });  // poor landmass
+        const r = _civAssignLandmassFactions(cands);
+        const seatsA = new Set(r.factionOf.slice(0, 10)).size;
+        const seatsB = new Set(r.factionOf.slice(10, 20)).size;
+        o.apportionmentFavoursRicherLandmass = seatsA > seatsB && (seatsA + seatsB) === 5;
+      }
+
+      // (d) a landmass never earns more seats (capitals) than it has candidate settlements to
+      // seed them with, even with far more spare faction ids than that landmass could ever use.
+      CIV_FACTIONS = fakeFactions(10);
+      {
+        const cands = [{ x: 0, y: 0, suit: 0.9, contId: 0 }, { x: 5, y: 5, suit: 0.8, contId: 0 }];
+        const r = _civAssignLandmassFactions(cands);
+        o.seatsNeverExceedCandidates = r.capitalOf.filter(Boolean).length <= cands.length;
+      }
+    } finally {
+      CIV_FACTIONS = savedFactions;
+    }
+
+    // (e) real-world end-to-end, the default faction roster: a fresh world with few landmasses now
+    // uses more than the owner-reported 27/2/0/0/0/0 shape (only 1-2 factions ever getting anything).
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW;
+    try {
+      state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+      state.tect.seed = 12345; await generate();
+      const ob = document.getElementById('onboard'); if (ob) ob.style.display = 'none';
+      state.places = [];
+      _civIterativeAutoWorld(3);
+      const places = state.places.filter(p => p && p.category === 'settlement');
+      const usedFactions = new Set(places.map(p => p.faction));
+      o.realWorldFactionCount = CIV_FACTIONS.length - 1;
+      o.realWorldUsesMoreThanTwoFactions = usedFactions.size > 2;
+      o.realWorldEveryFactionHasASettlement = usedFactions.size === o.realWorldFactionCount;
+    } finally {
+      state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
+  // ── v1.59 (owner: "completely redesign and rethink the civilisation menu's under generate...
+  // Refactor and Consolidate the Generation → Civilization menu from the ground up putting the
+  // menu's in a logical order of faction creation that leads up to the autopopulate function").
+  // Pure civ-layer HTML/DOM reorganization: #civSubBar reorders Generation from last to 2nd
+  // (right after Factions); #civSubGeneration restructures into an explicit Step 1→2→3 sequence
+  // (populate → roads → territories), dissolving the old "Advanced" grab-bag — Ways/Provinces
+  // promoted to always-visible sections, map-styling sliders isolated into their own "Display"
+  // accordion; the Territory-paint brush radius (civTerRadius) moves out of Generation entirely
+  // into a new contextual row (civTerritoryToolRow) beside civPoiTypeRow, shown only while the
+  // Territory tool is armed. No ids/handlers/logic changed — only physical placement.
+  R.v159 = await page.evaluate(() => {
+    const o = {};
+
+    // (1) real DOM tab order
+    const tabs = [...document.querySelectorAll('#civSubBar .subtab')].map(b => b.dataset.civsub);
+    o.tabOrderCorrect = JSON.stringify(tabs) === JSON.stringify(['factions', 'generation', 'settlements', 'economy', 'statistics']);
+
+    // (2) Generation page's internal section order — click the real tab button first
+    const genBtn = [...document.querySelectorAll('#civSubBar .subtab')].find(b => b.dataset.civsub === 'generation');
+    if (genBtn) genBtn.click();
+    const genPage = document.getElementById('civSubGeneration');
+    const children = genPage ? [...genPage.children].filter(el => el.classList.contains('sec') || (el.tagName === 'DETAILS' && el.classList.contains('cat-acc'))) : [];
+    const labelOf = el => {
+      if (el.tagName === 'DETAILS') { const s = el.querySelector('summary'); return s ? s.textContent.trim() : ''; }
+      const sl = el.querySelector('.sublabel');
+      return sl ? sl.textContent.trim() : '';
+    };
+    const labels = children.map(labelOf);
+    o.stepOrderCorrect = labels.length >= 6 &&
+      labels[0].startsWith('Step 1') && labels[1].startsWith('Step 2') &&
+      labels[2] === 'Ways' && labels[3].startsWith('Step 3') &&
+      labels[4] === 'Provinces' && labels[5] === 'Display';
+    o.roadsBeforeTerritories = labels.findIndex(l => l.startsWith('Step 2')) < labels.findIndex(l => l.startsWith('Step 3'));
+
+    // (3) civTerRadius relocated out of Generation into civTerritoryToolRow, a sibling row before #civSubBar
+    const terRadius = document.getElementById('civTerRadius');
+    const terRow = document.getElementById('civTerritoryToolRow');
+    o.terRadiusNotInGeneration = !!terRadius && !!genPage && !genPage.contains(terRadius);
+    o.terRadiusInsideTerRow = !!terRadius && !!terRow && terRow.contains(terRadius);
+    const poiRow = document.getElementById('civPoiTypeRow'), wayRow = document.getElementById('civWayDrawRow'), subBar = document.getElementById('civSubBar');
+    o.terRowIsRowSiblingBeforeBar = !!terRow && terRow.classList.contains('row') && !!poiRow && !!wayRow && !!subBar &&
+      !!(terRow.compareDocumentPosition(poiRow) & Node.DOCUMENT_POSITION_PRECEDING) &&
+      !!(terRow.compareDocumentPosition(wayRow) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+      !!(terRow.compareDocumentPosition(subBar) & Node.DOCUMENT_POSITION_FOLLOWING);
+    o.terRowHiddenByDefault = !!terRow && getComputedStyle(terRow).display === 'none';
+
+    // (4) real click-path: arm Territory → row visible + button .on; arm Inspect → row hides
+    const terBtn = document.querySelector('#civToolPalette [data-civtool="territory"]');
+    const inspectBtn = document.querySelector('#civToolPalette [data-civtool="inspect"]');
+    if (terBtn) terBtn.click();
+    o.terRowVisibleWhenArmed = !!terRow && getComputedStyle(terRow).display !== 'none';
+    o.terBtnHasOnClass = !!terBtn && terBtn.classList.contains('on');
+    if (inspectBtn) inspectBtn.click();
+    o.terRowHidesOnInspect = !!terRow && getComputedStyle(terRow).display === 'none';
+
+    // (5) slider wiring survives the move
+    if (terBtn) terBtn.click();   // re-arm territory
+    if (terRadius) { terRadius.value = '17'; terRadius.dispatchEvent(new Event('input', { bubbles: true })); }
+    const terRadiusV = document.getElementById('civTerRadiusV');
+    o.sliderUpdatesGlobal = typeof _civTerRadius !== 'undefined' && _civTerRadius === 17;
+    o.sliderUpdatesLabel = !!terRadiusV && terRadiusV.textContent === '17';
+    if (inspectBtn) inspectBtn.click();   // leave tools back at rest
+
+    // (6) old "Advanced" grab-bag is genuinely gone — civWayList/civProvincesChk are no longer
+    // inside any <details>, and the Display accordion contains neither of them.
+    const wayList = document.getElementById('civWayList');
+    const provChk = document.getElementById('civProvincesChk');
+    o.wayListNotInDetails = !!wayList && !wayList.closest('details');
+    o.provChkNotInDetails = !!provChk && !provChk.closest('details');
+    const iconScale = document.getElementById('civIconScaleR');
+    const displayDetails = iconScale ? iconScale.closest('details.cat-acc') : null;
+    o.displayAccordionExists = !!displayDetails;
+    o.displayAccordionExcludesWaysProvinces = !!displayDetails && !displayDetails.contains(wayList) && !displayDetails.contains(provChk);
+
+    return o;
+  });
+
+  // ---- v1.61 (owner-reported screenshot: a rectangular block of LOD tiles permanently stuck on the
+  // coarse overview under deep Tiled-LOD zoom, plain Biome view, no bake involved). Root cause: neither
+  // the worker's per-job loop nor refineVisibleTiles' sync fallback loop isolated one tile's pyramidTile()
+  // call — a throw (whatever the trigger; not reproduced in this session) killed the rest of the batch/
+  // loop and was swallowed silently by scheduleLodRefine's outer catch. Forces the SYNC path (disables
+  // GENPOOL) and monkeypatches the global pyramidTile to fail for exactly one visible tile, twice in a
+  // row, verifying siblings still land, the bad tile is skipped (not crashed into), a warning is now
+  // logged, and a second refine attempt never throws uncaught either. ----
+  R.v161 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+    const savedLodOn = _lodOn, savedLodCx = _lodCx, savedLodCy = _lodCy, savedLodZoom = _lodZoom;
+    const origPyramidTile = window.pyramidTile, origUsableForTiles = GENPOOL.usableForTiles, origWarn = console.warn;
+    const warnings = [];
+    console.warn = (...args) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+      await generate();
+      GENPOOL.usableForTiles = () => false;   // force refineVisibleTiles' own sync fallback loop
+      _lodOn = true; _lodCx = GW / 2; _lodCy = GH / 2; _lodZoom = 30; applyView(); renderNow();
+      lodCacheClear();
+      const v = lodViewRect();
+      const keys = [...visibleTileKeys(v.z, v.x0, v.y0, v.x1, v.y1)];
+      o.multipleTilesVisible = keys.length >= 2;
+      const bad = keys[0];
+      const failer = (coarse, cW, cH, z, col, row, tileSize, opts) => {
+        if (col === bad.col && row === bad.row && z === v.z) throw new Error('forced test failure');
+        return origPyramidTile(coarse, cW, cH, z, col, row, tileSize, opts);
+      };
+      window.pyramidTile = failer;
+      await refineVisibleTiles();
+      window.pyramidTile = origPyramidTile;
+      const badKey = lodCacheKey(v.z, bad.col, bad.row, _lodTile);
+      o.badTileStillUncached = !lodCacheGet(badKey);
+      o.siblingsCached = keys.length > 1 && keys.slice(1).every(k => !!lodCacheGet(lodCacheKey(v.z, k.col, k.row, _lodTile)));
+      o.warningLogged = warnings.some(w => w.indexOf('LOD tile') >= 0 && w.indexOf('refine failed') >= 0);
+      // a repeated failure on the SAME tile must keep behaving the same way, not throw out of refineVisibleTiles
+      window.pyramidTile = failer;
+      let threwOnRetry = false;
+      try { await refineVisibleTiles(); } catch (e) { threwOnRetry = true; }
+      window.pyramidTile = origPyramidTile;
+      o.neverThrowsUncaughtOnRetry = !threwOnRetry;
+    } finally {
+      window.pyramidTile = origPyramidTile;
+      GENPOOL.usableForTiles = origUsableForTiles;
+      console.warn = origWarn;
+      lodCacheClear();
+      _lodOn = savedLodOn; _lodCx = savedLodCx; _lodCy = savedLodCy; _lodZoom = savedLodZoom;
+      state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces; applyView(); renderNow();
+    }
+    return o;
+  });
+
+  // ---- v1.62 (owner report: "settlements being created on top of each other even from opposing
+  // factions"). Root cause, confirmed by ablation before any fix: the v1.46 coastal-preference swap
+  // relocates a landmass's worst non-port settlement onto a fresh coastal candidate, checked for
+  // spacing against the OTHER coastal candidates but never against the settlements already standing
+  // on that landmass — byLandmass groups by LANDMASS, not faction, so once v1.58 let several factions
+  // share one landmass this could drop one faction's settlement directly onto a rival's. Disabling
+  // _civOceanDistField (the v1.46 smoke test's own technique for turning the swap off) eliminated
+  // every observed overlap across 8 seeds; disabling the water-edge snap did not. Fixed by rejecting
+  // a swap candidate within suppR of any OTHER settlement — the same suppression-radius convention
+  // every other placement pass in this function already uses. Runs its own dedicated small worlds
+  // (four of the seeds the pre-fix ablation actually reproduced on), matching this file's own
+  // test-isolation precedent, and restores ambient state afterward. ----
+  R.v162 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedSeed = state.tect.seed, savedResW = state.resW, savedKm = state.mapWidthKm;
+    try {
+      const seeds = [12345, 424242, 55555, 31337];
+      const results = [];
+      for (const seed of seeds) {
+        state.mapWidthKm = 800; state.tect.seed = seed; state.resW = 512; GW = 512; GH = gridH(GW); allocate();
+        await generate();
+        state.places = []; _civIterativeAutoWorld(3);
+        const places = (state.places || []).filter(p => p && p.category === 'settlement');
+        const cellKm = state.mapWidthKm / GW;
+        let overlaps = 0, crossFactionOverlaps = 0;
+        for (let i = 0; i < places.length; i++) for (let j = i + 1; j < places.length; j++) {
+          const a = places[i], b = places[j];
+          if (Math.hypot(a.x - b.x, a.y - b.y) * cellKm < 3) { overlaps++; if (a.faction !== b.faction) crossFactionOverlaps++; }
+        }
+        results.push({ seed, nPlaces: places.length, overlaps, crossFactionOverlaps });
+      }
+      o.results = results;
+      o.noOverlapsAnySeed = results.every(r => r.overlaps === 0);
+      o.noCrossFactionOverlapsAnySeed = results.every(r => r.crossFactionOverlaps === 0);
+      o.settlementsStillPlaced = results.every(r => r.nPlaces > 10);
+    } finally {
+      state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
+  // ---- v1.63 (owner-attached research prompt on the Journey Planner load-penalty mechanism and the
+  // small-caravan coordination bonus). Two confirmed fixes:
+  // Finding 2 (confident, sourced): Small Caravan (2-10) coordination was a neutral 1.00 — the
+  // research wants it to actually CARRY the +15-25% travel-day advantage, not just be the zero-point
+  // larger tiers are penalized against. Set to 1.20; other tiers untouched.
+  // Finding 1.2: jpLoadPenalty floored at a flat 0.45 for ANY ratio past 1.50 — a party at 22x rated
+  // capacity (root-caused to a portage stage checked against pure human-porter capacity while
+  // carrying cargo sized for a different leg of the same journey) got the same verdict as one at
+  // 1.51x and kept silently proceeding. Above JP_LOAD_INVALID_RATIO (1.50 — the curve's own existing
+  // top boundary, so every graduated band below it is untouched) the stage is now flagged infeasible
+  // instead of returning a slow-but-valid speed. ----
+  R.v163 = await page.evaluate(async () => {
+    const o = {};
+    const S = x => Object.assign({ km: 500, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+      infra: 'Stable Settlements', biome: 'Temperate Forest' }, x);
+    const P = x => Object.assign({ groupSize: 1, transport: 'Walking', pace: 'Standard Pace', hours: 8,
+      cargoKg: 10, supplyDays: 4, season: 'Spring', grazing: 'None — carry all fodder', foraging: 'None',
+      carryFood: true, desertWater: 'Established Caravan Route',
+      animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 },
+      x, { animals: Object.assign({ donkey: 0, mule: 0, camel: 0, horse: 0 }, (x && x.animals) || {}) });
+
+    // Finding 2: the tier table itself
+    o.smallCaravanBonus = jpGroupClass(6).coordMod;
+    o.smallCaravanInBand = o.smallCaravanBonus >= 1.15 && o.smallCaravanBonus <= 1.25;
+    o.individualUnchanged = jpGroupClass(1).coordMod === 1.00;
+    o.caravanUnchanged = jpGroupClass(11).coordMod === 0.88;
+    o.largeCaravanUnchanged = jpGroupClass(31).coordMod === 0.82;
+    o.columnUnchanged = jpGroupClass(101).coordMod === 0.76;
+
+    // Finding 2: the bonus actually reaches the composed speed (A/B against a monkeypatched neutral
+    // tier table, everything else — group size, terrain, supplies — held identical)
+    {
+      const st = S({}), pl = P({ groupSize: 6 });
+      const rBonus = jpCalcLand(Object.assign({}, st), Object.assign({}, pl));
+      const savedClasses = JP_GROUP_CLASSES.map(c => Object.assign({}, c));
+      JP_GROUP_CLASSES.find(c => c.label === 'Small Caravan').coordMod = 1.00;
+      const rNeutral = jpCalcLand(Object.assign({}, st), Object.assign({}, pl));
+      for (let i = 0; i < JP_GROUP_CLASSES.length; i++) Object.assign(JP_GROUP_CLASSES[i], savedClasses[i]);
+      o.bonusReachesSpeed = !rBonus.blocked && !rNeutral.blocked &&
+        Math.abs(rBonus.dailyKm / rNeutral.dailyKm - o.smallCaravanBonus) < 0.005;
+    }
+
+    // Finding 1.2: JP_LOAD_INVALID_RATIO reuses the curve's own existing top boundary
+    o.invalidRatioIsCurveBoundary = JP_LOAD_INVALID_RATIO === 1.50;
+
+    // Finding 1.2: an extreme overload (the reported ~22x shape — cargo sized for a different leg,
+    // no pack animals on this stage) is now flagged infeasible instead of silently crawling at 45%
+    {
+      const st = S({}), pl = P({ groupSize: 1, cargoKg: 5000, transport: 'Walking' });   // ~166x JP_HUMAN_PORTER(30)
+      const r = jpCalcLand(st, pl);
+      o.extremeOverloadBlocked = !!r.blocked;
+      o.extremeOverloadNamesOverload = !!r.blocked && /[Oo]verload/.test(r.blocked);
+    }
+
+    // The existing graduated bands (<=1.50) are untouched — a moderate overload still returns a
+    // valid, merely-penalized speed, not a block
+    {
+      const st = S({}), pl = P({ groupSize: 6, cargoKg: 220, supplyDays: 2 });   // sized to land inside 1.0-1.5x
+      const r = jpCalcLand(st, pl);
+      o.moderateOverloadStaysValid = !r.blocked && r.loadRatio > 1.0 && r.loadRatio <= 1.50 && r.dailyKm > 0;
+    }
+
+    // lower-priority confirmations (doc checklist): grazing scale direction, sea-stage weather/biome
+    o.grazingOrderedCorrectly = JP_GRAZING['None — carry all fodder'].speedMod > JP_GRAZING['Partial — graze at camp'].speedMod &&
+      JP_GRAZING['Partial — graze at camp'].speedMod > JP_GRAZING['Full — graze on route'].speedMod;
+
+    return o;
+  });
+
+  // ── v1.64: auto-generated roads preserve and prefer manually-drawn ways ──────────────────────
+  // Owner: "on parts of routes and ways, when applicable always follow them as they are
+  // optimized." _civAutoRoutes used to wipe ALL of civWays (civWays=[]) before rebuilding, and
+  // _civHierarchicalNetwork had zero knowledge of pre-existing ways even when it wasn't
+  // destructive — v1.53's "ride existing infrastructure" discount only ever reached the manual
+  // Route/Way tools (_civDijkstraPath). Isolated on a dedicated fresh world (same test-isolation
+  // discipline as v1.24 BUG-3/v1.46/v1.58/v1.60's own smelting check above).
+  R.v164 = await page.evaluate(async () => {
+    const o = {};
+    o.discountConstantShared = _CIV_EXISTING_WAY_DISCOUNT === 0.25;
+    const savedPlaces = state.places, savedWays = civWays, savedSeed = state.tect.seed,
+      savedResW = state.resW, savedKm = state.mapWidthKm;
+    try {
+      state.mapWidthKm = 800; state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+      await generate();
+      state.places = []; _civIterativeAutoWorld(3);
+      const settles = state.places.filter(p => p.kind && CIV_SETTLE_KEYS.has(p.kind));
+      if (settles.length < 4) { o.skip = true; return o; }
+
+      // find a pair the base auto-network does NOT already connect directly — the case a
+      // discount can actually change, not one where the direct line was already the cheapest
+      // path regardless (which would make the before/after comparison a tautology).
+      const netBase = _civHierarchicalNetwork(settles, {});
+      const directPairs = new Set();
+      for (const w of netBase.ways) { if (w.aIdx == null) continue;
+        directPairs.add(Math.min(w.aIdx, w.bIdx) + '_' + Math.max(w.aIdx, w.bIdx)); }
+      let pair = null;
+      for (let i = 0; i < settles.length && !pair; i++) for (let j = i + 1; j < settles.length && !pair; j++) {
+        const d = Math.hypot(settles[i].x - settles[j].x, settles[i].y - settles[j].y) * (state.mapWidthKm / GW);
+        if (d > 15 && d < 150 && !directPairs.has(i + '_' + j)) pair = [i, j];
+      }
+      if (!pair) { o.skip = true; return o; }
+      const [ai, bi] = pair, A = settles[ai], B = settles[bi];
+      const N = 16, manualPts = [];
+      for (let k = 0; k <= N; k++) manualPts.push([Math.round(A.x + (B.x - A.x) * k / N), Math.round(A.y + (B.y - A.y) * k / N)]);
+      const manualWay = { pts: manualPts, sea: false, type: 'road', manual: true, name: 'TEST-MANUAL' };
+
+      // _civHierarchicalNetwork actually prefers the manual corridor once handed it: cells along
+      // the manual way see more usage, and the previously-indirect pair often becomes a direct edge.
+      const { RW, RH, sc } = _civRoutingGrid();
+      const wSet = new Set(); _civMarkWaysOnGrid([manualWay], RW, RH, sc, wSet);
+      const netWith = _civHierarchicalNetwork(settles, { existingWays: [manualWay] });
+      let usageNo = 0, usageWith = 0;
+      for (const i of wSet) { usageNo += netBase.usageCount[i] || 0; usageWith += netWith.usageCount[i] || 0; }
+      o.discountSteersTheNetwork = usageWith > usageNo;
+      o.pairBecomesDirect = netWith.ways.some(w => w.aIdx != null &&
+        ((w.aIdx === ai && w.bIdx === bi) || (w.aIdx === bi && w.bIdx === ai)));
+
+      // _civAutoRoutes preserves manual ways (land AND sea-lane) instead of wiping civWays=[],
+      // while still building a fresh auto-generated network alongside them.
+      civWays = [manualWay, { pts: [[A.x, A.y], [B.x, B.y]], sea: true, type: 'sea-lane', manual: true, name: 'TEST-MANUAL-SEA' }];
+      _civAutoRoutes();
+      o.manualLandSurvived = civWays.some(w => w.name === 'TEST-MANUAL' && w.manual);
+      o.manualSeaSurvived = civWays.some(w => w.name === 'TEST-MANUAL-SEA' && w.manual);
+      o.autoWaysAlsoPresent = civWays.some(w => !w.manual);
+    } finally {
+      state.mapWidthKm = savedKm; state.resW = savedResW; GW = savedResW; GH = gridH(GW); allocate();
+      state.tect.seed = savedSeed; await generate();
+      state.places = savedPlaces; civWays = savedWays;
+    }
+    return o;
+  });
+
+  // ── v1.65: one-click auto-fix buttons for stage bugs ──────────────────────────────────────────
+  // Owner: "when a stage gives a bug give a button to automate a fix." Extends the existing
+  // advisory-button pattern (v1.53's "Use here", v1.47's "Re-route") to the three blocked-stage
+  // subcases with a single, deterministic, side-effect-free remedy: a season-closed pass, a
+  // mount-blocked/wheel-lacking-animals stage (both fixed by switching mode to Walking), and a
+  // wheel-vehicle-present block (fixed by clearing this stage's carts/wagons AND switching to
+  // Walking — clearing carts alone was tried first and just traded one wheel-block message for
+  // the other, caught by testing the button end-to-end rather than assuming the fix worked).
+  // _jpDeriveStages is monkeypatched per case to force an exact blocked terrain/biome/season
+  // combination through the real _jpPlan/_jpRenderResults pipeline — real terrain sampling can't
+  // reliably hit these specific combinations, and this is the same "swap the primitive, verify
+  // the whole path, restore it" technique v1.51/v1.61 already use for hard-to-reach scenarios.
+  R.v165 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const span = Math.max(20, Math.min(GW - 10 - landPt[0], 40));
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    try {
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v165', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // ── wheel-vehicle block: carts present on wheel-blocked terrain ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Deep Sand', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Baggage Train', assetMode: 'manual', carts: 2, wagons: 0, groupSize: 4,
+          cargoKg: 10, stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _civOpenRouteEditor(0);
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.wheelBlockRendered = /Impossible as configured/.test(h) && /Wheeled vehicles cannot traverse/.test(h);
+        const btn = document.querySelector('[data-jps-fix-no-wheels="0"]');
+        o.wheelButtonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.wheelFixWorks = !plan2.results[0].blocked && p.stageOverrides['0'] &&
+          p.stageOverrides['0'].carts === 0 && p.stageOverrides['0'].wagons === 0 && p.stageOverrides['0'].transport === 'Walking';
+      }
+
+      // ── mounted block: Mounted Rider on mount-blocked terrain ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Swamp / Marsh', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Mounted Rider', mountAnimal: 'horse', carts: 0, wagons: 0, groupSize: 1,
+          cargoKg: 20, stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.mountBlockRendered = /Impossible as configured/.test(h) && /Mounted travel is not viable/.test(h);
+        o.mountButtonLabel = /Switch to Walking/.test(h);
+        const btn = document.querySelector('[data-jps-quick-idx="0"][data-jps-quick-mode="Walking"]');
+        o.mountButtonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.mountFixWorks = !plan2.results[0].blocked && p.stageOverrides['0'] && p.stageOverrides['0'].transport === 'Walking';
+      }
+
+      // ── seasonal closure: a winter mountain pass ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Mountain Pass', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Mountain Highland', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', season: 'Winter', seasonalClosures: true, carts: 0, wagons: 0,
+          groupSize: 4, cargoKg: 20, stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.seasonBlockRendered = /Impossible as configured/.test(h) && /closed by snow/.test(h);
+        o.seasonButtonLabel = /Turn off seasonal closures/.test(h);
+        const btn = document.querySelector('[data-jps-fix-season-off]');
+        o.seasonButtonExists = !!btn;
+        if (btn) btn.click();
+        const plan2 = _jpPlan(jn);
+        o.seasonFixWorks = !plan2.results[0].blocked && p.seasonalClosures === false;
+      }
+
+      // ── the existing advisory bar is untouched: vessel/capacity/cargo blocks stay text-only ──
+      o.noFixButtonForCapacityBlock = (() => {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', carts: 0, wagons: 0, groupSize: 1, cargoKg: 5000,
+          stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        return /Impossible as configured/.test(h) && !document.querySelector('[data-jps-fix-no-wheels], [data-jps-fix-season-off]');
+      })();
+    } finally {
+      window._jpDeriveStages = origDerive;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
+  // ── v1.66: per-stage pack animal + vehicle fine-tuning, with a swap advisory ───────────────────
+  // Owner: a 2-person party travels moderate climate for 2/3 of the route then desert, and wants
+  // to swap their mule+cart for a camel with travois at the transition — "For now I cant make any
+  // such a finetunement." The underlying water/food math was already species- and per-stage-correct
+  // (jpCapacity reads JP_ANIMALS[k]/JP_DESERT_ANIMAL_MOD[k] fresh per stage's own biome); the real
+  // gaps were no per-stage vehicle control (only animalSpecies had one, since v1.50) and no
+  // auto-detected advisory. _jpBestPackageForStage is the species/vehicle twin of v1.53's
+  // _jpBestLandTransportForStage — same "measure, never silently apply" contract, same >10% margin.
+  R.v166 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const span = Math.max(40, Math.min(GW - 10 - landPt[0], 60));
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    try {
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v166', groupSize: 2 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // sanity: the primitive itself declines outside its domain (no pack animals / not a Baggage Train)
+      {
+        const stTest = { km: 50, cat: 'land', terrain: 'Desert Hardpack', biome: 'Hot Desert', routeCond: 'Standard', infra: 'Stable Settlements', dryKm: 0 };
+        o.declinesNonBaggageTrain = _jpBestPackageForStage(stTest, { transport: 'Walking', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 }) === null;
+        o.declinesNoAnimals = _jpBestPackageForStage(stTest, { transport: 'Baggage Train', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 1, wagons: 0, travois: 0, sleds: 0 }) === null;
+      }
+
+      // the owner's own scenario: moderate climate for the first stretch, desert for the rest
+      window._jpDeriveStages = () => [
+        { km: 100, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard', infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 27 },
+        { km: 50, cat: 'land', terrain: 'Desert Hardpack', routeCond: 'Standard', infra: 'Stable Settlements', biome: 'Hot Desert', dryKm: 40, i0: 27, i1: 40 }
+      ];
+      const p = _jpEnsurePlan(jn);
+      Object.assign(p, { transport: 'Baggage Train', assetMode: 'manual', carts: 1, wagons: 0, travois: 0, sleds: 0,
+        groupSize: 2, cargoKg: 300, stageOverrides: {}, desertWater: 'Established Caravan Route',
+        animals: { donkey: 0, mule: 2, camel: 0, horse: 0 } });
+      _civOpenRouteEditor(0);
+      _jpRenderResults(jn);
+      o.stage1NoAdvisory = !document.querySelector('[data-jps-pkg-idx="0"]');
+      const btn = document.querySelector('[data-jps-pkg-idx="1"]');
+      o.stage2AdvisoryExists = !!btn;
+      o.stage2RecommendsCamel = btn && btn.dataset.jpsPkgSpecies === 'camel';
+      if (btn) btn.click();
+      o.stage1UntouchedByClick = !p.stageOverrides['0'];
+      o.stage2CamelApplied = p.stageOverrides['1'] && p.stageOverrides['1'].animals &&
+        p.stageOverrides['1'].animals.camel === 2 && p.stageOverrides['1'].animals.mule === 0;
+      o.basePlanStillMule = p.animals.mule === 2 && p.animals.camel === 0;
+
+      // per-stage Vehicle select: options, inherit label, writes overrides, base plan untouched
+      const sel = document.querySelector('select[data-jps="vehicle"][data-jps-idx="1"]');
+      o.vehicleSelectExists = !!sel;
+      o.vehicleSelectOptions = sel && Array.from(sel.options).map(op => op.value).join(',') === ',none,carts,wagons,travois,sleds';
+      if (sel) { sel.value = 'travois'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      o.stage2TravoisApplied = p.stageOverrides['1'] && p.stageOverrides['1'].travois === 1 && p.stageOverrides['1'].carts === 0;
+      o.stage1CartStillBasePlan = p.carts === 1 && !p.stageOverrides['0'];
+
+      // vehicle-axis advisory: a wheel-blocked terrain currently on wheels gets the v1.65 hard-block
+      // fix instead (deliberately deferred there); a party already on travois where wheels are viable
+      // again gets THIS advisory (cart edges travois on speed per JP_TRAIN_PACE) once cargo makes the
+      // difference cross the 10% bar
+      window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+        infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+      const p2 = _jpEnsurePlan(jn);
+      Object.assign(p2, { transport: 'Baggage Train', assetMode: 'manual', carts: 0, wagons: 0, travois: 1, sleds: 0,
+        groupSize: 2, cargoKg: 300, stageOverrides: {}, animals: { donkey: 0, mule: 2, camel: 0, horse: 0 } });
+      _jpRenderResults(jn);
+      const h = document.getElementById('reResults').innerHTML;
+      o.vehicleAdvisoryRendered = /better animal\/vehicle available/.test(h) && /cart \(was travois\)/i.test(h);
+      const vbtn = document.querySelector('[data-jps-pkg-idx="0"]');
+      o.vehicleAdvisoryHasNoSpeciesFix = vbtn && vbtn.dataset.jpsPkgSpecies === '';
+      if (vbtn) vbtn.click();
+      o.vehicleFixApplied = p2.stageOverrides['0'] && p2.stageOverrides['0'].carts === 1 && p2.stageOverrides['0'].travois === 0;
+      o.vehicleFixLeftSpeciesAlone = !('animals' in (p2.stageOverrides['0'] || {}));
+    } finally {
+      window._jpDeriveStages = origDerive;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
+  // ── v1.67 (owner report: an 18-month, 4253 km, 14-stage journey with several stages at
+  // 525%-1475% load all showing an identical flat 0.450 load-penalty multiplier and no error —
+  // "Somehow it feels like it is way too long for travel time"). Root cause: jpCalcLand's
+  // convergence loop derives its own water-carry mass from THIS stage's dryKm ÷ the speed reached
+  // SO FAR — slower speed → longer gap in days → more water mass → more load → slower speed, a real
+  // feedback loop — and jpLoadPenalty floors at a flat 0.45× for ANY ratio past 150%, so the loop
+  // "converges" at a stable but physically absurd load and returns it as a real, summed stage
+  // (reproduced from the report's own Stage 11: ratio0 0.82 read as fine by v1.63's pre-loop check,
+  // converged loadRatio 15.3). Fix: the SAME JP_LOAD_INVALID_RATIO cutoff v1.63 already checks on
+  // ratio0 is now ALSO checked on the post-loop loadRatio.
+  R.v167 = await page.evaluate(() => {
+    const o = {};
+    // (a) the owner's own reported stage (Hills / Ruined Region / Hot Desert, 215 km dry run,
+    // Baggage Train with 1 mule + 1 wagon, 2 people, Forced March/12h, 200 kg cargo, 20 supply
+    // days) now blocks instead of silently returning an 1100%+-of-capacity "answer".
+    const st = { km: 293.0, cat: 'land', terrain: 'Hills', routeCond: 'None / Wild', infra: 'Ruined Region',
+      biome: 'Hot Desert', dryKm: 215 };
+    const plan = { groupSize: 2, transport: 'Baggage Train', pace: 'Forced March', hours: 12, cargoKg: 200,
+      supplyDays: 20, season: 'Autumn', grazing: 'Partial — graze at camp', foraging: 'Active', carryFood: true,
+      desertWater: 'auto', animals: { donkey: 0, mule: 1, camel: 0, horse: 0 }, carts: 0, wagons: 1, travois: 0, sleds: 0 };
+    const r = jpCalcLand(st, plan);
+    o.reportedStageNowBlocked = !!r.blocked;
+    o.reportedStageMsgNamesCapacity = !!(r.blocked && /capacity/i.test(r.blocked) && /no party departs/i.test(r.blocked));
+
+    // (b) a genuinely fine stage (no dry gap, light cargo, no animals) is completely unaffected —
+    // same threshold, same constant, no new false positives.
+    const stFine = { km: 100, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard', infra: 'Stable Settlements',
+      biome: 'Temperate Forest', dryKm: 0 };
+    const planFine = { groupSize: 4, transport: 'Walking', pace: 'Standard Pace', hours: 8, cargoKg: 20,
+      supplyDays: 7, season: 'Summer', grazing: 'Partial — graze at camp', foraging: 'None', carryFood: true,
+      desertWater: 'auto', animals: { donkey: 0, mule: 0, camel: 0, horse: 0 }, carts: 0, wagons: 0, travois: 0, sleds: 0 };
+    const rFine = jpCalcLand(stFine, planFine);
+    o.fineStageUnaffected = !rFine.blocked && isFinite(rFine.dailyKm) && rFine.dailyKm > 0;
+
+    // (c) the fix reuses the SAME v1.63 constant on the post-loop ratio — not a new, separate
+    // magic threshold that could drift from the ratio0 check.
+    o.reusesSharedConstant = typeof JP_LOAD_INVALID_RATIO === 'number' && JP_LOAD_INVALID_RATIO === 1.50 &&
+      (jpCalcLand.toString().split('JP_LOAD_INVALID_RATIO').length - 1) >= 2;
+
+    // (d) plan-level: a journey mixing the fine stage and the reported-bug stage blocks the WHOLE
+    // plan's total (the same _jpPlan blockedIdx precedent every other hard block already uses),
+    // while the fine stage's own per-stage result is still a real, computed number — one bad
+    // stretch does not swallow the rest of the route's honest numbers.
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    try {
+      const sea = state.seaLevel || 0.42;
+      let landPt = null;
+      for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+        if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+      const pts = []; for (let k = 0; k <= 10; k++) pts.push([landPt[0] + k, landPt[1]]);
+      const jn = { pts, name: 'v167', groupSize: 2 };
+      state.places = []; civWays = []; civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      window._jpDeriveStages = () => [
+        Object.assign({}, stFine, { i0: 0, i1: 5 }),
+        Object.assign({}, st, { i0: 5, i1: 10 })
+      ];
+      const p = _jpEnsurePlan(jn);
+      Object.assign(p, plan);
+      const full = _jpPlan(jn);
+      o.planBlocked = !!(full && full.blocked);
+      o.planBlockedMsgNamesCapacity = !!(full && full.blockedMsg && /capacity/i.test(full.blockedMsg));
+      o.planTotalDaysNull = !!full && full.totalDays === null;
+      o.fineStageStillComputedInPlan = !!(full && full.results && full.results[0] && !full.results[0].blocked && isFinite(full.results[0].days) && full.results[0].days > 0);
+      o.badStageIsTheBlockedOne = !!(full && full.blockedIdx === 1);
+    } finally {
+      window._jpDeriveStages = origDerive;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+
+  // v1.88 (owner report: "hard to click a larger settlement when you're zoomed out... you click
+  // one of the smaller ones that are only visible when zooming in"). Verifies the settlement
+  // pick-priority fix at all four affected pick sites (a fifth, _civInfoAt's tight City-Viewer
+  // pin-hit re-test, is deliberately unweighted by design — see its own code comment — so it isn't
+  // asserted here) plus the two new shared helpers directly.
+  R.v188 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedScale = viewT.scale, savedLodOn = _lodOn, savedSel = _civSelectedPlace;
+    try {
+      // (a) weight formula matches drawCivLayer's own pin-size formula exactly (4+klass.rank; flat 5 for POIs)
+      o.weightHamlet = _civPlacePickWeight({ kind: 'hamlet' });
+      o.weightCity = _civPlacePickWeight({ kind: 'city' });
+      o.weightMetropolis = _civPlacePickWeight({ kind: 'metropolis' });
+      o.weightPOI = _civPlacePickWeight({ kind: 'ruin' });
+
+      // Coordinates are GW/GH-relative throughout (not fixed literals) — this block runs deep
+      // inside the shared sequential suite, where an earlier test may have left GW/GH at any
+      // resolution; a hardcoded coordinate near the map edge silently no-ops every pick call's
+      // own bounds guard instead of exercising the picking logic at all.
+      const midX = (GW / 2) | 0, midY = (GH / 2) | 0;
+
+      // (b) _civSelectPlaceAt: a near-miss (city dist^2=16, hamlet dist^2=9 from the click) now
+      // favors the bigger, more prominent settlement instead of the raw-nearest pixel.
+      viewT.scale = 1; _lodOn = false;
+      const clickX = midX + 4, clickY = midY;
+      const city = { x: midX, y: midY, name: 'BigCity', kind: 'city', faction: 0, pop: 50000, traits: [] };
+      const hamlet = { x: midX + 1, y: midY, name: 'TinyHamlet', kind: 'hamlet', faction: 0, pop: 80, traits: [] };
+      state.places = [city, hamlet];
+      _civSelectPlaceAt(clickX, clickY);
+      o.nearMissFavorsBigCity = _civSelectedPlace === city;
+
+      // (c) an obvious, unambiguous click directly on the small settlement still picks it — the
+      // fix is a tie-break among close candidates, not a blanket bias toward big settlements.
+      _civSelectPlaceAt(hamlet.x, hamlet.y);
+      o.obviousHamletClickStillPicksHamlet = _civSelectedPlace === hamlet;
+
+      // (d) _civDropPlace: a hidden (below-threshold) villageAddon must not be picked while zoomed
+      // out — previously ONLY _civSelectPlaceAt checked this, so _civDropPlace picked it anyway.
+      const addon = { x: midX - 10, y: midY - 5, name: 'HiddenAddon', kind: 'hamlet', villageAddon: true, faction: 0, pop: 40, traits: [] };
+      state.places = [addon];
+      _civSelectedPlace = null;
+      _civDropPlace(addon.x, addon.y);
+      o.hiddenAddonNotPickedByDropPlace = _civSelectedPlace !== addon;
+
+      // same addon, zoomed in past its own reveal threshold — now a legitimate target.
+      state.places = [addon];
+      viewT.scale = Math.max(3, CIV_VILLAGE_ADDON_LOD + 0.5);
+      _civSelectedPlace = null;
+      _civDropPlace(addon.x, addon.y);
+      o.revealedAddonPickedByDropPlace = _civSelectedPlace === addon;
+      viewT.scale = 1;
+
+      // (e) the right-click context-menu pick site: metropolis dist^2=25, hamlet dist^2=9 from the
+      // click — the same near-miss shape, reusing the two new shared helpers directly (the handler
+      // itself is only reachable via a real contextmenu event, so this exercises its own logic).
+      const metro = { x: midX + 10, y: midY - 10, name: 'BigMetro', kind: 'metropolis', faction: 0, pop: 200000, traits: [] };
+      const hamlet2 = { x: midX + 12, y: midY - 10, name: 'TinyHamlet2', kind: 'hamlet', faction: 0, pop: 50, traits: [] };
+      state.places = [metro, hamlet2];
+      const clickX2 = midX + 15, clickY2 = midY - 10;
+      const R2 = Math.pow(_civZoomPickR(Math.max(10, GW / 50)), 2);
+      let nearest = null, nd = Infinity;
+      for (const p of state.places) {
+        if (!_civPlacePickVisible(p)) continue;
+        const d = (p.x - clickX2) ** 2 + (p.y - clickY2) ** 2;
+        if (d > R2) continue;
+        const w = _civPlacePickWeight(p), dn = d / (w * w);
+        if (dn < nd) { nd = dn; nearest = p; }
+      }
+      o.contextMenuNearMissFavorsMetro = nearest === metro;
+    } finally {
+      state.places = savedPlaces; viewT.scale = savedScale; _lodOn = savedLodOn; _civSelectedPlace = savedSel;
+    }
+    return o;
+  });
+
+  R.v191 = await page.evaluate(async () => {
+    const o = {};
+    const savedAssetPack = assetPack, savedAssetRules = assetRules;
+    try {
+      // Build a minimal synthetic pack (one texture slot + one icon slot) entirely in-browser via
+      // this file's own zipStore() — no external fixture file needed, and it's small enough that a
+      // fresh grass/mountain colour is unambiguous evidence of the SAME pixels round-tripping.
+      function solidPng(w, h, r, g, b) {
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const cx = c.getContext('2d'); cx.fillStyle = `rgb(${r},${g},${b})`; cx.fillRect(0, 0, w, h);
+        return new Promise(res => c.toBlob(b => b.arrayBuffer().then(ab => res(new Uint8Array(ab))), 'image/png'));
+      }
+      const grassPng = await solidPng(64, 64, 61, 141, 59);
+      const mountainPng = await solidPng(48, 48, 121, 121, 131);
+      const manifest = { name: 'Smoke Test Pack', author: 'suite', license: 'CC0',
+        textures: { grass: 'textures/grass.png' }, icons: { mountain: 'icons/mountain.png' } };
+      const entries = [
+        { name: 'textures/grass.png', data: grassPng },
+        { name: 'icons/mountain.png', data: mountainPng },
+        { name: 'pack.json', data: new TextEncoder().encode(JSON.stringify(manifest)) },
+      ];
+      const packFile = new File([await zipStore(entries)], 'smoke_pack.zip', { type: 'application/zip' });
+
+      // (a) the header's direct "Import asset pack…" button path (loadAssetPack itself).
+      await loadAssetPack(packFile);
+      o.directImportSetAssetPack = !!assetPack;
+      o.directImportTexAny = !!(assetPack && assetPack.texAny);
+      o.directImportHasGrass = !!(assetPack && assetPack.textures && assetPack.textures.grass);
+      o.directImportHasMountainIcon = !!(assetPack && assetPack.icons && assetPack.icons.mountain);
+
+      // (b) the v1.91 fix under test: does that SAME import also mirror into the persisted Asset
+      // Library (AssetDB, via _alExportEntries/_alImportProject)? Before this fix, a pack loaded
+      // through this button lived only in the `assetPack` runtime global and vanished on the very
+      // next project save/reload — confirmed by a real exportZip()/loadZip() probe before shipping.
+      const alEntries = window._alExportEntries ? await window._alExportEntries() : null;
+      o.mirroredIntoLibrary = !!(alEntries && alEntries.length);
+
+      // (c) wipe the runtime assetPack (simulate a fresh session after a reload) and rebuild it
+      // purely from the Library through the SAME bridge a real loadZip() drives
+      // (_alImportProject -> AssetLibrary.syncToRuntime() -> applyLibraryAssets()) — this is the
+      // actual save/reload mechanism, exercised without needing a second full project export.
+      assetPack = null; assetRules = null;
+      window.AssetLibrary.syncToRuntime();
+      o.rebuiltFromLibraryHasAssetPack = !!assetPack;
+      // texAny gates _splatK at every splat render call site — restoring the textures slot alone
+      // still renders nothing without it (the bug this fix specifically closes).
+      o.rebuiltFromLibraryTexAny = !!(assetPack && assetPack.texAny);
+      o.rebuiltFromLibraryHasGrass = !!(assetPack && assetPack.textures && assetPack.textures.grass);
+      o.rebuiltFromLibraryHasMountainIcon = !!(assetPack && assetPack.icons && assetPack.icons.mountain);
+      o.rebuiltFromLibraryPackName = assetPack && assetPack.name;   // packMeta fix
+    } finally {
+      // Return AssetDB to empty via the same "no assets in this project" path a real reload takes,
+      // so this synthetic pack doesn't linger in the Library for any later smoke block, then
+      // hard-restore assetPack/assetRules to exactly what they were before this test ran.
+      if (typeof window !== 'undefined' && window._alImportProject) {
+        const emptyLib = { version: 1, kind: 'cartalith-assetlib', pack: { name: '', author: '', license: '' }, collections: {}, slots: [] };
+        try { await window._alImportProject({ 'assetlib/library.json': new TextEncoder().encode(JSON.stringify(emptyLib)) }); } catch (_) { }
+      }
+      assetPack = savedAssetPack; assetRules = savedAssetRules;
+    }
+    return o;
+  });
+
+  R.v194 = await page.evaluate(() => {
+    const o = {};
+    // (a) grainYieldRatio's own formula bounds — the v1.94 fix under test. The pre-fix formula
+    // (FLOOR + (TYPICAL-FLOOR)*clamp(K/0.6,0,1)*2) overshot to 5.68 for any K>=0.6; the fixed
+    // formula is a plain linear interpolation over K's own [0,1] range with no overshoot possible.
+    const samples = [];
+    for (let k = 0; k <= 1.0001; k += 0.1) samples.push(grainYieldRatio(+k.toFixed(2)));
+    o.allWithinBounds = samples.every(r => r >= GRAIN_YIELD_RATIO_FLOOR - 1e-9 && r <= GRAIN_YIELD_RATIO_TYPICAL + 1e-9);
+    o.monotonic = samples.every((r, i) => i === 0 || r >= samples[i - 1] - 1e-9);
+    o.atZeroIsFloor = Math.abs(grainYieldRatio(0) - GRAIN_YIELD_RATIO_FLOOR) < 1e-9;
+    o.atOneIsTypical = Math.abs(grainYieldRatio(1) - GRAIN_YIELD_RATIO_TYPICAL) < 1e-9;
+    // a K that used to sit on the old formula's overshoot plateau (any K>=0.6 -> a flat 5.68, 31%
+    // past TYPICAL) must now equal the correctly-bounded linear value FLOOR+(TYPICAL-FLOOR)*K, and
+    // must be measurably below the old plateau value and never above TYPICAL.
+    const oldOvershootPlateau = GRAIN_YIELD_RATIO_FLOOR + (GRAIN_YIELD_RATIO_TYPICAL - GRAIN_YIELD_RATIO_FLOOR) * 2;
+    const expectedAt08 = GRAIN_YIELD_RATIO_FLOOR + (GRAIN_YIELD_RATIO_TYPICAL - GRAIN_YIELD_RATIO_FLOOR) * 0.8;
+    const newAt08 = grainYieldRatio(0.8);
+    o.formerOvershootPointFixed = Math.abs(newAt08 - expectedAt08) < 1e-9 && newAt08 < oldOvershootPlateau - 1e-9 && newAt08 <= GRAIN_YIELD_RATIO_TYPICAL + 1e-9;
+
+    // (b) _civPlaceGrainYield: a real settlement on a real generated+populated world.
+    const savedPlaces = state.places;
+    try {
+      const midX = (GW / 2) | 0, midY = (GH / 2) | 0;
+      const p = { x: midX, y: midY, name: 'GrainTest', kind: 'town', faction: 0, pop: 4000, traits: [] };
+      state.places = [p];
+      const gy = _civPlaceGrainYield(p);
+      o.placeGrainYieldReturnsObject = !!gy;
+      o.placeGrainYieldInBounds = !!gy && gy.ratio >= GRAIN_YIELD_RATIO_FLOOR - 1e-9 && gy.ratio <= GRAIN_YIELD_RATIO_TYPICAL + 1e-9;
+      o.placeGrainYieldKgHaMatchesFormula = !!gy && gy.kgPerHa === Math.round(GRAIN_SEED_KG_PER_HA * gy.ratio);
+      o.placeGrainYieldDeficitFlagCorrect = !!gy && (gy.deficit === (gy.ratio <= GRAIN_YIELD_RATIO_FLOOR + 1e-6));
+
+      // (c) the shared inspector text (_civFormatPlaceInsp) — feeds BOTH the Settlement Inspector
+      // popup and the City Viewer's General section from one call, so this one check covers both.
+      const html = _civFormatPlaceInsp(p);
+      o.inspectorShowsGrainYield = html.includes('Grain yield') && html.includes('kg/ha');
+      o.inspectorNextToFoodRow = /<b>Food<\/b>[^<]*<\/?[^>]*>?\s*&nbsp;·&nbsp;\s*<b>Grain yield<\/b>/.test(html) || html.indexOf('<b>Food</b>') < html.indexOf('<b>Grain yield</b>');
+    } finally {
+      state.places = savedPlaces;
+    }
+    return o;
+  });
+
+  R.v197 = await page.evaluate(async () => {
+    const o = {};
+    // (a) U3 — the sail polar. The whole point of F-3 in the routing audit: speed is NOT monotonic
+    // in wind angle. Dead upwind is a no-go; dead downwind is SLOWER than a broad reach.
+    o.squareNoGo = jpSailFactor('Cog', 0) === 0;
+    o.squareDownwindSlowerThanReach = jpSailFactor('Cog', 180) < jpSailFactor('Cog', 135);
+    o.squarePeakIsReach = jpSailFactor('Cog', 135) >= jpSailFactor('Cog', 90) &&
+                          jpSailFactor('Cog', 135) >= jpSailFactor('Cog', 180);
+    o.foreaftPointsHigher = jpSailFactor('Dhow', 45) > jpSailFactor('Cog', 45);
+    o.oaredWindNeutral = [0, 45, 90, 135, 180].every(a => jpSailFactor('River Barge', a) === 1);
+    o.polarFoldsSymmetric = Math.abs(jpSailFactor('Cog', 225) - jpSailFactor('Cog', 135)) < 1e-9;
+    // neutral/span are DERIVED from pts, not hardcoded — guard against drift
+    const p = JP_RIG.square.pts;
+    let m = 0; for (let i = 0; i < 4; i++) m += (p[i] + p[i+1]) / 2;
+    o.rigNeutralDerived = Math.abs(JP_RIG.square.neutral - m/4) < 1e-9;
+    o.rigSpanDerived = Math.abs(JP_RIG.square.span - (Math.max.apply(null,p) - JP_RIG.square.neutral)) < 1e-9;
+
+    // (b) U1 — river direction from real signed elevation change (gain/loss are metres).
+    const riv = (gain, loss, km) => _jpRiverCondition({ gain, loss, km });
+    o.riverDownstream = riv(0, 100, 2) === 'Strong Downstream';       // 50 m/km descent
+    o.riverUpstream   = riv(100, 0, 2) === 'Strong Upstream';         // 50 m/km ascent
+    o.riverFlat       = riv(5, 5, 50) === 'Neutral';                  // net 0
+    o.riverMild       = riv(0, 20, 1) === 'Mild Downstream';          // 20 m/km
+    o.riverSigned     = riv(0, 100, 2) !== riv(100, 0, 2);            // direction actually matters
+
+    // (c) U2 — sea condition from the REAL current/wind fields, on a real generated world.
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    const oceanF = currentOceanField(), windF = currentWindField(), wb = currentWaterBodies();
+    // find a long all-ocean straight run
+    let fwd = null;
+    outer: for (let ay = 4; ay < GH - 4 && !fwd; ay += 3) {
+      for (let ax = 4; ax < GW - 40; ax += 3) {
+        const cand = []; let ok = true;
+        for (let s = 0; s <= 24; s++) { const x = ax + (s / 24) * 30, y = ay;
+          const ii = Math.min(GH-1,Math.round(y))*GW + Math.min(GW-1,Math.round(x));
+          if (wb[ii] !== 1) { ok = false; break; } cand.push([x, y]); }
+        if (ok && cand.length > 20) { fwd = cand; break outer; }
+      }
+    }
+    o.foundOceanRun = !!fwd;
+    if (fwd) {
+      const rev = fwd.slice().reverse();
+      const mk = pts => ({ cat:'sea', i0:0, i1:pts.length-1, km:120 });
+      const bf = _jpSeaCondition(mk(fwd), fwd, oceanF, windF, 'Cog');
+      const br = _jpSeaCondition(mk(rev), rev, oceanF, windF, 'Cog');
+      o.seaBandsValid = JP_ROUTE.sea[bf] != null && JP_ROUTE.sea[br] != null;
+      // THE headline check: sailing the same water the other way is not the same passage.
+      o.seaDirectional = bf !== br || JP_ROUTE.sea[bf] !== JP_ROUTE.sea[br];
+      // a wind-neutral oared hull must ignore wind entirely (current only)
+      o.oaredIgnoresWind = _jpSeaCondition(mk(fwd), fwd, oceanF, null, 'River Barge') ===
+                           _jpSeaCondition(mk(fwd), fwd, oceanF, windF, 'River Barge');
+      // no fields at all -> honest fallback, never a fabricated band
+      o.noFieldFallback = _jpSeaCondition(mk(fwd), fwd, null, null, 'Cog') === 'Neutral';
+    }
+
+    // (d) the guard: a LAND route-condition label must not leak onto a water stage.
+    o.landLabelRejected = JP_ROUTE.sea['Maintained'] == null && JP_ROUTE.river['Maintained'] == null;
+    return o;
+  });
+
+  R.v198 = await page.evaluate(async () => {
+    const o = {};
+    state.tect.seed = 12345; state.resW = 256; GW = 256; GH = gridH(GW); allocate();
+    await generate();
+    const RW = Math.min(GW, 384), sc = RW/GW, RH = Math.max(2, Math.round(GH*sc));
+    const wb = currentWaterBodies();
+    const cost = new Float32Array(RW*RH);
+    for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) {
+      const gx = Math.min(GW-1,(x/sc)|0), gy = Math.min(GH-1,(y/sc)|0);
+      cost[y*RW+x] = (wb[gy*GW+gx] === 1) ? 1 : Infinity;
+    }
+    // pick an ocean start
+    let s0 = -1; for (let i = 0; i < RW*RH; i++) if (cost[i] === 1) { s0 = i; break; }
+    o.foundOcean = s0 >= 0;
+    if (s0 < 0) return o;
+    const sx = s0 % RW, sy = (s0/RW)|0;
+
+    // (a) U4 — omitting edgeCost must take the identical arithmetic path as before.
+    const a1 = roadDijkstra(cost, RW, RH, sx, sy, !!state.world);
+    const a2 = roadDijkstra(cost, RW, RH, sx, sy, !!state.world, null);
+    let same = true; for (let i = 0; i < a1.dist.length; i++) if (a1.dist[i] !== a2.dist[i]) { same = false; break; }
+    o.nullEdgeCostIdentical = same;
+
+    // (b) a supplied callback is genuinely consulted (a 10x constant must change distances)
+    const a3 = roadDijkstra(cost, RW, RH, sx, sy, !!state.world,
+      (i,j,dx,dy) => (cost[i]===Infinity||cost[j]===Infinity) ? Infinity : (dx&&dy?1.4142135623730951:1)*10);
+    let differs = false;
+    for (let i = 0; i < a1.dist.length; i++) if (isFinite(a1.dist[i]) && Math.abs(a3.dist[i]-a1.dist[i]) > 1e-6) { differs = true; break; }
+    o.edgeCostIsConsulted = differs;
+
+    // (c) U5 — the sea time cost exists and is SYMMETRIC. Symmetry is the correctness guarantee
+    // that keeps the undirected Prim MST valid; an asymmetric cost would make the tree ill-defined.
+    const seaEdge = _civSeaTimeEdgeCost(RW, RH, sc);
+    o.seaEdgeBuilt = typeof seaEdge === 'function';
+    if (seaEdge) {
+      let symOK = true, finiteOK = true, checked = 0;
+      for (let i = 0; i < RW*RH && checked < 300; i += 37) {
+        if (cost[i] !== 1) continue;
+        const x = i % RW, y = (i/RW)|0;
+        for (const [dx,dy] of [[1,0],[0,1],[1,1],[1,-1]]) {
+          const nx = x+dx, ny = y+dy; if (nx<0||nx>=RW||ny<0||ny>=RH) continue;
+          const j = ny*RW+nx; if (cost[j] !== 1) continue;
+          const f = seaEdge(i,j,dx,dy), r = seaEdge(j,i,-dx,-dy);
+          if (Math.abs(f-r) > 1e-9) symOK = false;
+          if (!isFinite(f) || f <= 0) finiteOK = false;
+          checked++;
+        }
+      }
+      o.seaEdgeSymmetric = symOK && checked > 50;
+      o.seaEdgeFinitePositive = finiteOK;   // the tack floor: upwind is slow, never impassable
+      o.seaEdgeChecked = checked;
+
+      // (d) Test D — the time-costed router finds a path no slower, and usually faster, than
+      // the pure shortest-distance router, on the SAME water.
+      const edgeFn = (i,j,dx,dy) => (cost[i]===Infinity||cost[j]===Infinity) ? Infinity : seaEdge(i,j,dx,dy);
+      const timeOf = (prev, si, ti) => { let t = 0, c = ti, g = RW*RH;
+        while (c !== si && c >= 0 && g-- > 0) { const p = prev[c]; if (p < 0) return null;
+          const cx = c%RW, cy = (c/RW)|0, px = p%RW, py = (p/RW)|0;
+          t += edgeFn(p, c, cx-px, cy-py); c = p; }
+        return c === si ? t : null; };
+      const oc = []; for (let i = 0; i < RW*RH; i += 5) if (cost[i] === 1) oc.push(i);
+      let better = 0, worse = 0;
+      for (let t = 0; t < 8 && oc.length > 50; t++) {
+        const b = oc[(t*3571+17) % oc.length];
+        const bx = b%RW, by = (b/RW)|0;
+        if (Math.hypot(bx-sx, by-sy) < RW*0.18) continue;
+        const uni = roadDijkstra(cost, RW, RH, sx, sy, !!state.world);
+        const tim = roadDijkstra(cost, RW, RH, sx, sy, !!state.world, edgeFn);
+        if (!isFinite(uni.dist[b]) || !isFinite(tim.dist[b])) continue;
+        const tU = timeOf(uni.prev, s0, b), tT = timeOf(tim.prev, s0, b);
+        if (tU == null || tT == null) continue;
+        if (tT < tU - 1e-6) better++; else if (tT > tU + 1e-6) worse++;
+      }
+      o.testD_better = better; o.testD_worse = worse;
+    }
+    return o;
+  });
+
+  // v1.99 (routing-audit follow-up — live Journey-Planner audit): _civLandCostGrid/_civWaterCostGrid
+  // decide passability on the downsampled routing grid, and _civSmoothPath's Catmull-Rom smoothing
+  // is not guaranteed to stay within the raw path's own convex hull — either can cut a corner across
+  // real water/land that the caller's mode says is forbidden, producing phantom stages the Journey
+  // Planner then either wrongly hard-blocks or silently accepts. Fix: a full-resolution repair pass
+  // in _civSmoothPath (_civTerrainValidTest + _civNearestValidPt), applied everywhere a 'land'- or
+  // 'water'-mode path is built, PLUS a narrow ferry-crossing exception for _civDijkstraPath's own
+  // pre-existing "an existing sea lane is a traversable ferry in land mode" allowance (confirmed by
+  // direct measurement during verification — the naive fix was "fixing" a real, intentional ferry
+  // leg back onto dry land). 'mixed' mode is untouched (crossing water there is legitimate).
+  R.v199 = await page.evaluate(async () => {
+    const o = {};
+
+    // ---- (a) synthetic unit tests: a controlled water column, no real generate() needed ----
+    {
+      const savedGW = GW, savedGH = GH, savedField = field, savedSea = state.seaLevel,
+            savedCWB = window.currentWaterBodies, savedWays = civWays;
+      try {
+        // GW wide enough that the 50-cell-wide test path below stays under _civSmoothPath's own
+        // GW/2 world-seam-wrap threshold (a narrower grid made the "raw path" trigger the SAME
+        // seam-split guard real world-wrap routes need, discarding both points as a false wrap —
+        // a test-authoring mistake caught by running this standalone before trusting it).
+        GW = 110; GH = 40; state.seaLevel = 0.42;
+        const synthField = new Float32Array(GW * GH);
+        for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) synthField[y * GW + x] = (x === 55 || x === 56) ? 0.1 : 0.8;
+        field = synthField;
+        const wb = new Uint8Array(GW * GH);
+        for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) wb[y * GW + x] = (x === 55 || x === 56) ? 1 : 0;
+        window.currentWaterBodies = () => wb;
+        civWays = [];
+
+        const isLand = _civTerrainValidTest('land'), isWater = _civTerrainValidTest('water'), isOcean = _civTerrainValidTest('ocean');
+        o.landRejectsWater = isLand(55, 10) === false && isLand(56, 25) === false;
+        o.landAcceptsLand = isLand(10, 10) === true && isLand(90, 25) === true;
+        o.waterAcceptsWater = isWater(55, 10) === true;
+        o.waterRejectsLand = isWater(10, 10) === false;
+        o.oceanMatchesWater = isOcean(55, 10) === true && isOcean(10, 10) === false;
+
+        const [nx, ny] = _civNearestValidPt(55, 10, isLand, 16);
+        o.nearestValidFound = isLand(nx, ny) === true && Math.abs(nx - 55) <= 16;
+        const [gx, gy] = _civNearestValidPt(55, 10, () => false, 4);
+        o.nearestValidGivesUpCleanly = gx === 55 && gy === 10;
+
+        // a raw path straight across the water column: uncorrected smoothing crosses it, the
+        // isValid-guided repair pass never does — proves the fix, not a coincidence of geometry
+        const raw = [{ x: 30, y: 20 }, { x: 80, y: 20 }];
+        const baseline = _civSmoothPath(raw);
+        o.baselineCrossesWater = baseline.pts.some(([x, y]) => Math.round(x) === 55 || Math.round(x) === 56);
+        const repaired = _civSmoothPath(raw, isLand);
+        o.repairedNeverCrossesWater = repaired.pts.every(([x, y]) => isLand(x, y));
+
+        // ferry exception: an existing sea-lane way makes ONE spot on the water column valid for
+        // land-mode+allowSeaLanes, without opening up the rest of the column
+        civWays = [{ pts: [[45, 20], [66, 20]], sea: true, type: 'sea-lane', km: 10 }];
+        const isLandFerry = _civTerrainValidTest('land', { allowSeaLanes: true });
+        o.ferryPointValid = isLandFerry(55, 20) === true;
+        o.awayFromFerryStillInvalid = isLandFerry(55, 35) === false;
+        o.plainLandModeIgnoresFerry = isLand(55, 20) === false;   // captured before the allowSeaLanes flag existed on this closure — the flag gates it, not civWays alone
+      } finally {
+        GW = savedGW; GH = savedGH; field = savedField; state.seaLevel = savedSea;
+        window.currentWaterBodies = savedCWB; civWays = savedWays;
+      }
+    }
+
+    // ---- (b) a real generated+auto-populated world: land/water-mode _civDijkstraPath calls
+    // between real settlement pairs never cross the wrong terrain (excluding legitimate ferry
+    // crossings on an existing sea-lane way); the auto-road-network/sea-lane-MST builders (which
+    // have NO ferry exception) are held to a fully strict standard ----
+    {
+      state.tect.seed = 424242; state.resW = 220; state.world = false; state.mapWidthKm = 3000;
+      GW = state.resW; GH = gridH(GW); allocate();
+      await generate();
+      await _civIterativeAutoWorld(3);
+      const places = (state.places || []).filter(p => p.category === 'settlement');
+      const wb = currentWaterBodies();
+      const laneCells = new Set();
+      for (const w of civWays) { if (!w || !w.pts || (!w.sea && w.type !== 'sea-lane')) continue;
+        _civWalkWayCells(w, (px, py) => { const xi = Math.max(0, Math.min(GW - 1, Math.round(px))), yi = Math.max(0, Math.min(GH - 1, Math.round(py))); laneCells.add(yi * GW + xi); }); }
+      const nearLane = (xi, yi) => { for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const nx = xi + dx, ny = yi + dy; if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue; if (laneCells.has(ny * GW + nx)) return true; } return false; };
+
+      // Sorted farthest-first (the more stressful case for corner-cutting), but walks the WHOLE
+      // list rather than stopping at a fixed slice — a world where the farthest few pairs happen
+      // to be genuinely unreachable (e.g. separate landmasses) must not starve this assertion of
+      // real reachable-pair coverage (caught by running this standalone before trusting it: a
+      // fixed top-12 slice landed 0/12 reachable on one seed).
+      const pairs = [];
+      for (let i = 0; i < places.length; i++) for (let j = i + 1; j < places.length; j++) { const a = places[i], b = places[j]; pairs.push([a, b, Math.hypot(a.x - b.x, a.y - b.y)]); }
+      pairs.sort((x, y) => y[2] - x[2]);
+      let landPairsTested = 0, landBadPoints = 0;
+      for (const [a, b] of pairs) {
+        if (landPairsTested >= 10) break;
+        const p = _civDijkstraPath(a.x, a.y, b.x, b.y, 'land');
+        if (!p.reachable) continue;
+        landPairsTested++;
+        for (const [x, y] of p.pts) { const xi = Math.max(0, Math.min(GW - 1, Math.round(x))), yi = Math.max(0, Math.min(GH - 1, Math.round(y))); if (wb[yi * GW + xi] !== 0 && !nearLane(xi, yi)) landBadPoints++; }
+      }
+      o.landPairsTested = landPairsTested; o.landBadPoints = landBadPoints;
+
+      const coastal = places.filter(p => { const xi = Math.round(p.x), yi = Math.round(p.y);
+        for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const xx = xi + dx, yy = yi + dy; if (xx < 0 || yy < 0 || xx >= GW || yy >= GH) continue; if (wb[yy * GW + xx] === 1) return true; } return false; });
+      const seaPairs = [];
+      for (let i = 0; i < coastal.length; i++) for (let j = i + 1; j < coastal.length; j++) { seaPairs.push([coastal[i], coastal[j], Math.hypot(coastal[i].x - coastal[j].x, coastal[i].y - coastal[j].y)]); }
+      seaPairs.sort((x, y) => y[2] - x[2]);
+      let waterPairsTested = 0, waterBadPoints = 0;
+      for (const [a, b] of seaPairs) {
+        if (waterPairsTested >= 10) break;
+        const p = _civDijkstraPath(a.x, a.y, b.x, b.y, 'water');
+        if (!p.reachable) continue;
+        waterPairsTested++;
+        const interior = p.pts.slice(2, -2);
+        for (const [x, y] of interior) { const xi = Math.max(0, Math.min(GW - 1, Math.round(x))), yi = Math.max(0, Math.min(GH - 1, Math.round(y))); if (wb[yi * GW + xi] === 0) waterBadPoints++; }
+      }
+      o.waterPairsTested = waterPairsTested; o.waterBadPoints = waterBadPoints;
+
+      const netRes = _civHierarchicalNetwork(places, {});
+      let netBad = 0, netTot = 0;
+      for (const w of netRes.ways) { if (!w.pts) continue; for (const [x, y] of w.pts) { netTot++; const xi = Math.max(0, Math.min(GW - 1, Math.round(x))), yi = Math.max(0, Math.min(GH - 1, Math.round(y))); if (wb[yi * GW + xi] !== 0) netBad++; } }
+      o.autoNetTot = netTot; o.autoNetBad = netBad;
+
+      // ---- (c) _civJoinDijkstraSegs reports an unreachable leg, and _civCommitWay warns instead
+      // of silently committing a straight line through it (never applied to the general Route
+      // tool's 'mixed' mode, which has no unreachable concept — see _civMixedCostGrid) ----
+      let oceanPt = null;
+      const sea = state.seaLevel || 0.42;
+      // deep water, AND clear of any existing sea-lane way — otherwise the land-mode ferry
+      // exception could legitimately make this exact point reachable, which would make this a
+      // test of the wrong thing (see part (b)'s own laneCells/nearLane, reused here).
+      outer: for (let y = 6; y < GH - 6; y++) for (let x = 6; x < GW - 6; x++)
+        if (wb[y * GW + x] === 1 && field[y * GW + x] < sea - 0.1 && !nearLane(x, y)) { oceanPt = [x, y]; break outer; }
+      o.foundOceanPt = !!oceanPt;
+      if (oceanPt && places.length) {
+        const landPt = [Math.round(places[0].x), Math.round(places[0].y)];
+        const j = _civJoinDijkstraSegs([landPt, oceanPt], 'land');
+        o.unreachableLegDetected = j.unreachableLegs > 0;
+
+        const savedWayWps = _civWayWaypoints, savedWays2 = civWays.slice();
+        const origAlert = window.alert;
+        let alertCalls = 0, alertMsg = '';
+        try {
+          window.alert = (m) => { alertCalls++; alertMsg = String(m); };
+          _civWayWaypoints = [landPt, oceanPt];
+          const civWayTypeEl = document.getElementById('civWayType');
+          const savedSel = civWayTypeEl ? civWayTypeEl.value : null;
+          if (civWayTypeEl) civWayTypeEl.value = 'road';
+          _civCommitWay();
+          if (civWayTypeEl && savedSel != null) civWayTypeEl.value = savedSel;
+          o.commitWayWarnedOnUnreachable = alertCalls > 0 && /route/i.test(alertMsg);
+          o.commitWayStillCreatedTheWay = civWays.length > savedWays2.length;
+        } finally {
+          window.alert = origAlert; _civWayWaypoints = savedWayWps;
+        }
+
+        // a reachable, ordinary two-land-point way commits with NO warning (never a false positive)
+        if (places.length > 1) {
+          const a2 = [Math.round(places[0].x), Math.round(places[0].y)], b2 = [Math.round(places[1].x), Math.round(places[1].y)];
+          const j2 = _civJoinDijkstraSegs([a2, b2], 'land');
+          o.ordinaryLegNotFlagged = j2.unreachableLegs === 0;
+        }
+      }
+    }
+
+    return o;
+  });
+
   await browser.close();
 
   // ---- assertions ----
@@ -1847,9 +6998,47 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.75 metropolis: class present (rank 5, ★)', R.metro.classRank === 5 && R.metro.classGlyph === '★');
   A('v0.75 metropolis: promotes the dominant capital of a large polity, rejects low-betweenness + small-polity capitals', R.metro.bigChosen && R.metro.lowNotChosen && R.metro.smallFactionNotChosen && R.metro.chosenCount === 1 && R.metro.perFac1 <= 1);
   A('v0.75 metropolis: off by default, checkbox toggles the flag', R.metro.defaultOff && R.metroToggle && R.metroToggle.on === true && R.metroToggle.off === false);
-  A('v0.76 village mode: dense grid places more settlements than the default, bounded at the 200-pin cap', R.village.denser && R.village.capBounded && R.village.nDefault >= 2);
-  A('v0.76 village mode: off by default, checkbox toggles the flag', R.village.defaultOff && R.villageToggle && R.villageToggle.on === true && R.villageToggle.off === false);
-  A('v0.76 regional population: integrates a positive total over a positive land area', R.village.popTotal > 0 && R.village.popLand > 0);
+  A('v1.70 villages unit: _civRoadProximityQuery reads ~0 on the road, a small positive offset nearby, Infinity far outside the search window', R.villagesUnit.onRoad < 1 && R.villagesUnit.near4 > 2 && R.villagesUnit.near4 < 6 && R.villagesUnit.far === Infinity);
+  A('v1.70 villages unit: an empty or sea-only way set never resolves a road distance', R.villagesUnit.emptyWaysAllInfinite && R.villagesUnit.seaWayIgnored);
+  A('v1.70 villages unit: accept probability is 1 at the road regardless of (floor-clearing) suitability, and 1 at great suitability regardless of distance', R.villagesUnit.acceptAtRoad === 1 && R.villagesUnit.acceptFarGreatSuit === 1);
+  A('v1.70 villages unit: far from any road, floor-level suitability alone earns near-zero acceptance odds — the hard floor cannot be bypassed by road proximity that isn\'t there', R.villagesUnit.acceptFarLowSuit < 0.01);
+  A('v1.70 villages unit: acceptance decays smoothly with road distance — a soft falloff, not a hard cutoff', R.villagesUnit.acceptNear > R.villagesUnit.acceptFarther && R.villagesUnit.acceptFarther > R.villagesUnit.acceptFarthest);
+
+  A('v1.70 villages: off by default — no villageAddon-tagged settlements on a plain auto-populate', !R.villages.baselineHasAny);
+  A('v1.70 villages: enabling it adds a bounded, non-empty batch', R.villages.cappedSanely);
+  A('v1.70 villages: every added village is a real hamlet — named, populated, factioned, same code path as any other settlement', R.villages.allHamlet && R.villages.allNamed && R.villages.allPopPositive && R.villages.allHaveFaction);
+  A('v1.70 villages: respect VILLAGE_SPACING_KM both among themselves and against pre-existing settlements', R.villages.spacingRespectedAmong && R.villages.spacingRespectedVsOthers);
+  A('v1.70 villages: every added village lands on dry land', R.villages.allOnLand);
+  A('v1.70 villages: every added village clears VILLAGE_SUIT_THRESH on the SAME suit field every other placement pass reads — the hard floor', R.villages.allMeetSuitThreshold);
+  A('v1.70 villages: the candidate search finds genuinely decent sites, not just barely-passing ones (mean score above threshold)', R.villages.meanSuitAboveThreshold);
+  A('v1.70 villages: base capital/city/town/village/hamlet placement is unaffected by the toggle — only the additive layer responds (the actual "waay too populated" fix)', R.villages.baseUnchanged);
+  A('v1.70 villages: toggling it back off reproduces the exact baseline settlement count — no residual state', R.villages.toggleOffMatchesBaseline);
+  A('v1.70 villages: a village\'s map pin is hidden below CIV_VILLAGE_ADDON_LOD and pickable once zoomed past it (deliberately no dot fallback)', R.villages.pickHiddenBelow === true && R.villages.pickVisibleAbove === true);
+  A('v1.70 villages: road proximity never leaves meaningfully fewer villages seeded than with no roads at all (comparative check on the pure seeding function)', R.villages.roadBiasSane === true);
+  A('v1.70 villages: the unified "Villages" checkbox exists, defaults unchecked, and its change handler drives _civVillages', R.villagesToggle && R.villagesToggle.defaultChecked === false && R.villagesToggle.on === true && R.villagesToggle.off === false);
+  A('v1.70 villages: regional population estimate integrates a positive total over a positive land area (unaffected by the toggle merge)', R.villages.popTotal > 0 && R.villages.popLand > 0);
+
+  A('v1.71 villages unit: multi-source roadDijkstra matches the minimum of each source\'s own single-source distance at every cell', R.villagesUnit.multiSourceMatchesMinOfSingleSources);
+  A('v1.71 villages unit: every pre-v1.71 scalar roadDijkstra call is still byte-identical', R.villagesUnit.scalarFormByteIdentical);
+  A('v1.71 villages unit: _civWayLodMin overrides a villageAddon way\'s threshold to CIV_VILLAGE_ADDON_LOD but leaves a plain way of the same type at its ordinary CIV_LOD_ROAD value', R.villagesUnit.wayLodVillageAncient === 2.4 && R.villagesUnit.wayLodPlainAncient === 0.7 && R.villagesUnit.wayLodHighwayUnaffected);
+  A('v1.71 villages: connecting each village produces a bounded, non-empty batch of ancient-type connector ways', R.villages.connectorCount > 0 && R.villages.allConnAncient);
+  A('v1.71 villages: a connector\'s village end lands exactly on the village\'s own pin, and its settlement end lands exactly on a real settlement\'s pin', R.villages.villageEndsMatchPin && R.villages.settlementEndsMatchPin);
+  A('v1.71 villages: a connector reveals at the SAME deep zoom as its village (CIV_VILLAGE_ADDON_LOD), not the generic ancient-road threshold', R.villages.connectorLodMatchesVillage);
+  A('v1.71 villages: most villages reach the existing network with a connector (a few may be genuinely unreachable, e.g. an isolated landmass)', R.villages.mostVillagesConnected);
+  A('v1.71 villages: every connected village is registered as non-isolated by _civNetworkMetrics — not a silently-dropped self-loop', R.villages.allConnectedVillagesNonIsolated);
+  A('v1.71 villages: toggling the layer off leaves no villageAddon connector ways behind', R.villages.offHasNoConnectors);
+
+  A('v1.72 BUG-A: the way serialization whitelist keeps villageAddon, so connectors survive a save/load round trip', R.v172.A_savedKeepsFlag && R.v172.A_survivesReload);
+  A('v1.72 BUG-A: after a reload no village connector draws at a shallower zoom than the village it leads to (was 0.7 vs 2.4 — roads to invisible settlements)', R.v172.A_noRoadOutrunsItsVillage);
+  A('v1.72 BUG-B: Generate Roads no longer destroys the village connectors', R.v172.B_connectorsSurvive);
+  A('v1.72 BUG-B: after Generate Roads every way touching a village is still deep-zoom gated', R.v172.B_everyVillageWayIsDeepZoom);
+  A('v1.72 BUG-B: Generate Roads does not rebuild the trunk network over addon villages', R.v172.B_noTrunkWayTouchesAVillage);
+  A('v1.72 BUG-C: the way list is no longer flooded by auto connectors', R.v172.C_listNotFlooded && R.v172.C_connectorCount > 0);
+  A('v1.72 BUG-C: connectors live in a collapsed disclosure and stay fully reachable', R.v172.C_disclosureExists && R.v172.C_disclosureStartsClosed && R.v172.C_connectorsStillReachable);
+
+  A('v1.73: _civTraitDrop returns 0 for a trait-less place and a positive clearance for a trait-bearing one', R.v173.zeroWithoutTraits && R.v173.positiveWithTraits);
+  A('v1.73: the clearance the label-collision pass reserves is the SAME number _civDrawSettlementPin draws at (one definition, no drift)', R.v173.matchesDrawnFormula);
+  A('v1.73: the drop scales with pin size, so it stays correct at every zoom', R.v173.scalesWithSize);
   A('v0.81 regional population auto-fills the readout on populate (no manual button)', R.popAuto && R.popAuto.autoFilled && R.popAuto.noButton);
   A('v0.81 capacity-grounded settlement populations are all positive', R.popAuto && R.popAuto.allPos);
   A('v0.82 recovery: a city collapses into a fortified ruin under Survival + tier-from-population is sane', R.recovery && R.recovery.demoted && R.recovery.tierFn);
@@ -1871,7 +7060,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('un-finalize clears phase-explore', R.phaseOff === false);
   A('v0.74 finalize button is the first button in Generate → World, not behind a disclosure', R.finalizeTop.inFinalizeSec && R.finalizeTop.notInDetails && R.finalizeTop.isFirstButton && R.finalizeTop.depthInSec);
   A('Undo button lives in header', R.undoInHeader === true);
-  A('Generate sub-tab bar restored (world/civ/carto)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto']));
+  A('Generate sub-tab bar has world/civ/carto/sculpt (v1.15 adds the Sculpt editor)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','sculpt']));
   A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);
   A('faction picker lives in Generate → Civilization', R.factionPickerInGenCiv === true);
   A('Map style lives in Generate → Cartography', R.mapStyleInGenCarto === true);
@@ -1948,6 +7137,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v0.94: a real river cell is found on the fixed-seed world (test precondition)', R.riverWays.foundRiverSpot === true);
   A('v0.94: river ways toggle produces a real pixel difference on the main canvas', R.riverWays.mainDiffPx > 0);
   A('v0.94: river ways toggle produces a real pixel difference under Tiled LOD (closes the old "LOD shows no river color" gap)', R.riverWays.lodDiffPx > 0);
+  A('v1.14: surfaceColor skips its own raster river blend when the vector overlay (riverWays) is on — no more double-rendering the same network (the "two engines... in close proximity" report)', R.riverWays.dedupDiffer === true);
   A('v0.94 routing fix: both fixed-seed coastal detour pairs resolve to a valid mixed route', R.routingSeaShortcut.pairs.every(p => p.ok));
   A('v0.94 routing fix: a coastal route with a land detour now uses a real sea shortcut (was ~5-6% water, now materially more)', R.routingSeaShortcut.pairs.every(p => p.waterFrac >= 0.2));
   A('v0.87: LOD/atlas mode fills the viewport (was stuck at intrinsic world px) and restores on exit', R.lodViewport.filled && R.lodViewport.restored && R.lodViewport.hadInlineCleared);
@@ -2007,7 +7197,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.02: every land way reaches its own settlement exactly (no "stops just short" endpoints)', R.waysReachSettlements.vacuous || (R.waysReachSettlements.short === 0 && R.waysReachSettlements.exact > 0));
   A('v1.06: setup-gate seed box exists, 🎲 rolls a new value, and the typed seed drives state.tect.seed', R.setupSeedApplied === 'vacuous' || (R.setupSeed.present && R.setupSeed.diceChanged && R.setupSeedApplied === true));
   // ── v1.07: culture-flavored naming (borrow-list #1) ──
-  A('v1.07: every non-Unclaimed faction gets a naming-culture picker in the faction pill row', R.cultureNaming.present && R.cultureNaming.pickerSelects >= 6);
+  A('v1.07/v1.57: the faction pill row carries no naming-culture select (moved to the Faction Inspector); the Inspector\'s own culture select lists every CIV_CULTURES entry', R.cultureNaming.present && R.cultureNaming.pickerSelects === 0 && R.cultureNaming.inspectorCultureOptions === R.cultureNaming.culturesLen);
   A('v1.07: a faction pinned to a distinctive culture names its settlements from that culture\'s own suffix pool', R.cultureNaming.adherenceRate > 0.9);
   A('v1.07: the settlement editor\'s 🎲 re-rolls a name from the settlement\'s own faction culture', R.cultureNaming.rollBtnExists && R.cultureNaming.rerolled);
   A('v1.07: civFactionCulture round-trips through the same state.civ sync as faction names', R.cultureNaming.savedArrLen > 0 && R.cultureNaming.restored);
@@ -2023,7 +7213,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.10: a province never crosses its own faction\'s territory boundary', R.provinces.crossFactionLeak === false);
   A('v1.10: enabling the provinces tint produces a real pixel difference on the civ canvas', R.provinces.diffPx > 0);
   A('v1.10: exported province MultiPolygons exactly tile the parent territory (combined area == territory area)', R.provinces.provFeatCount === 3 && R.provinces.provGeomTypes.length === 1 && R.provinces.provGeomTypes[0] === 'MultiPolygon' && Math.abs(R.provinces.areaRatio - 1) < 0.001);
-  A('v1.10: every non-Unclaimed faction gets a state-religion picker, and civFactionReligion round-trips through sync', R.provinces.religionSelects >= 6 && R.provinces.savedReligionLen > 0 && R.provinces.religionRestored);
+  A('v1.10/v1.57: the faction pill row carries no state-religion select (moved to the Faction Inspector, which lists it correctly), and civFactionReligion round-trips through sync', R.provinces.religionSelects === 0 && R.provinces.inspectorReligionOptions > 0 && R.provinces.savedReligionLen > 0 && R.provinces.religionRestored);
   // ── v1.11: submap/resample UX (borrow-list #5) ──
   A('v1.11: "Extract as new world" shows a confirm() and hands off to the calibrate step at the requested resolution', R.submap.confirmSeen === true && R.submap.resolutionIsRequested === true);
   A('v1.11: the extracted region preserves real-world scale (new mapWidthKm == parent width × region-fraction, both in the state and the prefilled calibrate field)', Math.abs(R.submap.afterExtract.mapWidthKm - R.submap.expectedMapWidthKm) < 0.01 && Math.abs(R.submap.afterExtract.calWidthValue - R.submap.expectedMapWidthKm) < 1);
@@ -2037,6 +7227,1104 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.13 #1: a region/area name label still draws even when settlement auto-labels crowd its cell (pre-v1.13 the occupancy grid could suppress it entirely)', R.v113.regionLabelDraws >= 1);
   A('v1.13 #2: zoom-out floors at the FIT scale so the whole map — width AND height — fits the viewport (was cover: one axis overflowed, forcing L/R drag)', R.v113.fitAtOrBelowCover === true && R.v113.overflowsAtCover === true && R.v113.widthFitsAtFloor === true && R.v113.heightFitsAtFloor === true);
   A('v1.13 #3: under deep LOD zoom a left-click reaches _civInfoAt with the correct settlement cell (LOD-aware evtToGridLOD); the old un-zoomed mapping would have been far off', R.v113.lodClickHandlerErr < 3 && R.v113.plainMappingErr > 10);
+
+  // ── v1.15: Sculpt editor (stamp-based non-destructive terrain sculpting, replaces Manual Terrain) ──
+  A('v1.15 Sculpt tab: clicking the sub-tab shows the panel, hides World, and lists the 13-feature palette + 8 presets', R.sculpt.panelShown && R.sculpt.worldHidden && R.sculpt.featureButtons === 13 && R.sculpt.presetButtons === 8);
+  A('v1.15 Sculpt tab: _sculptEditorActive() is true while the tab is open on an un-finalized world', R.sculpt.editorActive === true);
+  A('v1.15 draft is non-destructive: painting a stroke touches neither `field` nor the rendered pixels until commit', R.sculpt.draftLeavesFieldUntouched && R.sculpt.draftLeavesRenderUntouched && R.sculpt.stampCountAfterPaint === 1);
+  A('v1.15 commit bakes the draft into `field`, runs a real renderNow (pixels update in the same pass), clears the stack, and pushes exactly one undo snapshot', R.sculpt.commitChangesField && R.sculpt.commitChangesRender && R.sculpt.commitClearsStamps && R.sculpt.commitPushedUndo);
+  A('v1.15 Ctrl+Z (field-level undo, post-commit) reverts the bake', R.sculpt.undoRevertsField && R.sculpt.undoDifferedFromCommitted);
+  A('v1.15 LOD-mode painting draws the stamp overlay (drawLODView tail) without throwing', R.sculpt.lodOverlayDrawsWithoutError === true);
+  A('v1.15 brush size is real-world/zoom-relative: the km-radius readout tracks brushSize (grid cells), doubling brushSize doubles the reported km', R.sculpt.kmReadoutAt32 && R.sculpt.kmReadoutDoublesWithBrushSize);
+
+  // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
+  A('v1.17 S2: auto-populate assigns a specialisation to every settlement', R.v117.nSettlements > 0 && R.v117.allHaveSpecialisation === true);
+  A('v1.17 S4: wall-spec ladder — fortress stone, plain hamlet none, umWalls:false override wins', R.v117.fortressStone && R.v117.plainHamletNone && R.v117.overrideFalseWins);
+  A('v1.17 S6: settlement function reaches the layout engine (economy in ctx → warehouse district in the model)', R.v117.economyInCtx && R.v117.warehouseTagged);
+  A('v1.17 S7: Site-profile debug view wired (button + state.debug + legend)', R.v117.siteprofileBtn && R.v117.siteprofileState === 'siteprofile' && R.v117.siteprofileLegend);
+  A('v1.17 S7: settlement-diagnostics overlay toggle draws on the civ canvas', R.v117.diagChk && R.v117.diagDraws);
+
+  // ── v1.18: Interactive City Viewer (Explore mode) ──
+  A('v1.18: an empty-terrain Explore-mode click still fills the plain sidebar summary and leaves the viewer closed (zero regression)', R.v118.emptyClickFillsPanel && R.v118.emptyClickModalClosed);
+  A('v1.32: a genuine settlement-pin click in Explore mode opens the anchored popup, not the fullscreen viewer, and still skips the plain summary', R.v118.settlementClickOpensPopup && R.v118.settlementClickLeavesModalShut && R.v118.settlementClickSkipsPlainPanel);
+  A('v1.18: the City Viewer still opens fully when explicitly requested (now via the popup button)', R.v118.viewerOpensOnRequest);
+  A('v1.18: the City Information Panel renders all 7 sections with real data, including honest "not modeled" notes for undeveloped religion/history simulation (never fabricated)', R.v118.infoSectionsPresent && R.v118.infoHonestNotes);
+  A('v1.18: the viewer camera zooms (state mutates) and its LOD tiers reveal different content as scale crosses a threshold', R.v118.zoomChangesScale && R.v118.lodTiersDiffer);
+  A('v1.18: the info panel\'s Edit button routes to the existing, untouched Civilization-mode settlement editor', R.v118.editOpensExistingPopup);
+  A('v1.18: both close paths (× button, Escape) work and clear camera state', R.v118.closeButtonWorks && R.v118.escapeWorks);
+  A('v1.18: the Civilization-mode settlement editor (_civOpenPlacePopup) is completely unaffected by the new viewer', R.v118.civModeEditorUnaffected);
+  A('v1.19: the sculpt nav joystick DOM (pad/stick/knob) is present', R.v119.domPresent);
+  A('v1.19: entering Generate → Sculpt on a non-touch browser leaves the joystick hidden (isMobile gate)', R.v119.sculptActiveOnTab && R.v119.hiddenOnDesktop);
+  A('v1.22: off-LOD, pushing the knob RIGHT pans the VIEW right (viewT.panX decreases) — corrected joystick direction', R.v119.pushRightPansViewRight);
+  A('v1.19: releasing the knob stops the continuous pan loop', R.v119.resetActuallyStopsLoop);
+  A('v1.19: a sub-dead-zone nudge does not start panning', R.v119.deadZoneIgnoresTinyPush);
+  A('v1.19: knob travel is clamped to MAX_OFFSET and recenters on release', R.v119.knobClampsOffset && R.v119.knobResetsToCenter);
+  A('v1.22: under Tiled LOD, pushing right drives _lodCx right too (view travels right)', R.v119.lodPanDrivesLodCx);
+  A('v1.19: cycling Sculpt/Generate tabs re-syncs joystick visibility without throwing', R.v119.noThrowOnTabCycle);
+  A('v1.20: the Icon tool\'s "Feature icons" gallery lists all 10 slots (was 4)', R.v120.featureTileCount === 10);
+  A('v1.20: a new kind (cactus) arms and places via the Icon tool exactly like the original 4', R.v120.armedCactus && R.v120.placedCactus);
+  A('v1.20: the manually-placed icon draws without throwing (pack sprite or generic glyph fallback)', R.v120.drawsWithoutThrow);
+  A('v1.20: every new feature-icon key has a real glyph fallback', R.v120.allNewKeysHaveGlyphs);
+  A('v1.20: PACK_ICON_SLOTS grew from 4 to 10', R.v120.packIconSlotsCount === 10);
+  A('v1.21: the zoom toolbar and Pan mode button exist once a sheet is loaded', R.v121.scaffold.zoomToolbarShown && R.v121.scaffold.hasPanBtn);
+  A('v1.21: a sheet loads at a sane fit-to-view scale (not 100%, not 0)', R.v121.scaffold.cvW0 > 0 && R.v121.scaffold.pct0 !== '100%');
+  A('v1.21: Zoom In grows the canvas past the wrap (native scroll now applies)', R.v121.zoomButtons.afterIn.w > R.v121.zoomButtons.before && R.v121.zoomButtons.afterIn.scrollable);
+  A('v1.21: Fit restores the original scale and resets scroll to 0,0', R.v121.zoomButtons.afterFit.w === R.v121.zoomButtons.before && R.v121.zoomButtons.afterFit.scrollLeft === 0);
+  A('v1.21: dragging in Pan mode moves the wrap\'s scroll offset by the drag delta', R.v121.pan.duringCursor.includes('panning') && R.v121.pan.movedCorrectly);
+  A('v1.21: cell click-to-select still hits the right cell at a non-fit zoom (evToSrc needed no changes)', R.v121.selectAtZoom.selBefore === '0 selected' && R.v121.selectAtZoom.selAfter === '1 selected' && R.v121.selectAtZoom.pct !== '100%');
+  A('v1.21: wheel-zoom actually zooms in', parseInt(R.v121.wheelZoom.pctAfter) > parseInt(R.v121.wheelZoom.pctBefore));
+
+  A('v1.23 BUG1: Open Sea km/day > Coastal Waters (systemic sea ordering fixed)', R.v123.openFasterThanCoastal);
+  A('v1.23 BUG1: Sheltered Bay is not the fastest sea terrain (no residual pair-ordering bug)', R.v123.shelteredNotFastest);
+  A('v1.23 BUG2: selector and validator agree for every vessel × water terrain (single source of truth)', R.v123.selValidatorMismatches === 0 && R.v123.checks > 0);
+  A('v1.23 BUG2: autoselect never picks a vessel the compat rule flags invalid', R.v123.autoInvalid === 0 && R.v123.autoPicks > 0);
+  A('v1.23 BUG2: an autoselected Open Sea vessel passes the real jpCalcWater validator (not blocked)', !!R.v123.autoOpenPick && R.v123.autoOpenNotBlocked);
+  A('v1.23 BUG2: jpCalcWater still blocks a genuinely infeasible manual pick (river barge on open sea)', R.v123.manualInfeasibleStillBlocked);
+  A('v1.23 BUG2: dhow is rated open-sea capable (sea, not river) — historically correct', R.v123.dhow.openSea && R.v123.dhow.fitsOpenSea && R.v123.dhow.fitsCoastal && !R.v123.dhow.fitsRiver);
+  A('v1.23: settlement pick radius shrinks as you zoom in (constant on-screen), off-LOD and under LOD', R.v123.pickShrinksOnZoomIn);
+
+  A('v1.24 BUG-1: releasing a World Structure slider no longer throws and correctly sets archetype=custom', !R.v124.bug1.threw && R.v124.bug1.archetypeIsCustom && R.v124.bug1.archetypeBtnOn);
+  A('v1.24 BUG-2: Delete while typing in the place editor does not delete the selected settlement', R.v124.bug2.hadInput && R.v124.bug2.placeSurvived);
+  A('v1.24 BUG-3: busy overlay stays visible until every queued op has hidden it, then recovers normally', R.v124.bug3.stillVisibleAfterOneHide && R.v124.bug3.hiddenAfterSecondHide && R.v124.bug3.recoversNormally);
+  A('v1.24 BUG-4: declining the confirm() on Clear labels/icons leaves the data untouched', R.v124.bug4.confirmCalls === 2 && R.v124.bug4.labelsSurvivedDecline && R.v124.bug4.iconsSurvivedDecline);
+  A('v1.24 BUG-5: a beforeunload guard exists and correctly reports a live world', R.v124.bug5.hasFn && R.v124.bug5.reportsTrue);
+  A('v1.24 BUG-6: the asset-pack thumbnail gallery has its host element back (was CSS-only)', R.v124.bug6.hasEl && !R.v124.bug6.threw);
+  A('v1.24 BUG-7: user-entered names are HTML-escaped in the settlements table row (no tag corruption)', R.v124.bug7.escOk && R.v124.bug7.rowEscaped && !R.v124.bug7.rowHasRawTag);
+  A('v1.24 BUG-8: a stuck Space-pan clears on window blur instead of requiring another key tap', R.v124.bug8.setTrue && R.v124.bug8.clearedOnBlur);
+
+  A('v1.25: Volcanic (continentality 0.05) now renders MOSTLY OCEAN, not majority land', R.v125.archetypes.volcanic.landFraction < 0.25);
+  A('v1.25: Archipelago (continentality 0.15) now renders mostly ocean', R.v125.archetypes.archipelago.landFraction < 0.35);
+  A('v1.25: Supercontinent (continentality 0.60) still renders a dominant landmass', R.v125.archetypes.supercontinent.landFraction > 0.45);
+  A('v1.25: Volcanic renders less land than Archipelago, which renders less land than Earth-like', R.v125.archetypes.volcanic.landFraction < R.v125.archetypes.archipelago.landFraction && R.v125.archetypes.archipelago.landFraction < R.v125.archetypes.earth.landFraction);
+  A('v1.25: Archipelago renders less land than Supercontinent (ocean-world vs land-world ordering preserved)', R.v125.archetypes.archipelago.landFraction < R.v125.archetypes.supercontinent.landFraction);
+  A('v1.25: land fraction tracks each archetype\'s own continentality parameter within a sane band', Object.values(R.v125.archetypes).every(a => Math.abs(a.landFraction - a.continentality) < 0.12));
+  A('v1.25: the #sea slider DOM is refreshed to reflect the auto-derived seaLevel (not left stale)', Object.values(R.v125.archetypes).every(a => a.seaSliderReflectsState));
+
+  A('v1.26: with no rules configured placeMapIcons keeps its legacy categories (bit-identical path)', R.v126.legacyKeepsCategories && R.v126.legacyItemsEqualSum && R.v126.rulesNullByDefault);
+  A('v1.26: the unified items[] draw list is Y-sorted and interleaves categories (mountains no longer always on top)', R.v126.legacyYSorted && R.v126.legacyInterleaved);
+  A('v1.26: a biome-restricted rule places only in that biome, never in water, within its size range', R.v126.ruledPlaced && R.v126.ruledObeysBiome && R.v126.ruledNeverInWater && R.v126.ruledSizeInRange && R.v126.ruledLegacyArraysEmpty);
+  A('v1.26: density is monotonic, and relief mode obeys its elevation band + blue-noise spacing', R.v126.densityMonotonic && R.v126.reliefObeysBand && R.v126.reliefRespectsSpacing);
+  A('v1.26: variant weighting honours a zero weight, and no weights reproduces the v1.25 hash pick exactly', R.v126.weightZeroNeverPicked && R.v126.unweightedMatchesLegacy);
+  A('v1.26: the Library→runtime bridge installs rules, bumps the cache gen, and filters disabled assets out', R.v126.bridgeSetRules && R.v126.bridgeFiltersDisabled);
+  A('v1.26: pack import autopopulates default biomes; custom-set assets start disabled (no invented intent)', R.v126.autoBindsDefaultBiomes && R.v126.autoCustomStartsDisabled && R.v126.customKeySpelling);
+  A('v1.26: the density brush scatters many icons per stamp, on land, spaced, sized from the asset rule', R.v126brush.paintedMultiple && R.v126brush.allOnLand && R.v126brush.allCorrectSlot && R.v126brush.sizeVaries && R.v126brush.sizeFromRule && R.v126brush.noOverlap && R.v126brush.withinBrush);
+
+  A('v1.27 FIX-1: wetland and biome are ANDed in scatter mode (vacuously true if this world has no wetland biome)', R.v127.hasWetlandBiome ? (R.v127.andSatisfiesBoth && R.v127.biomeNarrows) : true);
+  A('v1.27 FIX-2: normalizeScatterRule rejects non-finite input and keeps a legitimate 0 density', R.v127.normAllFinite && R.v127.normSane && R.v127.zeroDensityKept && R.v127.densityClamped);
+  A('v1.27 FIX-2b: normalize does not alias its own defaults object, and a NaN density cannot scatter everywhere', R.v127.noAliasing && R.v127.nanDensityBounded);
+  A('v1.27 FIX-3: a NaN spacing cannot collapse the relief bucket grid into an O(n^2) scan', R.v127.reliefNaNSurvives);
+  A('v1.27 FIX-4: the Library bridge retires art it previously owned when the asset is deleted', R.v127.bridgeRetires);
+  A('v1.27 FIX-5: scatter priority is specificity-ordered, not dependent on rule insertion order (vacuous without a wetland biome)', R.v127.hasWetlandBiome ? (R.v127.priorityStable && R.v127.prioritySpecificWins) : true);
+  A('v1.27 FIX-6: the density brush bounds one stamp\'s work at max radius/density', R.v127brush.stillPaints && R.v127brush.bounded && R.v127brush.allOnLand);
+
+  A('v1.28: biome/terrain/trait slot vocabularies stay aligned with the frozen CART_*/CIV_TRAITS indices', R.v128.vocabAligned);
+  A('v1.28: a painted biome cell renders the pack texture\'s TRUE colour, not the flat palette swatch', R.v128.foundCell ? R.v128.biomeTexture : true);
+  A('v1.28: removing the pack falls back to the flat swatch (pack-less render unchanged)', R.v128.foundCell ? R.v128.biomeFallback : true);
+  A('v1.28: a painted terrain cell renders its pack texture too', R.v128.foundCell ? R.v128.terrainTexture : true);
+  A('v1.28: _assetGen bumps on pack change and participates in the bake/tile cache keys', R.v128.assetGenBumps && R.v128.assetGenInKeys);
+  A('v1.28: "administrative" is now a real trait (was assigned by the economy code but absent from CIV_TRAITS)', R.v128.administrativeAdded);
+  A('v1.28: settlement trait badges are actually drawn beside the pin, and use sprite art when present', R.v128.traitFnsExist && R.v128.traitBadgesDrawn && R.v128.traitSpriteUsed);
+
+  // ── v1.29: eight owner-reported bugs ──
+  A('v1.29 B1: every range input suppresses touch-action/selection (not just .row sliders)', R.v129.rangeCount > 0 && R.v129.rangesSuppressSelect);
+  A('v1.29 B1: the long-press callout is suppressed by a bare input[type=range] rule', R.v129.calloutSuppressed);
+  A('v1.29 B2: a river polyline crossing the world seam is split, straight ones are untouched', R.v129.seamSplit && R.v129.seamNoOp);
+  A('v1.29 B3: river-way width grows sub-linearly with zoom on both camera paths, and is unchanged at zoom 1', R.v129.widthDampedLod && R.v129.widthDampedOff && R.v129.widthUnityAtZoom1);
+  A('v1.29 B4: LOD zoom holds the world point under the cursor and moves the camera centre to do it', R.v129.zoomHoldsCursor && R.v129.zoomMovedCentre);
+  A('v1.29 B4: a centred LOD zoom still behaves exactly like the old centre-zoom', R.v129.zoomCentreUnchanged);
+  A('v1.29 B5: the joystick LOD pan and the zoom-reset button both schedule a tile refine', R.v129.joyRefineWired && R.v129.resetSchedulesRefine);
+  A('v1.29 B5: adjacent tiles agree at the world column they share (shared ' + R.v129.seamShared + ' vs interior ' + R.v129.seamInterior + ')', R.v129.tilesSeamless);
+  A('v1.29 B6: the 3D height source flattens an inland lake to its pooled surface without touching `field`', R.v129.foundLake ? (R.v129.lakeFlattened && R.v129.notInPlace) : true);
+  A('v1.29 B6: flatten-sea off, or lakes-as-water off, returns `field` itself (no allocation, no divergence from the 2D map)', R.v129.offReturnsField && R.v129.showLakesOffRespected);
+  A('v1.29 B7: a river run crossing open water is dropped, not stroked across the lake', R.v129.lakeSplit);
+  A('v1.29 B7: a cell inside the lake\'s sub-cell flood band no longer counts as dry land', R.v129.foundFloodBand ? R.v129.floodBandIsWet : true);
+
+  // ── v1.30: unified suitability + flood + per-settlement trade ──
+  A('v1.30: the second, divergent suitability scorer is gone (no private copy left behind)', R.v130.extendedRetired);
+  A('v1.30: one advisory seed threshold shared by the debug view and auto-populate', R.v130.oneThreshold);
+  A('v1.30: the view and the placer read the same cached field object, so they cannot drift', R.v130.sameFieldObject && R.v130.seedsExist);
+  A('v1.30: flood is a real penalty — a floodplain scores below identical dry ground', R.v130.foundFloodPair ? R.v130.floodPenalises : true);
+  A('v1.30: settlements report their own exports/imports, not only their faction\'s', R.v130.havePlaces ? R.v130.anyTrade : true);
+  A('v1.30: no good is listed as both an export and an import', R.v130.havePlaces ? R.v130.noGoodBothWays : true);
+  A('v1.30: every reported trade states what it was derived from', R.v130.havePlaces ? R.v130.everyTradeHasBasis : true);
+  A('v1.30: trade genuinely varies between settlements (it is not the faction row copied down)', R.v130.havePlaces ? R.v130.variesBySettlement : true);
+  A('v1.30: a specialised settlement exports its primary good', R.v130.havePlaces ? R.v130.specExports : true);
+  A('v1.30: the settlement inspector renders the trade rows', R.v130.havePlaces ? R.v130.inspectorRenders : true);
+
+  A('v1.31: RESOURCE_KEYS grew to 15 append-only (original six keep their save-format indices)', R.v131.keyCount === 15 && R.v131.appendOnly && R.v131.namesAligned && R.v131.civKeysTrack);
+  A('v1.31 §10.1: the scarcity cut is ordered by crustal abundance (gold < tin < copper < iron) and bounded', R.v131.scarcityOrdered && R.v131.cutsBounded);
+  A('v1.31 §10.1: applyResourceScarcity only thins, never invents a deposit, and keeps the strongest cells', R.v131.scarcityNeverInvents && R.v131.scarcityThins && R.v131.scarcityKeepsStrongest);
+  A('v1.31: every new potential field is present, finite and in [0,1] on a real world', R.v131.allFieldsPresent && R.v131.allFinite);
+  A('v1.31: rarity is visible on the map — obsidian and silver occupy far less land than clay', R.v131.rarityShowsOnMap);
+  A('v1.31 FIX: the channel atlas covers every RESOURCE_KEY (was a hand-listed six, dropping nine)', R.v131.atlasCoversAll);
+  A('v1.31 FIX: worldMeanResource has no NaN (mkResMap was a frozen six-key literal indexed with fifteen)', R.v131.worldMeanNoNaN);
+  A('v1.31 §10.7: subsistence modes are ordered, ocean/marginal read as foraging, good land as annual cultivation', R.v131.modeOrdered && R.v131.modeOcean && R.v131.modeIntensive && R.v131.modeMarginal && R.v131.densityMonotonic);
+  A('v1.31 §10.7: per-world normalisation preserves the v1.30 land-integrated total while the distribution genuinely varies', R.v131.densityTotalPreserved && R.v131.densityVaries);
+  A('v1.31 §10.2: the charcoal:iron ratio and coppice yields are in the reference\'s range', R.v131.ratioSane);
+  A('v1.31 §10.3: smelting output is the MIN of the ore and fuel budgets, finite, and labelled by which binds', !R.v131.nPlaces || (R.v131.smeltFinite && R.v131.smeltIsMin && R.v131.smeltLabels && R.v131.coppiceScales));
+  A('v1.31 §10.3: at least one settlement is genuinely fuel-limited rather than ore-limited (the Elba case)', !R.v131.nPlaces || R.v131.someFuelLimited);
+  A('v1.31 §9: every settlement gets the full 7-category checklist with a valid severity, and no good is both an import and an export', !R.v131.nPlaces || (R.v131.checklistShape && R.v131.noGoodBothWays));
+  A('v1.31 §8: archetypes are drawn from the declared vocabulary and at least one settlement matches', !R.v131.nPlaces || (R.v131.archetypesValid && R.v131.someArchetype));
+  A('v1.31 §6: pasture/crop shares are disjoint fractions and the manure uplift is capped', !R.v131.nPlaces || (R.v131.pastoralShapes && R.v131.pastoralSharesDisjoint));
+  A('v1.31 §7: bulk goods without navigable water reach only local markets; luxuries travel regardless', !R.v131.nPlaces || (R.v131.navShapes && R.v131.bulkGatedByWater && R.v131.luxuryAlwaysTravels && R.v131.bulkNeedsWater));
+
+  A('v1.32 A: the setup gate is a canvas-wrap child with a scrollable card, and the overlay guard matches it but not the canvas', R.v132.guardExists && R.v132.gateIsCanvasChild && R.v132.gateCardScrollable && R.v132.guardMatchesGate && R.v132.guardIgnoresCanvas);
+  /* NOTE: this smoke world never generates faction territory (territoryCells stays 0), so every
+     faction's resource means are 0 and the resource-export threshold cannot be exercised here — the
+     assertion is honestly vacuous in that case rather than passing on the unrelated 'food' export.
+     The v1.32 threshold fix itself is verified by reading, not by this run; a world with real
+     territory is needed to exercise it end-to-end. */
+  A('v1.32 B: with real territory at least one faction exports a RESOURCE, not just food (vacuous here — this world has no territory)', !R.v132.territoryCells || R.v132.factionsWithResourceExports > 0);
+  A('v1.32 B: faction exports are valid resource keys and no good is both imported and exported', R.v132.exportsAreValidKeys && R.v132.noGoodBothWays);
+  A('v1.32 D: no settlement is classified coastal while the coast-distance field puts the sea far away', !R.v132.nPlaces || R.v132.wrongCoastal === 0);
+  A('v1.32 E: no settlement reports a river order/width for a river beyond the context radius (the ~618km readout)', !R.v132.nPlaces || R.v132.badRiver === 0);
+  A('v1.32 E: every Site Profile field stays finite and in range, and the km thresholds are resolution-independent', !R.v132.nPlaces || (R.v132.profileFinite && R.v132.boxKmSane));
+  A('v1.32 C: selecting a settlement opens the anchored popup with the city card on top, an Open-city-view button and editable fields', !R.v132.nPlaces || (R.v132.popupOpens && R.v132.popupHasCityCard && R.v132.popupHasCityButton && R.v132.popupHasEditableFields));
+  A('v1.32 C: the fullscreen City Viewer is not forced open by selecting a settlement', !R.v132.nPlaces || R.v132.fullscreenNotForced);
+
+  A('v1.33 AUDIT: one shared resource-trade rule exists and behaves (rich exports, poor imports, average neither)', R.v133.sharedRuleExists && R.v133.ruleExportsWhenRich && R.v133.ruleImportsWhenPoor && R.v133.ruleNeutralWhenAverage);
+  A('v1.33 AUDIT: the settlement inspector uses the same rule as the faction/Economy surfaces (was a stale absolute-margin copy)', !R.v133.nPlaces || R.v133.settlementUsesSharedRule);
+  A('v1.33: food transport decay halves at the cost-doubling distance and falls monotonically with distance', R.v133.decayHalvesAtDoubleKm && R.v133.decayMonotonic);
+  A('v1.33: water carriage beats land over the same distance (Diocletian ratios) and mode selection picks the cheapest both ends share', R.v133.waterBeatsLand && R.v133.modePicksCheapest);
+  A('v1.33: a source 800km overland delivers nothing while the same distance by sea is nearly free', R.v133.decayLand800 === 0 && R.v133.decaySea800 > 0.9);
+  A('v1.33: every food shed is finite and sums to local + hinterland + import', !R.v133.nPlaces || (R.v133.shedsFinite && R.v133.shedSumsCorrectly));
+  A('v1.33: the countryside hinterland actually feeds settlements (not only other settlements\' surplus)', !R.v133.nPlaces || R.v133.hinterlandContributes);
+  A('v1.33: after reconciliation every settlement is within its food shed (or at the minimum-population floor), and the pass is a fixed point', !R.v133.nPlaces || (R.v133.allSustainable && R.v133.passIsFixedPoint && R.v133.stillSustainable));
+  A('v1.33: a food deficit is only reported as an import when a supply route can actually deliver it', !R.v133.nPlaces || R.v133.deficitNotAutoImport);
+
+  A('v1.34 PARAMS: every food figure matches the research note (9:1 farmers, 470-1000 kg/ha, 160km doubling, 5.5x river, 50x sea, 4.34 seed ratio)', R.v134.paramsSane);
+  A('v1.34 PARAMS: grain yield has one source of truth (v1.31\'s separate 500 kg/ha constant is now derived from the range)', R.v134.yieldUnified);
+  A('v1.34: median soil reproduces the 9:1 baseline exactly, marginal soil yields NO surplus, rich soil is capped', R.v134.medianIsBaseline && R.v134.marginalYieldsNothing && R.v134.richIsCapped && R.v134.surplusMonotonic);
+  A('v1.34: the surplus ratio calibrates to the world\'s own median soil, not an assumed 0.5 midpoint', R.v134.calibratesToWorld);
+  A('v1.34 ACYCLIC: a settlement\'s own population never changes its own food supply (it cannot feed itself)', !R.v134.nPlaces || R.v134.ownPopDoesNotFeedItself);
+  A('v1.34 ACYCLIC: growing one settlement never raises another settlement\'s ceiling (no mutual inflation)', !R.v134.nPlaces || R.v134.growthDoesNotInflateNeighbours !== false);
+  A('v1.34: the reconciliation pass is monotonically non-increasing — it may only cap, never grow', !R.v134.nPlaces || R.v134.passNeverGrows);
+  A('v1.34: the ceiling pass bounds settled population (strict historical band is checked on a clean world by probe_foodshed.js)', !R.v134.nPlaces || (R.v134.urbanShareBounded && R.v134.passReducesOrHolds));
+
+  A('v1.35: every water-adjacency threshold is at least one grid cell (a finer one is unsatisfiable by construction)', R.v135.reachAtLeastOneCell);
+  A('v1.35: no settlement the terrain calls coastal or riverine reports "water access: none"', !R.v135.nPlaces || R.v135.mismatch === 0);
+  A('v1.35: riverOrder actually populates (the v1.34 gate was finer than a cell, so it was always 0)', !R.v135.nPlaces || R.v135.riverOrdersNonZero > 0);
+  A('v1.35: an attached sea lane makes a settlement sea-accessible, and a distant one does not', !R.v135.nPlaces || (R.v135.seaLaneWins && R.v135.farLaneIgnored));
+  A('v1.35: every water-access verdict states its basis, so "none" can be told from a threshold bug', !R.v135.nPlaces || R.v135.everyKindHasBasis);
+
+  /* The water-edge snap is opt-in (state.civ.waterEdgeSnap) pending a placement/routing reorder — see
+     the note at its call site — so this world does not exercise it. The snap's own invariants are
+     asserted below as pure properties, which hold whether or not it is enabled. */
+  A('v1.36: the snap is idempotent and only ever returns habitable, non-flooded land', !R.v136.nPlaces || (R.v136.snapIdempotent && R.v136.snapReturnsHabitable));
+  /* On-water-edge share, flood-zone occupancy and corridor preference are PLACEMENT OUTCOMES, so they
+     only mean anything on settlements this version actually placed. By this point ~350 earlier
+     assertions have resampled and extracted this world, and its settlements predate the v1.36 pass —
+     measuring them here would test history, not the feature. tests/perf/probe_placement.js runs those
+     on a freshly generated world; what stays here is the property checks, which hold regardless. */
+  A('v1.36: the corridor field is finite, sparse (an opportunity term, not a broad lift) and zero at sea', R.v136.corridorFinite && R.v136.corridorIsSparse && R.v136.corridorZeroInSea);
+
+  A('v1.37: the coastal site-kind test uses the same >=1-cell floor as every other water test', R.v137.siteKindUsesReach);
+  A('v1.37: an estuary settlement reports SEA access, not merely river', R.v137.estuaryIsSea);
+  A('v1.37: every coastal settlement can make its own salt, and none imports salt it already has', !R.v137.nPlaces || (R.v137.coastalWithoutSalt === 0 && R.v137.importsSaltAnyway === 0));
+  A('v1.37: the trade checklist discriminates between settlements (not every category unmet everywhere)', !R.v137.nPlaces || (R.v137.checklistDiscriminates && R.v137.gapsVary));
+
+  A('v1.38: the City Viewer lists the same exports and imports as the settlement popup (one source, not faction-level)', !R.v138.nPlaces || (R.v138.viewerShowsPopupExports && R.v138.viewerShowsPopupImports));
+  A('v1.38: the City Viewer shows the settlement\'s own trade rows and still labels the faction rows as such', !R.v138.nPlaces || (R.v138.viewerHasOwnRows && R.v138.viewerLabelsFaction));
+
+  A('v1.40: landmass quality is finite, in [0,1], zero at sea, and its components partition the land exactly', R.v140.qualityFinite && R.v140.zeroAtSea && R.v140.partitionsLand && R.v140.sizesSumToLand);
+  A('v1.40: the largest landmass scores above the smallest (placement can tell an island from a speck)', R.v140.bigBeatsSmall);
+  A('v1.40: the islet penalty is sparse — it is an exception, not a reweighting of the whole map', R.v140.penaltySparse);
+  A('v1.40: no settlement is seeded on a speck of land while real landmass exists', !R.v140.nPlaces || R.v140.onTinyIslet === 0);
+
+  A('v1.43: every calibrated mode lands inside its travel-speeds.md §8 band', R.v143.allInBand);
+  A('v1.43: an ox-wagon train is far slower than a pack-animal train (one "Baggage Train" bucket no longer covers both)', R.v143.wagonSlowerThanPack);
+  A('v1.43: the pace-setting animal\'s terrain affinity reaches a TRAIN, not only a lone rider (camels beat mules on sand)', R.v143.camelBeatsMuleOnSand);
+  A('v1.43: a paved surface lifts a walker more than an ox — the animal\'s gait is the ceiling', R.v143.surfaceGainDamped);
+  A('v1.43: sea daily distance rises bay < coastal < open sea', R.v143.seaOrdered);
+  A('v1.43: the land hours/day slider no longer moves a sea leg (the sailing window is the water\'s property)', R.v143.seaHoursIndependent);
+  A('v1.43: infrastructure tiers are multiples of the world\'s own settlement density, not absolute counts', R.v143.tiersRelative);
+  A('v1.43: empty countryside is not a "Hostile / Dead Zone" — the bottom tier needs a real signal', R.v143.emptyWildIsNotHostile && R.v143.ruinsStillHostile);
+  A('v1.43: claimed faction territory floors a stage at Sparse Settlements (inhabited land is not wilderness)', R.v143.claimedFloorsTier);
+  A('v1.43: an open-sea leg is not tiered by land settlement density', R.v143.openSeaNotLandTiered);
+  A('v1.43: a short stage is not amplified by its own shortness, yet length still dilutes above the floor', R.v143.shortStageNotAmplified && R.v143.lengthStillDilutesAboveFloor);
+  A('v1.43: a party of ≤10 is the reference tier and larger caravans carry the §5 spread (+15-25%)', R.v143.smallCaravanFavoured);
+
+  A('v1.44: a route through settlements produces a Stops list, with no layover by default', R.v144.hasStops && R.v144.noLayoverByDefault);
+  A('v1.44: a stop\'s key is stable (the same settlement re-derives the same key)', R.v144.keyStable);
+  A('v1.44: a planned layover adds to total trip time without changing the underlying travel-day math', R.v144.layoverAdds && R.v144.travelDaysUnaffected);
+  A('v1.44: weatherOverride="auto" is byte-identical to the pre-v1.44 unset field (the suggestion system, unchanged)', R.v144.autoMatchesUnset);
+  A('v1.44: a forced weather condition diverges from the seasonal-average Auto and is labeled "forced:" in the trace', R.v144.stormDivergesFromAuto && R.v144.stormLabeledInTrace && R.v144.autoLabeledInTrace);
+  A('v1.44: a forced Storm also degrades (or blocks) a sea leg, not just land', R.v144.waterStormBlockedOrSlower);
+  A('v1.44: the Route Editor opens on call, sets its guard flag, and populates the party/stops/route-map surfaces', R.v144.opensOnCall && R.v144.modalHasOpenClass && R.v144.reOpenFlagSet && R.v144.routeMapCanvasExists && R.v144.partyFormPopulated && R.v144.stopsListPopulated);
+  A('v1.44: the canvas-wheel scroll guard covers the open Route Editor (the v1.32 scroll-fix pattern)', R.v144.scrollGuardCoversModal);
+  A('v1.44: the Route Editor closes on call and clears its guard flag', R.v144.closesOnCall && R.v144.reOpenFlagCleared);
+
+  A('v1.45: at deep LOD zoom, drawRiverWays receives the real uncapped GW/span zk, not the old Math.min(8,...) clamp', R.v145.foundRiverSpot && R.v145.zkUncappedAtDeepZoom);
+  A('v1.45: at shallow LOD zoom (already <=8 pre-fix), the river-ways zk is unchanged from before', R.v145.shallowZoomAlreadyUnderOldCap);
+  A('v1.45: at deep zoom the uncapped stroke-width law paints meaningfully more river pixels than the old hard-capped-at-8 law on the same view', R.v145.deepZoomPaintsMoreThanOldCap);
+
+  A('v1.46: _civOceanDistField is ocean-only (matches currentWaterBodies\' class-1 cells, zero there)', R.v146.oceanDTExists && R.v146.oceanDTZeroAtOcean);
+  A('v1.46: the coastal-preference pass never reduces coastal representation in aggregate across a wide seed sample (v1.58: two independent stochastic runs per seed can locally diverge — see the test\'s own comment)', R.v146.neverWorse);
+  A('v1.46: the coastal-preference pass demonstrably improves coastal representation on at least one seed (not a dead no-op)', R.v146.anyImproved);
+  A('v1.46: the coastal-preference pass never places a settlement in water', R.v146.noneInWaterAnySeed);
+
+  A('v1.47: _civDijkstraPath reports reachable=true for a genuine short land-mode hop', R.v147.foundLandPt && R.v147.landReachableTrue);
+  A('v1.47: _jpModeForRoute maps Sea Faring->water, River Transport->mixed, land transports->undefined (the land branch)', R.v147.modeMapCorrect);
+  A('v1.47: a land-mode re-route succeeds and genuinely replaces the drawn path', R.v147.walkRerouteOk && R.v147.walkRerouteReplacedPts);
+  A('v1.47: a sea-mode re-route between two inland points reports failure with a reason, never a fabricated straight line', R.v147.seaRerouteReportsFailure && R.v147.seaRerouteNeverMutatedOnFailure);
+  A('v1.47: the Re-route button exists in the Route Editor and is labeled with the live transport mode', R.v147.buttonExists && R.v147.buttonLabeledWithMode);
+  A('v1.47: declining the confirm leaves the drawn path untouched (never silently discards user work)', R.v147.declineLeavesPtsUntouched);
+  A('v1.47: accepting the confirm replaces the path and refreshes the modal', R.v147.acceptReplacesPts);
+
+  A('v1.48: a normal short-duration trip auto-picks a small sane animal count, not flagged infeasible', R.v148.shortTripOk && R.v148.shortTripCountSane);
+  A('v1.48: a very long supply duration on the same cargo is flagged infeasible instead of a runaway count', R.v148.longTripFlaggedInfeasible);
+  A('v1.48: the flagged count stays bounded (the reported bug: 250kg used to require ~213 mules)', R.v148.longTripCountBounded);
+  A('v1.48: the infeasibility hint explains why and points at resupply, not just more animals', R.v148.longTripHintExplainsWhy);
+  A('v1.48: full grazing never trips the fodder-infeasibility check, however long the trip', R.v148.fullGrazingNeverInfeasible);
+
+  A('v1.49: the verdict has a valid level, text and NAMED reasons (never an unexplained judgement)', R.v149.verdictShape && R.v149.verdictLevelValid && R.v149.verdictReasonsAreStrings);
+  A('v1.49: a deliberately overloaded party escalates the verdict and cites the overload by name', R.v149.overloadEscalates && R.v149.overloadNamed);
+  A('v1.49: the confidence band brackets the point estimate and is asymmetric (downside > upside)', R.v149.confBrackets && R.v149.confAsymmetric);
+  A('v1.49: the confidence band widens with trip duration, and is null for a blocked route', R.v149.confWidensWithDuration && R.v149.confBlockedIsNull);
+  A('v1.49: the pack-range ceiling reproduces the v1.48 guard threshold exactly (one source of truth)', R.v149.packRangeExists && R.v149.packRangeMatchesGuard);
+  A('v1.49: full grazing reports no carry-duration ceiling (none exists when fodder is not carried)', R.v149.fullGrazingNoCeiling);
+  A('v1.49: Results + Stops moved into the sticky output column (was a full-width block below the form)', R.v149.resultsInOutputColumn && R.v149.stopsInOutputColumn && R.v149.outColIsSticky);
+  A('v1.49: Results renders above the fold and no longer trails the taller party form', R.v149.resultsAboveFold && R.v149.resultsBeforeParty);
+  A('v1.49: the verdict and confidence band actually render into the panel', R.v149.verdictRendered && R.v149.confidenceRendered);
+
+  A('v1.50: jpAnimalTerrainMod reproduces the override/base table exactly (one source of truth with jpCalcLand)', R.v150.modResolverMatchesTable && R.v150.modResolverDefaults);
+  A('v1.50 AUDIT: Hills and Mountain Pass now select the mule their own ratings call best', R.v150.hillsPicksMule && R.v150.mountainPassPicksMule);
+  A('v1.50 AUDIT: Forest Path is the ONLY terrain whose pick is not the argmax (a documented capacity choice)', R.v150.onlyForestPathIsNonArgmax);
+  A('v1.50: a real mountain share switches the whole route\'s animal and reports the switch by name', R.v150.bottleneckSwitches && R.v150.bottleneckNamesTerrain);
+  A('v1.50: the veto is symmetric — a sand crossing switches toward the camel, not only toward the mule', R.v150.bottleneckSymmetric);
+  A('v1.50: a token stretch below the share floor never hijacks the route animal', R.v150.smallStretchDoesNotSwitch);
+  A('v1.50: a route with no bottleneck reports no switch, and Forest Path keeps its capacity-chosen mule', R.v150.noBottleneckNoSwitch && R.v150.forestKeepsMule);
+  A('v1.50: the reason shown comes from the km-dominant stage, not whichever was scored last', R.v150.reasonFromDominantStage);
+  A('v1.50: an empty land-stage list still returns the versatile default', R.v150.emptyRouteSafe);
+
+  A('v1.51: the resupply requirement is finally compared with the settlements actually on the route', R.v151.reachExists && R.v151.reachFieldsSane);
+  A('v1.51: a route whose settlement gap exceeds the carried range is flagged, with both numbers named', R.v151.unmetDetected && R.v151.unmetNamesBothNumbers);
+  A('v1.51: the false "resupplied from settlements in reach" verdict string is gone', R.v151.falseStringGone);
+  A('v1.51: supplyDays is a live control — it sets the carried range instead of being divided out', R.v151.supplyDaysMovesReach && R.v151.supplyDaysMovesDays);
+  A('v1.51: a waterless stretch and an overloaded pack give different causes and different messages', R.v151.waterCauseNamed && R.v151.loadCausePlain && R.v151.causesDiffer);
+  A('v1.51: the water gap is measured from real hydrology, not the old flat 1.5-day constant', R.v151.dryKmMeasured && R.v151.dryKmVaries && R.v151.gapNotConstant);
+  A('v1.51: column length grows with party size and damps the day, floored so a column never stops', R.v151.colGrows && R.v151.colFloored);
+  A('v1.51: a 100k column is slower than a mid-size party (v1.50 made it the fastest configuration)', R.v151.hugeIsSlower);
+  A('v1.51: caravan-scale parties are unaffected by the column term (colMod ~1.0)', R.v151.caravanUnaffected);
+  A('v1.51: a winter pass in a cold biome is CLOSED, not merely slow', R.v151.winterPassClosed);
+  A('v1.51: summer, a temperate biome, and non-pass terrain all stay open', R.v151.summerOpen && R.v151.temperateOpen && R.v151.plainsOpen);
+  A('v1.51: seasonal closures are overridable per plan', R.v151.closureOverridable);
+  A('v1.51: desert water on auto is derived from the map, not the dropdown default', R.v151.desertAutoDerives);
+  A('v1.51: an impossible/overloaded stage is highlighted in the planner, force-opened where it can be edited', R.v151.troubleRendered && R.v151.troubleOpened && R.v151.troubleTinted);
+  A('v1.51: every trouble card names the control that fixes it, not just the symptom', R.v151.troubleHasFix);
+  A('v1.51: jpVesselDayKm composes cruise × sailing window × realised fraction, and refuses unrated water', R.v151.vesselDayKmComposes && R.v151.vesselDayKmRefuses);
+  A('v1.51: the vessel matrix covers every hull × every water and agrees with the validator', R.v151.vesselMatrixShape && R.v151.vesselMatrixVsValidator !== false && R.v151.vesselMatrixMatchesValidator && R.v151.vesselEveryHullSails);
+  A('v1.51: the fastest vessel genuinely varies by water and is not just the highest cruise speed', R.v151.vesselBestVaries && R.v151.vesselBestIsNotJustCruise);
+  A('v1.51: the vessel reference renders in the Route Editor results', R.v151.vesselPanelRendered);
+
+  A('v1.52: the Cartography season slider turns its own prerequisite on instead of sitting inert', R.v152.sliderEnablesSeasons && R.v152.checkboxSynced);
+  A('v1.52: every slider position now renders a different map (was 1 render for all 5)', R.v152.sliderDistinct === 5);
+  A('v1.52: the slider states its live/inert status rather than failing silently', R.v152.noteLive && R.v152.noteInert);
+  A('v1.52: rest days are reported separately and total = travel + rest + layovers exactly', R.v152.restSums && R.v152.restCadenceLive);
+  A('v1.52: rest days follow the researched cadence — none under a week, 1-in-4/5 on a long haul', R.v152.restShortNone && R.v152.restLongHas);
+  A('v1.52: jpSeasonAt walks the calendar and wraps at a full year', R.v152.seasonWalks);
+  A('v1.52: a journey longer than a season is computed in the seasons it actually crosses', R.v152.driftCrosses && R.v152.driftChangesDays);
+  A('v1.52: a stage is assigned the season at its MIDPOINT, not the one it departed in', R.v152.driftUsesMidpoint);
+  A('v1.52: open water is closed to shipping in winter; coastal cabotage continues', R.v152.seaShut && R.v152.coastalOpen);
+  A('v1.52: the sea closure is overridable and blocks a real stage', R.v152.seaOverridable && R.v152.seaBlocksStage);
+  A('v1.52: the cost model breaks down to its total and scales with cargo', R.v152.costSums && R.v152.costScales);
+  A('v1.52: carriage rates keep the Diocletian land:river:sea ordering', R.v152.costRatios);
+  A('v1.52: a cargo journey reports a break-even price per tonne; a blocked one prices at null', R.v152.costBreakEven && R.v152.costBlockedNull);
+  A('v1.52: snap-to-place/way is on by default and a nearby click lands exactly on the settlement (V1.915 parity)', R.v152.snapDefaultOn && R.v152.snapsToPlaceNearby);
+  A('v1.52: a far-away click does not snap, and the toggle genuinely disables it', R.v152.noSnapFarAway && R.v152.disableWorks);
+  A('v1.52: drawing also snaps onto an existing way\'s curve, and a real draw_way click lands exactly on the pin', R.v152.snapsToWay && R.v152.snappedExactly);
+  A('v1.52: _civSnapPoint applies the snap at the point of drawing, and both toggle checkboxes exist', R.v152.snapPointWorks && R.v152.checkboxesExist);
+  A('v1.52: the header VERSION constant matches the file it is shipped in (was stuck on 1.50 through v1.51)', R.v152.versionMatches);
+
+  A('v1.53: a marked sea-lane bend is followed by a fresh mixed-mode route instead of the shorter beeline', R.v153.laneFollowed && R.v153.bendIsReal);
+  A('v1.53: the sea-lane discount is a real multiplicative reduction, not the old Math.min(cost,1.0) cap', R.v153.discountIsMultiplicative);
+  A('v1.53: _jpBestLandTransportForStage finds a genuinely faster mode for a Baggage-Train stage', R.v153.functionExists && R.v153.foundFasterMode);
+  A('v1.53: the faster-mode advisory is never applied automatically', R.v153.neverAutoApplied);
+  A('v1.53: the advisory renders as a named suggestion with a "Use here" button', R.v153.advisoryRendered && R.v153.buttonExists);
+  A('v1.53: clicking "Use here" writes into stageOverrides and speeds up just that stage', R.v153.applyWorks);
+  A('v1.53: the per-stage hint text honestly says the suggestion is never auto-applied', R.v153.hintHonest);
+
+  A('v1.54: median-soil surplus at the default ratio is still exactly 1/9 to the bit', R.v154.medianStillExact && R.v154.implicitMatchesExplicitDefault);
+  A('v1.54: the rich-soil cap at the default ratio is still exactly FOOD_SURPLUS_RATIO_MAX (0.35)', R.v154.capStillExact);
+  A('v1.54: every faction defaults to Traditional Agrarian (9:1) on a fresh/older-save world', R.v154.everyFactionDefaultsTraditional && R.v154.defaultRatioIs9);
+  A('v1.54: the surplus-ratio formula is the correct population-balance 1/(R+1), not the old 1/R', R.v154.formulaCorrect);
+  A('v1.54: an industrial tech level gives substantially more surplus than traditional, not a rounding-level nudge (the bug the first cut of this shipped)', R.v154.industrialSubstantiallyHigher);
+  A('v1.54: even a very low farmers:urbanite ratio stays within the absolute cap and below 100%', R.v154.industrialWithinAbsCap && R.v154.lowRNeverExceeds1);
+  A('v1.54: switching a real settlement\'s faction to Early Industrial substantially raises its food shed', R.v154.earlyIndustrialFeedsMuchMore);
+  A('v1.54: the Faction Inspector\'s Ag. technology select exists, lists every level, and writes through on change', R.v154.selectExists && R.v154.selectHasAllLevels && R.v154.writesThrough);
+
+  A('v1.55: Factions is the default/first Civilization sub-tab', R.v155.firstTabIsFactions && R.v155.defaultSubTabIsFactions && R.v155.firstTabShowsOn && R.v155.factionsPageVisibleByDefault);
+  A('v1.55: the faction detail drawer carries the slide-in CSS class and starts closed', R.v155.drawerHasClass && R.v155.drawerClosedByDefault);
+  A('v1.55: clicking a faction row opens the drawer; Back closes it', R.v155.drawerOpensOnRowClick && R.v155.drawerClosesOnBack);
+  A('v1.55: re-entering the Factions tab always resets to the simplified overview, even if a faction was left selected', R.v155.reEntryResetsToOverview);
+  A('v1.55: the world overview renders real content mentioning factions', R.v155.overviewHasContent && R.v155.overviewMentionsFactionCount);
+  A('v1.55: _civFactionAggregates() exposes per-faction terrainMix + a world-mean twin, fractions in [0,1]', R.v155.aggHasTerrainMix && R.v155.aggHasWorldMeanTerrain && R.v155.terrainMixFractionsInRange);
+  A('v1.55: Territory Fit gives no fabricated verdict for identity-flavored cultures (common/imperial)', R.v155.commonGetsNoVerdict && R.v155.imperialGetsNoVerdict);
+  A('v1.55: Territory Fit gives a real match/typical/mismatch verdict for a terrain-themed culture (riverlands)', R.v155.riverlandsGetsAVerdict);
+  A('v1.55: _civFactionAggregates()\'s pre-world guard never throws and returns a safe zeroed shape (needed once Factions became the default tab)', R.v155.preWorldGuardNoThrow && R.v155.preWorldGuardSafeShape);
+
+  A('v1.56: JP_DRINKING_FLOW_DIVISOR exists and is wired into _jpStageDryKm', R.v156.divisorExists && R.v156.wiredIntoDryKm);
+  A('v1.56: a minor stream that fails the old mapped-river flowThresh test now reads as freshwater', R.v156.minorStreamFailsOldTest && R.v156.minorStreamNowFound);
+  A('v1.84 (reverts v1.56): a non-desert biome never gets a water-crossing tier labeled in its formula, no matter how severe the dry gap — desert-only again', R.v156.nonDesertNeverGetsWaterCrossingLabel);
+  A('v1.84 (reverts v1.56): a severe non-desert dry gap no longer slows the stage down at all (water is not a factor outside arid biomes)', R.v156.nonDesertGapNoLongerSlowsIt);
+  A('v1.84: a severe non-desert dry gap still carries zero water as weight, and the tier ladder itself (unused for non-desert now) still reaches every tier up to Deep Desert Crossing for a large enough gap', R.v156.nonDesertGapStillZeroCarriedWater && R.v156.desertTierLadderStillIntact);
+  A('v1.56: the explicit desert-override dropdown stays desert-only — on a non-desert stage it shows no water-crossing tier at all (neither the override nor the auto measurement applies)', R.v156.explicitOverrideIgnoredOnNonDesert);
+  A('v1.56: a genuine desert stage still honors an explicit override (unchanged regression)', R.v156.desertExplicitOverrideStillHonored);
+  A('v1.56: a genuine desert stage on auto still resolves and labels its tier', R.v156.desertAutoStillResolvesAndLabels);
+
+  A('v1.57: the Factions pop-up carries the modal shell class and starts closed', R.v157.modalHasClass && R.v157.modalClosedInitially);
+  A('v1.57: the sidebar launcher button opens it, with real roster content rendered', R.v157.openBtnExists && R.v157.opensOnButtonClick && R.v157.rosterRendersOpen);
+  A('v1.57: _overCanvasOverlay recognizes the Factions pop-up (scroll/wheel events inside it are handed back to native scrolling)', R.v157.overCanvasRecognizesModal);
+  A('v1.57: Escape closes the pop-up', R.v157.closesOnEscape);
+  A('v1.57: the close button closes the pop-up', R.v157.closesOnCloseButton);
+  A('v1.57: re-entering the Factions tab always closes the pop-up if left open (v1.55\'s drawer-reset rule, extended one level up)', R.v157.reEntryClosesModal);
+  A('v1.57: the faction pill row carries zero selects of any kind (Government/Culture/Religion/Ag.-tech editing now lives only in the Inspector)', R.v157.pickerHasNoSelects);
+
+  A('v1.58: factionCount<=landmassCount reproduces the exact pre-fix cycling assignment (byte-identical, not a special case)', R.v158.present && R.v158.baselineMatchesOldCycling && R.v158.baselineOneCapitalPerLandmass && R.v158.baselineFactionCount);
+  A('v1.58: a single landmass with spare faction capacity uses every defined faction and seeds one capital each', R.v158.singleLandmassUsesAllFactions && R.v158.singleLandmassSixCapitals);
+  A('v1.58: spare seats are apportioned by capacity — the richer landmass earns more of them, and the total matches factionCount exactly', R.v158.apportionmentFavoursRicherLandmass);
+  A('v1.58: a landmass never earns more capitals than it has candidate settlements to seed them with', R.v158.seatsNeverExceedCandidates);
+  A('v1.58: on a real generated world with few landmasses, more than 1-2 factions now get settlements — every defined faction gets at least one', R.v158.realWorldUsesMoreThanTwoFactions && R.v158.realWorldEveryFactionHasASettlement);
+
+  A('v1.59: Civilization sub-tab order is Factions → Generation → Settlements → Economy → Statistics (owner: faction creation leads up to autopopulate)', R.v159.tabOrderCorrect);
+  A('v1.59: Generation restructured into Step 1 (populate) → Step 2 (roads) → Ways → Step 3 (territories) → Provinces → Display', R.v159.stepOrderCorrect);
+  A('v1.59: Generate Roads sits before Recalculate Territories (settle → connect → formalize control)', R.v159.roadsBeforeTerritories);
+  A('v1.59: civTerRadius relocated out of #civSubGeneration into the new civTerritoryToolRow contextual row', R.v159.terRadiusNotInGeneration && R.v159.terRadiusInsideTerRow);
+  A('v1.59: civTerritoryToolRow sits between civPoiTypeRow and civWayDrawRow, before #civSubBar, hidden by default', R.v159.terRowIsRowSiblingBeforeBar && R.v159.terRowHiddenByDefault);
+  A('v1.59: arming the Territory tool reveals civTerritoryToolRow and marks the palette button on; arming Inspect hides it again', R.v159.terRowVisibleWhenArmed && R.v159.terBtnHasOnClass && R.v159.terRowHidesOnInspect);
+  A('v1.59: civTerRadius slider wiring survives the relocation — dispatching input still updates _civTerRadius and the readout', R.v159.sliderUpdatesGlobal && R.v159.sliderUpdatesLabel);
+  A('v1.59: the old "Advanced" grab-bag is gone — civWayList/civProvincesChk are no longer inside any <details>, and the Display accordion holds neither', R.v159.wayListNotInDetails && R.v159.provChkNotInDetails && R.v159.displayAccordionExists && R.v159.displayAccordionExcludesWaysProvinces);
+
+  A('v1.61: the test scenario has multiple visible LOD tiles (so a sibling-survival check is meaningful)', R.v161.multipleTilesVisible);
+  A('v1.61: a tile whose refine throws is skipped, not crashed into — it stays uncached, ready to retry', R.v161.badTileStillUncached);
+  A('v1.61: siblings of a failed tile still get cached — one bad tile can no longer take its neighbours down with it', R.v161.siblingsCached);
+  A('v1.61: a refine failure is now logged instead of silently swallowed', R.v161.warningLogged);
+  A('v1.61: a repeated failure on the same tile never escapes refineVisibleTiles as an uncaught rejection', R.v161.neverThrowsUncaughtOnRetry);
+
+  A('v1.62: no two settlements land within 3km of each other on any of the 4 seeds that reproduced the pre-fix bug', R.v162.noOverlapsAnySeed);
+  A('v1.62: no cross-faction settlement overlaps either — the reported "even opposing factions" case', R.v162.noCrossFactionOverlapsAnySeed);
+  A('v1.62: the overlap guard does not suppress placement outright — settlements are still placed normally', R.v162.settlementsStillPlaced);
+
+  A('v1.63: Small Caravan coordination is now a real +15-25% bonus (1.15-1.25), not neutral', R.v163.smallCaravanInBand);
+  A('v1.63: Individual/Caravan/Large Caravan/Column tiers are untouched', R.v163.individualUnchanged && R.v163.caravanUnchanged && R.v163.largeCaravanUnchanged && R.v163.columnUnchanged);
+  A('v1.63: the coordination bonus actually reaches the composed daily speed (A/B vs a neutral tier, all else equal)', R.v163.bonusReachesSpeed);
+  A('v1.63: JP_LOAD_INVALID_RATIO reuses the load curve\'s own existing top boundary (1.50) rather than inventing a new one', R.v163.invalidRatioIsCurveBoundary);
+  A('v1.63: an extreme overload (~22x-166x capacity) is now flagged infeasible instead of silently crawling at a flat 45%', R.v163.extremeOverloadBlocked && R.v163.extremeOverloadNamesOverload);
+  A('v1.63: the existing graduated load bands (<=1.50x) are untouched — a moderate overload still returns a valid, merely-penalized speed', R.v163.moderateOverloadStaysValid);
+  A('v1.63: grazing speedMod scale is confirmed correctly ordered (None > Partial > Full), not inverted', R.v163.grazingOrderedCorrectly);
+
+  A('v1.64: _civHierarchicalNetwork shares the manual Route/Way tools\' own 0.25x "existing infrastructure" discount constant', R.v164.discountConstantShared);
+  A('v1.64: opts.existingWays measurably steers the auto-generated network onto the manual corridor (or the test scenario was skipped)', R.v164.skip || R.v164.discountSteersTheNetwork);
+  A('v1.64: a settlement pair the base network did NOT connect directly often becomes a direct edge once a manual way exists between them (or skipped)', R.v164.skip || R.v164.pairBecomesDirect);
+  A('v1.64: Generate Roads no longer destroys a manually-drawn LAND way (was civWays=[])', R.v164.skip || R.v164.manualLandSurvived);
+  A('v1.64: Generate Roads no longer destroys a manually-drawn SEA-LANE way either', R.v164.skip || R.v164.manualSeaSurvived);
+  A('v1.64: Generate Roads still builds a fresh auto-generated network alongside the preserved manual ways', R.v164.skip || R.v164.autoWaysAlsoPresent);
+
+  A('v1.65: a wheel-vehicle-blocked stage (carts on wheel-blocked terrain) renders with its own quick-fix button', R.v165.wheelBlockRendered && R.v165.wheelButtonExists);
+  A('v1.65: clicking that button clears carts/wagons AND switches the stage to Walking, actually unblocking it', R.v165.wheelFixWorks);
+  A('v1.65: a mount-blocked stage renders a "Switch to Walking" quick-fix button', R.v165.mountBlockRendered && R.v165.mountButtonLabel && R.v165.mountButtonExists);
+  A('v1.65: clicking it overrides that stage to Walking and unblocks it', R.v165.mountFixWorks);
+  A('v1.65: a winter-closed mountain pass renders a "Turn off seasonal closures" quick-fix button', R.v165.seasonBlockRendered && R.v165.seasonButtonLabel && R.v165.seasonButtonExists);
+  A('v1.65: clicking it sets plan.seasonalClosures=false and unblocks the stage', R.v165.seasonFixWorks);
+  A('v1.65: a capacity/overload block still gets no fix button — only deterministic, side-effect-free remedies get one', R.v165.noFixButtonForCapacityBlock);
+
+  A('v1.66: _jpBestPackageForStage declines outside its domain (non-Baggage-Train, or no pack animals)', R.v166.declinesNonBaggageTrain && R.v166.declinesNoAnimals);
+  A('v1.66: the owner\'s own scenario — moderate-climate stage gets no swap advisory', R.v166.stage1NoAdvisory);
+  A('v1.66: the desert-transition stage gets a species advisory recommending camel', R.v166.stage2AdvisoryExists && R.v166.stage2RecommendsCamel);
+  A('v1.66: clicking it applies camel to ONLY that stage — the moderate stage and the shared plan stay mule', R.v166.stage1UntouchedByClick && R.v166.stage2CamelApplied && R.v166.basePlanStillMule);
+  A('v1.66: a per-stage Vehicle select exists with None/Cart/Wagon/Travois/Sled options', R.v166.vehicleSelectExists && R.v166.vehicleSelectOptions);
+  A('v1.66: picking Travois on it writes a per-stage override without touching the shared plan\'s cart', R.v166.stage2TravoisApplied && R.v166.stage1CartStillBasePlan);
+  A('v1.66: a party already on travois where wheels are viable again gets a "cart (was travois)" advisory once cargo clears the margin', R.v166.vehicleAdvisoryRendered && R.v166.vehicleAdvisoryHasNoSpeciesFix);
+  A('v1.66: clicking it switches to a cart and leaves species alone (mule was already optimal there)', R.v166.vehicleFixApplied && R.v166.vehicleFixLeftSpeciesAlone);
+
+  A('v1.67: the owner\'s reported stage (Hills/Ruined Region/Hot Desert, 215km dry, 1 mule+1 wagon) now blocks instead of returning an 1100%+-overloaded "answer"', R.v167.reportedStageNowBlocked && R.v167.reportedStageMsgNamesCapacity);
+  A('v1.67: a genuinely fine stage is completely unaffected by the new post-loop check', R.v167.fineStageUnaffected);
+  A('v1.67: the fix reuses the SAME v1.63 JP_LOAD_INVALID_RATIO constant, not a new separate threshold', R.v167.reusesSharedConstant);
+  A('v1.67: a journey mixing a fine stage and the reported-bug stage blocks the WHOLE plan (blockedIdx precedent) with a capacity-naming message', R.v167.planBlocked && R.v167.planBlockedMsgNamesCapacity && R.v167.badStageIsTheBlockedOne);
+  A('v1.67: plan.totalDays is nulled on a block, but the fine stage\'s own per-stage result is still a real computed number', R.v167.planTotalDaysNull && R.v167.fineStageStillComputedInPlan);
+
+  A('v1.74: the tile-canvas cap covers the MEASURED 68-tile working set of the reported zoom gesture (a 48-entry cap still thrashed)', R.v174.capCoversMeasuredWorkingSet);
+  A('v1.74: the pixel cache is deliberately larger than the heightmap cache — pixels are what a zoom-back re-costs, and they are never invalidated by camera motion', R.v174.capExceedsDataCache);
+  A('v1.74: the cap is a PIXEL budget, so it tracks _lodTile (2048 → fewer entries, 512 → more) instead of costing 16x more memory at 2048', R.v174.capTracksTileSize);
+  A('v1.74: an absurd _lodTile still leaves a usable floor rather than a zero-entry cache', R.v174.capHasFloor);
+  A('v1.74: _lodRenderKey deliberately excludes zoom/pan — a colorized tile is a static image across a whole zoom gesture', R.v174.renderKeyIgnoresCamera);
+  A('v1.74: _lodRenderKey does still change when something visual changes (sea level), so a real edit invalidates the pixels', R.v174.renderKeyCoversVisualState);
+  A('v1.74: requestLodRender() defers instead of compositing inline — 25 calls in one tick draw nothing yet', R.v174.coalescedNotImmediate);
+  A('v1.74: those 25 requests collapse to exactly ONE composite on the next frame (was one full composite per wheel event)', R.v174.exactlyOneCompositePerFrame);
+  A('v1.74: an interactive frame runs with a positive per-frame tile-colorization budget, and the budget is cleared again afterwards', R.v174.interactiveFrameIsBudgeted && R.v174.budgetClearedAfterFrame);
+  A('v1.74: a direct renderNow() (settle refine, generate, export grab, this harness) still composites unbudgeted — the whole view in one frame', R.v174.directRenderNowUnbudgeted);
+
+  A('v1.75: _civAutoRoutes builds trunk-road ways, and at least one land way with aIdx/bIdx set is produced (the scenario is meaningful)', R.v175.landWaysChecked > 0);
+  A('v1.75: every land way\'s aIdx/bIdx resolves to a real, non-addon settlement in state.places — not a POI inserted ahead of the settlements in the array (the settles-vs-state.places index-base divergence flagged in v1.72\'s HANDOFF entry)', R.v175.allResolveToRealSettlements);
+
+  A('v1.76: village connectors exist and were checked (the scenario is meaningful)', R.v176.connectorCount > 0 && R.v176.checked > 0);
+  A('v1.76: no village connector loops — path length stays within a sane multiple of the straight-line distance between its own endpoints (was 3.35x pre-fix, generous slack above the measured 1.86x post-fix)', R.v176.maxCircuity < 2.2);
+  A('v1.76: no village connector self-intersects (was 54/199 pre-fix — the endpoint-overwrite bug that "jump near destination, retrace the route backward, jump to destination again")', R.v176.selfXingCount === 0);
+
+  A('v1.79: village connectors exist and were checked (the scenario is meaningful)', R.v179.connectorCount > 0 && R.v179.villageCount > 0);
+  A('v1.79: at least one village actually connects to a SIBLING village, not just to real settlements (the reported bug is genuinely exercised and fixed, not just theoretically possible)', R.v179.villageToVillageEdges > 0);
+  A('v1.79: nearest-sibling-is-closer-than-actual-connection dropped well below the pre-fix 79.5% (measured ~36.5% post-fix; generous slack)', R.v179.siblingCloser / R.v179.checked2 < 0.5);
+  A('v1.79: every village\'s connector chain, followed through however many village-to-village hops, still reaches a real settlement — no cluster left networked only among itself', R.v179.stuckInVillageOnly === 0);
+  A('v1.79: villages left without a connector at all are still genuinely rare (a landmass-reachability edge case, not a regression)', R.v179.isolated <= R.v179.villageCount * 0.05);
+
+  A('v1.81: JP_BIOMES.waterForage exists and true desert is far smaller than a wet biome (a dew trap barely helps in the desert — the owner\'s own framing)', R.v181.hotDesertWF < R.v181.jungleWF * 0.2 && R.v181.hotDesertWF < R.v181.wetlandsWF * 0.2);
+  A('v1.81: foraging="None" is an exact no-op — bit-identical to pre-v1.81 regardless of position/wildlife data (the default, most-common case)', R.v181.noneIsNoop);
+  A('v1.81: Active foraging genuinely reduces carried water need in a real biome', R.v181.jungleWaterReduction > 0);
+  A('v1.81: true desert\'s water-foraging offset is far smaller than a lush biome\'s (near-zero, not a meaningful range extension in genuine desert)', R.v181.desertMuchDrierThanJungle);
+  A('v1.81: the water-foraging offset is deliberately smaller than the food offset (water is the harder resource to forage)', R.v181.waterReductionSmallerThanFoodReduction);
+  A('v1.81: a real generated+auto-populated world was built for the wildlife-integration check (the scenario is meaningful)', R.v181.genOk && R.v181.wildlifeReachable);
+  A('v1.81: real route stages carry a real map coordinate (mx/my) for foraging to sample', R.v181.stagesCarryMx);
+  A('v1.81: real per-region wildlife data is genuinely consulted end-to-end — the wildlife modifier is reachable and produces real values on a live world, not just in isolation', R.v181.wildlifeModVaried);
+
+  A('v1.82: the western/eastern-boundary bend leaves the zonal (east-west) current component untouched — it is a purely meridional correction', R.v182.uUnchangedByBend);
+  A('v1.82: the bend genuinely changes current direction on a real fraction of this world\'s ocean cells (the mechanism actually activates on real geometry, not just present in code)', R.v182.vBendFractionAffected > 0.02);
+  A('v1.82: with the bend on, the mean-absolute SST anomaly across the whole ocean is measurably stronger than with it off — heat distribution now genuinely differentiates by basin position, not latitude alone', R.v182.bendStrengthensSignal);
+  A('v1.82: with the bend on, meaningfully more of the ocean shows a real cold (upwelling) anomaly than with it off — a two-sided signal, not just a stronger one-sided warm drift', R.v182.bendProducesMoreColdCells);
+  A('v1.82: the wind/current streak particles genuinely advect at the new slower rate (~35% of the pre-v1.82 step), measured directly against the real _windFxStep function', R.v182fx.n > 0 && Math.abs(R.v182fx.actualVsPredicted315 - 1) < 0.25 && R.v182fx.actualVsPredicted90 < 0.6);
+
+  A('v1.83: a Mounted Rider party now gets real saddlebag capacity from its own mounts (300kg -> 660kg for the owner\'s reported 10-rider case)', R.v183.mountedCapacity === 660 && R.v183.mountCredit === 360);
+  A('v1.83: the owner\'s reported 500kg-cargo/167%-overloaded case is now genuinely under capacity, not just numerically different', R.v183.mountedNowUnderReportedCargo);
+  A('v1.83: a Walking party of the identical size/cargo is completely unaffected — the mount credit is Mounted-Rider-only', R.v183.walkingCapacityUnaffected);
+  A('v1.83: the "Lone courier" preset (mount already declared as a full pack animal) gets zero extra credit — no double-counting the same physical horse', R.v183.loneCourierMountCreditIsZero);
+  A('v1.83: a partial declaration (some riders\' mounts also declared as pack animals) blends full pack-animal credit and saddlebag credit correctly, never double- or under-counting', R.v183.partialBlendCorrect);
+  A('v1.83: a genuinely extreme water-driven overload (400km waterless desert) still correctly blocks — the fix helps a real capacity gap, it does not rescue an unsurvivable crossing', R.v183.extremeGapStillBlocked);
+
+  A('v1.84: jpCapacity charges zero carried water for a non-desert biome (was a flat 2-day reserve)', R.v184.nonDesertHumanWaterIsZero);
+  A('v1.84: a genuine desert biome still charges real carried water, unchanged from v1.83', R.v184.desertHumanWaterStillCounted);
+  A('v1.84: carrying CAPACITY itself never depends on biome — only what counts as carried mass does', R.v184.capacityUnaffectedByBiome);
+  A('v1.84: jpAutoPickTransport (the animal-count solver) still runs cleanly through the same gated helper', R.v184.autoPickRanWithoutError);
+  A('v1.84: jpCalcLand\'s convergence loop adds zero water mass for a non-desert stage even with a severe measured dry run', R.v184.convergenceLoopZeroWaterNonDesert);
+  A('v1.84: the formula trace explains WHY a non-desert stage shows no water weight ("assumed abundant"), not a silent zero', R.v184.nonDesertTraceExplainsAbundance);
+  A('v1.84: a genuine desert stage keeps its real measured dry-run trace line, unchanged', R.v184.desertTraceStillShowsRealGap);
+  A('v1.84: the route-summary water total (plan.waterL) excludes a non-desert stage too — not just jpCapacity\'s own breakdown, which this summary line reads around rather than through', R.v184.routeSummaryWaterExcludesNonDesert);
+
+  A('v1.85: insolationContrastK/rotationContrastK are exactly 1 at Earth defaults, so climEffectiveEquatorTemp equals the raw equatorTemp slider there (bit-identical invariant)', R.v185.defaultsAreExactlyOne);
+  A('v1.85: the critical obliquity where the contrast term vanishes is arccos(1/sqrt(3))≈54.7356°, the real documented reversal point (Rose/Cronin/Bitz 2017) — not an arbitrary constant', R.v185.criticalObliquityIsZero && R.v185.criticalObliquityMatchesDocumentedValue);
+  A('v1.85: axial tilt monotonically flattens the equator-pole contrast from 0° to the UI\'s own 45° cap, never reaching the reversal the slider range cannot reach', R.v185.tiltMonotonicDecreasing && R.v185.tiltStaysWithinUiRangeNeverFlips);
+  A('v1.85: rotation rate monotonically flattens the contrast as the day lengthens, reusing circulationCells()\'s own Ω=24/rotationHours rather than an unrelated constant', R.v185.rotationMonotonicDecreasing && R.v185.rotationReusesCirculationCellsOmega);
+  A('v1.85: computeTemperature() on a real generated world genuinely diverges from Earth defaults at max tilt, in the predicted (colder) direction — the grounding is live end-to-end, not just correct in isolation', R.v185.liveGenerateRespondsToTilt);
+  A('v1.85: the probe leaves tempField exactly as it found it once tilt/rotation are restored — no state leaked into the rest of the suite', R.v185.tempFieldFullyRestored);
+
+  A('v1.86: carrying capacity now genuinely responds to a pure climate re-simulation (was frozen — the biome-derived cache family was only invalidated by computeFlow()/generate(), never by computeTemperature()/simulateWeather())', R.v186.carryingCapacityRespondsToWeatherResim);
+  A('v1.86: the biome raster (buildBiomeRaster) now genuinely responds to a pure climate re-simulation, matching the OTHER settlement-suitability inputs it feeds', R.v186.biomeRasterRespondsToWeatherResim);
+  A('v1.86: the Wind-Throw-Risk debug field now genuinely responds to a pure climate re-simulation, not just a full regenerate', R.v186.windThrowRespondsToWeatherResim);
+  A('v1.86: the climate probe leaves tempField/rainField exactly as it found them once restored — no state leaked into the rest of the suite', R.v186.climateFullyRestored);
+  A('v1.86: currentFloodField now genuinely responds to a same-seed terrain edit (was frozen — keyed on state.tect.seed instead of _fieldGen, so a sculpt edit or same-seed regenerate could never invalidate it; consequential because it feeds buildSettlementSuitability\'s flood penalty and _civSnapToWaterEdge directly)', R.v186.floodFieldRespondsToTerrainEditSameSeed && R.v186.seedGenuinelyUnchanged);
+  A('v1.86: the terrain-edit probe leaves field[] exactly as it found it once restored — no state leaked into the rest of the suite', R.v186.terrainFullyRestored);
+  A('v1.86: buildWindThrowField reuses the shared buildBiomeRaster() instead of independently reclassifying biome per cell (avoids redundant work and a real mountain-lake classification disagreement)', R.v186.windThrowUsesSharedBiomeRaster);
+
+  A('v1.78: the v1.77 Terrain-coupled wind & currents checkbox is gone — terrain coupling is unconditional now', R.v178.checkboxGone);
+  A('v1.78: state.climate.terrainWind is gone (not just false) — no dead toggle field left behind', R.v178.stateFieldGone);
+  A('v1.78: terrain deflection is real and LOCALIZED — near-ridge effect measurably exceeds the far-field effect', R.v178.nearRidgeMeanDiff > R.v178.farMeanDiff * 1.5);
+  A('v1.78: World-mode wrap seam stays continuous (ridge kept away from the seam — a wrap bug would show as a real discontinuity, not legitimate ridge-crest flow-splitting)', R.v178.seamMeanDiff < 0.05);
+  A('v1.78: refreshClimate() is deterministic on an unchanged field (re-running reproduces the same rain/temp — a sanity check on the always-on path, not a toggle A/B)', R.v178.rainStableOnReRun);
+  A('v1.78: the Wind debug view (currentWindField) reports a real, non-trivial wind speed on the live world', R.v178.windFieldMaxSpeed > 1e-3);
+  A('v1.78: the Ocean debug view has real ocean cells to compare on this world', R.v178.oceanCells > 0);
+  A('v1.78: the Ocean debug view shows the REAL 2-D current (Ekman-rotated + coastal-deflected), not the old wy-as-current proxy shortcut', R.v178.oceanCurrentIsRealNotWindProxy);
+
+  A('v1.78: the wind/current particle-streak overlay canvas exists and is hidden by default', R.v178fx.canvasExists && R.v178fx.hiddenByDefault && !R.v178fx.runningBeforeClick);
+  A('v1.78: switching to the Wind debug view starts the streak animation with real particles', R.v178fx.runningOnWind && R.v178fx.visibleOnWind && R.v178fx.hasParticlesOnWind);
+  A('v1.78: switching to the Ocean debug view keeps it running with an ocean-only particle set', R.v178fx.runningOnOcean && R.v178fx.oceanParticleCount > 0);
+  A('v1.78: switching the debug view off self-terminates the animation and hides the canvas', R.v178fx.stoppedOnOff && R.v178fx.hiddenOnOff);
+
+  A('v1.88: _civPlacePickWeight matches drawCivLayer\'s own pin-size formula exactly (4+klass.rank; flat 5 for POIs)', R.v188.weightHamlet === 4 && R.v188.weightCity === 7 && R.v188.weightMetropolis === 9 && R.v188.weightPOI === 5);
+  A('v1.88: _civSelectPlaceAt now favors a bigger, more prominent settlement over a nearer-but-smaller one in a near-miss (was pure nearest-pixel, so the smaller settlement always won)', R.v188.nearMissFavorsBigCity);
+  A('v1.88: an unambiguous click directly on a small settlement still picks it — the fix is a tie-break among close candidates, not a blanket bias against small settlements', R.v188.obviousHamletClickStillPicksHamlet);
+  A('v1.88: _civDropPlace no longer selects a still-hidden villageAddon while zoomed out (previously only _civSelectPlaceAt checked this visibility gate, so _civDropPlace picked an invisible addon anyway)', R.v188.hiddenAddonNotPickedByDropPlace);
+  A('v1.88: the same addon becomes a legitimate _civDropPlace target once zoomed in past its own reveal threshold — the fix gates on visibility, it doesn\'t exclude addon villages outright', R.v188.revealedAddonPickedByDropPlace);
+  A('v1.88: the right-click context-menu pick site shows the same near-miss fix, reusing the shared _civPlacePickVisible/_civPlacePickWeight helpers rather than a fourth drifting copy', R.v188.contextMenuNearMissFavorsMetro);
+
+  A('v1.91: loadAssetPack() (the header "Import asset pack…" button) still sets assetPack directly, unchanged', R.v191.directImportSetAssetPack && R.v191.directImportTexAny && R.v191.directImportHasGrass && R.v191.directImportHasMountainIcon);
+  A('v1.91: that same import now ALSO mirrors into the persisted Asset Library (AssetDB) — previously it lived only in the runtime assetPack global and was silently lost on the next project save/reload', R.v191.mirroredIntoLibrary);
+  A('v1.91: rebuilding purely from the Library (the exact mechanism a real project reload drives) restores assetPack, not null', R.v191.rebuiltFromLibraryHasAssetPack);
+  A('v1.91: the rebuilt pack keeps texAny=true — the bridge\'s new "textures" family branch (Splat channels) was the missing piece; without it the gate stayed false and splat rendering silently drew nothing even with textures present', R.v191.rebuiltFromLibraryTexAny);
+  A('v1.91: the rebuilt pack\'s texture slot survives the Library round-trip (assetPack.textures.grass)', R.v191.rebuiltFromLibraryHasGrass);
+  A('v1.91: the rebuilt pack\'s icon slot survives the Library round-trip (assetPack.icons.mountain)', R.v191.rebuiltFromLibraryHasMountainIcon);
+  A('v1.91: pack name/author/license metadata also travels through the bridge, not just the art (assetPack.name reads the real pack name, not the generic "Asset Library" default)', R.v191.rebuiltFromLibraryPackName === 'Smoke Test Pack');
+
+  A('v1.94: grainYieldRatio(K) stays within [FLOOR,TYPICAL] across the whole K range — the v1.93 audit found it dead, v1.94 wires it in and this is the overshoot bug that wiring surfaced', R.v194.allWithinBounds);
+  A('v1.94: grainYieldRatio(K) is monotonically non-decreasing in K', R.v194.monotonic);
+  A('v1.94: grainYieldRatio(0) is exactly the subsistence floor (3)', R.v194.atZeroIsFloor);
+  A('v1.94: grainYieldRatio(1) is exactly the documented Sussex-manor typical (4.34), not past it', R.v194.atOneIsTypical);
+  A('v1.94: a K that used to sit on the old formula\'s overshoot plateau (K=0.8, was a flat value 31% past TYPICAL) now equals the correctly-bounded linear value', R.v194.formerOvershootPointFixed);
+  A('v1.94: _civPlaceGrainYield(p) returns a real object for a real settlement on a real generated world', R.v194.placeGrainYieldReturnsObject);
+  A('v1.94: _civPlaceGrainYield(p)\'s ratio stays within [FLOOR,TYPICAL] on real terrain, not just synthetic K samples', R.v194.placeGrainYieldInBounds);
+  A('v1.94: _civPlaceGrainYield(p)\'s kgPerHa follows the doc\'s own formula (seed_rate × yield_ratio), not an independent number', R.v194.placeGrainYieldKgHaMatchesFormula);
+  A('v1.94: _civPlaceGrainYield(p)\'s deficit flag matches the floor comparison exactly', R.v194.placeGrainYieldDeficitFlagCorrect);
+  A('v1.94: the Settlement Inspector\'s shared _civFormatPlaceInsp (feeds BOTH the inspector popup and the City Viewer) now shows the grain yield line', R.v194.inspectorShowsGrainYield);
+  A('v1.94: the grain yield line sits next to the existing Food row, matching the doc\'s own framing ("gives the food rows an honest answer")', R.v194.inspectorNextToFoodRow);
+
+  // ── v1.97: river/sea route conditions derived from the real fields (routing-audit U1/U2/U3) ──
+  A('v1.97: square rig is a genuine no-go dead upwind (jpSailFactor=0) — not a cosine bonus', R.v197.squareNoGo);
+  A('v1.97: dead downwind is SLOWER than a broad reach — the non-monotonic polar shape F-3 requires', R.v197.squareDownwindSlowerThanReach);
+  A('v1.97: the square-rig polar peaks on a reach, not dead downwind', R.v197.squarePeakIsReach);
+  A('v1.97: a fore-and-aft rig points materially closer to the wind than a square rig', R.v197.foreaftPointsHigher);
+  A('v1.97: an oared/river hull is wind-neutral at every angle (no fabricated sail bonus)', R.v197.oaredWindNeutral);
+  A('v1.97: the polar folds symmetrically about 180 deg (port/starboard tack are equivalent)', R.v197.polarFoldsSymmetric);
+  A('v1.97: each rig\'s neutral is DERIVED from its own polar points, so it cannot drift from them', R.v197.rigNeutralDerived);
+  A('v1.97: each rig\'s span is likewise derived from its polar, not hardcoded', R.v197.rigSpanDerived);
+  A('v1.97: a descending river stage reads Strong Downstream (was hardcoded "Neutral" pre-v1.97)', R.v197.riverDownstream);
+  A('v1.97: the same reach travelled upstream reads Strong Upstream', R.v197.riverUpstream);
+  A('v1.97: a net-flat river stage reads Neutral', R.v197.riverFlat);
+  A('v1.97: an intermediate gradient reads Mild Downstream, so the band ladder is reachable', R.v197.riverMild);
+  A('v1.97: river direction genuinely changes the answer (downstream !== upstream)', R.v197.riverSigned);
+  A('v1.97: found a real all-ocean run to test the sea condition on', R.v197.foundOceanRun);
+  A('v1.97: _jpSeaCondition returns bands that exist in JP_ROUTE.sea', R.v197.seaBandsValid);
+  A('v1.97: sailing the SAME water in the opposite direction is not the same passage (A->B !== B->A)', R.v197.seaDirectional);
+  A('v1.97: a wind-neutral oared hull ignores the wind field entirely (current only)', R.v197.oaredIgnoresWind);
+  A('v1.97: with no current/wind fields available the condition falls back to Neutral, never fabricated', R.v197.noFieldFallback);
+  A('v1.97: land route-condition labels do not exist in the sea/river tables (the override guard is meaningful)', R.v197.landLabelRejected);
+  // ── v1.98: edgeCost hook + directional sea-lane geometry (routing-audit U4/U5) ──
+  A('v1.98: found ocean water to route over', R.v198.foundOcean);
+  A('v1.98: omitting edgeCost takes the identical arithmetic path as pre-v1.98 (bit-identical by construction)', R.v198.nullEdgeCostIdentical);
+  A('v1.98: a supplied edgeCost callback is genuinely consulted, not ignored', R.v198.edgeCostIsConsulted);
+  A('v1.98: _civSeaTimeEdgeCost builds a real cost function from the current/wind fields', R.v198.seaEdgeBuilt);
+  A('v1.98: the sea edge cost is SYMMETRIC (round-trip) — the guarantee that keeps the undirected Prim MST well-defined', R.v198.seaEdgeSymmetric);
+  A('v1.98: upwind water is slow but never impassable (the tack floor keeps every edge finite and positive)', R.v198.seaEdgeFinitePositive);
+  A('v1.98: Test D — the time-costed router is never SLOWER than pure shortest-distance on the same water', R.v198.testD_worse === 0);
+  A('v1.98: Test D — and it is genuinely faster on real ocean pairs (a longer route chosen because it is quicker)', R.v198.testD_better > 0);
+
+  A('v1.99: _civTerrainValidTest(\'land\') rejects water and accepts dry land on a controlled synthetic grid', R.v199.landRejectsWater && R.v199.landAcceptsLand);
+  A('v1.99: _civTerrainValidTest(\'water\')/(\'ocean\') accept water and reject dry land', R.v199.waterAcceptsWater && R.v199.waterRejectsLand && R.v199.oceanMatchesWater);
+  A('v1.99: _civNearestValidPt finds nearby dry land off the water column', R.v199.nearestValidFound);
+  A('v1.99: _civNearestValidPt gives up cleanly (returns the original point, does not hang) when nothing within range qualifies', R.v199.nearestValidGivesUpCleanly);
+  A('v1.99: an uncorrected _civSmoothPath genuinely crosses the water column on this synthetic raw path (proves the repair pass fixes something real, not a coincidence)', R.v199.baselineCrossesWater);
+  A('v1.99: the SAME raw path with the land isValid test never crosses the water column', R.v199.repairedNeverCrossesWater);
+  A('v1.99: an existing sea-lane way makes its own crossing point valid under land+allowSeaLanes (the pre-existing "ferry crossing" allowance _civDijkstraPath\'s cost grid already grants)', R.v199.ferryPointValid);
+  A('v1.99: the ferry exception stays narrowly scoped to the lane itself, not the whole water body', R.v199.awayFromFerryStillInvalid);
+  A('v1.99: plain land-mode (no allowSeaLanes) is unaffected by an existing sea lane — only _civDijkstraPath opts in', R.v199.plainLandModeIgnoresFerry);
+  A('v1.99: on a real generated+auto-populated world, land-mode _civDijkstraPath paths between real settlements never cross real water outside a legitimate ferry crossing', R.v199.landPairsTested > 0 && R.v199.landBadPoints === 0);
+  A('v1.99: water-mode _civDijkstraPath paths never cross real land', R.v199.waterPairsTested === 0 || R.v199.waterBadPoints === 0);
+  A('v1.99: the auto-generated land road network (_civHierarchicalNetwork, no ferry exception) never crosses water', R.v199.autoNetTot > 0 && R.v199.autoNetBad === 0);
+  A('v1.99: _civJoinDijkstraSegs flags a genuinely unreachable leg (land point to open ocean, clear of any ferry) via unreachableLegs', !R.v199.foundOceanPt || R.v199.unreachableLegDetected);
+  A('v1.99: _civCommitWay warns (not silently) when a drawn segment has no real route, naming the route as the issue', !R.v199.foundOceanPt || R.v199.commitWayWarnedOnUnreachable);
+  A('v1.99: _civCommitWay still creates the way despite the warning — a hand-placed waypoint is not silently discarded', !R.v199.foundOceanPt || R.v199.commitWayStillCreatedTheWay);
+  A('v1.99: an ordinary reachable leg between two real settlements is never flagged (no false positives)', R.v199.ordinaryLegNotFlagged !== false);
+
+  // ── v1.100 (JP stage-blocking audit): _stageTrouble missed 2 of _jpVesselWaterBlock's 4
+  // verdicts. "cannot operate on rivers/lakes"/"the open sea" (a MODE mismatch — this class of
+  // vessel can never be here, unlike a rating shortfall) and "No vessel selected" match neither
+  // pre-existing regex (no hyphenated "open-sea", no "navigate") and fell to the fully generic
+  // catch-all with no useful remedy. Both are water-only and mean the party cannot make this leg
+  // by water at all — the one case where re-routing the WHOLE journey land-only is a genuine,
+  // deterministic, one-click fix (reuses _jpRerouteForMode verbatim via a new optional forceMode
+  // param, confirm()-gated exactly like the existing #reRerouteBtn since it replaces the whole
+  // drawn path). The land-side capacity hard-blocks (v1.63/v1.67) also fell to the generic line
+  // despite already naming their own remedy in r.blocked — given the same "point at the controls,
+  // don't restate" treatment as the sibling water-resupply case, still with no button (a
+  // cargo/party-size change stays the user's own call, same v1.48/v1.49 precedent as always).
+  R.v100 = await page.evaluate(async () => {
+    const o = {};
+    const sea = state.seaLevel || 0.42;
+    let landPt = null;
+    for (let y = 8; y < GH - 8 && !landPt; y++) for (let x = 8; x < GW - 8 && !landPt; x++)
+      if (field[y * GW + x] >= sea + 0.05) landPt = [x, y];
+    const span = Math.max(20, Math.min(GW - 10 - landPt[0], 40));
+    const savedPlaces = state.places, savedWays = civWays, savedJourneys = civJourneys, savedIdx = _civSelectedJourneyIdx;
+    const origDerive = _jpDeriveStages;
+    const origConfirm = window.confirm, origAlert = window.alert;
+    try {
+      state.places = [{ kind: 'town', name: 'A', x: landPt[0], y: landPt[1], category: 'settlement', pop: 1000 },
+      { kind: 'town', name: 'B', x: landPt[0] + span, y: landPt[1], category: 'settlement', pop: 1000 }];
+      const pts = []; for (let k = 0; k <= 40; k++) pts.push([landPt[0] + span * k / 40, landPt[1]]);
+      const jn = { pts, name: 'v100', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+
+      // ── vessel MODE mismatch: a river-only vessel (River Barge) staged on open sea. Set as an
+      // EXPLICIT PER-STAGE override (stageOverrides[0].vessel), not the shared plan-level vessel —
+      // a shared vessel that can't do one stage is silently substituted by _jpPlan's own graceful
+      // per-stage fallback (v1.53, "a keelboat auto-selected crossing the ocean is rejected" fix)
+      // UNLESS the stage carries its own explicit override, which that fallback deliberately never
+      // second-guesses. Caught by first running this against the plan-level field and observing it
+      // silently render "Favourable", not blocked at all — the fallback quietly picked a working
+      // vessel instead. ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'sea', terrain: 'Coastal Waters', routeCond: 'Neutral',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', groupSize: 4, cargoKg: 10, stageOverrides: { 0: { vessel: 'River Barge' } } });
+        _civOpenRouteEditor(0);
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.mismatchRendered = /Impossible as configured/.test(h) && /cannot operate on/.test(h);
+        o.mismatchFixMentionsReroute = /re-route this journey land-only/.test(h);
+        const btn = document.querySelector('[data-jps-fix-reroute-land]');
+        o.mismatchButtonExists = !!btn;
+
+        // decline leaves the drawn path untouched (same confirm()-gate as #reRerouteBtn)
+        const ptsBeforeDecline = jn.pts;
+        let confirmCalls = 0;
+        window.confirm = () => { confirmCalls++; return false; };
+        if (btn) btn.click();
+        o.declineLeavesPtsUntouched = jn.pts === ptsBeforeDecline && confirmCalls === 1;
+
+        // accept genuinely reroutes and, run back through the REAL (unmocked) stage deriver on
+        // the new all-land path, actually clears the block end-to-end
+        window._jpDeriveStages = origDerive;
+        window.confirm = () => true; window.alert = () => {};
+        const btn2 = document.querySelector('[data-jps-fix-reroute-land]');
+        if (btn2) btn2.click();
+        o.rerouteReplacedPts = jn.pts !== ptsBeforeDecline && jn.pts.length >= 2;
+        const plan2 = _jpPlan(jn);
+        o.rerouteUnblocksJourney = !plan2.blocked;
+      }
+
+      // ── "No vessel selected for the water leg." — same explicit-override requirement as above;
+      // a genuinely empty per-stage vessel override (ov.vessel==='') is treated as "no override"
+      // by _jpPlan's own hasOverride check and would hit the graceful fallback instead, so this
+      // uses a non-empty but invalid vessel name (JP_SHIPS[name]===undefined) — the real shape a
+      // stray/corrupted stageOverrides entry would take, since the UI's own per-stage select only
+      // ever offers real JP_SHIPS keys or deletes the override entirely. ──
+      {
+        window.confirm = origConfirm; window.alert = origAlert;
+        window._jpDeriveStages = () => [{ km: 50, cat: 'river', terrain: 'Calm River', routeCond: 'Neutral',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', groupSize: 4, cargoKg: 10, stageOverrides: { 0: { vessel: 'Nonexistent Vessel' } } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.noVesselRendered = /Impossible as configured/.test(h) && /No vessel selected/.test(h);
+        o.noVesselButtonExists = !!document.querySelector('[data-jps-fix-reroute-land]');
+      }
+
+      // ── land capacity overload: improved fix text (names the controls, like the sibling
+      // water-resupply case), but still NO button — matches the pre-existing v1.65
+      // noFixButtonForCapacityBlock scenario exactly, confirming that behavior is unchanged ──
+      {
+        window._jpDeriveStages = () => [{ km: 50, cat: 'land', terrain: 'Dirt Track', routeCond: 'Standard',
+          infra: 'Stable Settlements', biome: 'Temperate Forest', dryKm: 0, i0: 0, i1: 40 }];
+        const p = _jpEnsurePlan(jn);
+        Object.assign(p, { transport: 'Walking', carts: 0, wagons: 0, groupSize: 1, cargoKg: 5000,
+          stageOverrides: {}, animals: { donkey: 0, mule: 0, camel: 0, horse: 0 } });
+        _jpRenderResults(jn);
+        const h = document.getElementById('reResults').innerHTML;
+        o.overloadRendered = /Impossible as configured/.test(h) && /no party departs in this state/.test(h);
+        o.overloadFixNamesControls = /pack animals or a cart\/wagon/.test(h);
+        o.overloadNoRerouteButton = !document.querySelector('[data-jps-fix-reroute-land]');
+      }
+
+      // ── the mechanism this whole feature depends on: forceMode='land' must override
+      // plan.transport, not merely omit it — a block can happen on ONE stage even while the
+      // journey's overall transport is Sea Faring/River Transport for the rest of the trip;
+      // re-deriving from plan.transport there would re-path the SAME water domain and reproduce
+      // the identical unusable leg ──
+      {
+        window._jpDeriveStages = origDerive;
+        const p = _jpEnsurePlan(jn);
+        p.transport = 'Sea Faring';
+        jn.pts = pts.map(pt => pt.slice());
+        const withoutForce = _jpRerouteForMode(jn);
+        o.withoutForceFailsUnderSeaTransport = withoutForce.ok === false;
+        jn.pts = pts.map(pt => pt.slice());
+        const withForce = _jpRerouteForMode(jn, 'land');
+        o.forceLandSucceedsUnderSeaTransport = withForce.ok === true;
+      }
+
+      // ── backward compatibility: the pre-v1.100 call shape (no second argument) is unaffected ──
+      {
+        window._jpDeriveStages = origDerive;
+        const p = _jpEnsurePlan(jn);
+        p.transport = 'Walking';
+        jn.pts = pts.map(pt => pt.slice());
+        const oldPts = jn.pts;
+        const res = _jpRerouteForMode(jn);
+        o.plainRerouteStillWorks = res.ok === true && jn.pts !== oldPts;
+      }
+    } finally {
+      window._jpDeriveStages = origDerive; window.confirm = origConfirm; window.alert = origAlert;
+      state.places = savedPlaces; civWays = savedWays; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedIdx;
+    }
+    return o;
+  });
+  A('v1.100: a vessel MODE mismatch ("cannot operate on...") now renders with a specific fix, not the generic catch-all', R.v100.mismatchRendered);
+  A('v1.100: its fix text points at re-routing the journey land-only', R.v100.mismatchFixMentionsReroute);
+  A('v1.100: the "Re-route journey, land-only" quick-fix button is rendered for it', R.v100.mismatchButtonExists);
+  A('v1.100: declining the reroute confirm() leaves the drawn path untouched', R.v100.declineLeavesPtsUntouched);
+  A('v1.100: accepting genuinely replaces the drawn path', R.v100.rerouteReplacedPts);
+  A('v1.100: and the rerouted journey is no longer blocked, run back through the real (unmocked) stage deriver', R.v100.rerouteUnblocksJourney);
+  A('v1.100: "No vessel selected for the water leg." also renders with the reroute quick fix', R.v100.noVesselRendered && R.v100.noVesselButtonExists);
+  A('v1.100: a land capacity overload gets fix text naming the actual controls (pack animals/cart, resupply stop), not the fully generic line', R.v100.overloadRendered && R.v100.overloadFixNamesControls);
+  A('v1.100: but still gets no quick-fix button (cargo/party-size stays the user\'s own call, v1.48/v1.49 precedent, unchanged from v1.65)', R.v100.overloadNoRerouteButton);
+  A('v1.100: _jpRerouteForMode(jn) with no forceMode still fails under Sea Faring for two inland points (unchanged pre-v1.100 behavior)', R.v100.withoutForceFailsUnderSeaTransport);
+  A('v1.100: _jpRerouteForMode(jn,\'land\') succeeds for the SAME inland points even though plan.transport is still Sea Faring — the actual mechanism this feature depends on', R.v100.forceLandSucceedsUnderSeaTransport);
+  A('v1.100: the pre-v1.100 call shape (no second argument) is unaffected', R.v100.plainRerouteStillWorks);
+
+  // ── v1.101 (owner: fix both the sea-cost-model style over-strict water detection at large map
+  // scale, AND add a Generate → World troubleshooting info button). Two independent civ-layer
+  // pieces: (a)/(b) the JP-specific drinking-water threshold easing (_jpDrinkingCoarseEase,
+  // layered on top of the engine's own riverCoarseEase — see test_tail.js for the engine-side
+  // riverCoarseEase/riverFlowThresh unit tests, which this file doesn't duplicate), and (c) the new
+  // #genInfoBtn/#genInfoPanel UI. Hash vs v1.100 is NOT identical at scales above the app's default
+  // mapWidthKm=800 (a deliberate, measured re-baseline — see CHANGELOG); AT the default and below,
+  // riverCoarseEase is a no-op by construction, so the default render is untouched.
+  R.v101 = await page.evaluate(async () => {
+    const o = {};
+    o.riverCoarseEaseNoOpAtDefault = riverCoarseEase(800) === 1;
+    o.riverCoarseEaseCapped = riverCoarseEase(1e6) === TERRAIN_DETAIL_MAX_K;
+    o.jpDrinkingEaseNoOpAtDefault = _jpDrinkingCoarseEase(800) === 1;
+    o.jpDrinkingEaseGoesPastCartographicCap = _jpDrinkingCoarseEase(40000) > riverCoarseEase(40000);
+    o.jpDrinkingEaseCapped = _jpDrinkingCoarseEase(1e9) === JP_DRINKING_COARSE_MAX;
+
+    // _jpStageDryKm: a synthetic coarse world (cellKm=200, well past both easing caps' break
+    // points) with sparse minor-stream flow just strong enough to clear the NEW eased threshold but
+    // not the OLD (pre-v1.101) one — proves the fix changes the actual water-search OUTCOME, not
+    // just the standalone easing functions in isolation.
+    const savedGW = GW, savedGH = GH, savedField = field, savedFlow = flowField, savedMWK = state.mapWidthKm;
+    try {
+      GW = 200; GH = 10; state.mapWidthKm = 40000;
+      field = new Float32Array(GW * GH).fill(0.6);
+      const cellKm = state.mapWidthKm / GW;
+      const flowThreshEased = riverFlowThresh(GW, GH);
+      const newDrinkThresh = flowThreshEased * (riverCoarseEase(state.mapWidthKm) / _jpDrinkingCoarseEase(state.mapWidthKm)) / JP_DRINKING_FLOW_DIVISOR;
+      const oldDrinkThresh = (GW * GH * 0.0004) / JP_DRINKING_FLOW_DIVISOR;
+      o.newThreshBelowOld = newDrinkThresh < oldDrinkThresh;   // the fix must actually loosen it
+      const flowVal = (newDrinkThresh + oldDrinkThresh) / 2;   // clears NEW, does not clear OLD
+      const flow = new Float32Array(GW * GH);
+      for (let x = 20; x < GW; x += 40) flow[5 * GW + x] = flowVal;
+      flowField = flow;
+      const wb = new Uint8Array(GW * GH);
+      const pts = []; for (let x = 0; x < GW; x++) pts.push([x, 5]);
+      const dryKmPost = _jpStageDryKm(pts, 0, pts.length - 1, cellKm, wb, flowThreshEased);
+      // hand-rolled OLD-behavior scan: same reach/search logic, old (uneased) threshold
+      const R = Math.ceil(_jpWaterReachCells(cellKm));
+      function freshOld(x, y) { for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || nx >= GW || ny < 0 || ny >= GH) continue; if (dx * dx + dy * dy > R * R) continue; if (flow[ny * GW + nx] > oldDrinkThresh) return true; } return false; }
+      let longest = 0, run = 0;
+      for (let x = 0; x < GW; x++) { if (freshOld(x, 5)) run = 0; else { run += cellKm; if (run > longest) longest = run; } }
+      o.dryKmPost = dryKmPost; o.dryKmPreFix = longest;
+      o.fixBshortensDryRun = dryKmPost < longest;
+    } finally {
+      GW = savedGW; GH = savedGH; field = savedField; flowField = savedFlow; state.mapWidthKm = savedMWK;
+    }
+
+    // Generate → World info button
+    const btn = document.getElementById('genInfoBtn'), panel = document.getElementById('genInfoPanel'), ta = document.getElementById('genInfoText');
+    o.infoButtonExists = !!btn; o.infoPanelExists = !!panel; o.infoTextareaExists = !!ta;
+    o.infoCopyBtnExists = !!document.getElementById('genInfoCopyBtn');
+    o.infoPanelStartsClosed = panel && panel.style.display === 'none';
+    if (btn) btn.click();
+    o.infoPanelOpensOnClick = panel && panel.style.display !== 'none';
+    const text = ta ? ta.value : '';
+    o.infoTextHasVersion = /Elevation Foundation v/.test(text);
+    o.infoTextHasGrid = new RegExp('Grid ' + GW + '.' + GH).test(text);
+    o.infoTextHasFullParams = /Full generation parameters/.test(text) && /"warp"/.test(text) && text.includes(String(state.tect.seed));
+    if (btn) btn.click();
+    o.infoPanelClosesOnSecondClick = panel && panel.style.display === 'none';
+    return o;
+  });
+  A('v1.101: riverCoarseEase is a no-op at the app default mapWidthKm (800)', R.v101.riverCoarseEaseNoOpAtDefault);
+  A('v1.101: riverCoarseEase is capped at TERRAIN_DETAIL_MAX_K', R.v101.riverCoarseEaseCapped);
+  A('v1.101: _jpDrinkingCoarseEase is a no-op at the app default mapWidthKm (800)', R.v101.jpDrinkingEaseNoOpAtDefault);
+  A('v1.101: _jpDrinkingCoarseEase eases FURTHER than the cartographic riverCoarseEase past its cap — JP has no rendering cost to weigh against going further', R.v101.jpDrinkingEaseGoesPastCartographicCap);
+  A('v1.101: _jpDrinkingCoarseEase is capped at JP_DRINKING_COARSE_MAX (stays finite under an extreme misconfiguration)', R.v101.jpDrinkingEaseCapped);
+  A('v1.101: the new drinking threshold is genuinely looser than the pre-v1.101 one at world scale (the fix has real effect, not just a no-op formula)', R.v101.newThreshBelowOld);
+  A('v1.101: on a synthetic coarse world, _jpStageDryKm finds water (shorter dry run) that the pre-v1.101 threshold would have missed entirely', R.v101.fixBshortensDryRun);
+  A('v1.101: the Generate → World info button exists with its panel/textarea/copy button', R.v101.infoButtonExists && R.v101.infoPanelExists && R.v101.infoTextareaExists && R.v101.infoCopyBtnExists);
+  A('v1.101: the info panel starts closed and toggles open on click', R.v101.infoPanelStartsClosed && R.v101.infoPanelOpensOnClick);
+  A('v1.101: the info text contains the version/grid summary AND the full-parameters JSON dump (incl. the real seed)', R.v101.infoTextHasVersion && R.v101.infoTextHasGrid && R.v101.infoTextHasFullParams);
+  A('v1.101: clicking the info button again closes the panel', R.v101.infoPanelClosesOnSecondClick);
+
+  // ── v1.102 (owner: "pathfinding and routes seem to make mistakes with lakes"). Root-caused by
+  // reproduction on a real generated lake: a stage crossing it measured 172.8m gain / 183.6m loss
+  // over an 85.9km "Calm River" — a lake bed is flat, so that's DEM sampling noise across the lake
+  // surface being read by _jpRiverCondition as a real downhill current, and it can just as easily
+  // cross the Strong Downstream/Upstream threshold on a different seed/crossing, fabricating a fast
+  // current on a genuinely still body of water. Every lake cell (CART_BIOMES index 14) was
+  // unconditionally cat:'river'/terrain:"Calm River" regardless of the lake's actual size — a pond
+  // and a Great-Lakes-scale crossing got IDENTICAL treatment: river-only vessel eligibility (a real
+  // open-water hull incorrectly read as ineligible) and the calmest, fastest river terrain. Fix:
+  // reuse the ocean branch's own "distance to nearest land" measurement for lake cells too — a
+  // small, near-shore lake (d<=2, the SAME cutoff "Sheltered Bay" already uses) stays river-like;
+  // a lake wide enough that its middle sits genuinely far from either shore gets the SAME
+  // open-water terrain/vessel/condition treatment the ocean branch already has (Coastal Waters/
+  // Open Sea, wind-driven _jpSeaCondition instead of the noise-prone gradient one). Civ-layer only
+  // (_jpDeriveStages); hash vs v1.101 ALL IDENTICAL.
+  R.v102 = await page.evaluate(async () => {
+    const o = {};
+    const realCB = currentCartBiome(), savedCB = _cartBiome, savedField = field;
+    try {
+      // an all-land baseline avoids surrounding-row leakage into the distance-to-shore search
+      // (which scans a 2-D neighbourhood, not just along the sampled row)
+      const cb = new Uint8Array(realCB.length); cb.fill(2);   // 2 = Temperate Forest (land)
+      const y = Math.floor(GH / 2);
+      const seaLvl = state.seaLevel;
+      const f = new Float32Array(field.length); f.fill(seaLvl + 0.1);
+      // narrow lake: 3 cells wide, entirely within the d<=2 "stays river" reach
+      for (let dy = -1; dy <= 1; dy++) for (let x = 40; x < 43; x++) { cb[(y + dy) * GW + x] = 14; f[(y + dy) * GW + x] = seaLvl - 0.05; }
+      // wide lake: 30 cells wide and 31 tall, so the middle is genuinely far (>8 cells) from any shore
+      for (let dy = -15; dy <= 15; dy++) for (let x = 100; x < 130; x++) { cb[(y + dy) * GW + x] = 14; f[(y + dy) * GW + x] = seaLvl - 0.05; }
+      _cartBiome = cb; field = f;
+      const pts = []; for (let x = 0; x < GW; x++) pts.push([x, y]);
+      const jn = { pts, name: 'lake-synth' };
+      const plan = _jpEnsurePlan(jn);
+      const stages = _jpDeriveStages(jn, plan);
+      o.narrowLakeStagesAllRiver = stages.filter(s => s.i0 <= 42 && s.i1 >= 40).every(s => s.cat === 'river' && s.terrain === 'Calm River');
+      const wideLakeMidStages = stages.filter(s => s.i0 <= 120 && s.i1 >= 108);
+      o.wideLakeHasSeaStage = wideLakeMidStages.length > 0 && wideLakeMidStages.every(s => s.cat === 'sea');
+      o.wideLakeUsesRealSeaTerrain = wideLakeMidStages.every(s => s.terrain === 'Coastal Waters' || s.terrain === 'Open Sea');
+      o.wideLakeReachesOpenSea = wideLakeMidStages.some(s => s.terrain === 'Open Sea');
+      // no false positive: a real ocean crossing (bIdx 15) is completely unaffected by this change
+      const cbOcean = new Uint8Array(realCB.length); cbOcean.fill(2);
+      for (let dy = -15; dy <= 15; dy++) for (let x = 100; x < 130; x++) { cbOcean[(y + dy) * GW + x] = 15; }
+      _cartBiome = cbOcean;
+      const oceanStages = _jpDeriveStages({ pts, name: 'ocean-synth' }, _jpEnsurePlan({ pts, name: 'ocean-synth' }));
+      const oceanMid = oceanStages.filter(s => s.i0 <= 120 && s.i1 >= 108);
+      o.oceanCrossingStillWorks = oceanMid.length > 0 && oceanMid.every(s => s.cat === 'sea');
+    } finally {
+      _cartBiome = savedCB; field = savedField;
+    }
+    return o;
+  });
+  A('v1.102: a small, near-shore lake crossing (3 cells wide) stays river-classified with Calm River terrain — unchanged from before', R.v102.narrowLakeStagesAllRiver);
+  A('v1.102: a lake wide enough to be genuinely far from any shore is now sea-classified in its middle, not river', R.v102.wideLakeHasSeaStage);
+  A('v1.102: that sea-classified lake stretch uses the real sea terrain bands (Coastal Waters/Open Sea), not a fabricated lake-specific label', R.v102.wideLakeUsesRealSeaTerrain);
+  A('v1.102: a lake wide enough reaches the Open Sea band at its true middle, same distance rule the ocean branch already uses', R.v102.wideLakeReachesOpenSea);
+  A('v1.102: a real ocean crossing is unaffected by the lake fix (still sea-classified via its own bIdx=15 branch)', R.v102.oceanCrossingStillWorks);
+
+  // v2.03 (owner, pasting the always-visible #readout screenshot: "I want the generation info
+  // button here"): the v1.101 ℹ️ Info button moved from inside #genWorld (one of three mutually-
+  // exclusive tab panels, invisible whenever Explore/Assets was active) to sit beside #readout — a
+  // sibling .sec rendered after all three tab panels close, genuinely always visible. Pure DOM
+  // relocation; every element id kept, so this just re-confirms the v1.101 behavior still holds
+  // from its NEW location, plus the actual point of the move: visibility survives a tab switch.
+  R.v203 = await page.evaluate(async () => {
+    const o = {};
+    const readout = document.getElementById('readout');
+    const btn = document.getElementById('genInfoBtn'), panel = document.getElementById('genInfoPanel'), ta = document.getElementById('genInfoText');
+    o.readoutExists = !!readout;
+    o.infoButtonExists = !!btn; o.infoPanelExists = !!panel; o.infoTextareaExists = !!ta;
+    o.sameSecAsReadout = !!(readout && btn && readout.closest('.sec') === btn.closest('.sec'));
+    o.notInsideGenWorld = !(btn && btn.closest('#genWorld'));
+    o.notInsideExplorePanel = !(btn && btn.closest('#explorePanel'));
+    o.notInsideAssetsPanel = !(btn && btn.closest('#assetsPanel'));
+    const aside = document.querySelector('aside');
+    o.insideAside = !!(btn && aside && aside.contains(btn));
+    o.infoPanelStartsClosed = panel && panel.style.display === 'none';
+    if (btn) btn.click();
+    o.infoPanelOpensOnClick = panel && panel.style.display !== 'none';
+    o.infoTextHasVersion = ta && /Elevation Foundation v/.test(ta.value);
+    if (btn) btn.click();
+    o.infoPanelClosesOnSecondClick = panel && panel.style.display === 'none';
+    // the actual point of the move: switch to the Explore tab and confirm the button is still
+    // present/visible/clickable (it would have been display:none-ancestor-hidden pre-v2.03)
+    const exploreTabBtn = document.querySelector('[data-tab="explore"]');
+    if (exploreTabBtn) exploreTabBtn.click();
+    const btnRect = btn ? btn.getBoundingClientRect() : null;
+    o.visibleUnderExploreTab = !!(btn && getComputedStyle(btn).display !== 'none' && btnRect && btnRect.width > 0 && btnRect.height > 0);
+    const genTabBtn = document.querySelector('[data-tab="generate"]');
+    if (genTabBtn) genTabBtn.click();   // restore for any later smoke block reading Generate-tab DOM state
+    return o;
+  });
+  A('v2.03: #readout and the info button share the same sidebar .sec (they were moved to sit together)', R.v203.readoutExists && R.v203.infoButtonExists && R.v203.sameSecAsReadout);
+  A('v2.03: the info button/panel are no longer inside any of the three tab panels (genWorld/explorePanel/assetsPanel)', R.v203.notInsideGenWorld && R.v203.notInsideExplorePanel && R.v203.notInsideAssetsPanel);
+  A('v2.03: the info button is still inside <aside>, just relocated within it', R.v203.insideAside);
+  A('v2.03: the info panel still starts closed and opens/closes on click from its new location', R.v203.infoPanelStartsClosed && R.v203.infoPanelOpensOnClick && R.v203.infoPanelClosesOnSecondClick);
+  A('v2.03: the info text still renders real generation-parameter content from its new location', R.v203.infoTextHasVersion);
+  A('v2.03: the info button stays visible/clickable under the Explore tab — the whole point of the move (it never did before)', R.v203.visibleUnderExploreTab);
+
+  // v2.04 (owner: "Per stage override should be the full travel options. Per stage a lot can
+  // change."). Every scalar/enum field jpCalcLand/jpCalcWater/jpCapacity read off the per-stage
+  // effective plan already flowed through _jpEffectiveStagePlan's generic Object.assign merge with
+  // zero plumbing changes — Pace/Group size/Cargo were simply the only three that had ever been
+  // given a per-stage control. This closes the gap: Weather/Carry food/Road-or-water quality/
+  // Infrastructure on every stage category; Hours-per-day/Supplies carried/Grazing/Foraging/Mount/
+  // Desert water on land stages only (jpCalcWater never reads any of the five — a ship has no
+  // marching hours, fodder or a mount). Two synthetic journeys (land + hand-carved sea, the same
+  // v1.102 hand-carve-a-water-region idiom) exercise the DOM directly rather than depending on a
+  // real generated world's own biome mix, since desert/mounted/sea gating needs exact control.
+  R.v204 = await page.evaluate(async () => {
+    const o = {};
+    const savedPlaces = state.places, savedJourneys = civJourneys, savedSelIdx = _civSelectedJourneyIdx;
+    try {
+      // ── land journey ──
+      const x0 = Math.round(GW * 0.3), y0 = Math.round(GH * 0.5);
+      const x1 = Math.round(GW * 0.5), y1 = Math.round(GH * 0.5);
+      state.places = [
+        { kind: 'town', name: 'Testford', x: x0, y: y0, category: 'settlement', pop: 4000 },
+        { kind: 'town', name: 'Testbury', x: x1, y: y1, category: 'settlement', pop: 6000 }
+      ];
+      const pts = []; for (let k = 0; k <= 20; k++) pts.push([x0 + (x1 - x0) * k / 20, y0 + (y1 - y0) * k / 20]);
+      const km = Math.hypot(x1 - x0, y1 - y0) * ((state.mapWidthKm || 800) / GW);
+      const jn = { pts, km, name: 'v2.04 land test', groupSize: 4 };
+      civJourneys = [jn]; _civSelectedJourneyIdx = 0;
+      const pl = _jpEnsurePlan(jn);
+
+      _civOpenRouteEditor(0);
+      const html = document.getElementById('reResults').innerHTML;
+      o.hasWeather = /data-jps="weatherOverride"/.test(html);
+      o.hasCarryFood = /data-jps="carryFood"/.test(html);
+      o.hasRouteCond = /data-jps="routeCond"/.test(html);
+      o.hasInfra = /data-jps="infra"/.test(html);
+      o.hasHours = /data-jps="hours"/.test(html);
+      o.hasSupplyDays = /data-jps="supplyDays"/.test(html);
+      o.hasGrazing = /data-jps="grazing"/.test(html);
+      o.hasForaging = /data-jps="foraging"/.test(html);
+      o.noMountOnWalking = !document.querySelector('[data-jps="mountAnimal"][data-jps-idx="0"]');
+
+      pl.transport = 'Mounted Rider'; pl.mountAnimal = 'horse';
+      _jpRenderResults(jn);
+      o.hasMountOnMountedRider = !!document.querySelector('[data-jps="mountAnimal"][data-jps-idx="0"]');
+
+      pl.transport = 'Walking';
+      const stageBiome = _jpPlan(jn).stages[0].biome;
+      const savedDesertLike = JP_BIOMES[stageBiome].desertLike;
+      JP_BIOMES[stageBiome].desertLike = true;
+      _jpRenderResults(jn);
+      o.hasDesertWaterWhenDesert = !!document.querySelector('[data-jps="desertWater"][data-jps-idx="0"]');
+      JP_BIOMES[stageBiome].desertLike = savedDesertLike;
+      _jpRenderResults(jn);
+      o.noDesertWaterByDefault = !document.querySelector('[data-jps="desertWater"][data-jps-idx="0"]');
+
+      // carryFood tri-state translates to a real boolean, and '' clears back to inherit
+      const cfSel = document.querySelector('[data-jps="carryFood"][data-jps-idx="0"]');
+      cfSel.value = 'off'; cfSel.dispatchEvent(new Event('change'));
+      o.carryFoodOffIsBoolean = pl.stageOverrides['0'].carryFood === false;
+      const cfSel2 = document.querySelector('[data-jps="carryFood"][data-jps-idx="0"]');
+      cfSel2.value = ''; cfSel2.dispatchEvent(new Event('change'));
+      o.carryFoodInheritClears = !pl.stageOverrides['0'] || !('carryFood' in pl.stageOverrides['0']);
+
+      // an override actually reaches jpCalcLand's real speed math (not just stored inertly)
+      const before = _jpPlan(jn).results[0].dailyKm;
+      const hoursSel = document.querySelector('[data-jps="hours"][data-jps-idx="0"]');
+      hoursSel.value = String(Math.round(_jpPlan(jn).plan.hours) === 16 ? 4 : 16);
+      hoursSel.dispatchEvent(new Event('change'));
+      o.hoursChangesSpeed = Math.abs(_jpPlan(jn).results[0].dailyKm - before) > 1e-6;
+
+      const routeCondOpts = Array.from(document.querySelector('[data-jps="routeCond"][data-jps-idx="0"]').options).map(x => x.value).filter(Boolean);
+      o.routeCondUsesLandTable = routeCondOpts.join(',') === Object.keys(JP_ROUTE.land).join(',');
+
+      _civCloseRouteEditor();
+
+      // ── sea journey (hand-carved open-water band, mirrors v1.102's synthetic-lake technique) ──
+      const savedCB = _cartBiome, savedField = field;
+      const cb = new Uint8Array(GW * GH); cb.fill(2);
+      const fld = new Float32Array(field);
+      const sy = Math.floor(GH / 2);
+      for (let x = 40; x < 160; x++) { cb[sy * GW + x] = 15; fld[sy * GW + x] = 0.1; }
+      _cartBiome = cb; field = fld;
+      const spts = []; for (let k = 0; k <= 20; k++) spts.push([60 + 80 * k / 20, sy]);
+      const jnSea = { pts: spts, km: 80 * ((state.mapWidthKm || 800) / GW), name: 'v2.04 sea test', groupSize: 4 };
+      const plSea = _jpEnsurePlan(jnSea);
+      plSea.transport = 'Sea Faring'; plSea.vessel = 'Cog';
+      civJourneys = [jnSea]; _civSelectedJourneyIdx = 0;
+      _civOpenRouteEditor(0);
+      o.seaStageIsSea = _jpPlan(jnSea).stages[0].cat === 'sea';
+      o.seaHasWeather = !!document.querySelector('[data-jps="weatherOverride"][data-jps-idx="0"]');
+      o.seaHasCarryFood = !!document.querySelector('[data-jps="carryFood"][data-jps-idx="0"]');
+      o.seaHasRouteCond = !!document.querySelector('[data-jps="routeCond"][data-jps-idx="0"]');
+      o.seaHasInfra = !!document.querySelector('[data-jps="infra"][data-jps-idx="0"]');
+      o.seaNoHours = !document.querySelector('[data-jps="hours"][data-jps-idx="0"]');
+      o.seaNoSupplyDays = !document.querySelector('[data-jps="supplyDays"][data-jps-idx="0"]');
+      o.seaNoGrazing = !document.querySelector('[data-jps="grazing"][data-jps-idx="0"]');
+      o.seaNoForaging = !document.querySelector('[data-jps="foraging"][data-jps-idx="0"]');
+      o.seaNoMount = !document.querySelector('[data-jps="mountAnimal"][data-jps-idx="0"]');
+      o.seaNoDesertWater = !document.querySelector('[data-jps="desertWater"][data-jps-idx="0"]');
+      const seaRouteCondOpts = Array.from(document.querySelector('[data-jps="routeCond"][data-jps-idx="0"]').options).map(x => x.value).filter(Boolean);
+      o.seaRouteCondUsesSeaTable = seaRouteCondOpts.join(',') === Object.keys(JP_ROUTE.sea).join(',');
+      _civCloseRouteEditor();
+      _cartBiome = savedCB; field = savedField;
+    } finally {
+      state.places = savedPlaces; civJourneys = savedJourneys; _civSelectedJourneyIdx = savedSelIdx;
+    }
+    return o;
+  });
+  A('v2.04: Weather/Carry food/Road quality/Infrastructure rows present on a land stage', R.v204.hasWeather && R.v204.hasCarryFood && R.v204.hasRouteCond && R.v204.hasInfra);
+  A('v2.04: Hours/Supplies/Grazing/Foraging rows present on a land stage', R.v204.hasHours && R.v204.hasSupplyDays && R.v204.hasGrazing && R.v204.hasForaging);
+  A('v2.04: Mount row hidden while Walking, shown once the stage resolves to Mounted Rider', R.v204.noMountOnWalking && R.v204.hasMountOnMountedRider);
+  A('v2.04: Desert water row appears only once the stage\'s own biome reads desert-like, not by default', R.v204.hasDesertWaterWhenDesert && R.v204.noDesertWaterByDefault);
+  A('v2.04: the Carry food tri-state select stores a real boolean, and inherit clears the override key', R.v204.carryFoodOffIsBoolean && R.v204.carryFoodInheritClears);
+  A('v2.04: a per-stage override (Hours) actually changes jpCalcLand\'s computed speed, not just stored inertly', R.v204.hoursChangesSpeed);
+  A('v2.04: Road quality options on a land stage are JP_ROUTE.land\'s own keys', R.v204.routeCondUsesLandTable);
+  A('v2.04: Weather/Carry food/Road quality/Infrastructure rows present on a sea stage too', R.v204.seaHasWeather && R.v204.seaHasCarryFood && R.v204.seaHasRouteCond && R.v204.seaHasInfra);
+  A('v2.04: land-only rows (Hours/Supplies/Grazing/Foraging/Mount/Desert water) are all absent on a sea stage', R.v204.seaNoHours && R.v204.seaNoSupplyDays && R.v204.seaNoGrazing && R.v204.seaNoForaging && R.v204.seaNoMount && R.v204.seaNoDesertWater);
+  A('v2.04: Road/Water quality options on a sea stage are JP_ROUTE.sea\'s own keys, not JP_ROUTE.land\'s', R.v204.seaRouteCondUsesSeaTable);
+
+  // v2.06 (owner: "Zooming out seems to rerender all tiles. Which it shouldn't do as zoomed out
+  // tiles had already been rendered before. They should be stored and recalled."). test_tail.js
+  // already unit-tests lodPinMaxZ()/lodCachePut()/_lodTileCacheSet() directly (block 1, pure); this
+  // is the end-to-end confirmation through the REAL drawLODView()/renderNow() rendering pipeline —
+  // render a wide view, dive deep and explore a real swath of the map (touching enough distinct
+  // tiles to pressure the ordinary LRU pool), then return to the exact original wide view and
+  // confirm it needs ZERO recolorization, not a partial or full re-render.
+  R.v206 = await page.evaluate(async () => {
+    const o = {};
+    document.getElementById('lodChk').checked = true;
+    _lodOn = true;
+    let colorizeCount = 0;
+    const origRender = renderBiomeTileRGBA;
+    window.renderBiomeTileRGBA = function (...args) { colorizeCount++; return origRender.apply(this, args); };
+    async function settleAt(zoom, cx, cy) {
+      _lodZoom = zoom; _lodCx = cx; _lodCy = cy;
+      applyView();
+      colorizeCount = 0;
+      await refineVisibleTiles();
+      renderNow();
+      return colorizeCount;
+    }
+    const wideColorizedFirst = await settleAt(2, GW / 2, GH / 2);
+    o.wideRenderedSomething = wideColorizedFirst > 0;
+    // explore a real swath at deep zoom — enough distinct tiles to exceed the ordinary LRU budget
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      await settleAt(24, GW * (0.25 + 0.5 * t), GH * (0.25 + 0.5 * Math.sin(t * Math.PI)));
+    }
+    o.returnColorized = await settleAt(2, GW / 2, GH / 2);
+    window.renderBiomeTileRGBA = origRender;
+    _lodOn = false;
+    return o;
+  });
+  A('v2.06: the Tiled LOD view actually renders tiles on first reveal (sanity check the harness itself works)', R.v206.wideRenderedSomething);
+  A('v2.06: returning to a previously-rendered wide view after deep exploration needs ZERO recolorization — it is recalled, not rerendered', R.v206.returnColorized === 0);
+
+  // v2.08 (owner: "when using LOD the window on mobile doesn't allow a full zoom out anymore").
+  // Root cause, measured directly (Playwright mobile-viewport probe) before fixing: _lodZoom already
+  // hard-floors at exactly 1 through every zoom-out path (button/pinch/reset) — the CAMERA reaches
+  // full zoom-out correctly — but _lodFitCanvas() always displayed the canvas in CSS "cover" mode,
+  // which crops it to the viewport's own aspect with no escape valve, unlike the off-LOD camera
+  // (_viewClampFill's fit-scale floor). On a portrait/mobile-shaped viewport that crops ~66% of the
+  // map's width even at the zoom floor. Fixed: letterbox-FIT exactly at _lodZoom<=1, cover above it;
+  // _lodFitCanvas() now also runs from requestLodRender() (every zoom-changing input reaches it),
+  // not just applyView() (which a zoom step alone never called). A real prior smoke pass on this
+  // narrow ratio DID observe the crop pre-fix; this reproduces it through the actual DOM/camera
+  // instead of asserting the formula in isolation.
+  const _origVp = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });   // portrait/mobile-shaped, deliberately far from GW:GH's landscape aspect
+  R.v208 = await page.evaluate(async () => {
+    const o = {};
+    document.getElementById('lodChk').checked = true;
+    _lodOn = true;
+    applyView();   // resets canvasStack's CSS transform to identity, as the real lodChk 'change' handler does
+    // full zoom-out (the floor) — the whole map must fit on screen, letterboxed, not cropped
+    _lodZoom = 1; _lodCx = GW / 2; _lodCy = GH / 2;
+    requestLodRender();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const wrap = document.querySelector('.canvas-wrap'), wr = wrap.getBoundingClientRect(), vr = view.getBoundingClientRect();
+    o.floorFitsWidth = vr.width <= wr.width + 1;
+    o.floorFitsHeight = vr.height <= wr.height + 1;
+    o.floorWidthPx = vr.width; o.wrapWidthPx = wr.width;
+    // zoomed IN — cover mode should still fill/overflow the viewport (the v0.87 behavior this
+    // function exists for must survive: a real zoom-in must not go back to a small letterboxed tile)
+    _lodZoom = 4; requestLodRender();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const vr2 = view.getBoundingClientRect();
+    o.zoomedInFillsViewport = (vr2.width >= wr.width * 0.9) && (vr2.height >= wr.height * 0.9);   // 0.9, not exact: wr is the wrap's OUTER box (incl. padding), the covered content box is a little smaller
+    // back down to the floor via the SAME on-screen control a mobile user taps — must re-fit, not
+    // stay stuck at the cover size from the zoomed-in step above (proves requestLodRender() itself
+    // refreshes the sizing, not just applyView()/resize)
+    document.getElementById('zoomReset').click();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const vr3 = view.getBoundingClientRect();
+    o.resetBtnRefitsAtFloor = vr3.width <= wr.width + 1;
+    o.lodZoomAtEnd = _lodZoom;
+    _lodOn = false;
+    document.getElementById('lodChk').checked = false;
+    return o;
+  });
+  await page.setViewportSize(_origVp);
+  A('v2.08: at the LOD zoom floor (_lodZoom=1) on a portrait/mobile-shaped viewport, the whole map fits on screen (no cover-crop) — width', R.v208.floorFitsWidth);
+  A('v2.08: at the LOD zoom floor, the whole map fits on screen — height too (letterboxed, not cropped)', R.v208.floorFitsHeight);
+  A('v2.08: a real zoom-in (_lodZoom=4) still fills/covers the viewport — the v0.87 fix this shares code with is not regressed', R.v208.zoomedInFillsViewport);
+  A('v2.08: the on-screen "⟳" reset button (the one #zoomOverlay exposes on mobile) re-fits the canvas at the floor immediately, not just on resize/toggle', R.v208.resetBtnRefitsAtFloor);
+  A('v2.08: _lodZoom itself still ends exactly at the floor (1) — the camera state, unaffected by the display-sizing fix', R.v208.lodZoomAtEnd === 1);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
