@@ -1,6 +1,13 @@
 > **Copied from the native-port repository.** This document was compiled in
 > `Achos0190/Cartalith_GDT` (branch `claude/cartalith-rust-godot-setup-lhgtgh`,
-> commit `6440672`, 2026-09-13) and is reproduced here verbatim below this note.
+> commit `6440672`, 2026-09-13) and is reproduced below this note.
+>
+> **Three rows were corrected in place**, each marked inline, after checking the
+> claim against this repository's `Cartalith Gen1 v2.11.html`: *Continents as
+> entities* (landmasses are already detected and ranked here), *Pipeline-wide
+> multithreading* (four worker kernels, not two) and *Round towers on curtain
+> walls* (other towers do exist). Every other row is verbatim, so a diff against
+> the port repository's copy shows this note and those three rows only.
 >
 > Three references in it resolve in that repository, not this one:
 >
@@ -40,12 +47,12 @@ A straight port of a legacy function is not listed, even if its code was rewritt
 |---|---|---|---|---|
 | Military manpower model | New | Standing army, field army, emergency mobilisation and a war-duration ladder, derived from five drivers: agricultural surplus, fiscal extraction, professionalisation, logistics and carrying capacity. The legacy file has no army-size model at all | `cartalith-civ/src/manpower.rs::civ_military_manpower`; bridged in `civ_military_bridge.rs` | Shipped |
 | Causal landmark generation | New | 49 landmark kinds sited from terrain, hydrology and the route network (bridges, market sites, caravan stations, trade depots, road junctions…). A funnel reports candidates per kind and which cap bound. The legacy "landmark" is only a hand-placed POI icon | `cartalith-civ/src/landmark.rs::generate`, `LandmarkFunnel`; `landmark_run` in `cartalith-godot/src/lib.rs` | Shipped |
-| Continents as entities | New | Landmasses are ranked by area, named, and given an id and boundary so notes can link to them. The legacy file computes only a per-cell continentality field | `cartalith-civ/src/lib.rs::civ_continents`; `EntityKind::Continent` in `cartalith-vault` | Shipped |
+| Continents as entities | New | Landmasses are ranked by area, named, and given an id and boundary so notes can link to them. **Corrected 2026-09-13 against the RC file:** the legacy file does more than a per-cell continentality field — `buildLandmassQuality` (v1.40) already labels connected land components and ranks them by area and mean carrying capacity. The real gap is names, ids and boundaries, not detection | `cartalith-civ/src/lib.rs::civ_continents`; `EntityKind::Continent` in `cartalith-vault` | Shipped |
 | Multi-good trade matching | Improved | The legacy supply match and road gate handle food only. Here they cover all fifteen resource goods, driven by the good-reach figure the legacy file computed only for display | `cartalith-civ/src/trade.rs` | Shipped |
 | Physical crater model | New | Optional crater count and size by area density, plus wear over a stated surface age in millions of years | `params.rs` rows `crater.physical_model`, `crater.surface_age_myr`; `cartalith_terrain::crater_degradation_tau` | Shipped, off by default |
 | Erosion passes as generation parameters | Improved | Velocity erosion, glacial carving, coastal processes and hillslope diffusion are one-off manual buttons in the legacy file. Here they are saved, toggleable parameters that run inside generation | `cartalith-godot/src/params.rs` (`passes.*`) | Shipped; the passes default to off (`WorldParams::defaults`) |
 | GPU compute across generation | New | wgpu compute for noise, domain warp, crustal heterogeneity, the height formula, plate assignment, weather and flow accumulation, with CPU fallback. The legacy WebGL2 path covers only eight post-process shaders (erosion, diffusion, blur, temperature, coastal) | `cartalith-gpu/src/lib.rs`; dispatched from `cartalith-engine::generate_terrain` | Shipped |
-| Pipeline-wide multithreading | Improved | Per-cell loops across terrain, climate, erosion, hydrology and civilisation run in parallel with Rayon. The legacy file uses Web Workers for two erosion kernels only | `par_iter` throughout `cartalith-climate`, `-civ`, `-erosion`, `-engine`, `-terrain`, `-hydrology` | Shipped |
+| Pipeline-wide multithreading | Improved | Per-cell loops across terrain, climate, erosion, hydrology and civilisation run in parallel with Rayon. **Corrected 2026-09-13 against the RC file:** the legacy file uses Web Workers for *four* erosion kernels (`dropletKernel`, `streamPowerKernel`, `glacialKernel`, `velocityErodeKernel`) plus the `GENPOOL` row-fill pool, not two. The conclusion stands — none of it is pipeline-wide | `par_iter` throughout `cartalith-climate`, `-civ`, `-erosion`, `-engine`, `-terrain`, `-hydrology` | Shipped |
 | Lower generation memory peak | Improved | The previous world is freed before the next is generated, dead grids are removed, and resource potentials are stored in blocks. Measured about 519 MiB lower at peak | `cartalith-godot/src/lib.rs::release_world`; `RESOURCE_BLOCK` in `cartalith-civ` | Partial: R1–R3 done, R4–R8 not started |
 | Non-destructive tiled sculpt storage | Improved | Sculpt commit, discard, undo and redo work over a tiled buffer with dirty-region tracking, instead of whole-canvas snapshots | `cartalith-spatial/src/pass.rs::PassBuffer`, `DirtyTracker`; `sculpt_bridge.rs` | Shipped |
 
@@ -103,7 +110,7 @@ A straight port of a legacy function is not listed, even if its code was rewritt
 
 | Feature | Kind | What it does | Where in the code | Status 2026-09-13 |
 |---|---|---|---|---|
-| Round towers on curtain walls | New | Towers drawn at every vertex of a plain wall circuit. The legacy file's only towers are harbour chain towers | `shell/urban_layout_draw.gd` (`WALL_TOWER`) | Shipped 2026-09-13 |
+| Round towers on curtain walls | New | Towers drawn at every vertex of a plain wall circuit. **Corrected 2026-09-13 against the RC file:** the legacy file also draws a mole-head fort tower and per-building towers (`kind:'spire'`, `kind:'dome'`). The substantive point holds: it puts no towers on a plain curtain-wall circuit | `shell/urban_layout_draw.gd` (`WALL_TOWER`) | Shipped 2026-09-13 |
 | Deep-zoom-safe ground fills | Improved | Block and parcel fills fall back to a triangle fan where Godot's triangulation fails at deep zoom (42 failures → 0 on the repro town). The legacy canvas never triangulated, so it never had the failure | `urban_layout_draw.gd::_fill_ground_polygon` | Shipped |
 
 ---
