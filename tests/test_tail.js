@@ -4378,6 +4378,24 @@ if (typeof carveRiverValleys === 'function') {
     })());
   }
 
+  /* ---- v2.13: route-corridor + travel-cost views -------------------------------------------
+     Both fields already existed as internal scoring inputs; this version only draws them. The
+     logic worth pinning is the two fixed normalisers and the travel-cost cache. */
+  {
+    check('v2.13 views: corridor normaliser is 0 at 0 and saturates by 0.2 (the field is sparse)', _corrNorm(0) === 0 && _corrNorm(0.2) === 1 && _corrNorm(0.1) > 0 && _corrNorm(0.1) < 1);
+    check('v2.13 views: corridor normaliser never leaves [0,1]', [0, 0.001, 0.5, 5, 1e9].every(v => _corrNorm(v) >= 0 && _corrNorm(v) <= 1));
+    check('v2.13 views: travel-cost normaliser is 0 at flat (cost 1) and 1 by cost 10', _tcostNorm(1) === 0 && _tcostNorm(10) === 1);
+    check('v2.13 views: travel-cost normaliser maps water (Infinity) to the far end rather than NaN', _tcostNorm(Infinity) === 1);
+    check('v2.13 views: travel-cost normaliser never leaves [0,1]', [0, 1, 3, 10, 1e6, Infinity].every(v => _tcostNorm(v) >= 0 && _tcostNorm(v) <= 1));
+    check('v2.13 views: currentTravelCost() is cached — the same array comes back until the field changes', currentTravelCost() === currentTravelCost());
+    check('v2.13 views: currentTravelCost() is land-finite and water-impassable, matching buildTravelCost', (() => {
+      const tc = currentTravelCost();
+      let land = 0, water = 0;
+      for (let i = 0; i < tc.length; i += 401) { if (field[i] < state.seaLevel) { if (!isFinite(tc[i])) water++; } else if (isFinite(tc[i]) && tc[i] >= 1) land++; }
+      return land > 0 && water > 0;
+    })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

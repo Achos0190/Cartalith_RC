@@ -12,6 +12,44 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.13 — Route-corridor and travel-cost views; towers on stone wall circuits
+
+Second build off `PORT_ONLY_FEATURES.md` (the "cheap render wins" track). Hash vs v2.11
+**ALL IDENTICAL** — both views are opt-in `state.debug` modes and the towers only draw under
+`urbanLayouts`/the City Viewer, all off by default.
+
+- **Corridors and Travel cost as real map views.** Both fields were already computed and already
+  consumed — `buildRouteCorridors` (v1.36 natural crossroads: passes, fords, isthmuses) and
+  `buildTravelCost` (the slope-squared cost roads and territory flood-fill actually use) — and
+  neither was ever visible. This adds no computation: `currentRouteCorridors()` already existed as
+  a cached accessor, and `currentTravelCost()` mirrors its five-line cache idiom so the build runs
+  once per field change rather than once per render. Wired at the seven sites v1.17's `siteprofile`
+  established (button, main-render fetch + colour, legend, `renderDebugTile` fetch + colour,
+  `LAYER_GROUPS`).
+  - Fixed normalisers, not per-world ones: a diagnostic view wants the same colour to mean the same
+    value between worlds. Corridor is sparse (land mean ~0.038, v1.40) so 0.2 reads as full; travel
+    cost is 1 on flat ground and climbs with slope squared, so 1..10 spans the ramp. `Infinity`
+    (water) maps to the far end rather than `NaN`.
+- **Round towers on plain stone wall circuits** (`_umWallTowers`), in both `_umDrawLayout` and the
+  City Viewer. The style guard is the whole eligibility rule — a bastioned trace carries its own
+  geometry, a palisade or ditch has no masonry — so both call sites stay one line. Spacing is
+  enforced in SCREEN space: the ring is finely sampled, so one tower per vertex alone renders as a
+  smear once zoomed out.
+- **Three of the track's five items were deliberately NOT built**, each for a specific reason
+  rather than effort:
+  - *Flow-based wetness halo* — `state.viz.wetness` (R5) already darkens and cools persistently
+    saturated ground off the topographic wetness index. A second wetness pass is a duplicate.
+  - *Local contrast* — it is a spatial-neighbourhood (band-pass) operation, and v1.29's own rule
+    says any such per-tile pass is a seam unless sampled from a world-wide field. It is not a cheap
+    win; it belongs with a proper world-wide implementation, not bolted into the tile path.
+  - *Plate border / neatline* — the scale bar is a DOM overlay, not a canvas pass, so there is no
+    existing overlay stage to join. A CSS border is three lines but is screen-only and would never
+    reach `exportZip`'s baked `map.png`, which is the one place a printed map border matters.
+- **Verification.** `tests/run.sh` **1097/1097** (+7), `tests/run_um.sh` 852/852, `hash_gen1.js`
+  vs v2.11 ALL IDENTICAL, plus a Playwright probe confirming each view renders, is not flat, is
+  registered in `LAYER_GROUPS`, has its button, and that switching back to the base view is
+  byte-identical.
+
 ### v2.12 — Field-level redo, autosave snapshots, failed-open recovery
 
 First build off `PORT_ONLY_FEATURES.md` (pulled in from the native-port repository this session).
