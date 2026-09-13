@@ -12,6 +12,51 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.15 — One search over controls and map, and a setup gate you can dismiss
+
+Third `PORT_ONLY_FEATURES.md` track (navigation). Hash vs v2.11 **ALL IDENTICAL**; 1097/1097;
+852/852.
+
+- **The port has two features — `command_index.gd` and `place_search.gd` — and they answer one
+  question, so this is one box.** `⌃K` / `⌘K` focuses it. Two sources: every labelled control, and
+  the civ layer's own entities (settlements, POIs, map labels, factions, named ways).
+- **The control index is scraped from the live DOM**, never hand-maintained: every
+  `label[for]` → its input. A slider added in a later version is searchable with no extra work,
+  which is the entire reason not to copy the port's hand-written command table. Measured: 145 of
+  the file's 193 labels index (the other 48 have empty text — an unlabelled control has no name to
+  search by, so skipping them is correct, not a gap).
+- **Revealing a control is the real work, and the panel ids turned out to be derivable** rather
+  than needing a map: a `data-gsub="carto"` button owns `#genCarto`, a `data-civsub="generation"`
+  button owns `#civSubGeneration`. `_findPanelOwners()` builds the map by that convention and drops
+  any entry whose panel does not resolve — if the convention ever breaks, search still finds the
+  control and merely stops auto-switching tabs. Reveal opens every ancestor `<details>`, clicks the
+  owning tab buttons, scrolls the control into view and flashes it. Measured: 11 owners resolve
+  (4 `gsub` + 5 `civsub` + 2 top tabs).
+- **`.find-hit` was written before its CSS rule existed** — the class was added and nothing was
+  visible, which is precisely v1.80's `windFxCanvas` shape. Caught while checking the file rather
+  than by the probe, which asserted the class, not the pixels. **A probe that checks a class name
+  has not checked that anything is visible.**
+- **The setup gate can be dismissed** ("Skip for now"), leaving a usable empty app. The subtlety is
+  `_hasLiveWorld()`, whose contract is "gate hidden ⟺ a world exists" and which **both**
+  `beforeunload` and v2.12's autosave read — so a skipped gate must not satisfy it, or an empty app
+  warns on close and autosaves a blank world. `_setupSkipped` is cleared by `generate()`, which is
+  exactly when the contract becomes true on its own.
+  - It is declared `var`, beside the function that reads it, deliberately. `generate()` reads it
+    ~11k lines earlier in the same global lexical scope, and **`typeof` on a `let` in its temporal
+    dead zone throws just as hard as reading it** — so a `typeof` guard could not have saved a late
+    `let`. This is the v1.24 BUG-1 shape (`segOn` called from another closure) caught before
+    shipping rather than after.
+- **Measure tools are the track's fourth item and are deliberately NOT in this version.** A GUI
+  redesign proposal aligning this app with the port's DCC shell was commissioned in the same
+  session; a new canvas tool is exactly the thing that redesign may reposition, so building it
+  first would be work done twice. Disclosed, not forgotten.
+- **Verification**: two Playwright probes — 12 checks on search (index sizes, prefix-beats-midword
+  ranking, reveal opening ancestor `<details>`, dropdown render, Escape, empty query) and 8 on the
+  gate (skip hides it, `_hasLiveWorld()` stays false, autosave declines, the contract restores
+  after `generate()`, and the flash rule genuinely exists in a stylesheet). Search and the gate are
+  DOM-driven, so they are probe/smoke-tested rather than asserted in the block-1 headless suite —
+  the same split every civ-layer feature here uses.
+
 ### v2.14 — Ponytail pass: one real bug, one dead declaration, and a measurement
 
 Owner asked for a laziest-that-works cleanup over the whole file. Hash vs v2.11 **ALL IDENTICAL**.

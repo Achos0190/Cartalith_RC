@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.14**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.15**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.14.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.13.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.15.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.14.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1030,6 +1030,20 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Unified search + dismissible setup gate (v2.15)
+
+- **The control index is SCRAPED from the DOM** (`label[for]` → its input), never hand-maintained —
+  a control added later is searchable for free. **Panel ownership is derivable, not mapped**:
+  `data-gsub="carto"`→`#genCarto`, `data-civsub="generation"`→`#civSubGeneration`. An entry whose
+  panel does not resolve is dropped, so a broken convention degrades to "found but no tab switch".
+- **A class added without a CSS rule is invisible** — `.find-hit` shipped that way for one edit.
+  Same shape as v1.80's `windFxCanvas`. **Asserting a class name is not asserting visibility.**
+- **`_hasLiveWorld()`'s contract is "gate hidden ⟺ a world exists", and `beforeunload` AND autosave
+  both read it.** A dismissible gate must therefore NOT satisfy it (`_setupSkipped`), or an empty
+  app warns on close and autosaves a blank world. `generate()` clears the flag.
+- **`typeof x` on a `let` in its temporal dead zone THROWS** — it cannot guard a forward reference.
+  Declare a cross-block flag `var`, beside its reader. (v1.24 BUG-1's shape, caught pre-ship.)
 
 ### Ponytail pass — and how to run a dead-code sweep here (v2.14)
 
