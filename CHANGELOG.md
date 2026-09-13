@@ -12,6 +12,31 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.16 — Six CSS tokens were used and never defined
+
+Found by the GUI-alignment audit (`docs/GUI_DCC_ALIGNMENT_PROPOSAL.md`), then measured before and
+after. CSS-only; hash vs v2.11 ALL IDENTICAL (the map is JS-painted onto a canvas, so no stylesheet
+can move it); 1097/1097; 852/852.
+
+- **`--border` (34 uses), `--muted` (71), `--fg`, `--text`, `--bg2`, `--panel-darker` appear in
+  `var()` and are defined nowhere.** The real palette is `--line` / `--dim` / `--ink` / `--panel2`;
+  these six are plausible synonyms that drifted in over time — including in v2.12's snapshot list
+  and v2.15's search dropdown, which this pass also repairs.
+- **Why it was invisible: a `var()` with no fallback does not fall back to nothing, it makes the
+  whole declaration invalid at computed-value time**, so the property takes its INITIAL value.
+  For `border-color` that is `currentColor`. Measured on an inactive phase tab: v2.15 renders
+  `border-color rgb(215,220,229)` (the text colour) on a transparent background; v2.16 renders
+  `rgb(44,49,61)` on `--panel2`. `.tab` lost background, colour and border in one rule.
+- **Aliased in `:root`, not rewritten at 105+ call sites.** An alias cannot miss a site and keeps
+  the diff readable. New code should use the canonical names.
+- **One correction to the audit that flagged it**: `--preview-al` is NOT broken. It is always
+  written `var(--preview-al,#0c0e13)`, and a fallback is precisely what keeps a declaration valid.
+- **Honest limit on the `--muted` half**: 71 declarations were invalid, but most sit inside
+  `.hint`-class ancestors that already set `color:var(--dim)`, so the invalid declaration inherited
+  a near-identical colour and looked right. Measured: a sampled `var(--muted)` element computes
+  `rgb(139,147,163)` on BOTH versions. The visible damage was concentrated in
+  `--border`/`--bg2`/`--fg`, not spread evenly across all 105 uses.
+
 ### v2.15 — One search over controls and map, and a setup gate you can dismiss
 
 Third `PORT_ONLY_FEATURES.md` track (navigation). Hash vs v2.11 **ALL IDENTICAL**; 1097/1097;

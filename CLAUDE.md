@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.15**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.16**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.15.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.14.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.16.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.15.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1030,6 +1030,18 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### CSS tokens: use the canonical names (v2.16)
+
+**The palette is `--bg --panel --panel2 --line --ink --dim --faint --accent --accent2 --warn`.**
+`--border`/`--muted`/`--fg`/`--text`/`--bg2`/`--panel-darker` were used 105+ times and defined
+nowhere; they are now aliases in `:root`, but new code should use the canonical names.
+
+- **A `var()` with no fallback does not degrade gracefully — it invalidates the whole declaration**
+  at computed-value time, so the property takes its INITIAL value (`border-color` → `currentColor`).
+  That is why inactive tabs rendered transparent with a bright text-coloured border for versions
+  without anyone noticing. **Always write `var(--x,fallback)` for anything not in the list above.**
+- `--preview-al` looks undefined and is fine — it is always written with a fallback.
 
 ### Unified search + dismissible setup gate (v2.15)
 
