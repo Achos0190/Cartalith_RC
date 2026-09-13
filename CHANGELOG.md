@@ -12,6 +12,48 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.21 — The supply match runs for all fifteen goods, not just food
+
+Fourth build off `PORT_ONLY_FEATURES.md`'s engine-simulation track. v1.33 built a real supply
+match — who actually feeds whom, gated by distance, transport mode and road connectivity — and it
+handled exactly **one** good. Every other resource stopped at a list of names: `_civGoodReach`
+classified each export local/regional/long and **nothing consumed that classification**. Civ-layer
+only, display-only. Hash vs v2.20 **ALL IDENTICAL**; 1136/1136; 852/852; 18 probe assertions.
+
+- **It reuses v1.33's machinery rather than adding a second distance law.** `_civFoodMode` picks
+  the cheapest transport both ends share, `_civFoodConnected` is the road/water gate, and
+  `_civFoodDeliverable`'s `2^(−d/D)` carries Diocletian's Price Edict ratios. One curve to argue
+  with, not two.
+- **The one thing added is VALUE DENSITY**, and it is the same curve with a longer half-distance.
+  That curve is calibrated for GRAIN — the densest-bulk case; a good worth twenty times as much per
+  kg tolerates twenty times the transport cost before shipping stops being worth it, so
+  `_civGoodDeliverable` divides the distance by a class multiplier (bulk 1, general 3, luxury 20)
+  and hands it to the existing function. A bulk good is therefore **bit-identical to v1.33's
+  answer**, asserted directly. Measured: grain is at 1.3% delivered 1000 km overland while a luxury
+  is still above 50% — which is why spices crossed continents and grain did not.
+- **`CIV_GOOD_BULK`/`CIV_GOOD_LUXURY` already existed** and only `_civGoodReach` read them; an
+  unlisted good falls to `general` rather than being treated as bulk, so a new resource key behaves
+  sensibly before anyone classifies it.
+- **This only works because v2.18 fixed road connectivity two versions ago.** `_civFoodConnected`
+  returned false for every overland supplier past 50 km until then, so a multi-good match built on
+  it beforehand would have silently reported almost nothing and looked like a modelling choice.
+  Verified the gate genuinely bites: removing every way drops distant land-mode suppliers from 18
+  to 0.
+- **A good with no reachable exporter is reported UNSUPPLIED**, not quietly assumed importable —
+  v1.33's own rule for food, now applied to every good. Measured on a real world: 92 matched, 2
+  unsupplied, across 15 goods with exporters.
+- **`_civTradeNetwork()` is one cached pass** over every settlement's trade profile, on the same
+  generation counters `_civFactionAggregates` uses. Without it the match would call
+  `_civPlaceTrade` once per candidate per good — quadratic over a 235-settlement world.
+- **On screen**: the Settlement Inspector's Exports line now tags each good with its reach, and a
+  new *Supplied by* block names the best source for each import with its distance, mode and
+  delivered fraction, or says plainly that nothing exporting it is close enough or connected.
+- **Known scope cuts**: the match is display-only and feeds no population or economy figure — the
+  v1.34 ACYCLIC rule stays intact, and wiring a resource shortfall into settlement size is a
+  separate decision with its own calibration. Quantities are not modelled: this answers *where from
+  and how much arrives*, never *how many tonnes*. `TRADE_VALUE_MULT`'s three rungs are reasoned
+  from value density, not sourced against a price series the way the underlying ratios are.
+
 ### v2.20 — Landmasses get names; and the unified search never found a map label
 
 Third build off `PORT_ONLY_FEATURES.md`'s engine-simulation track, and the row this repo had

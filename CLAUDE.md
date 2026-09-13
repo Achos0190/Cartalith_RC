@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.20**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.21**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.20.html` | **Current** unified tool (~30.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.19.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.21.html` | **Current** unified tool (~30.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.20.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1030,6 +1030,24 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Multi-good supply matching (v2.21)
+
+**`_civResourceSupply(p)` answers "where would each import actually come from".** v1.33 built this
+match for food alone; `_civGoodReach` classified every other export and nothing read it.
+
+- **Reuses v1.33's machinery — do not add a second distance law.** `_civFoodMode` /
+  `_civFoodConnected` / `_civFoodDeliverable` are the mode, the road gate and the curve.
+- **The only addition is VALUE DENSITY**: `_civGoodDeliverable` divides the distance by a class
+  multiplier (bulk 1, general 3, luxury 20) and calls the same curve — the same law with a longer
+  half-distance. A bulk good is therefore bit-identical to the food answer; asserted.
+- **An unlisted good falls to `general`**, never to bulk, so a new resource key behaves sensibly
+  before anyone classifies it.
+- **It depends on v2.18.** Before that fix `_civFoodConnected` refused every overland supplier past
+  50 km, so this match would have reported almost nothing and looked deliberate.
+- **`_civTradeNetwork()` is one cached pass** — calling `_civPlaceTrade` per candidate per good is
+  quadratic over a 235-settlement world.
+- Display-only: it feeds no population or economy figure, so the v1.34 ACYCLIC rule is intact.
 
 ### Landmasses as named entities (v2.20)
 
@@ -4012,6 +4030,7 @@ node tests/perf/probe_passes.js A.html      # v2.17 generation passes: the DOM/s
 node tests/perf/probe_roadconnect.js A.html # v2.18 road connectivity: a real road must read as connected
 node tests/perf/probe_manpower.js A.html    # v2.19 military manpower incl. the spec's two worked examples
 node tests/perf/probe_landmass.js A.html    # v2.20 landmass names, the map layer, rename + the search fix
+node tests/perf/probe_trade.js A.html       # v2.21 multi-good supply matching + the value-density curve
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
