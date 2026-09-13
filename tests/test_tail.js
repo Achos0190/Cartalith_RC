@@ -4299,6 +4299,54 @@ if (typeof carveRiverValleys === 'function') {
     })());
   }
 
+  /* ---- v2.12: field-level redo, and the stale-snapshot fix ---------------------------------
+     undoLast() used to drop the state it was leaving, so an undo could not be walked back. The
+     stacks were also never cleared on a new world, which let a snapshot outlive the world that
+     made it (proven on v2.11: undo after a regenerate overwrote the new terrain with the old,
+     and after a resolution DECREASE field.set() threw RangeError outright). */
+  {
+    const h = a => { let x = 2166136261 >>> 0; for (let i = 0; i < a.length; i += 17) { x ^= Math.round(a[i] * 1e6) | 0; x = Math.imul(x, 16777619) >>> 0; } return x >>> 0; };
+    clearUndoHistory();
+    const A = h(field);
+    check('v2.12 redo: a fresh history starts with both stacks empty', undoStack.length === 0 && redoStack.length === 0);
+
+    pushUndo();
+    for (let i = 0; i < field.length; i += 3) field[i] = Math.min(1, field[i] + 0.05);
+    const B = h(field);
+    check('v2.12 redo: the simulated edit actually changed the field (guards every check below)', A !== B);
+
+    undoLast();
+    check('v2.12 redo: undoLast() restores the previous field', h(field) === A);
+    check('v2.12 redo: undoLast() captures the state it left, so redo has somewhere to go', redoStack.length === 1);
+
+    redoLast();
+    check('v2.12 redo: redoLast() steps forward to the undone state', h(field) === B);
+    check('v2.12 redo: stepping forward moves the entry back onto the undo stack', undoStack.length === 1 && redoStack.length === 0);
+
+    redoLast();
+    check('v2.12 redo: redoLast() past the end is a no-op, not a corruption', h(field) === B);
+
+    undoLast(); pushUndo();
+    check('v2.12 redo: a fresh edit after an undo forks the history (the old redo chain is dropped)', redoStack.length === 0);
+
+    clearUndoHistory();
+    check('v2.12 redo: clearUndoHistory() empties both stacks', undoStack.length === 0 && redoStack.length === 0);
+    check('v2.12 redo: undo/redo on an empty history are no-ops that do not throw', (() => {
+      const before = h(field);
+      try { undoLast(); redoLast(); } catch (_) { return false; }
+      return h(field) === before;
+    })());
+
+    check('v2.12 redo: neither stack can grow past MAX_UNDO', (() => {
+      clearUndoHistory();
+      for (let k = 0; k < MAX_UNDO + 4; k++) { pushUndo(); field[k] = Math.min(1, field[k] + 0.01); }
+      if (undoStack.length !== MAX_UNDO) return false;
+      for (let k = 0; k < MAX_UNDO + 4; k++) undoLast();          // more undos than there are steps
+      return redoStack.length <= MAX_UNDO;
+    })());
+    clearUndoHistory();
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();
