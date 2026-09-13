@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.13**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.14**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.13.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.12.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.14.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.13.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1030,6 +1030,24 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Ponytail pass — and how to run a dead-code sweep here (v2.14)
+
+- **A reference sweep MUST include `tests/perf/*.js`, not just the two headless tails.** Scanning
+  only `test_tail.js`/`um_test_tail.js` reports `grainKgPerHaMedieval` and
+  `CHARCOAL_KG_PER_HA_YR_MAX` as dead; both are asserted in `smoke_gen1.js`. v1.93's note calling
+  them deliberately-kept is CORRECT — this pass nearly deleted them before checking.
+- **The file is already clean.** 1128 functions and 3115 `const`/`let` declarations; exactly one
+  dead (`flowC`, removed). Do not go looking for cruft that is not there.
+- **Most repeated code here is mandatory and must stay**: the `MinHeap` and `D8` copies exist
+  because invariant 11 requires self-contained worker kernels; the D8 loop headers are the hottest
+  loops in the file (v1.92); the GL `texParameteri` pairs are untestable headlessly.
+- **A control that is not reflected in `syncUI()` will go stale on load.** v2.12's autosave
+  controls were set at boot only, so a loaded project left the checkbox and the running timer on
+  the previous values. Every control belongs in `syncUI()`'s tail.
+- **Comment rule, refined**: v1.27's "rationale comments stay" is about CONSTRAINTS — what breaks
+  if you change this. Narrative (how the bug was found, what the first cut got wrong) belongs in
+  `CHANGELOG.md`, not at the call site.
 
 ### Corridor/travel-cost views + wall towers (v2.13)
 

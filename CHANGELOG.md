@@ -12,6 +12,46 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.14 — Ponytail pass: one real bug, one dead declaration, and a measurement
+
+Owner asked for a laziest-that-works cleanup over the whole file. Hash vs v2.11 **ALL IDENTICAL**.
+`tests/run.sh` 1097/1097, `tests/run_um.sh` 852/852.
+
+- **The headline is a measurement, not a deletion.** A zero-reference sweep over all four script
+  blocks — **1128 function declarations and 3115 `const`/`let` declarations** — found exactly
+  **one** dead declaration in the entire ~30 400-line file: `flowC`, an unused local arrow beside
+  the used `fieldC` in `applyClimateMoistureCorrectors()`. Removed. v1.93's sweep plus the
+  discipline since has held; there is no cruft to cut here.
+- **A methodology correction to v1.93's own documented sweep, learned by nearly getting it wrong.**
+  The first pass here scanned only `tests/test_tail.js` and `tests/um_test_tail.js` and reported
+  `grainKgPerHaMedieval` and `CHARCOAL_KG_PER_HA_YR_MAX` as dead — and concluded CLAUDE.md's note
+  calling them "deliberately-kept, tested pure primitives" was stale. It is not: **both are
+  asserted against in `tests/perf/smoke_gen1.js`**, which the sweep had not read. Two actively-
+  tested primitives were one step from deletion. **A reference sweep must include
+  `tests/perf/*.js`, not just the two headless tails.**
+- **Real bug, reproduced on v2.13 then fixed: autosave's controls were never reflected by
+  `syncUI()`.** Every other control is (`scaleBarChk`, `iconsChk`, `seasons`, `currents`); v2.12
+  set its own at boot only. Measured on v2.13: after `state.autosave` changes and `syncUI()`, the
+  checkbox, the interval box and the running timer all stayed on the old values — so loading a
+  project with autosave off left the box ticked and the old timer running. `syncUI()` now calls
+  `autosaveSyncUI()` + `autosaveReschedule()`, the same tail `_seasonSliderNote()` already uses.
+- **`autosaveNow()` ran the fingerprint twice** on the timer path — once in the skip guard, once
+  in the body. Harmless when it was a strided sample; v2.12 made it a full ~3M-op scan, which made
+  the second one cost real time. Computed once now. Also removed `_snapLastAt` (written, never
+  read) and an `fp` field stored on each record that nothing reads.
+- **Duplication was surveyed and deliberately left alone.** 42 substantial code lines repeat 3+
+  times, and the significant ones must stay: the three `MinHeap` sift-downs and the four local
+  `D8` tables are duplicated **because invariant 11 requires the worker kernels to be
+  self-contained** (the suite rebuilds them from `toString()`); the eight D8 neighbour-loop headers
+  are the file's hottest loops, where extracting a callback costs more than it saves (v1.92
+  optimised exactly these); the WebGL `texParameteri` pairs sit in GPU code this harness cannot
+  test. What remains is one-line defensive idioms where a helper is a wash. **Collapsing 16 call
+  sites to save five lines in a 30k-line file is churn, not cleanup.**
+- **Comment policy applied, not overridden.** v1.27's rule — rationale comments are load-bearing
+  regression prevention — stands, so nothing explaining a constraint was cut. What was cut is
+  *narrative*: how a bug was found, which probe caught it, what the first cut got wrong. That
+  belongs here, in the CHANGELOG, which is what it is for. The constraint stays at the code.
+
 ### v2.13 — Route-corridor and travel-cost views; towers on stone wall circuits
 
 Second build off `PORT_ONLY_FEATURES.md` (the "cheap render wins" track). Hash vs v2.11
