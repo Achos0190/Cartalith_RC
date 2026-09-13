@@ -4396,6 +4396,83 @@ if (typeof carveRiverValleys === 'function') {
     })());
   }
 
+
+  /* ---- v2.17: the four erosion ops as generation passes --------------------------------------
+     Nothing new is computed here -- velocity, glacial, coastal and hillslope diffusion already
+     existed as buttons. What is new is that generate() can run them, which means two things have
+     to hold: each *Pass() must be the button's own field mutation and nothing more (or the two
+     paths drift), and all four must default off (or every existing world re-baselines). */
+  {
+    const P0 = JSON.parse(JSON.stringify(state.passes));
+    const F0 = field.slice(), g0 = state.planet.g;
+    const v0 = JSON.parse(JSON.stringify(state.velo)), gl0 = JSON.parse(JSON.stringify(state.glacial));
+    const c0 = JSON.parse(JSON.stringify(state.coastal)), e0 = state.erosion.diffusePasses;
+    const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+    check('v2.17 passes: all four default off (a pre-v2.17 world regenerates unchanged)',
+      state.passes && state.passes.velocity === false && state.passes.glacial === false &&
+      state.passes.coastal === false && state.passes.hillslope === false);
+    check('v2.17 passes: runGenerationPasses() reports nothing ran, and changes no byte, when all are off',
+      runGenerationPasses() === false && same(Array.from(field), Array.from(F0)));
+
+    /* hillslopePass() must be exactly hillslopeDiffuseCPU on this harness (no GPU), so run both
+       over the same bytes and compare. A divergence here is the button and generate() disagreeing. */
+    state.erosion.diffusePasses = 2;
+    const ref = F0.slice(); hillslopeDiffuseCPU(2, state.erosion.diffuseD, ref, GW, GH);
+    field.set(F0); hillslopePass();
+    check('v2.17 passes: hillslopePass() is bit-identical to the CPU kernel the button runs',
+      same(Array.from(field), Array.from(ref)));
+    check('v2.17 passes: ...and it genuinely moved the terrain, so that comparison means something',
+      !same(Array.from(ref), Array.from(F0)));
+
+    /* coastalPass() swaps a gravity-scaled copy into state.coastal for the GPU path's benefit and
+       restores it in a finally. With g === 1 the scaling is a divide by one, so a broken restore
+       would be invisible -- force g away from 1 to make the leak observable. */
+    state.planet.g = 2; state.coastal.passes = 1;
+    const cObj = state.coastal, wave0 = state.coastal.waveStr;
+    field.set(F0); coastalPass();
+    check('v2.17 passes: coastalPass() restores state.coastal (the g-scaled copy never leaks)',
+      state.coastal === cObj && state.coastal.waveStr === wave0);
+    check('v2.17 passes: coastalPass() reworked the shoreline', !same(Array.from(field), Array.from(F0)));
+    state.planet.g = g0;
+
+    /* velocityPass() is the one pass with a side product: the velocity/water buffers the Velocity
+       debug view reads. generate() nulls them at its top, so the pass has to refill them. */
+    state.velo.iters = 10;
+    _veloVx = _veloVy = _veloWater = null;
+    field.set(F0); velocityPass();
+    check('v2.17 passes: velocityPass() refills the velocity buffers generate() nulled',
+      _veloVx && _veloVy && _veloWater && _veloVx.length === GW * GH);
+    check('v2.17 passes: velocityPass() eroded the field', !same(Array.from(field), Array.from(F0)));
+
+    /* glacialPass() carries eroSettle -- the physics half of the button's tail. Isostatic rebound
+       is one-sided (only removal rebounds), so calling it against an unchanged snapshot must be a
+       no-op; that is what lets a pass run it without a render. */
+    field.set(F0); eroSettle(F0.slice());
+    check('v2.17 passes: eroSettle() against an unchanged snapshot moves nothing (rebound is one-sided)',
+      same(Array.from(field), Array.from(F0)));
+    state.glacial.passes = 1; state.glacial.snowline = 0.2;   // low snowline: guarantee ice on this world
+    field.set(F0); glacialPass();
+    check('v2.17 passes: glacialPass() carved', !same(Array.from(field), Array.from(F0)));
+
+    /* The run order is fixed, so the whole stage is reproducible: same starting field in, same
+       field out. Without that, a saved pass set would not reproduce its own world. */
+    state.passes.hillslope = true; state.passes.coastal = true;
+    field.set(F0); const ranA = runGenerationPasses(); const A = field.slice();
+    field.set(F0); const ranB = runGenerationPasses(); const B = field.slice();
+    check('v2.17 passes: runGenerationPasses() reports that something ran', ranA === true && ranB === true);
+    check('v2.17 passes: the chained stage is deterministic (a saved world regenerates identically)',
+      same(Array.from(A), Array.from(B)));
+    check('v2.17 passes: the chained stage moved the terrain', !same(Array.from(A), Array.from(F0)));
+
+    state.passes = P0; state.planet.g = g0; state.velo = v0; state.glacial = gl0;
+    state.coastal = c0; state.erosion.diffusePasses = e0;
+    field.set(F0); _veloVx = _veloVy = _veloWater = null;
+    _fieldGen++; invalidateDerived(); computeFlow(true);
+    check('v2.17 passes: the harness world is restored byte-for-byte for the checks after this one',
+      same(Array.from(field), Array.from(F0)));
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

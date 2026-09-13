@@ -3,21 +3,21 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.16**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.17**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.16.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.15.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.17.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.16.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1097-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1111-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -29,7 +29,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1097 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1111 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1030,6 +1030,32 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Erosion passes as generation parameters (v2.17)
+
+**`state.passes={velocity,glacial,coastal,hillslope}`, all false by default.** Velocity erosion,
+glacial carving, coastal processes and hillslope diffusion used to be buttons you press *after*
+generation, so an eroded world could not be reproduced from its seed. `generate()` now runs them.
+
+- **The split is `*Pass()` (field mutation) vs. the button wrapper (mutation + the interactive tail
+  `computeFlow(true); refreshClimate(); renderNow()`).** `generate()` calls the SAME `*Pass()` the
+  button does. Do not add a generation-side copy of a kernel's parameters — each pass reads its own
+  existing sliders (`state.velo` / `state.glacial` / `state.coastal` / `state.erosion`).
+- **`eroSettle(pre)` is the physics half of `eroFinish(pre)`** (rebound + exhumation hardening +
+  `enforceRiverChannels`); `eroFinish` = `eroSettle` + the tail. `enforceRiverChannels` early-returns
+  unless a river was brushed, and `generate()` clears `riverMask` at its top, so it no-ops there.
+- **Fixed order: velocity → glacial → coastal → hillslope**, matching the panels' own hints
+  ("erode first, then glaciate"; diffusion "softens cliffs… between fluvial passes"). Fixed order is
+  what makes a saved pass set reproduce its world — do not make it configurable without replacing
+  that guarantee.
+- **Staged after climate, before `carveRiverValleys()`** — velocity reads `rainField`, glacial
+  `tempField`, coastal `flowField`. `runGenerationPasses()` returns whether anything ran so
+  `generate()` re-derives once, in its own order (`refreshClimate()` then `computeFlow(true)`). The
+  button path re-derives the other way round; pre-existing, deliberately untouched.
+- **`coastalPass()` must restore `state.coastal`** — it swaps in a gravity-scaled copy for the GPU
+  path and restores in a `finally`. At g = 1 a broken restore is invisible; test at g ≠ 1.
+- Live verification is `tests/perf/probe_passes.js` — the checkboxes, `syncUI()`, and `generate()`
+  itself are all browser-only.
 
 ### CSS tokens: use the canonical names (v2.16)
 
@@ -3860,7 +3886,8 @@ Pipeline (`generate()`): continentality → **`buildTectonicSubstrate()`** (warp
 stress → flexure → base blur + age → heterogeneity → resistance → orogeny; also replayed by
 `loadZip` to reconstruct the tectonic substrate exactly from the saved seed) → height formula →
 normalize → volcanism + craters → **flow(area) → climate → flow(discharge)** (rivers accumulate
-runoff — `computeFlow(true)` seeds cells with mean-normalised rain) → render. Canonical stage
+runoff — `computeFlow(true)` seeds cells with mean-normalised rain) → erosion passes
+(v2.17 `state.passes`, all off by default) → `carveRiverValleys()` → render. Canonical stage
 order rationale: `docs/research/pipeline-order-audit.md`.
 
 Erosion ops (droplet/stream-power/glacial/velocity) run in blob-URL Web Workers built by
@@ -3914,7 +3941,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1097-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1111-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -3922,6 +3949,7 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
+node tests/perf/probe_passes.js A.html      # v2.17 generation passes: the DOM/syncUI half + generate() itself
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 

@@ -12,6 +12,58 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.17 — The four one-off erosion buttons become saved generation parameters
+
+First build off `PORT_ONLY_FEATURES.md`'s engine-simulation track. Velocity erosion, glacial
+carving, coastal processes and hillslope diffusion existed only as buttons you press after the
+world is generated — so the eroded world could not be reproduced from its own seed, and a reload
+came back unweathered. Engine only. Hash vs v2.16 **ALL IDENTICAL** in every scenario (all four
+default off); 1111/1111 (+14); 852/852.
+
+- **Nothing new is computed.** The four kernels, their sliders and their physics are untouched.
+  What moved is where the mutation ends: each driver was split into a `*Pass()` that does the
+  field mutation and a button wrapper that adds the interactive tail
+  (`computeFlow(true); refreshClimate(); renderNow()`). `generate()` calls the same `*Pass()`
+  functions the buttons do — one definition each, not a generation-side copy of four kernels'
+  worth of parameters, which is the drift this file keeps re-learning.
+- **`eroSettle(pre)` is the physics half of `eroFinish(pre)`** — isostatic rebound and the
+  exhumation-hardening recompute, which a generation pass must run, without the render it must
+  not. `eroFinish` is now `eroSettle` plus that tail, so `streamPowerErode` and `glacialErode`
+  behave exactly as before. `enforceRiverChannels()` early-returns unless a river was brushed, and
+  `generate()` clears `riverMask` at its top, so it is a no-op on the generation path.
+- **Run order is fixed, and it is the order the panels' own hints already recommend.** Velocity
+  then glacial (the Glacial panel: *"erode first, then glaciate"*), then coastal reworking the
+  shoreline against the resulting land/sea boundary, then hillslope diffusion as the wear pass
+  (the Hillslope panel: *"softens cliffs and fills hollows between fluvial passes"*). Fixed order
+  is what makes a saved pass set reproduce its own world; asserted directly.
+- **Placed after climate and before `carveRiverValleys()`.** Velocity reads `rainField`, glacial
+  reads `tempField`, coastal reads `flowField` — all three need climate to exist. Carving after
+  means rivers are cut into the finished landscape rather than partly erased by a later pass, and
+  it puts the new stage beside the stream-power erosion `carveRiverValleys()` already runs.
+- **`generate()` re-derives once, not four times**, hence `runGenerationPasses()` returning whether
+  anything ran. It re-derives in generate()'s own order — climate from the new elevation, then
+  drainage from the new climate. The button path does it the other way round (`computeFlow(true)`
+  before `refreshClimate()`, so flow is seeded from the previous rain); that is a pre-existing
+  inconsistency in the button path, recorded rather than changed under cover of this work.
+- **A second control that was set at boot only.** `dynLithChk` was absent from `syncUI()` —
+  exactly v2.14's defect, found while adding the four new boxes to that same tail. Loading a
+  project left it showing the previous world's value. Fixed in passing.
+- **`coastalPass()` swaps a gravity-scaled copy into `state.coastal`** for the GPU path's benefit
+  and restores it in a `finally`. At the default g = 1 the scaling is a divide by one, so a broken
+  restore would be invisible; the new assertion forces g = 2 to make the leak observable.
+- **Verified two ways.** The headless suite proves each `*Pass()` is bit-identical to the mutation
+  the button runs (`hillslopePass()` against a hand-run `hillslopeDiffuseCPU` over the same bytes)
+  and that the chained stage is deterministic. New `tests/perf/probe_passes.js` proves the half a
+  headless run cannot reach: the four checkboxes, `syncUI()` reflecting them, a real click writing
+  state, and `generate()` itself — one pass ticked produces a different world, unticking it
+  reproduces the baseline hash exactly, all four produce four distinct worlds, and a world
+  generated with velocity on comes out with its velocity buffers filled.
+- **Known scope cuts**: the droplet and stream-power ops are not in this set — stream power already
+  runs inside `carveRiverValleys()` on every generate, and droplet is the one op whose cost is
+  unbounded by a pass count. No per-pass ordering control (fixed order is what makes the world
+  reproducible). No `evolveCoupled` (climate↔erosion cycles) as a generation parameter; it is a
+  loop over passes rather than a pass, and belongs to its own decision.
+
 ### v2.16 — Six CSS tokens were used and never defined
 
 Found by the GUI-alignment audit (`docs/GUI_DCC_ALIGNMENT_PROPOSAL.md`), then measured before and
