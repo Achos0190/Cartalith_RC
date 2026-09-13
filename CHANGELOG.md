@@ -12,6 +12,46 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.18 — Road connectivity has always answered "no"
+
+Found by a name collision, not by looking: writing a union-find for the military-manpower model
+(v2.19) hit an existing `_civRoadComponents` — and that one, shipped with v1.33's food logistics,
+never found a single edge. Civ-layer only. Hash vs v2.17 **ALL IDENTICAL**; 1111/1111; 852/852.
+
+- **Two independent defects, stacked, each sufficient on its own.** (1) The edge loop iterated
+  `state.ways` — a property **nothing in this file ever assigns**; the live array is `civWays`, and
+  the way-km readout one screen below already had that fallback right. (2) It read way points as
+  `.x`/`.y`, but `_civMstRoutes` and `_civHierarchicalNetwork` emit `[x,y]` **arrays** — undefined →
+  NaN → `d<bd` false → the nearest-settlement snap never fired. v1.42's own CHANGELOG entry names
+  that second trap in as many words: *"Assuming one silently yields NaN and a pass that does
+  nothing."*
+- **Measured before and after, on seed 12345**: 18 settlements, 30 land roads, **18 components and
+  0 of 153 pairs connected** — including two towns joined by a real 30.7 km road whose first point
+  sits at distance *exactly 0* from its own pin. After: **2 components, 121 of 153 pairs**, and all
+  30 road-joined pairs read connected on every seed tested.
+- **Nothing threw, and that is why it survived.** "Not road-connected" is an ordinary answer, so
+  `_civFoodConnected` simply declined every land-mode supplier beyond `FOOD_LOCAL_RADIUS_KM` and
+  said nothing. The function's own docstring has claimed since v1.33 that the ceiling pass runs
+  after roads *"since road connectivity is what makes distant suppliers count"* — it never did.
+- **What it changes**: long-range OVERLAND food import is reachable again. Measured across four
+  seeds — importers 11→16 and capacity 95 026→120 600 on one, 19→23 and 430 540→484 055 on another,
+  unchanged on the two whose suppliers were already inside the 50 km local radius or water-linked.
+  **Settlement populations did not move on any of the four**, because extra import capacity only
+  relaxes a ceiling that was not binding. It is not monotone in principle (a settlement that keeps
+  more people exports less), so that is four seeds measured, not a proof.
+- **Sea lanes are now skipped.** The function answers "is there a ROAD", and `_civFoodConnected`
+  only asks it for land-mode supply — crediting a lane would have carried grain overland across
+  open water. The pre-fix code iterated every way type; it simply never mattered while the loop
+  found nothing.
+- **A test bug caught in the same pass**: the first draft of `tests/perf/probe_roadconnect.js`
+  asserted "not every pair is connected", which failed on seed 99001 — a single-landmass world
+  whose 41 settlements genuinely are all road-connected. That is a property of the world, not of
+  the code; the assertion now checks that connectivity agrees with the component count, which holds
+  for a one-component world too.
+- **Verification**: `tests/perf/probe_roadconnect.js` (new) asserts the thing that makes the bug
+  visible — every settlement pair joined by a real road must read as connected — across four seeds.
+  It fails 12 assertions on v2.17 and passes on v2.18.
+
 ### v2.17 — The four one-off erosion buttons become saved generation parameters
 
 First build off `PORT_ONLY_FEATURES.md`'s engine-simulation track. Velocity erosion, glacial

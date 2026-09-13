@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.17**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.18**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.17.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.16.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.18.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.17.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1030,6 +1030,23 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Road connectivity: check the ARRAY and the POINT SHAPE (v2.18)
+
+**`_civRoadComponents()`/`_civRoadConnected()` returned "not connected" for every pair from v1.33
+until v2.18**, so v1.33's long-range overland food import was never reachable. Two stacked defects:
+
+- **`state.ways` is never assigned anywhere in this file.** The live array is `civWays`. Grep before
+  reading a `state.*` collection — this one had two other readers, and the other already guarded it
+  with the `civWays` fallback.
+- **Way points are not uniformly shaped**: `_civMstRoutes`/`_civHierarchicalNetwork` emit `[x,y]`
+  ARRAYS, other builders `{x,y}` objects (v1.42 documented this). Reading `.x` gives undefined →
+  NaN → every comparison false → a pass that silently does nothing.
+- **Neither threw.** "Not connected" is an ordinary answer, which is why it survived versions. Any
+  predicate whose false branch is unremarkable needs a test that a TRUE case really is true — here,
+  that two settlements joined by a real road read as connected (`tests/perf/probe_roadconnect.js`).
+- Sea lanes are excluded: this answers "is there a ROAD", and `_civFoodConnected` only asks it for
+  land-mode supply.
 
 ### Erosion passes as generation parameters (v2.17)
 
@@ -3950,6 +3967,7 @@ node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisati
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
 node tests/perf/probe_passes.js A.html      # v2.17 generation passes: the DOM/syncUI half + generate() itself
+node tests/perf/probe_roadconnect.js A.html # v2.18 road connectivity: a real road must read as connected
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
