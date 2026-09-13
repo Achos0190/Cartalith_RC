@@ -4473,6 +4473,88 @@ if (typeof carveRiverValleys === 'function') {
       same(Array.from(field), Array.from(F0)));
   }
 
+
+  /* ---- v2.20: landmasses as named entities -------------------------------------------------
+     buildLandmassQuality already found and ranked the components; what is new is identity. The
+     parts worth pinning are the ones a future edit could silently break: the kind thresholds are
+     shares of LAND (not km2), the name key is POSITIONAL (so it survives renumbering), and a
+     world-mode landmass straddling the seam must not get its centroid dropped in mid-ocean. */
+  {
+    check('v2.20 landmass: kind is a share of the world\'s land, with an archipelago allowed no continent',
+      landmassKind(0.5) === 'continent' && landmassKind(0.10) === 'continent' &&
+      landmassKind(0.099) === 'island' && landmassKind(0.005) === 'island' &&
+      landmassKind(0.004) === 'islet' && landmassKind(0) === 'islet');
+
+    check('v2.20 landmass: a name is deterministic in its seed', landmassNameFrom(12345, 'continent') === landmassNameFrom(12345, 'continent'));
+    check('v2.20 landmass: different seeds give different names', landmassNameFrom(1, 'continent') !== landmassNameFrom(2, 'continent'));
+    check('v2.20 landmass: the suffix pool follows the kind', (() => {
+      const c = landmassNameFrom(777, 'continent'), i = landmassNameFrom(777, 'islet');
+      return LANDMASS_SFX.continent.some(sf => c.endsWith(sf)) && LANDMASS_SFX.islet.some(sf => i.endsWith(sf)) && c !== i;
+    })());
+    check('v2.20 landmass: a name starts capitalised and is non-trivial',
+      /^[A-Z][a-z]/.test(landmassNameFrom(42, 'island')) && landmassNameFrom(42, 'island').length >= 5);
+
+    /* The key must move with position, not with a scan index -- that is the whole point of it. */
+    check('v2.20 landmass: the key is positional and tolerates a small drift (8-cell block)',
+      landmassKey(40, 40, 7) === landmassKey(42, 41, 7) && landmassKey(40, 40, 7) !== landmassKey(400, 40, 7));
+    check('v2.20 landmass: the key is per-world', landmassKey(40, 40, 7) !== landmassKey(40, 40, 8));
+
+    /* A synthetic two-blob world: one 20x20 block and one 2x2 speck, on a 64x40 grid. */
+    const W = 64, H = 40, comp = new Int32Array(W * H).fill(-1);
+    for (let y = 4; y < 24; y++) for (let x = 4; x < 24; x++) comp[y * W + x] = 0;
+    /* ONE cell for the speck, not four: the kind rule is a share of the world's own land, so in a
+       world holding only 401 land cells even a 4-cell speck is 1% of it and honestly reads as an
+       island. A first draft of this fixture used four and failed here -- the rule working, not a
+       bug, and exactly the property a share-based threshold is supposed to have. */
+    comp[30 * W + 50] = 1;
+    const idx = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, null, false);
+    check('v2.20 landmass: every component becomes one entry', idx.length === 2);
+    check('v2.20 landmass: entries are ranked largest first', idx[0].cells === 400 && idx[1].cells === 1 && idx[0].rank === 0 && idx[1].rank === 1);
+    check('v2.20 landmass: km2 is cells x cellKm2', idx[0].km2 === 1600 && idx[1].km2 === 4);
+    check('v2.20 landmass: share is of LAND, not of the whole grid', Math.abs(idx[0].share - 400 / 401) < 1e-9);
+    check('v2.20 landmass: the big block reads as a continent and the speck as an islet', idx[0].kind === 'continent' && idx[1].kind === 'islet');
+    check('v2.20 landmass: the centroid is the block centre', Math.abs(idx[0].cx - 13.5) < 1e-9 && Math.abs(idx[0].cy - 13.5) < 1e-9);
+    check('v2.20 landmass: the bbox is the block extent', idx[0].x0 === 4 && idx[0].y0 === 4 && idx[0].x1 === 23 && idx[0].y1 === 23);
+    check('v2.20 landmass: an underived name is flagged as not user-given', idx[0].named === false && !!idx[0].name);
+    check('v2.20 landmass: two builds of the same world agree, name included', (() => {
+      const b = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, null, false);
+      return b[0].name === idx[0].name && b[0].key === idx[0].key;
+    })());
+
+    /* A rename is stored against the key and must win, and must mark itself as user-given. */
+    const over = {}; over[idx[0].key] = 'Testerra';
+    const named = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, over, false);
+    check('v2.20 landmass: a stored name overrides the derived one and is flagged', named[0].name === 'Testerra' && named[0].named === true);
+    check('v2.20 landmass: ...and only that one', named[1].name === idx[1].name && named[1].named === false);
+
+    /* World mode wraps in X. A landmass straddling the antimeridian must not have its centroid
+       averaged into the middle of the ocean -- the case a plain arithmetic mean gets wrong. */
+    const comp2 = new Int32Array(W * H).fill(-1);
+    for (let y = 10; y < 20; y++) { for (let x = 0; x < 5; x++) comp2[y * W + x] = 0; for (let x = W - 5; x < W; x++) comp2[y * W + x] = 0; }
+    const flat = buildLandmassIndex({ comp: comp2, count: 1 }, W, H, 1, 5, null, false);
+    const wrapped = buildLandmassIndex({ comp: comp2, count: 1 }, W, H, 1, 5, null, true);
+    check('v2.20 landmass: a plain mean would put a seam-straddling centroid mid-map', Math.abs(flat[0].cx - W / 2) < 6);
+    check('v2.20 landmass: the circular mean puts it ON the seam instead', (() => {
+      const d = Math.min(Math.abs(wrapped[0].cx), Math.abs(wrapped[0].cx - W));
+      return d < 1.0;
+    })());
+    check('v2.20 landmass: a seam-straddling landmass is flagged, and only in world mode', wrapped[0].wraps === true && flat[0].wraps === false);
+
+    /* The live accessor: cached, and reflects this harness's real world. */
+    const live = currentLandmasses();
+    check('v2.20 landmass: currentLandmasses() is cached — the same array until the world changes', currentLandmasses() === live);
+    check('v2.20 landmass: the real world produces named landmasses whose shares sum to 1', (() => {
+      if (!live.length) return false;
+      let sum = 0; for (const l of live) sum += l.share;
+      return Math.abs(sum - 1) < 1e-6 && live.every(l => l.name && l.key && l.km2 > 0);
+    })());
+    check('v2.20 landmass: every entry carries a kind from the frozen three', live.every(l => ['continent', 'island', 'islet'].indexOf(l.kind) >= 0));
+    check('v2.20 landmass: names are unique enough to be useful as identities', (() => {
+      const top = live.slice(0, Math.min(8, live.length)).map(l => l.name);
+      return new Set(top).size === top.length;
+    })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

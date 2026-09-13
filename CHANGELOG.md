@@ -12,6 +12,56 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.20 — Landmasses get names; and the unified search never found a map label
+
+Third build off `PORT_ONLY_FEATURES.md`'s engine-simulation track, and the row this repo had
+already corrected: detection was never the gap. `buildLandmassQuality` (v1.40) has labelled every
+connected land component and ranked it by area and mean carrying capacity for twenty versions —
+what did not exist was **identity**. A landmass had no name, no stable key and no extent, so
+nothing in the app could refer to one. Hash vs v2.19 **ALL IDENTICAL** (the map layer is opt-in and
+defaults off); 1136/1136 (+25); 852/852; 20 probe assertions.
+
+- **The kind is a share of the world's own LAND, never an absolute km².** Continent ≥ 10%, island
+  ≥ 0.5%, islet below — so an archipelago world legitimately has **no continent**, and the panel
+  says so rather than promoting its largest islet. Same discipline as every other threshold here
+  (v1.30/v1.31/v1.34/v1.55).
+- **The identity key is POSITIONAL, not a component index.** Component ids come from
+  `buildLandmassQuality`'s scan order and renumber whenever the coastline moves, so keying a name on
+  one would reshuffle every name after an ordinary sculpt edit. `landmassKey` quantises the centroid
+  to an 8-cell block and folds in the world seed; a rename keyed the same way survives a save/load
+  and a small edit.
+- **A seam-straddling landmass needed a circular mean.** World mode wraps in X, so a continent with
+  cells at both x≈0 and x≈W−1 gets its centroid dropped in mid-ocean by a plain arithmetic mean —
+  asserted directly, both the wrong answer and the right one. The bbox stays raw and carries a
+  `wraps` flag, because a bbox across a seam has no single honest answer; the label uses the
+  centroid, the bbox only frames.
+- **No outline is synthesised.** The coastline is already what the renderer draws, and a second
+  traced boundary would duplicate it pixel for pixel. The port's row asks for "an id and boundary so
+  notes can link to them"; here the id, the centroid and the extent are what a link actually needs.
+- **The name pool is deliberately separate from `CIV_CULTURES`.** A culture belongs to a faction;
+  a landmass predates every faction standing on it.
+- **A real bug of my own, found while surveying for this**: `_findMapIndex()` (v2.15's unified
+  search) reads `l.text`, but the one site that creates a map label writes `name` and the drawer
+  reads `lb.name` — so **no hand-placed label has ever been findable**. Measured directly: 0 label
+  entries on v2.19, 1 on v2.20. Nothing threw, because a falsy field simply contributes no entries
+  and "no results" is an ordinary answer — the same shape as v2.18's road connectivity, two versions
+  running. Landmasses are in that index now too.
+- **A test-fixture correction worth recording.** The first synthetic world used a 4-cell speck
+  against a 400-cell block and failed the islet assertion — because 4 of 404 land cells is 1% of
+  that world's land, which a share-based rule correctly calls an island. The rule working, not a
+  bug; the fixture now uses one cell.
+- **Verified two ways.** The headless suite covers the pure half — kinds, deterministic names, the
+  positional key, the synthetic two-blob index, the circular centroid, rename override. New
+  `tests/perf/probe_landmass.js` covers what only a browser reaches: the search fix, the toggle
+  through `syncUI()` and a real click, the label layer **measurably painting** (0 → 14,445 opaque
+  pixels on the civ overlay, not merely "the code ran"), the Statistics section and its rename
+  control, a rename surviving `serializeState`, clearing the field restoring the *derived* name, and
+  the same seed naming the same landmasses twice.
+- **Known scope cuts**: no traced boundary polyline (above); islets past rank 7 are named but not
+  listed, and their names are not drawn on the map at all — a speck's label is noise at map scale;
+  the continent/island share thresholds are reasoned, not calibrated against a geographic
+  convention, because there isn't one to calibrate against.
+
 ### v2.19 — Military manpower: four outputs, and technology is not the driver
 
 Second build off `PORT_ONLY_FEATURES.md`'s engine-simulation track, and the one row on it that is

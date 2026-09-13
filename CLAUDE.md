@@ -3,21 +3,21 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.19**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.20**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.19.html` | **Current** unified tool (~30.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.18.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.20.html` | **Current** unified tool (~30.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.19.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1111-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1136-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -29,7 +29,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1111 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1136 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1030,6 +1030,23 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Landmasses as named entities (v2.20)
+
+**`buildLandmassIndex` is pure; `currentLandmasses()` is the cached live accessor.** Detection was
+never the gap — `buildLandmassQuality` (v1.40) already labelled and ranked every component. This
+adds identity: a name, a stable key, an extent.
+
+- **`landmassKind` is a share of the world's own LAND**, never km². An archipelago world honestly
+  has no continent; do not add a "promote the biggest" fallback.
+- **`landmassKey` is POSITIONAL (centroid quantised to 8 cells + the seed), never the component
+  index** — those renumber on any coastline change, so an index-keyed rename would reshuffle after
+  a sculpt edit. `state.landmassNames` stores only user renames, keyed that way.
+- **World mode needs the CIRCULAR centroid.** A landmass straddling the antimeridian has cells at
+  x≈0 and x≈W−1; a plain mean puts its label in mid-ocean. The bbox stays raw and carries `wraps`.
+- **No outline is traced** — the coastline is already what the renderer draws.
+- The map layer is `state.viz.landmassLabels`, default off, drawn beneath user labels and
+  settlements (a continent is the ground, it never wins a collision against a town).
 
 ### Military manpower (v2.19)
 
@@ -3983,7 +4000,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1111-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1136-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -3994,6 +4011,7 @@ node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-s
 node tests/perf/probe_passes.js A.html      # v2.17 generation passes: the DOM/syncUI half + generate() itself
 node tests/perf/probe_roadconnect.js A.html # v2.18 road connectivity: a real road must read as connected
 node tests/perf/probe_manpower.js A.html    # v2.19 military manpower incl. the spec's two worked examples
+node tests/perf/probe_landmass.js A.html    # v2.20 landmass names, the map layer, rename + the search fix
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
