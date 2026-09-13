@@ -3,14 +3,14 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.18**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.19**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.18.html` | **Current** unified tool (~30.4k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.17.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.19.html` | **Current** unified tool (~30.5k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.18.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1030,6 +1030,31 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Military manpower (v2.19)
+
+**`civManpowerModel(inp)` is PURE and is the whole model**; `_civFactionManpowerAll()` gathers the
+real inputs. Ported from the owner's specification (verbatim in the native port's
+`MILITARY_MANPOWER_SCOPE.md` §1) — read it before touching any `MANPOWER_*` constant.
+
+- **The two worked examples in that specification are the calibration target and both reproduce to
+  the unit.** `tests/perf/probe_manpower.js` pins every figure. Do not retune a constant without
+  re-running it: those numbers are the only external check this model has.
+- **Four outputs, never one.** Standing / field / emergency / duration differ radically and the
+  force-by-duration ladder is what makes them comparable.
+- **Technology is not the driver** — it sets the labour ratio only. The era is an OUTPUT of the
+  labour ratio split by state capacity, never a lookup on the ag-tech key.
+- **Era bands are shares of the CITIZEN population**, per the owner's ruling. Both bases are shown;
+  nothing is clamped into a band. `MANPOWER_CITIZEN_MODERNISATION` is written as
+  `CEILING − min(share)` on purpose, so editing the lowest row without editing it fails loudly.
+- **Unknown government keys read as `chiefdom` in BOTH tables, for opposite reasons**: it denies an
+  unclassifiable state an imperial treasury, and it gives it a HIGH citizen fraction, which makes a
+  share of that body smaller and so cannot flatter it into a band.
+- **`MANPOWER_ROAD_REFERENCE = 10`, not the ~40 a Roman road inventory suggests** — this file's way
+  network is inter-settlement trunk roads only, so it is not comparable to a road inventory.
+- **Derived and stored nowhere.** Nothing manpower-shaped reaches the save format; asserted.
+- The state-capacity splits inside each labour-ratio band are FITTED to the eight faction
+  assignments the specification publishes, not stated by it. The probe checks all eight.
 
 ### Road connectivity: check the ARRAY and the POINT SHAPE (v2.18)
 
@@ -3968,6 +3993,7 @@ node tests/perf/probe_placement.js A.html   # clean-world settlement-placement c
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
 node tests/perf/probe_passes.js A.html      # v2.17 generation passes: the DOM/syncUI half + generate() itself
 node tests/perf/probe_roadconnect.js A.html # v2.18 road connectivity: a real road must read as connected
+node tests/perf/probe_manpower.js A.html    # v2.19 military manpower incl. the spec's two worked examples
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 

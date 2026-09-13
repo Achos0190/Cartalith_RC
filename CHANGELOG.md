@@ -12,6 +12,69 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.19 — Military manpower: four outputs, and technology is not the driver
+
+Second build off `PORT_ONLY_FEATURES.md`'s engine-simulation track, and the one row on it that is
+genuinely NEW rather than a wiring job — grepping this file for `manpower`, `mobiliz`, `levy`,
+`conscript` and `militia` finds nothing but a toll comment. Civ-layer (block 2) only, display-only,
+derived and stored nowhere. Hash vs v2.18 **ALL IDENTICAL**; 1111/1111; 852/852; 46 probe assertions.
+
+- **The specification is the ground truth, because there is nothing else.** The owner's
+  specification is carried verbatim in the native port's `MILITARY_MANPOWER_SCOPE.md` §1, and it
+  supplies two worked examples with stated outputs. Those are the calibration target, and
+  reproducing them is what makes this a port rather than an invention. **Both reproduce to the
+  unit** — Kingdom A standing 5 846 / levy 41 221 / field 15 870 / citizens 745 500, Kingdom B
+  19 067 / 98 889 / 47 368 / 651 900 — as do both derived eras, both war durations, and the ladder
+  rungs the specification publishes (59 455 and 38 045).
+- **Four outputs, not one "army size"**, because they differ radically: what a polity keeps
+  continuously under arms, what it can concentrate for a campaign, what it can call up in an
+  emergency, and how long any of it can stay away from the harvest. Imperial Rome kept ~250 000
+  regulars over 45–120 million; Republican Rome mobilised 17–29% of its citizens for one war.
+- **Agricultural technology is deliberately NOT the driver.** It sets the labour ratio; government,
+  road reach, navigable water and the land's own capacity do the rest — so two factions on the same
+  `AG_TECH_LEVELS` row land in different eras with different armies. The era is an OUTPUT, read off
+  the labour ratio first and split by state capacity, never a lookup on the ag-tech key.
+- **Two tables that had no consumer now have one.** `AG_TECH_LEVELS` reached only
+  `foodSurplusRatio`; `CIV_GOVERNMENTS` reached nothing at all but a `<select>`. The probe asserts
+  both are live: `traditionalAgrarian → improvedAgrarian` and `chiefdom → empire` each move the
+  standing army, and restoring the roster restores it exactly.
+- **`civManpowerModel()` is pure** — every input an argument, nothing read from a global — so the
+  whole model is exercisable without a world, which is what let the two worked examples be checked
+  at all. `_civFactionManpowerAll()` is the half that gathers real inputs, cached on the aggregate's
+  own generation counters PLUS government and ag-tech, since editing either in the inspector
+  invalidates the answer and neither bumps `_civAggGen`.
+- **It reuses this file's own road connectivity rather than writing a second union-find** — which is
+  how v2.18's bug was found in the first place: the name collided. That ordering matters; built on
+  the broken primitive, `capitalRoadReach` would have read 1/settlements for every faction and
+  silently under-reported state capacity everywhere.
+- **The era bands are shares of the CITIZEN population, not of everyone**, per the owner's own
+  ruling — the one place the specification names a denominator it names that one. Government drives
+  the fraction (a republic's citizen body is a much larger share of its polity than an empire's),
+  and `CITIZEN_MODERNISATION` is written as `CEILING − min(share)` rather than as `0.68`, so
+  editing the lowest row without editing it breaks loudly. Both bases are shown on screen; nothing
+  is clamped into a band.
+- **The warrior-society caution is honoured structurally, not by a special case.** At α = 0.95 the
+  non-agricultural population is 5% of the total, so a subsistence polity's standing army collapses
+  to almost nothing while its levy stays demographic and large: measured 798 standing against
+  23 167 levy on a million people.
+- **Measured on this file's worlds, and the geography term binds at the LOW end here** — the
+  ecological factor spreads 0.25 … 2.00 across six factions, several at the floor rather than at the
+  ceiling the port's own findings report. That is honest and not a bug: this engine sizes
+  settlements against a food shed that includes hinterland and imports, while the density integral
+  counts only the faction's own territory cells, so a polity fed from outside its borders reads as
+  ecologically stretched. Standing-army verdicts read `below` on that world, exactly as the
+  specification's own finding 2 predicts — reported, not tuned.
+- **The state-capacity splits inside each labour-ratio band are fitted, and said so at the call
+  site.** The ratio bands come from the specification; the thresholds that separate a Bronze Age
+  palace from a classical state within one band do not — they are fitted to reproduce the eight
+  faction assignments the specification's verification section publishes, and the probe checks all
+  eight.
+- **Declined, with reasons, not deferred**: per-settlement garrisons (which town holds which part of
+  a standing army is a placement rule nothing here implies), campaigns/movement/combat (each needs a
+  clock, an objective and an opposed force), and change over time. All three are disclosed on screen
+  in those words. `power.military` stays as it is — a relative 0–100 score of this faction against
+  the others, a different question from a headcount, shown beside it and labelled.
+
 ### v2.18 — Road connectivity has always answered "no"
 
 Found by a name collision, not by looking: writing a union-find for the military-manpower model
