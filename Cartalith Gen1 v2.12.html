@@ -535,6 +535,18 @@ details.cat-acc[open]>summary{color:var(--accent)}
       <button id="loadBtn">Load heightmap…</button>
       <button id="inferTectBtn">Infer tectonics from heightmap</button>
       <button id="loadZipBtn">Load project .zip…</button>
+      <!-- v2.12: a load that fails used to leave nothing behind once the alert was dismissed -->
+      <div id="loadRefusal" class="hint" style="display:none;color:#e88"></div>
+      <div class="dsep"></div>
+      <div class="menu-sec">Autosave</div>
+      <label style="display:flex;align-items:center;gap:6px;padding:2px 6px">
+        <input type="checkbox" id="autosaveChk"> every
+        <input type="number" id="autosaveMins" min="1" max="120" step="1" style="width:54px">
+        min, keep
+        <input type="number" id="autosaveKeep" min="1" max="20" step="1" style="width:46px">
+      </label>
+      <div class="btnrow" style="padding:2px 6px"><button id="snapNowBtn">Save snapshot now</button></div>
+      <div id="snapList" class="hint" style="padding:2px 6px"></div>
       <div class="dsep"></div>
       <button id="packBtn">Import asset pack…</button>
       <div class="dsep"></div>
@@ -2298,6 +2310,7 @@ const state = {
   lodMaxLevel:8,   /* v0.118: user-selectable max pyramid/LOD depth (zoom levels the tiled-LOD viewer + atlas refine/bake reach) */
   finalized:false, /* v0.62: world finalized — the whole LOD pyramid is baked to the atlas and the Generate side (geography/weather/erosion/sculpt) is locked; the project behaves as a cartographic LOD viewer/editor. Persisted with the save; un-finalize any time. */
   lodAuto:true,    /* v0.133: enter the tiled-LOD viewer automatically when the user zooms in on the main map (detail surfaces on zoom) */
+  autosave:{ enabled:true, minutes:5, keep:5 },   /* v2.12: periodic IndexedDB snapshot — until now manual "File → Export .zip" was the ONLY save path (v1.24 BUG-5 added a beforeunload warning and nothing else) */
   glacial:{ kg:0.15, mg:0.4, snowline:0.65, uFactor:0.6, passes:8 },
   coastal:{ waveStr:0.5, estuaryDepth:0.08, marshBand:0.03, passes:4 },
   planet:{ g:1.0, rotationHours:24, axialTiltDeg:23.4, radiusRel:1.0,
@@ -13127,7 +13140,7 @@ async function loadZip(file){ showBusy('loading…');
     state.places=[]; state.roads=null; state.labels=[]; state.mapIcons=[];
     state.cartoPaint=null; state.vault=null; state.treeCarried=null; state.region=null;
     GW=pk.GW; GH=pk.GH; Object.assign(state,pk.state);
-    regionSel=state.region||null; regionDrag=null;   /* v2.11 (§11.3) */ state.climate=Object.assign({windDir:0,evap:0.12,ocean:1.0,wIters:70,oceanHum:1.0},state.climate); if(state.climate.windMode==null)state.climate.windMode='manual'; if(state.climate.pressK==null)state.climate.pressK=0; if(state.climate.zonalK==null)state.climate.zonalK=1.0; if(state.climate.bulkEvap==null)state.climate.bulkEvap=false; if(state.climate.seasons==null)state.climate.seasons=false; if(state.climate.maxRainMm==null)state.climate.maxRainMm=3000; if(state.climate.currents==null)state.climate.currents=false; if(state.climate.currentK==null)state.climate.currentK=1.0; if(state.climate.albedo==null)state.climate.albedo=0; delete state.climate.terrainWind; state.stream=Object.assign({uplift:0.0,deposit:0.3,climateK:0.5,cycles:5},state.stream); state.velo=Object.assign({iters:60,strength:0.5,meander:0.6},state.velo||{}); if(state.lodMaxLevel==null)state.lodMaxLevel=8; if(typeof state.finalized!=='boolean')state.finalized=false; if(typeof state.lodAuto!=='boolean')state.lodAuto=true; if(!Array.isArray(state.places))state.places=[]; if(state.roads===undefined)state.roads=null; if(!Array.isArray(state.labels))state.labels=[]; if(!Array.isArray(state.mapIcons))state.mapIcons=[]; if(!state.cartoPaint)state.cartoPaint={biome:[],splat:[],terrain:[]}; state.mapFilter=Object.assign({showTerritory:true,factionsOff:[],settlementTypesOff:[],showRoads:true,wayTypesOff:[],timelineExistOnly:false,timelineGhost:false,timelineHighlight:false},state.mapFilter||{}); state.view3d=Object.assign({exag:0.5,detail:1,lightAz:315,flatSea:true},state.view3d||{}); if(typeof state.showRivers!=='boolean')state.showRivers=true; if(typeof state.carveRivers!=='boolean')state.carveRivers=true; state.glacial=Object.assign({kg:0.15,mg:0.4,snowline:0.65,uFactor:0.6,passes:8},state.glacial||{}); state.coastal=Object.assign({waveStr:0.5,estuaryDepth:0.08,marshBand:0.03,passes:4},state.coastal||{}); state.planet=Object.assign({g:1.0,rotationHours:24,axialTiltDeg:23.4,radiusRel:1.0},state.planet||{}); state.planet.geoid=Object.assign({enabled:false,amp:0.015},state.planet.geoid||{}); state.planet.tides=Object.assign({enabled:false,k2:1.0,moons:[{massRel:1.0,distRel:1.0,phase:0}]},state.planet.tides||{}); state.world_structure=Object.assign({enabled:false,archetype:'earth',continentality:0.30,fragmentation:0.50,tectonicEnergy:0.60,oceanDepth:0.60,hotspotDensity:0.20},state.world_structure||{}); if(typeof state.world!=='boolean')state.world=false; if(state.debugOpacity==null)state.debugOpacity=1; state.viz=Object.assign({parchment:0,icons:false,waves:false,waveDist:1,zoomDetail:1,scaleBar:true,splat:0.7,sharpBiomes:true,showLakes:true,multiSun:false,ao:0,crest:0,rockSlope:0,texture:0,minorStreams:0,ridgedRelief:0,svf:0,shadows:0,curveShade:0,geology:0,wetness:0,season:0,contourM:0,sdfCoast:0,sdfRivers:0,sdfBiomes:0,contours:0,ink:0,hachure:0,watercolor:0,cel:0,crosshatch:0,stipple:0,sepia:0,risograph:0,pointillism:0,waterAnim:false,riverDensity:1,minRiverOrder:1,civIconScale:1,civWayScale:1,urbanLayouts:false,civDiagnostics:false,provinces:false,territoryOpacity:130/255,wayOpacity:1},state.viz||{}); delete state.viz.smoothRivers; delete state.viz.blueprint; if(state.viz.riverWays==null)state.viz.riverWays=false;   /* v0.94: new default is ON for fresh worlds (see the top-level state literal) — a pre-v0.94 save keeps its old (no river-way lines) look */ if(state.tect.tectonicGraph==null)state.tect.tectonicGraph=false; if(state.tect.foldIntensity==null)state.tect.foldIntensity=1.0; if(state.tect.trenchDepth==null)state.tect.trenchDepth=1.0; if(state.tect.faultBlock==null)state.tect.faultBlock=0.6; if(state.tect.dynamicLithology==null)state.tect.dynamicLithology=false; state.resW=GW; allocate(); refreshGeoid(); refreshTides();
+    regionSel=state.region||null; regionDrag=null;   /* v2.11 (§11.3) */ state.climate=Object.assign({windDir:0,evap:0.12,ocean:1.0,wIters:70,oceanHum:1.0},state.climate); if(state.climate.windMode==null)state.climate.windMode='manual'; if(state.climate.pressK==null)state.climate.pressK=0; if(state.climate.zonalK==null)state.climate.zonalK=1.0; if(state.climate.bulkEvap==null)state.climate.bulkEvap=false; if(state.climate.seasons==null)state.climate.seasons=false; if(state.climate.maxRainMm==null)state.climate.maxRainMm=3000; if(state.climate.currents==null)state.climate.currents=false; if(state.climate.currentK==null)state.climate.currentK=1.0; if(state.climate.albedo==null)state.climate.albedo=0; delete state.climate.terrainWind; state.stream=Object.assign({uplift:0.0,deposit:0.3,climateK:0.5,cycles:5},state.stream); state.velo=Object.assign({iters:60,strength:0.5,meander:0.6},state.velo||{}); if(state.lodMaxLevel==null)state.lodMaxLevel=8; if(typeof state.finalized!=='boolean')state.finalized=false; if(typeof state.lodAuto!=='boolean')state.lodAuto=true; state.autosave=Object.assign({enabled:true,minutes:5,keep:5},state.autosave||{});   /* v2.12 */ if(!Array.isArray(state.places))state.places=[]; if(state.roads===undefined)state.roads=null; if(!Array.isArray(state.labels))state.labels=[]; if(!Array.isArray(state.mapIcons))state.mapIcons=[]; if(!state.cartoPaint)state.cartoPaint={biome:[],splat:[],terrain:[]}; state.mapFilter=Object.assign({showTerritory:true,factionsOff:[],settlementTypesOff:[],showRoads:true,wayTypesOff:[],timelineExistOnly:false,timelineGhost:false,timelineHighlight:false},state.mapFilter||{}); state.view3d=Object.assign({exag:0.5,detail:1,lightAz:315,flatSea:true},state.view3d||{}); if(typeof state.showRivers!=='boolean')state.showRivers=true; if(typeof state.carveRivers!=='boolean')state.carveRivers=true; state.glacial=Object.assign({kg:0.15,mg:0.4,snowline:0.65,uFactor:0.6,passes:8},state.glacial||{}); state.coastal=Object.assign({waveStr:0.5,estuaryDepth:0.08,marshBand:0.03,passes:4},state.coastal||{}); state.planet=Object.assign({g:1.0,rotationHours:24,axialTiltDeg:23.4,radiusRel:1.0},state.planet||{}); state.planet.geoid=Object.assign({enabled:false,amp:0.015},state.planet.geoid||{}); state.planet.tides=Object.assign({enabled:false,k2:1.0,moons:[{massRel:1.0,distRel:1.0,phase:0}]},state.planet.tides||{}); state.world_structure=Object.assign({enabled:false,archetype:'earth',continentality:0.30,fragmentation:0.50,tectonicEnergy:0.60,oceanDepth:0.60,hotspotDensity:0.20},state.world_structure||{}); if(typeof state.world!=='boolean')state.world=false; if(state.debugOpacity==null)state.debugOpacity=1; state.viz=Object.assign({parchment:0,icons:false,waves:false,waveDist:1,zoomDetail:1,scaleBar:true,splat:0.7,sharpBiomes:true,showLakes:true,multiSun:false,ao:0,crest:0,rockSlope:0,texture:0,minorStreams:0,ridgedRelief:0,svf:0,shadows:0,curveShade:0,geology:0,wetness:0,season:0,contourM:0,sdfCoast:0,sdfRivers:0,sdfBiomes:0,contours:0,ink:0,hachure:0,watercolor:0,cel:0,crosshatch:0,stipple:0,sepia:0,risograph:0,pointillism:0,waterAnim:false,riverDensity:1,minRiverOrder:1,civIconScale:1,civWayScale:1,urbanLayouts:false,civDiagnostics:false,provinces:false,territoryOpacity:130/255,wayOpacity:1},state.viz||{}); delete state.viz.smoothRivers; delete state.viz.blueprint; if(state.viz.riverWays==null)state.viz.riverWays=false;   /* v0.94: new default is ON for fresh worlds (see the top-level state literal) — a pre-v0.94 save keeps its old (no river-way lines) look */ if(state.tect.tectonicGraph==null)state.tect.tectonicGraph=false; if(state.tect.foldIntensity==null)state.tect.foldIntensity=1.0; if(state.tect.trenchDepth==null)state.tect.trenchDepth=1.0; if(state.tect.faultBlock==null)state.tect.faultBlock=0.6; if(state.tect.dynamicLithology==null)state.tect.dynamicLithology=false; state.resW=GW; allocate(); refreshGeoid(); refreshTides();
     if(z['heightmap.f32']){ const fa=new Float32Array(z['heightmap.f32'].buffer); field.set(fa.subarray(0,Math.min(fa.length,GW*GH))); }
     else if(z['heightmap_rg16.bin']){ const fa=unpackHeight16(z['heightmap_rg16.bin'],GW*GH); field.set(fa.subarray(0,Math.min(fa.length,GW*GH))); }   /* portable 16-bit fallback */
     if(z['temperature.f32']){ const fa=new Float32Array(z['temperature.f32'].buffer); tempField.set(fa.subarray(0,Math.min(fa.length,GW*GH))); } else computeTemperature();
@@ -13148,8 +13161,157 @@ async function loadZip(file){ showBusy('loading…');
        §8.1's absent climate, §14.3's malformed record); collecting them into
        one message beats four dialogs and beats a console line nobody reads. */
     if(notes.length) alert('Project loaded, with '+notes.length+' note'+(notes.length===1?'':'s')+':\n\n• '+notes.join('\n\n• '));
-  }catch(e){ alert('Load failed: '+e.message); }
+  }catch(e){
+    /* v2.12 (failed-open recovery): the alert stays — it is the one surface that cannot be
+       missed — but it was ALSO the only one, so dismissing it left no trace of what went wrong
+       and no way back except finding the menu again. The refusal is now recorded and shown as a
+       persistent line beside the Load button, and the File menu is reopened so the retry is one
+       click away rather than a re-navigation. */
+    _lastLoadRefusal={ msg:String(e&&e.message||e), name:(file&&file.name)||'(snapshot)', at:Date.now() };
+    _renderLoadRefusal();
+    alert('Load failed: '+e.message+'\n\nThe project was not opened; whatever was on screen is untouched.');
+  }
   finally{ hideBusy(); if(typeof _setupHide==='function') _setupHide(); if(typeof _viewFill==='function'&&!_lodOn) _viewFill(); }   /* v0.67: a loaded project satisfies the setup gate; v1.13: fill the display for the loaded world */
+}
+/* ===================== v2.12: autosave snapshots (IndexedDB) =====================
+   The port has autosave; this file had no automatic save path at all. The whole feature rests on
+   one measured fact about loadZip() above: of the ~30 entries exportZip() writes, it reads back
+   exactly SIX. Everything else (map.png, the atlas, biome/resource rasters, wildlife, features,
+   layers preview) is write-only, consumed by downstream tools and never by this app. So a
+   restorable snapshot is those six entries and nothing more -- no bake, no atlas embed, which is
+   what makes it cheap enough to run on a timer. loadZip() takes anything with .arrayBuffer(), so
+   a Blob out of IndexedDB restores through the identical, already-proven path a real file does.
+
+   Feature-detected exactly like the atlas layer below/above it: no indexedDB (the headless
+   harness) means every call here is an immediate no-op, never a throw. */
+const SNAP_DB='cartalith-snapshots', SNAP_DBVER=1, SNAP_STORE='snaps';
+let _snapDBp=null, _snapTimer=null, _snapLastFp=0, _snapBusy=false, _snapLastAt=0, _snapLastErr=null;
+let _lastLoadRefusal=null;
+function snapOpen(){
+  if(_snapDBp) return _snapDBp;
+  if(typeof indexedDB==='undefined'){ _snapDBp=Promise.resolve(null); return _snapDBp; }
+  _snapDBp=new Promise(res=>{
+    let req; try{ req=indexedDB.open(SNAP_DB,SNAP_DBVER); }catch(_){ return res(null); }
+    req.onupgradeneeded=()=>{ const db=req.result; if(!db.objectStoreNames.contains(SNAP_STORE)) db.createObjectStore(SNAP_STORE,{keyPath:'key'}); };
+    req.onsuccess=()=>res(req.result); req.onerror=()=>res(null); req.onblocked=()=>res(null);
+  });
+  return _snapDBp;
+}
+async function snapPut(rec){ const db=await snapOpen(); if(!db) return false; return new Promise(res=>{ try{ const tx=db.transaction(SNAP_STORE,'readwrite'); tx.objectStore(SNAP_STORE).put(rec); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false); tx.onabort=()=>res(false); }catch(_){ res(false); } }); }
+async function snapAll(){ const db=await snapOpen(); if(!db) return []; return new Promise(res=>{ try{ const tx=db.transaction(SNAP_STORE,'readonly'), rq=tx.objectStore(SNAP_STORE).getAll(); rq.onsuccess=()=>res((rq.result||[]).sort((a,b)=>b.ts-a.ts)); rq.onerror=()=>res([]); }catch(_){ res([]); } }); }
+async function snapDelete(key){ const db=await snapOpen(); if(!db) return false; return new Promise(res=>{ try{ const tx=db.transaction(SNAP_STORE,'readwrite'); tx.objectStore(SNAP_STORE).delete(key); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false); }catch(_){ res(false); } }); }
+
+/* The six entries loadZip() actually consumes -- deliberately NOT exportZip()'s list. */
+function _snapEntries(){
+  const E=[];
+  E.push({name:'params.json',data:new TextEncoder().encode(JSON.stringify(serializeState(),null,2))});
+  E.push({name:'heightmap.f32',data:f32bytes(field)});
+  E.push({name:'temperature.f32',data:f32bytes(tempField)});
+  E.push({name:'rainfall.f32',data:f32bytes(rainField)});
+  E.push({name:'volcanic_field.f32',data:f32bytes(volcanicField)});   /* v0.6: stamped straight into `field`, so not re-derivable from the seed */
+  E.push({name:'impact_field.f32',data:f32bytes(impactField)});
+  return E;
+}
+/* Is this world different from the one last written? Deliberately a CONTENT fingerprint, not a
+   dirty flag: v1.24 BUG-5 declined to thread "dirty since last export" through every mutation
+   site precisely because one missed spot fails silently, and that reasoning applies here with
+   the same force. Sampling the real field and the real serialized state cannot be out of step
+   with the data the way a flag can.
+
+   It scans EVERY cell and every character, and the first cut did not -- it strided the field by
+   997 and the JSON by 13, which reintroduced exactly the silent miss the flag was rejected for:
+   a sculpt stroke touching a few hundred cells, or a settlement renamed without changing the
+   string's length, fell between the samples and the edit was never saved. The suite's own
+   "fingerprint tracks the FIELD" assertion caught it. A full pass is ~3M operations against a
+   timer that fires once every few MINUTES; the stride was never worth its correctness hole. */
+function _snapFingerprint(){
+  let x=2166136261>>>0; const mix=v=>{ x^=v|0; x=Math.imul(x,16777619)>>>0; };
+  for(let i=0;i<field.length;i++) mix(Math.round(field[i]*65536));
+  mix(field.length);
+  let js=''; try{ js=JSON.stringify(serializeState()); }catch(_){ js=''; }
+  for(let i=0;i<js.length;i++) mix(js.charCodeAt(i));
+  mix(js.length);
+  return x>>>0;
+}
+async function autosaveNow(force){
+  if(typeof indexedDB==='undefined') return null;
+  if(_snapBusy) return null;
+  if(!force){
+    if(!state.autosave||!state.autosave.enabled) return null;
+    if(typeof _hasLiveWorld==='function' && !_hasLiveWorld()) return null;   /* same contract the beforeunload guard uses: gate hidden <=> a world exists */
+    if(typeof _eroBusy!=='undefined' && _eroBusy) return null;               /* an erosion op is mid-flight; its field is a half-state */
+    const fp=_snapFingerprint(); if(fp===_snapLastFp) return null;
+  }
+  _snapBusy=true;
+  try{
+    const fp=_snapFingerprint();
+    const blob=await zipStore(_snapEntries());
+    const rec={ key:'snap-'+Date.now()+'-'+Math.random().toString(36).slice(2,7), ts:Date.now(),
+                seed:state.tect&&state.tect.seed, gw:GW, gh:GH, bytes:blob, size:blob.size,
+                manual:!!force, fp };
+    const ok=await snapPut(rec);
+    if(!ok){ _snapLastErr='could not write to IndexedDB (quota or private mode?)'; return null; }
+    _snapLastFp=fp; _snapLastAt=rec.ts; _snapLastErr=null;
+    /* prune oldest beyond `keep`, so autosave cannot grow without bound */
+    const keep=Math.max(1,(state.autosave&&state.autosave.keep)||5);
+    const all=await snapAll(); for(let i=keep;i<all.length;i++) await snapDelete(all[i].key);
+    _renderSnapList();
+    return rec;
+  }catch(e){ _snapLastErr=String(e&&e.message||e); return null; }
+  finally{ _snapBusy=false; }
+}
+async function restoreSnapshot(key){
+  const all=await snapAll(), rec=all.find(r=>r.key===key); if(!rec) return false;
+  const blob=rec.bytes instanceof Blob?rec.bytes:new Blob([rec.bytes]);
+  await loadZip(blob);            /* the same path a real .zip takes, including its own failure reporting */
+  _snapLastFp=_snapFingerprint(); /* the restored world IS the snapshot — do not immediately re-save it */
+  return true;
+}
+function autosaveReschedule(){
+  if(_snapTimer){ clearInterval(_snapTimer); _snapTimer=null; }
+  if(typeof indexedDB==='undefined') return;                 /* headless: never arm a timer */
+  if(!state.autosave||!state.autosave.enabled) return;
+  const mins=Math.max(1,+state.autosave.minutes||5);
+  _snapTimer=setInterval(()=>{ autosaveNow(false); },mins*60000);
+}
+function _renderLoadRefusal(){
+  const el=document.getElementById('loadRefusal'); if(!el) return;
+  if(!_lastLoadRefusal){ el.style.display='none'; el.textContent=''; return; }
+  el.style.display='';
+  el.textContent='Could not open '+_lastLoadRefusal.name+': '+_lastLoadRefusal.msg+' — the open world is untouched. Try another file, or restore an autosave below.';
+}
+function _snapAgo(ts){ const s2=Math.max(0,(Date.now()-ts)/1000); if(s2<90) return Math.round(s2)+'s ago'; if(s2<5400) return Math.round(s2/60)+' min ago'; return Math.round(s2/3600)+' h ago'; }
+async function _renderSnapList(){
+  const el=document.getElementById('snapList'); if(!el) return;
+  if(typeof indexedDB==='undefined'){ el.textContent='Autosave needs IndexedDB — unavailable here.'; return; }
+  const all=await snapAll();
+  if(!all.length){ el.textContent=_snapLastErr?('Autosave problem: '+_snapLastErr):'No snapshots yet.'; return; }
+  el.innerHTML=all.map(r=>'<div style="display:flex;align-items:center;gap:6px;margin:2px 0">'
+    +'<span style="flex:1">'+_escHtml(_snapAgo(r.ts))+' · seed '+_escHtml(String(r.seed))+' · '+r.gw+'px · '+(r.size/1048576).toFixed(1)+' MB'+(r.manual?' · manual':'')+'</span>'
+    +'<button data-snap-restore="'+_escHtml(r.key)+'">Restore</button>'
+    +'<button data-snap-del="'+_escHtml(r.key)+'">✕</button></div>').join('')
+    +(_snapLastErr?'<div style="color:#e88">Autosave problem: '+_escHtml(_snapLastErr)+'</div>':'');
+}
+/* One delegated listener — the list is rebuilt on every write, so per-row listeners would leak. */
+{ const host=document.getElementById('snapList');
+  if(host) host.addEventListener('click',async e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    const rk=b.getAttribute('data-snap-restore'), dk=b.getAttribute('data-snap-del');
+    if(rk){ if(!confirm('Restore this snapshot? The world currently open will be replaced.')) return; await restoreSnapshot(rk); _renderSnapList(); }
+    else if(dk){ await snapDelete(dk); _renderSnapList(); }
+  });
+}
+{ const c=document.getElementById('autosaveChk'), m=document.getElementById('autosaveMins'), k=document.getElementById('autosaveKeep'), b=document.getElementById('snapNowBtn');
+  if(c) c.addEventListener('change',()=>{ state.autosave.enabled=c.checked; autosaveReschedule(); _renderSnapList(); });
+  if(m) m.addEventListener('change',()=>{ state.autosave.minutes=Math.max(1,Math.min(120,+m.value||5)); m.value=state.autosave.minutes; autosaveReschedule(); });
+  if(k) k.addEventListener('change',()=>{ state.autosave.keep=Math.max(1,Math.min(20,+k.value||5)); k.value=state.autosave.keep; });
+  if(b) b.addEventListener('click',async()=>{ b.disabled=true; try{ await autosaveNow(true); } finally{ b.disabled=false; _renderSnapList(); } });
+}
+function autosaveSyncUI(){
+  const c=document.getElementById('autosaveChk'), m=document.getElementById('autosaveMins'), k=document.getElementById('autosaveKeep');
+  if(c) c.checked=!!(state.autosave&&state.autosave.enabled);
+  if(m) m.value=(state.autosave&&state.autosave.minutes)||5;
+  if(k) k.value=(state.autosave&&state.autosave.keep)||5;
 }
 function syncUI(){ suspendRender=true;
   applyFinalizedUI();   /* v0.62: a loaded finalized project must arrive with the Generate side locked */
@@ -15068,6 +15230,9 @@ window.addEventListener('resize',()=>{ if(_view3dOn){ resizeView3D(); _v3dDirty=
 GW=state.resW; GH=gridH(GW); allocate();
 if(typeof indexedDB==='undefined'){ withBusy('generating…',generate); }
 else { renderNow(); if(typeof _setupOpen==='function') _setupOpen('intro'); }
+/* v2.12: arm autosave once at boot. Deliberately not inside generate() — invariant 12 keeps that
+   path synchronous, and an autosave is async by nature (zipStore + IndexedDB). */
+try{ autosaveSyncUI(); autosaveReschedule(); _renderSnapList(); }catch(_){}
 </script>
 
 <!-- =====================================================================

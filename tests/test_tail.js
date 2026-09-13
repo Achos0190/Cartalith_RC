@@ -4347,6 +4347,37 @@ if (typeof carveRiverValleys === 'function') {
     clearUndoHistory();
   }
 
+  /* ---- v2.12: autosave snapshots ------------------------------------------------------------
+     The whole design rests on one coupling: a snapshot carries exactly the entries loadZip()
+     reads back, and nothing else. If a future version teaches loadZip() to read a seventh entry
+     and does not add it here, restores silently lose it -- so assert the set by name. */
+  {
+    const names = _snapEntries().map(e => e.name).sort();
+    const expected = ['heightmap.f32','impact_field.f32','params.json','rainfall.f32','temperature.f32','volcanic_field.f32'];
+    check('v2.12 autosave: the snapshot carries exactly the six entries loadZip() reads back', names.length === expected.length && names.every((n, i) => n === expected[i]));
+    check('v2.12 autosave: every snapshot entry has real bytes', _snapEntries().every(e => e.data && e.data.length > 0));
+
+    const fp0 = _snapFingerprint();
+    check('v2.12 autosave: the fingerprint is stable when nothing changed', _snapFingerprint() === fp0);
+    const keep = field[7];
+    field[7] = keep > 0.5 ? keep - 0.25 : keep + 0.25;
+    check('v2.12 autosave: the fingerprint tracks the FIELD (a terrain edit is never missed)', _snapFingerprint() !== fp0);
+    field[7] = keep;
+    check('v2.12 autosave: restoring the field restores the fingerprint', _snapFingerprint() === fp0);
+
+    state.labels.push({ x: 1, y: 1, text: '__fp_probe__' });
+    check('v2.12 autosave: the fingerprint tracks serialized STATE too (a civ-layer edit is never missed)', _snapFingerprint() !== fp0);
+    state.labels = state.labels.filter(l => l.text !== '__fp_probe__');
+    check('v2.12 autosave: removing that state change restores the fingerprint', _snapFingerprint() === fp0);
+
+    /* Headless safety: there is no indexedDB in this harness, so every entry point must be an
+       immediate no-op and must never arm a timer that would keep the process alive. */
+    check('v2.12 autosave: no indexedDB here, so the harness genuinely exercises the no-op path', typeof indexedDB === 'undefined');
+    check('v2.12 autosave: autosaveReschedule() arms no timer without indexedDB', (() => {
+      autosaveReschedule(); return _snapTimer === null;
+    })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

@@ -12,6 +12,88 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.12 — Field-level redo, autosave snapshots, failed-open recovery
+
+First build off `PORT_ONLY_FEATURES.md` (pulled in from the native-port repository this session).
+Owner picked all four back-port tracks; this is the persistence track. Every claim the document
+made about this file was re-verified against v2.11 before any work started, and **three of its
+rows were wrong or imprecise** and were corrected in place — see that file's own header.
+
+Hash vs v2.11 **ALL IDENTICAL** in every scenario. Nothing here is reachable from `generate()` or
+`renderNow()`: undo/redo is only called by the manual edit ops, and autosave runs on a timer
+outside both.
+
+- **Redo (`redoStack`/`redoLast()`).** The port's row said the legacy file "keeps five undo steps
+  with no redo". Half right, and worth stating precisely: `sculptRedo` HAS existed since v1.15,
+  but it is DRAFT-scoped — stamp history that has not touched `field` — as its own comment says.
+  The field-level stack had none. `undoLast()` now captures the state it is leaving before
+  restoring it; it used to drop it, which is exactly why there was nothing to go back to.
+  `redoLast()` deliberately does **not** call `pushUndo()`, which clears the redo chain and would
+  make a redo its own last step. `Ctrl+Shift+Z` was already reserved at field level and inert
+  (`if(!e.shiftKey) undoLast();`) — it is the redo key now, matching the sculpt editor's own shift
+  convention rather than adding a `Ctrl+Y` this file has never used.
+- **Two pre-existing undo bugs, both REPRODUCED on v2.11 before being fixed.** `pushUndo()` is
+  called only by the erosion buttons and `sculptCommit` — never by `generate()` — so a snapshot
+  belongs to exactly one world, and the stacks were never cleared. (a) Edit, regenerate a
+  different seed, Undo: the new world's terrain was overwritten with the **old world's**
+  heightmap while `state` stayed new. (b) Worse across a resolution DECREASE — edit at 1024,
+  switch to 512 (`allocate()` shrinks `field`), Undo → **`RangeError: offset is out of bounds`**,
+  because `field.set(src)` throws when `src` is the larger array. `clearUndoHistory()` now runs
+  from both `generate()` and `loadZip()`.
+  - *Method note:* a first attempt to reproduce (b) set `state.resW` alone and measured no throw.
+    `state.resW` does not resize anything by itself — `GW` stayed 2048. The claim only held up
+    once driven through the real `GW`/`GH`/`allocate()` path `#resSeg`'s handler uses. A failed
+    reproduction is not a refutation until you have checked you reproduced the right thing.
+- **Autosave to IndexedDB.** Until now manual `File → Export .zip` was the ONLY save path; v1.24
+  BUG-5 added a `beforeunload` warning and deliberately stopped there. The feature rests on one
+  measured fact: of the ~30 entries `exportZip()` writes, **`loadZip()` reads back exactly six**
+  (`params.json`, `heightmap.f32`, `temperature.f32`, `rainfall.f32`, `volcanic_field.f32`,
+  `impact_field.f32`). Everything else — `map.png`, the atlas, biome/resource rasters, wildlife,
+  features, the layers preview — is write-only, consumed by downstream tools. So a *restorable*
+  snapshot is those six and nothing else: no bake, no atlas embed, which is what makes it cheap
+  enough to run on a timer. `loadZip()` accepts anything with `.arrayBuffer()`, so a Blob out of
+  IndexedDB restores through the identical, already-proven path a real file takes — no second
+  reader. Measured: **112 ms / 1.49 MB at 512px, 436 ms / 6.02 MB at 1024px.** Feature-detected
+  exactly like the atlas layer beside it, so the headless harness arms no timer and every entry
+  point is an immediate no-op.
+- **The fingerprint scans everything, and the first cut did not.** "Has this world changed since
+  the last snapshot" is answered by hashing the real field and the real serialized state — not a
+  dirty flag, for the reason v1.24 BUG-5 already gave (one missed mutation site fails silently).
+  The first cut strided the field by 997 and the JSON by 13 and **reintroduced that same silent
+  miss**: a sculpt stroke touching a few hundred cells, or a settlement renamed without changing
+  the string's length, fell between samples and was never saved. The new suite assertion
+  "fingerprint tracks the FIELD" caught it. It is a full pass now — ~3M operations against a timer
+  that fires once every few minutes; the stride was never worth its correctness hole.
+- **Failed-open recovery.** A failed load showed one `alert()` and, once dismissed, left no trace
+  of what went wrong. The refusal is now recorded and shown as a persistent line beside the Load
+  button, and the alert says explicitly that the open world is untouched.
+- **Verification.** `tests/run.sh` **1090/1090** (+20: 11 redo, 9 autosave), `tests/run_um.sh`
+  852/852, `hash_gen1.js` vs v2.11 ALL IDENTICAL, plus two Playwright probes (12 redo checks
+  through the live DOM; 15 autosave checks covering write/dedupe/restore/prune). One assertion
+  guards the coupling that the whole design rests on — the snapshot's entry names must match the
+  six `loadZip()` reads, by name, so a future seventh entry cannot be silently dropped.
+  - *Test-authoring note:* a probe check "canary gone after regenerate" failed, and the product
+    was right — `generate()` does not clear `state.labels`, correctly, since labels are user
+    annotations rather than terrain. The probe was rewritten to remove the canary by hand before
+    restoring, which is what actually proves the snapshot carries the civ layer.
+- **Known scope cuts.** No browsable undo-history list (the port has one; `MAX_UNDO` is still 5
+  and each step is a full `field` copy, so a deeper stack is a memory decision, not a UI one). No
+  "recent projects" across sessions beyond the snapshot list itself — a browser has no project
+  path to remember. Autosave stores snapshots only in this browser's IndexedDB; it is a crash/
+  tab-close guard, not a substitute for `Export .zip`, and the UI says so by showing sizes.
+  Extrapolating the measured figures, 2048px is roughly 24 MB per snapshot — with the default
+  `keep:5` that is ~120 MB of IndexedDB, which is why `keep` is user-editable.
+
+### v2.11 — (no entry)
+
+**This version shipped without a CHANGELOG entry.** It was added to the repository by upload
+(`bc1b2e1`, "Add files via upload") rather than through a session that maintained this log. Its
+in-file comments show the substance — reading the native port's project tree per
+`SAVEFILE_COMPAT.md`, the Markdown Vault link store (`vault.json`, `_vaultSummaryHtml`), clearing
+project-scoped collections before a load merge, and collecting load `notes` into one report — but
+that is inference from the diff, not an account from whoever made the change, so it is recorded
+as a gap rather than reconstructed here.
+
 ### v2.10 — Ocean current coastal deflection widened + LOD bake depth 6
 
 Two owner-reported items from one message. Civ/UI-only for the second item; engine-only for the
