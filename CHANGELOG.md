@@ -14,9 +14,16 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 Owner: *"are there any performance or rendering upgrades or gains to be made?"* Answered by
 profiling rather than by reading, and the biggest line in the profile turned out to be one this
-file had twice looked at and twice, reasonably, declined to touch. `tests/run.sh` **1175/1175**
-(+4) · `tests/run_um.sh` 852/852 · `tests/perf/probe_blur.js` (new) **7/7**, 2 of them failing on
-v2.31 · `hash_gen1.js` vs v2.31 diverges — a deliberate, quantified re-baseline, below.
+file had twice looked at and twice, reasonably, declined to touch. `tests/run.sh` **0 failures across
+three runs** (+4 assertions) · `tests/run_um.sh` 852/852 · `tests/perf/probe_blur.js` (new) **7/7**,
+2 of them failing on v2.31 · `hash_gen1.js` vs v2.31 diverges — a deliberate, quantified
+re-baseline, below.
+
+**The suite's own assertion TOTAL is not constant** — the three clean runs reported 1175, 1175 and
+**1174** passed, all with zero failures, so at least one `check()` in `test_tail.js` is reached
+conditionally on ambient state. Nothing failed, but a suite whose count moves can hide a silently
+skipped assertion, which is the same class of problem as the unpinned seeds below. Observed and
+recorded; not chased in a performance version. Quote it as "0 failed", not as a count.
 
 ### The measurement that changed the answer
 

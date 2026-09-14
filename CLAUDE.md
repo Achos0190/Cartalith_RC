@@ -1046,6 +1046,9 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
 Owner: *"are there any performance or rendering upgrades or gains to be made?"* Found by profiling.
 **`generate()` 5919 → 3894 ms at 1024px (−34%)**; 2057 → 1631 at 512px, 20153 → 13758 at 2048px. Verification is
 `tests/perf/probe_blur.js` (7 assertions, 2 of which fail on v2.31) plus 4 headless ones.
+**`tests/run.sh`'s assertion TOTAL is not constant** — three clean runs reported 1175/1175/1174
+passed with zero failures, so at least one `check()` is reached conditionally on ambient state.
+Quote the suite as "0 failed", not as a count, until that is tracked down.
 
 - **`gaussBlur` and `GPU.blurArr` are one algorithm, not two** — three separable box-blur passes at
   `pr=round(r/1.6)`, agreeing to 1.2e-7. They are not one COMPLEXITY: `boxH`/`boxV` carry a running
