@@ -458,7 +458,13 @@ body.phase-explore #phaseChip{display:inline-block}
 #creditsModal .cr-close:hover{border-color:var(--accent);color:var(--accent)}
 #creditsModal .cr-foot{font-size:11px;color:var(--faint);line-height:1.5;margin-top:16px;border-top:1px solid var(--line);padding-top:10px}
 /* v0.63 (§4.9): first-run onboarding empty-state card — v0.67: promoted to the hard setup gate */
-#onboard{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;background:rgba(10,12,17,.86)}
+/* v2.24 fix: FIXED, not absolute. It was absolute inside .canvas-wrap, which was nearly the whole
+   viewport when the only chrome above it was one header — the DCC frame puts an app bar, a
+   document bar and (on mobile) a horizontal domain rail above it, so the gate was squeezed into
+   what was left and its card's top was clipped off screen at first start. A MANDATORY gate owns
+   the viewport; body.setup-gated already makes every band behind it inert, so showing them above
+   it was noise even when it fitted. z-index clears every overlay (settings 74, context menu 80). */
+#onboard{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;background:rgba(10,12,17,.86);overflow-y:auto;padding:12px;box-sizing:border-box}
 #onboard .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px 28px;width:min(440px,92vw);max-height:92vh;overflow-y:auto;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.55)}
 #onboard h3{font-family:var(--mono);font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 6px}
 #onboard .ob-sub{color:var(--dim);font-size:12px;line-height:1.6;margin-bottom:16px}
@@ -494,7 +500,13 @@ body.setup-gated .toolrail,body.setup-gated .status-bar{pointer-events:none;opac
 #onboard .su-legend .lg-d{font-family:var(--mono);color:var(--accent);white-space:nowrap}
 #onboard .su-legend .lg-a{color:var(--dim);text-align:right}
 #onboard .chk.su{display:flex;align-items:center;gap:7px;margin-top:12px;font-size:12px;color:var(--ink);cursor:pointer}
-#onboard .su-actions{display:flex;gap:8px;margin-top:20px}
+/* v2.24 fix: the confirm row STICKS to the bottom of the card. The setup form is taller than a
+   phone viewport, so Back/Commit sat below the fold and could only be reached by scrolling inside a
+   nested scroll container — reported as "can't scroll to the bottom buttons to confirm". Sticky
+   means the action you came here to take is never the thing you have to hunt for. Negative margins
+   bleed it to the card's edges so nothing shows through beside it; the padding is restored inside. */
+#onboard .su-actions{display:flex;gap:8px;margin:20px -28px -24px;padding:12px 28px;
+  position:sticky;bottom:0;background:var(--panel);border-top:1px solid var(--line);z-index:1}
 #onboard .su-actions button{flex:1;padding:10px 12px;font-size:12px}
 #onboard .su-actions .su-back{flex:0 0 auto}
 #packGrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -542,8 +554,17 @@ body.setup-gated .toolrail,body.setup-gated .status-bar{pointer-events:none;opac
    Placed AFTER the base .dropdown/#fileMenu rules so equal-specificity source order lets it win; the
    more-specific `.layers-fab .dropdown.layers-popover` is untouched. */
 @media (max-width:860px){
-  .dropdown-wrap .dropdown{position:fixed;left:8px;right:8px;top:60px;min-width:0;max-width:none;width:auto;max-height:calc(100dvh - 72px);overflow-y:auto}
-  #fileMenu{width:auto;max-height:calc(100dvh - 72px)}
+  /* v2.24: `top:60px` was written when the header was one row. The DCC frame's app bar wraps to
+     ~113px on a phone, so the menu opened UNDER it — covering the File button you tap to dismiss it,
+     with its own first rows hidden behind the bar. --chrome-top carries the header's real measured
+     height (see _syncChromeTop); the literal stays as the fallback so a failed measure degrades to
+     the old behaviour rather than to nothing.
+     overscroll-behavior:contain is the other half of "does not scroll properly": without it a drag
+     that reaches either end of this fixed container chains to the page, and Android reads that as
+     pull-to-refresh / URL-bar hide instead of scrolling the menu. */
+  .dropdown-wrap .dropdown{position:fixed;left:8px;right:8px;top:var(--chrome-top,60px);min-width:0;max-width:none;width:auto;
+    max-height:calc(100dvh - var(--chrome-top,60px) - 12px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+  #fileMenu{width:auto;max-height:calc(100dvh - var(--chrome-top,60px) - 12px)}
 }
 /* ---- collapsible accordions (erosion sub-ops, debug overlay) ---- */
 details.acc{border-top:1px solid var(--line)}
@@ -15577,6 +15598,14 @@ function updateScaleBar(){
    would keep a stale fit and the scale bar a stale number. One rAF-debounced observer on the wrap
    runs exactly the body the window listener below runs; the window listeners stay, because they
    also catch DPR and orientation changes the observer does not see. */
+/* v2.24: the one place the shell's own chrome height is published to CSS. The app bar wraps at
+   phone widths, so its height is a measured fact, not a constant — anything that has to open BELOW
+   it (today the header dropdowns) reads --chrome-top instead of guessing. */
+function _syncChromeTop(){
+  const hd=document.querySelector('header'); if(!hd) return;
+  const b=Math.round(hd.getBoundingClientRect().bottom);
+  if(b>0) document.documentElement.style.setProperty('--chrome-top', b+'px');
+}
 function _viewportRect(){ const cw=document.querySelector('.canvas-wrap'); return cw?cw.getBoundingClientRect():{left:0,top:0,right:innerWidth,bottom:innerHeight,width:innerWidth,height:innerHeight}; }
 let _vpRefitQueued=false;
 function _refitViewportNow(){
@@ -15590,7 +15619,11 @@ function _scheduleViewportRefit(){ if(_vpRefitQueued) return; _vpRefitQueued=tru
   if(typeof ResizeObserver!=='function') return;   /* must degrade gracefully — file:// on an old engine still gets the window listeners */
   const cw=document.querySelector('.canvas-wrap'); if(!cw) return;
   try{ new ResizeObserver(()=>_scheduleViewportRefit()).observe(cw); }catch(_){}
+  const hd=document.querySelector('header');
+  if(hd) try{ new ResizeObserver(()=>_syncChromeTop()).observe(hd); }catch(_){}
 })();
+_syncChromeTop();
+if(window.addEventListener) window.addEventListener('resize',_syncChromeTop);
 if(window.addEventListener) window.addEventListener('resize',updateScaleBar);
 if(window.addEventListener) window.addEventListener('resize',()=>{ if(_lodOn) _lodFitCanvas(); else _viewFill(); });   /* v0.87: keep the LOD viewport filled on window resize; v1.01/v1.13: re-fill (cover) — a resize/rotation changes the cover scale, and the default should stay filled */
 
