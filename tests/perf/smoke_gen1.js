@@ -5451,7 +5451,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   Object.assign(R.v152, await page.evaluate(() => {
     const o = {};
     const settles = _jpSettlements();
-    if (!settles.length) { o.settleCount = 0; return o; }
+    // A probe that early-returns leaves every field undefined, so all three assertions below fail
+    // with no hint that the WORLD, not the snap logic, is what went missing. Record the count and
+    // assert it separately — a silently-empty fixture is the failure mode this file has been bitten
+    // by before, and "three assertions failed" reads identically whether snapping broke or the
+    // suite simply had no settlements left by this point.
+    o.settleCount = settles.length;
+    if (!settles.length) return o;
     const s0 = settles[0];
     o.snapDefaultOn = _civSnapEnabled();
 
@@ -7563,6 +7569,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.52: the cost model breaks down to its total and scales with cargo', R.v152.costSums && R.v152.costScales);
   A('v1.52: carriage rates keep the Diocletian land:river:sea ordering', R.v152.costRatios);
   A('v1.52: a cargo journey reports a break-even price per tonne; a blocked one prices at null', R.v152.costBreakEven && R.v152.costBlockedNull);
+  A('v1.52: the snap probe actually had a world to test against (guards the three assertions below from failing as a group on an empty fixture)', R.v152.settleCount > 0);
   A('v1.52: snap-to-place/way is on by default and a nearby click lands exactly on the settlement (V1.915 parity)', R.v152.snapDefaultOn && R.v152.snapsToPlaceNearby);
   A('v1.52: a far-away click does not snap, and the toggle genuinely disables it', R.v152.noSnapFarAway && R.v152.disableWorks);
   A('v1.52: drawing also snaps onto an existing way\'s curve, and a real draw_way click lands exactly on the pin', R.v152.snapsToWay && R.v152.snappedExactly);
