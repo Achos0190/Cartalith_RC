@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.23 DCC test.html` | **Theme experiment, not a mainline version** — a duplicate of v2.22 wearing the native port's DCC shell theme (colour, geometry, type; no markup or handler change). Deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.23` name would have made this the suite's default target. |
+| `Cartalith v2.24 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.23 was a repaint of v2.22 (colour/radius/density only); v2.24 replaces the GUI FRAME — app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path (`hash_gen1.js` vs v2.22 ALL IDENTICAL); run the suites against it explicitly: `tests/run.sh "Cartalith v2.24 DCC test.html"`. |
+| `Cartalith v2.23 DCC test.html` | Previous DCC-line file — the theme layer alone, kept. Both are deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.2x` name would have made an experiment the suite's default target. |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1031,6 +1032,38 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The DCC editor frame (v2.24, DCC-line file only)
+
+**`Cartalith v2.24 DCC test.html` replaces v0.65's header + single 324px `<aside>` with the native
+port's editor frame.** Mainline `Cartalith Gen1 v2.22.html` still carries the old shell — this
+section describes the DCC line only. `hash_gen1.js` vs v2.22 is ALL IDENTICAL in every scenario.
+
+- **`_domain` is the ONE writable navigation variable.** `_activeTab`/`_genSubTab` are DERIVED from
+  it by `_syncLegacyTabVars()` and must never be assigned directly — they each had exactly one
+  writer (the two deleted bars) and ~8 readers, every one a guard that fails CLOSED and silently.
+  `_setDomain`/`_setGenSubTab`/`_setActiveTab`/`_setSculptCategory` are the navigation API;
+  `_applyDomainUI()` does all the DOM work, reading state rather than the clicked button.
+- **Sculpt is a CATEGORY inside WORLD, not a domain** (`_sculptCategoryOpen`). No rail token can
+  encode it, and `_sculptEditorActive()` is the master switch for the whole sculpt input pipeline.
+- **The finalize lock is `[data-genlock]`, never DOM containment.** `_stampGenLock()` stamps it.
+  Any control hoisted out of `#genWorld` needs the attribute AND its own `confirmRegenerate()` —
+  `#resSeg` calls `allocate()` before `generate()`'s guard can refuse.
+- **Domain bodies keep INLINE `style.display`.** `_civSubPageVisible()` reads `#genCiv`'s inline
+  display exactly (v1.96); a class-based hide makes it return true unconditionally and restores the
+  686 ms-per-generate hidden aggregate pass.
+- **Any band that can resize the viewport needs `_scheduleViewportRefit()`.** There was no
+  `ResizeObserver` in this file before v2.24; one observes `.canvas-wrap`. The window listeners stay
+  (DPR, orientation).
+- **`.dockwrap` holds ONLY the docks.** `display:contents` on desktop, the fixed mobile sheet at
+  ≤860px. Nesting `.canvas-wrap` inside it is invisible on desktop and puts the map in the drawer
+  on a phone.
+- **`:not()` contributes its argument's specificity.** The theme layer's button allowlist is wrapped
+  in `:where()` for exactly this reason — unwrapped it read (0,4,1) and silently killed the whole
+  `.seg` border system, including `#debugSeg`'s 6-column grid, for the life of v2.23.
+- **The cog owns program scope; File owns document scope.** GPU, Tiled LOD, Atlas cache, Region
+  export, autosave/snapshots, 3D view, theme, Asset Library and the generation-parameter dump are
+  in `#settingsModal`; import/export stay in File. Search can open the window.
 
 ### Physical crater model (v2.22)
 

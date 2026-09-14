@@ -10,6 +10,131 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.24 DCC test — the GUI frame itself, not a repaint
+
+Owner, on v2.23: *"Compare it to your proposed design. There is no left bar, no rail. Double check
+your work and you goal is to completely replace the current GUI for the new design."* Correct —
+v2.23 changed colour, radius and density and nothing else. This replaces the frame.
+
+`v0.65`'s shell was: one `<header>` carrying every utility, one `.stage`, one 324px `<aside>`
+holding **every** control behind a two-level `#tabBar` + `#genSubBar`. It is now the DCC editor
+frame: **app bar + cog · document bar 40 · conditional tool rail 40 · [domain rail 40 | left dock
+372 | viewport | right dock 304] · status bar 26**, with a Settings window behind the cog.
+
+**Verification: `tests/run.sh` 1160/1160 · `tests/run_um.sh` 852/852 · `hash_gen1.js` vs v2.22 ALL
+IDENTICAL in every scenario including `icons`.** A GUI replacement of this size that leaves the
+render path bit-identical is the single cheapest proof it stayed a layout change; that was the
+gate every step below was held to.
+
+A six-lens read of the file was done before any markup moved, because the risky parts of this are
+not the markup. Seven things it found would each have failed silently:
+
+- **`_activeTab`/`_genSubTab` had exactly ONE writer each — the two bars the frame deletes** — and
+  every reader is a guard that fails CLOSED. Deleting the bars would have frozen both variables at
+  their initial values and quietly disabled the civ tool dispatcher, the carto paint gate and the
+  sculpt pipeline, with nothing thrown. `_domain` is the one writable navigation variable now and
+  both legacy names are DERIVED from it by `_syncLegacyTabVars()`, so every pre-v2.24 reader keeps
+  working untouched.
+- **`_sculptEditorActive()` was `_activeTab==='generate' && _genSubTab==='sculpt'`**, which no
+  four-domain rail token can satisfy. Sculpt is not a domain — it is a way of working on the world
+  — so it became a CATEGORY inside WORLD with its own explicit `_sculptCategoryOpen` flag. A token
+  rename would have looked fine and left the whole sculpt input pipeline dead.
+- **`applyFinalizedUI()` derived the finalize lock from DOM containment in `#genWorld`.** Hoisting
+  seed/extent/grid into the document bar therefore RELEASED them — and `#resSeg`'s handler runs
+  `GW=state.resW; GH=gridH(GW); allocate();` *before* `generate()`'s finalize guard can
+  early-return, so that was a one-click, no-confirm zeroing of a finalized world's arrays while
+  the baked atlas still served the old tiles. The lock is `[data-genlock]` now, stamped by
+  `_stampGenLock()` over exactly the set the old query reached plus the hoisted controls; and
+  `#resSeg`/`#extentSeg`/`#seedN`/`#centerBtn` gained the `confirmRegenerate()` guard they never
+  had. A smoke assertion stubs `allocate` and proves a finalized grid click never reaches it.
+- **`_civSubPageVisible()` reads `#genCiv`'s INLINE `style.display` by design** (v1.96: the read is
+  exact and costs no layout flush on a per-place-mutation path). Hiding domain bodies with a class
+  would have made it return true unconditionally and silently restored the 686 ms-per-generate
+  full-grid aggregate pass into an invisible panel. The bodies keep inline display.
+- **Five CSS rules bound to the bare `aside` TYPE selector**, including `body.setup-gated aside` —
+  the v0.68 gate, the only thing making controls inert while no world exists. Splitting the
+  element would have dropped it. Re-keyed to `.dock`, and **widened**: the gate now covers the
+  document bar, the rail and the status bar too, because the frame hoists Regenerate outside every
+  dock. The smoke assertion was widened to match; retargeting it alone would have passed while the
+  most destructive control on screen stayed live.
+- **There was no `ResizeObserver` anywhere in 32,925 lines** — all four refit paths are
+  `window.addEventListener('resize',…)`. The conditional tool rail changes `.canvas-wrap`'s box
+  with the window motionless. One rAF-debounced observer now runs the same body the window
+  listener does; the window listeners stay, since they also catch DPR and orientation.
+- **`#civFactionsModal` is `position:fixed;inset:0;z-index:72` but was physically nested inside
+  `#genCiv`**, and the comment asserting it "lives OUTSIDE #genCiv" was factually wrong. Re-parented
+  to `<body>` before any dock could become its containing block. Comment corrected.
+
+**A live defect in v2.23, found by that audit and fixed here.** The theme layer's
+`button:not(.accent):not(.subtab):not(.tab):not(.on)` reads **(0,4,1)** — `:not()` contributes its
+argument's specificity — so it out-specified the ENTIRE `.seg` border system: `.seg button` (0,1,1)
+and, worse, `.seg.grid button:nth-child(-n+6)` / `:nth-child(6n)` (0,3,1), the two rules encoding
+`#debugSeg`'s 6-column grid. Every segmented control had been rendering as a row of separate boxes
+since v2.23 shipped. Wrapping the allowlist in `:where()` drops it to (0,0,1) while matching
+exactly the same buttons. Separately, `button.on` was taking a full border inside a `.seg`, making
+the armed cell 1px taller than its neighbours — inside a seg the active state is the fill, not a
+new box.
+
+### What moved
+
+- **Document bar** (always visible): Seed · Extent · Grid · View · Center landmasses · Generate.
+  These lived inside Generate → World, so they vanished the moment you switched branch — they are
+  what you reach for from every domain, which is what a tool-options bar is for.
+- **Domain rail** (vertical, 40px): WORLD · CIVIL · CARTO · EXPLORE. Four domains, not the port's
+  three: this app has a genuine Explore phase the port does not. The buttons carry the SAME literal
+  `data-gsub`/`data-tab` tokens the retired bars did, because `_findPanelOwners` derives panel ids
+  as `'gen'+Cap(gsub)` — keeping the literals keeps unified search working with no code change.
+  Deliberately NOT `class="tab"`: that selector still has a live global handler.
+- **Left dock (372)**: a unified TOOLS block over the active domain's body. The three palettes and
+  the five contextual option rows (POI kind, territory radius, way type, Info readout, route
+  commit) used to live one-per-domain-body, so an armed tool's options could be hidden by a body
+  that was not on screen while the tool stayed armed. **Each palette stays domain-scoped** — the
+  only thing that ever stopped Territory being armed from Cartography was `#genCiv`'s
+  `display:none`, so showing them all at once would have been a silent capability change, not a
+  layout change.
+- **Right dock (304) — the INFORMATION pane.** Owner, mid-build: *"The right bar should be the
+  information pane, not Layers."* So it holds what answers "what am I looking at": Properties (the
+  selection editor, `#inspector`, previously hidden outright on World and Sculpt) and the Info
+  tool's readout (`#civInfoSec`, previously inside the Explore palette, so a location you had just
+  clicked vanished the moment you changed domain). **Layers describes the map VIEW, not the
+  selection, so it stayed on the map** — the first cut moved it into this dock and was wrong. Its
+  popover, its `#layersList`/`#layersOpacity` ids, `buildLayersPopover()` and v0.86's wheel
+  containment are all unchanged. Properties being persistent means it must be CLEARED on a domain
+  switch — the old hide did that for free, which is why `_civClearInspectorIfStale()` exists.
+- **Status bar (26)**: `#readout`, rewritten from seven `<br>`-separated lines (~176px of content
+  at line-height 1.9 — no CSS reflows that into 26px) to inline chips, plus protocol / autosave /
+  GPU. Narrow viewports drop whole chips by priority; a status bar that clips mid-word reads broken.
+- **The cog** — owner: *"put all program options behind the cog wheel (like gpu use and more system
+  specific settings such as data locations)"*. Performance (GPU, Tiled LOD) · Storage & data
+  (autosave + its IndexedDB snapshot store, Atlas cache, Region export) · Appearance (theme, 3D
+  view) · Workspace (Asset Library, the generation-parameter dump) · About (credits). File keeps
+  only DOCUMENT actions — import/export — which is the distinction the DCC shell draws. Search can
+  open the window, or those controls would be findable and unreachable.
+
+### Mobile
+
+One sheet, one `#panelToggle`, one `body.panel-open` — two edge drawers would double the chrome on
+the smallest screen. `.dockwrap` is `display:contents` on desktop (so both docks are flex children
+of `.stage` and `.dock-left{order:-1}` orders them) and the fixed sheet at ≤860px. **The viewport
+must stay OUTSIDE it**: nesting `.canvas-wrap` there is invisible on desktop and puts the map
+inside the drawer on a phone — which is exactly what the first cut did, caught by a 390×844 probe,
+not by reading. The rail goes horizontal at `z-index:31`, above the scrim, so it stays clickable
+with a dock open. Measured after: no horizontal scroll, map 390×592, joystick and zoom overlay
+both inside the map box.
+
+### Tests
+
+`smoke_gen1.js` gained 24 assertions and 13 existing ones were retargeted or widened. Three of
+those were **structure assertions that would have passed vacuously** and were rewritten to assert
+behaviour instead: two direct `_activeTab = …` assignments (inert once derived), and v0.86's
+layers-popover wheel containment — that hazard is closed structurally now (the list is outside
+`.canvas-wrap`), so the assertion pins the reason rather than the retired `stopPropagation` patch.
+A test that still passes after the element it targeted was deleted was never asserting what it
+claimed.
+
+**Still owed a real-device pass**, per this file's own headless carve-out: touch drag on the new
+bands, the drawer gesture, and the joystick at the new chrome height.
+
 ## v2.23 DCC test — a duplicate of v2.22 wearing the port's shell theme
 
 **A parallel experiment, not a mainline bump**, and named `Cartalith v2.23 DCC test.html` without

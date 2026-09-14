@@ -3664,8 +3664,13 @@ if (typeof carveRiverValleys === 'function') {
 /* ---------- v1.15: Sculpt editor — draft layer + commit sequence (live world) ---------- */
 {
   state.world = false; state.resW = 256; GW = 256; GH = gridH(GW); allocate(); generate();
-  const saveActiveTab = _activeTab, saveSubTab = _genSubTab, saveFinalized = state.finalized;
-  _activeTab = 'generate'; _genSubTab = 'sculpt'; state.finalized = false;
+  /* v2.24: _activeTab/_genSubTab are DERIVED from _domain/_sculptCategoryOpen and are no longer
+     authoritative — assigning them here would leave _sculptEditorActive() false and every
+     assertion below would pass or fail for the wrong reason. Drive the real state instead. */
+  const saveDomain = _domain, saveSculptCat = _sculptCategoryOpen, saveFinalized = state.finalized;
+  _domain = 'world'; _sculptCategoryOpen = true; _syncLegacyTabVars(); state.finalized = false;
+  check('v2.24: driving _domain/_sculptCategoryOpen really arms the sculpt editor', _sculptEditorActive() === true);
+  check('v2.24: ...and the derived legacy tab vars agree with it', _activeTab === 'generate' && _genSubTab === 'sculpt');
   sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
   // sculptCommit()'s tail calls sculptSyncUI() to refresh the sliders/stamp-list DOM (createElement +
   // innerHTML + querySelector) — pure browser UI with no effect on engine data, already verified via
@@ -3746,7 +3751,7 @@ if (typeof carveRiverValleys === 'function') {
 
   sculptSyncUI = _sculptSyncUIOrig;
   global.confirm = _confirmOrig;
-  _activeTab = saveActiveTab; _genSubTab = saveSubTab; state.finalized = saveFinalized;
+  _domain = saveDomain; _sculptCategoryOpen = saveSculptCat; _syncLegacyTabVars(); state.finalized = saveFinalized;
   sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
   generate();   // restore a pristine field (this block committed mountains/river/lake stamps into the live world)
 }
