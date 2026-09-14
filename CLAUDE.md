@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.27 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.26 plus five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
+| `Cartalith v2.28 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
+| `Cartalith v2.27 DCC test.html` | Previous DCC-line file — five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
 | `Cartalith v2.26 DCC test.html` | Previous DCC-line file — the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
 | `Cartalith v2.25 DCC test.html` | Previous DCC-line file — three render fixes: rivers switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. Still writes the flat save layout. |
 | `Cartalith v2.24 DCC test.html` | Previous DCC-line file — the GUI FRAME replacement: app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path vs v2.22. |
@@ -1035,6 +1036,15 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### A flex container must never centre an item that can overflow it (v2.28, DCC-line file only)
+
+Owner: the cog window *"falls out of view as soon as we open it"*, ✕ *"barely accessible"*. CSS only; `hash_gen1.js` vs v2.27 ALL IDENTICAL. `tests/perf/probe_cogmodal.js` — 33 assertions, **18 of them fail on v2.27**.
+
+- **Centring splits overflow across BOTH edges, and the top half cannot be scrolled to.** `#settingsModal` was `align-items:center`, so an over-tall shell put the head — which carries the only way out — off the top. Measured on v2.27: `top = −129px`, and the modal was not a scroll container at all. **This file already paid for this once: v1.21, `.al-slice-cv-wrap`.** The fix is the same — do not centre; use `align-items:flex-start` + `margin:auto`, which centres identically while keeping the top edge reachable, plus `overflow:auto`. The head is `position:sticky`.
+- **`vh` again, in the box v2.27 missed.** `.set-shell{height:100vh}` at ≤860px and `min(680px,90vh)` on the desktop rule. Same remedy as v2.27's three boxes: `dvh`, `vh` first as the fallback, and `#settingsModal` itself gains `height:100dvh`. **When you fix `vh` anywhere, grep for the rest.**
+- **The ✕ was 34×26** — under every touch minimum, and the only exit from a full-screen sheet. 44×44 at ≤860px only.
+- **`getComputedStyle().margin` returns the USED value**, so `margin:auto` reads back as resolved pixels (`110px 210px`), never `auto`. Assert the outcome (equal gap above and below), not the mechanism.
 
 ### Shell fixes: one header row, the sidebar's own controls, and `dvh` (v2.27, DCC-line file only)
 
@@ -4221,6 +4231,7 @@ node tests/perf/probe_trade.js A.html       # v2.21 multi-good supply matching +
 node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: controls, saturation, size shift
 node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
 node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
+node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 

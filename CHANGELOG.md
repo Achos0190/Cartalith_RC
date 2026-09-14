@@ -10,6 +10,64 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.28 DCC test — the cog window centred itself off the top of the screen
+
+Owner: *"The cog wheel menu falls out of view as soon as we open it. On smartphone the X button is
+barely accessible."* Two faults, each alone enough to put the ✕ out of reach. CSS only — no JS
+changed: `tests/run.sh` 1160/1160 · `tests/run_um.sh` 852/852 · `hash_gen1.js` vs v2.27 **ALL
+IDENTICAL** · `tests/perf/probe_cogmodal.js` (new) **33/33**, and **18 of those 33 fail on v2.27**.
+
+### `vh` again — in the box the v2.27 pass missed
+
+`@media (max-width:860px){ .set-shell{width:100vw;height:100vh} }`, plus `min(680px,90vh)` on the
+desktop rule. v2.27 fixed `html,body`, the mobile dock sheet and the Layers popover for exactly this
+reason and left the Settings shell carrying the original unit. Same remedy: `dvh`, with the `vh`
+declaration first as the fallback, and `#settingsModal` itself gains `height:100dvh` so the fixed
+layer tracks the dynamic viewport too.
+
+### A flex container must never centre an item that can overflow it
+
+This is the half that actually hides the ✕, and the half that reproduces headlessly.
+`#settingsModal` was `display:flex; align-items:center`. Centring splits any overflow across **both**
+edges, and the top half cannot be scrolled to — so the head, which carries the only way out, goes off
+the top. **Measured on v2.27: force a shell taller than its container and the head sits at
+`top = −129px`, with the modal not a scroll container at all (`overflow: visible`).**
+
+This file has paid for this quirk once already: v1.21 hit it on `.al-slice-cv-wrap` and fixed it by
+not centring. Same fix here — `align-items:flex-start` with `margin:auto` on the shell, which centres
+identically while keeping the top edge reachable, plus `overflow:auto` on the modal. The head is also
+`position:sticky` now, so it stays put while the body scrolls.
+
+With `dvh` working the shell never exceeds the viewport and none of this should trigger; it is the
+belt-and-braces for a browser without `dvh`, where the `vh` fallback can still overflow.
+
+### The ✕ was not a touch target
+
+34×26 px, under every touch minimum, and the only way out of a full-screen sheet. 44×44 at ≤860px
+only — the desktop button is a pointer target and is unchanged.
+
+### Verification
+
+`tests/perf/probe_cogmodal.js` runs three viewports (desktop, 390×720, 390×480) and checks the shell
+fits, the head and ✕ are fully on-screen, the modal is a scroll container that does not centre-clip,
+the shell is still centred (equal gap above and below), and the ✕ is a real touch target on mobile —
+then **forces the overflow case directly** (`sh.style.height = innerHeight + 260`) and asserts the
+head is still reachable at `scrollTop = 0`. Four source assertions pin `vh`-then-`dvh` on both shell
+rules.
+
+**A test-writing mistake caught before shipping**: the first cut asserted `margin:auto` by reading
+`getComputedStyle(...).margin`, which returns the **used** value — `110px 210px` on desktop, i.e. the
+auto margins correctly resolved to centring pixels, never the literal `auto`. The assertion was
+wrong, not the fix; replaced with the outcome (equal gap above and below).
+
+### Known scope cuts
+
+Headless Chromium cannot model the dynamic viewport — `vh` there equals the real viewport, so the
+`dvh` half is asserted at the source and by the shell fitting a short viewport, not reproduced. The
+flexbox-centring half IS reproduced, and is what the measurement above shows. On-device confirmation
+of the address-bar case stays under this file's headless carve-out. `.cv-modal` on `#settingsModal`
+remains a class with no rule anywhere — inert, left alone.
+
 ## v2.27 DCC test — the header cluster, the sidebar's own controls, and three phone symptoms with one cause
 
 Five owner reports in one pass, all shell (markup + CSS + two small wiring changes). **Nothing here is
