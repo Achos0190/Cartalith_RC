@@ -4715,6 +4715,31 @@ if (typeof carveRiverValleys === 'function') {
       Math.abs((0.8 - coarse) - 40 * CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K) < 1e-5);
   }
 
+  /* ---- v2.32: gaussBlur's CPU path is now the ONLY path on the hot route ---------------------- */
+  {
+    /* Pins the decision, not the timing: the measured evidence lives in tests/perf/probe_blur.js
+       (it needs WebGL2, which this harness does not have). If someone re-enables the shader route,
+       this fails and sends them to that probe rather than letting it back in silently. */
+    check('v2.32 blur: the GPU blur route is off by default', GAUSS_BLUR_GPU === false);
+
+    /* boxH/boxV carry a RUNNING SUM — that is the whole reason the CPU path is radius-free and so
+       beats the shader. A broken sum shows up first as a constant field that does not survive. */
+    const W = 64, H = 48, flat = new Float32Array(W * H).fill(0.375);
+    check('v2.32 blur: a constant field survives a blur unchanged, at any radius',
+      [2, 9, 40].every(r => { const o = gaussBlur(flat, r, W, H, false);
+        for (let i = 0; i < o.length; i++) if (Math.abs(o[i] - 0.375) > 1e-5) return false; return true; }));
+
+    /* and it is a blur: more radius, less variance, monotonically. */
+    const spike = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) spike[y * W + x] = ((x >> 2) + (y >> 2)) % 2;
+    const varOf = a => { let m = 0; for (const v of a) m += v; m /= a.length;
+      let s2 = 0; for (const v of a) s2 += (v - m) * (v - m); return s2 / a.length; };
+    const v0 = varOf(spike), v1 = varOf(gaussBlur(spike, 3, W, H, false)), v2 = varOf(gaussBlur(spike, 20, W, H, false));
+    check('v2.32 blur: variance falls monotonically with radius', v0 > v1 && v1 > v2, v0 + '/' + v1 + '/' + v2);
+    check('v2.32 blur: r<1 returns a COPY, never the caller\'s own array',
+      (() => { const o = gaussBlur(flat, 0, W, H, false); return o !== flat && o.length === flat.length; })());
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

@@ -10,6 +10,129 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.32 DCC test — the GPU blur was the slow path, at every size and every radius
+
+Owner: *"are there any performance or rendering upgrades or gains to be made?"* Answered by
+profiling rather than by reading, and the biggest line in the profile turned out to be one this
+file had twice looked at and twice, reasonably, declined to touch. `tests/run.sh` **1175/1175**
+(+4) · `tests/run_um.sh` 852/852 · `tests/perf/probe_blur.js` (new) **7/7**, 2 of them failing on
+v2.31 · `hash_gen1.js` vs v2.31 diverges — a deliberate, quantified re-baseline, below.
+
+### The measurement that changed the answer
+
+A CPU self-time profile of one `generate()` at 1024px put **`readPixels` first at 1568 ms, 24.2 %**
+of the whole run. v1.89 and v1.96 both saw that line and both declined to act on it, on the correct
+reasoning that this box is a software rasteriser and cannot represent a real GPU. That reasoning is
+sound about *magnitudes*. It does not cover the question neither pass asked: **is the GPU path
+faster than the CPU path it replaces at all?**
+
+It is not. `gaussBlur` and `GPU.blurArr` are the *same algorithm* — three passes of a separable box
+blur at radius `pr = round(r/1.6)`, agreeing to 1.2e-7, i.e. float32 noise. They are not the same
+complexity. `boxH`/`boxV` carry a **running sum**, so a pass is O(N) and the radius is free; the
+shader samples the whole 2·pr+1 kernel per texel, so it is O(N·pr), and then pays a synchronous
+`readPixels`:
+
+| | r=6 | r=24 | r=64 |
+|---|---|---|---|
+| **512px** | GPU 31.1 / CPU 5.8 | GPU 78.2 / CPU 5.9 | GPU 180.0 / CPU 8.3 |
+| **1024px** | GPU 114.0 / CPU 36.2 | GPU 291.2 / CPU 36.5 | GPU 691.1 / CPU 36.8 |
+| **2048px** | GPU 419.9 / CPU 197.8 | GPU 1121.2 / CPU 150.3 | GPU 2680.6 / CPU 156.8 |
+
+CPU wins everywhere, by 2.1x to 21.7x, **and the gap widens with radius** — the CPU column is flat
+(36 ms at 1024 whether `pr` is 4, 15 or 40) and the GPU column is not. That shape is the part that
+survives a change of machine: more cores move the constant, they do not make 2·pr+1 fetches cheaper
+than two adds, and a synchronous readback stalls a real pipeline too.
+
+### What it was costing
+
+Only the five full-grid callers took the shader route (`w===GW && h===GH`), and they are exactly the
+expensive ones: `stressField`, `shearField`, the **flexural blur at `blurR*3`** — the largest radius
+in the file — `baseField`, and `isostaticRebound` inside `carveRiverValleys()`. The coarse 240×150
+climate blurs never qualified.
+
+| stage @1024px | v2.31 | v2.32 |
+|---|---|---|
+| **generate() total** | **5919 ms** | **3894 ms  (−34.2 %)** |
+| flexure | 599 | **49  (−92 %)** |
+| plates+stress | 1196 | 694  (−42 %) |
+| carveRivers | 2076 | 1500  (−28 %) |
+| baseBlur | 107 | 44 |
+
+512px: 2057 → **1631 ms (−20.7 %)**; 2048px: 20153 → **13758 ms (−31.7 %)**, where flexure's
+2921 ms leaves the top six entirely. The win grows with resolution because the radius does.
+
+### A timing calibration was considered and rejected
+
+The obvious fix is to measure both paths once at startup and keep the winner. It was rejected: the
+blur feeds `stressField` and the flexural field, so the terrain would become a function of **how
+busy the machine was when the page loaded** — the same seed could produce two different worlds on
+one computer. A fixed choice, justified by the complexity argument rather than by one box's
+timings, is the only version that stays deterministic. `GAUSS_BLUR_GPU` keeps the shader route
+compiled and one flag away, for anyone re-testing on real hardware.
+
+### The re-baseline, quantified rather than waved at
+
+Two float32 implementations of one algorithm do not agree bit-for-bit, so with WebGL2 up the
+generated world moves. Measured at seed 12345/512px, GPU on for both sides:
+
+| | max &#124;Δ&#124; | mean &#124;Δ&#124; | peak as a share of the field's own range |
+|---|---|---|---|
+| `field` | 2.31e-4 | 8.03e-8 | 0.0234 % |
+| `temp` | 1.03e-2 °C | 2.45e-6 | 0.0266 % |
+| `rain` | 3.83e-5 | 9.25e-8 | 0.0038 % |
+
+The mean is below float32 resolution; the worst single cell moves 2.31e-4 of a [0,1] heightmap,
+about **2 m** on this file's own 8848 m scale. It is the same world. `hash_gen1.js` nonetheless
+mismatches in every scenario, and that is honest rather than hidden — note that the **headless
+suite is bit-identical** (no WebGL2 there, so it always took the CPU path), which is what makes it
+a clean confirmation that only the blur route changed.
+
+### Tests
+
+`probe_blur.js` measures both claims in a real browser, because the headless harness has no WebGL2
+and so has never been able to see this: the two implementations agree to float32 noise; the CPU is
+faster at r=6 and by a **wider** margin at r=64; the CPU cost is near radius-independent while the
+shader's is not; and a live `gaussBlur` call really does take the CPU route with WebGL2 up. Four
+headless assertions pin the decision and guard the running sum that is now the only implementation
+on the hot path — a constant field must survive a blur at any radius, variance must fall
+monotonically with radius, and `r<1` must return a copy rather than the caller's own array.
+
+### A second unpinned-seed assertion, disclosed not fixed
+
+One run of `tests/run.sh` on this build reported **1174/1 — `world seam avg delta < 0.12 (got
+0.1671)`** (invariant 9), and it did not reproduce. It **cannot** be this change: `tests/stub_head.js`
+returns `null` for any `getContext` other than `'2d'`, so the headless harness has no WebGL2,
+`GPU.enabled` is false, and the branch this version touches is unreachable there — v2.31 and v2.32
+run byte-identical code under that suite. The cause is the same shape v2.25 already documented for
+`SST anomaly has warm + cold cells`: the seam block sets `state.world = true` and calls `generate()`
+on **whatever seed the preceding ~630 assertions happened to leave behind**, and invariant 9's own
+note in `CLAUDE.md` says the metric is seed-dependent and sometimes near its threshold.
+
+That is now **two** assertions in `test_tail.js` deciding a pass on an unpinned ambient seed. The
+fix is v2.25's own prescription — measure an aggregate across several PINNED seeds, which is both
+deterministic and broader coverage than one arbitrary world — and it belongs to a deliberate pass
+over both of them, not bolted onto a performance version. Recorded here rather than quietly re-run.
+
+### A dropped argument on the route this version switches off
+
+`gaussBlur` has always called `GPU.blurArr(src, r, wrapX)`. `blurArr` took **two** parameters and
+substituted `!!state.world` for the third. Inert in practice — every full-grid caller takes
+`gaussBlur`'s own `state.world` default, so the two agreed — but the shader route is now one flag
+away from being live again, and an escape hatch that silently ignores its `wrapX` is not an escape
+hatch. `blurArr` accepts and honours the argument now.
+
+### Also measured, and deliberately not acted on
+
+- **`carveRivers` is still the largest stage** (1500 ms, 38.5 % at 1024px) and `streamPowerKernel`
+  is most of it. v1.89/v1.92 already worked it; the remaining cost is `P.iters` real work.
+- **v2.29/v2.30 did not make the carve slower**, which is worth recording because it is the
+  opposite of what I assumed before measuring: the carve costs **1774 ms on v2.31 against 2085 ms
+  on v2.28**, and v2.30's 2.4x extra carve points cost 5 ms of it.
+- **The interactive render path is already fully cached** — 20 back-to-back `renderNow()` calls
+  total 7 ms. The 622 ms "render" in the stage table is the single cold render inside `generate()`.
+
+---
+
 ## v2.31 DCC test — the domain rail is the phone drawer's head, not a band above the map
 
 Owner: *"in smartphone mode I'd like to put the buttons for world, carto, explore and civil back on

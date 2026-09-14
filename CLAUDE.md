@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.31 DCC test.html` | **The DCC shell line's current head, not a mainline version.** `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
+| `Cartalith v2.32 DCC test.html` | **The DCC shell line's current head, not a mainline version.** `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~2 m on an 8848 m scale) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
+| `Cartalith v2.31 DCC test.html` | Previous DCC-line file. `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
 | `Cartalith v2.30 DCC test.html` | Previous DCC-line file. The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
 | `Cartalith v2.29 DCC test.html` | Previous DCC-line file. Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
 | `Cartalith v2.28 DCC test.html` | Previous DCC-line file — the cog window's two faults: v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
@@ -26,7 +27,7 @@ threads; `file://` must degrade gracefully, never break).
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1171-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1175-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -38,7 +39,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1171 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1175 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1039,6 +1040,41 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### gaussBlur's CPU path is the FAST path, not a fallback (v2.32, DCC-line file only)
+
+Owner: *"are there any performance or rendering upgrades or gains to be made?"* Found by profiling.
+**`generate()` 5919 → 3894 ms at 1024px (−34%)**; 2057 → 1631 at 512px, 20153 → 13758 at 2048px. Verification is
+`tests/perf/probe_blur.js` (7 assertions, 2 of which fail on v2.31) plus 4 headless ones.
+
+- **`gaussBlur` and `GPU.blurArr` are one algorithm, not two** — three separable box-blur passes at
+  `pr=round(r/1.6)`, agreeing to 1.2e-7. They are not one COMPLEXITY: `boxH`/`boxV` carry a running
+  sum (O(N), radius free — 36 ms at 1024 whether pr is 4 or 40) while the shader scans the whole
+  2·pr+1 kernel (O(N·pr)) and then blocks on `readPixels`. Measured **2.1x–21.7x** in the CPU's
+  favour at every size and radius, **widening with radius**. That shape is algorithmic; more cores
+  move the constant, not the exponent. **Do not "restore" the GPU route without re-running the
+  probe on the hardware you are claiming it for.**
+- **Only the five full-grid callers ever took it**, and they are the expensive ones: `stressField`,
+  `shearField`, the flexural blur at `blurR*3` (the file's largest radius), `baseField`, and
+  `isostaticRebound` inside `carveRiverValleys()`. `readPixels` was **24.2%** of a 1024px generate.
+- **A startup timing calibration is the wrong fix and was rejected.** The blur feeds `stressField`
+  and flexure, so picking the path by measurement would make the terrain depend on how busy the
+  machine was at load — one seed, two worlds, on one computer. `GAUSS_BLUR_GPU` is a fixed flag.
+- **The re-baseline is quantified, not waved at**: with WebGL2 up the world moves by max 2.31e-4 on
+  `field` (mean 8.03e-8 — below float32 resolution; ~2 m at the worst cell on an 8848 m scale). The
+  **headless suite is bit-identical**, having no WebGL2, which is what confirms only this route
+  changed.
+- **`tests/stub_head.js` returns `null` for any `getContext` but `'2d'`** — the headless suite has
+  no WebGL2 at all, so it never took the shader route and cannot see any of this. That is also the
+  proof that a sporadic `world seam avg delta` failure seen once on this build is not from here:
+  both versions run byte-identical code under that harness. It is the **second** `test_tail.js`
+  assertion found deciding on an unpinned ambient seed (with v2.25's SST one) — the seam block
+  generates on whatever seed ~630 earlier assertions left behind. v2.25's prescription (an aggregate
+  over PINNED seeds) applies to both, as one deliberate pass; do not loosen either threshold.
+- Measured and NOT acted on: `carveRivers` is still the largest stage (38.5%) and is real
+  `streamPowerKernel` work; the interactive render path is already fully cached (20 `renderNow()`
+  calls = 7 ms); and **v2.29/v2.30 did not make the carve slower** — 1774 ms on v2.31 vs 2085 ms on
+  v2.28, with v2.30's 2.4x extra carve points costing 5 ms.
 
 ### The domain rail is the phone drawer's head (v2.31, DCC-line file only)
 
@@ -4309,7 +4345,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1171-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1175-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -4326,6 +4362,7 @@ node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: contr
 node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
 node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
 node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
+node tests/perf/probe_blur.js A.html       # v2.32 gaussBlur: the CPU path is the fast one (needs a real browser — the headless suite has no WebGL2)
 node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer head on a phone, unchanged on desktop
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
