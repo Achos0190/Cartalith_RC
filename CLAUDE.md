@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.32 DCC test.html` | **The DCC shell line's current head, not a mainline version.** `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~1.6 m at default peakM) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
+| `Cartalith v2.33 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
+| `Cartalith v2.32 DCC test.html` | Previous DCC-line file. `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~1.6 m at default peakM) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
 | `Cartalith v2.31 DCC test.html` | Previous DCC-line file. `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
 | `Cartalith v2.30 DCC test.html` | Previous DCC-line file. The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
 | `Cartalith v2.29 DCC test.html` | Previous DCC-line file. Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
@@ -1040,6 +1041,37 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Land routing costs TIME — and slope is not the binding term (v2.33, DCC-line file only)
+
+`docs/research/routing-audit.md`'s P1 item 5, deferred since v1.98. **Read the last bullet before
+building on this.**
+
+- **Three land cost functions were live** and which you got depended on how the road was made: the
+  auto network had the full terrain model, the Route tool a partial one, and the **Way tool, village
+  tracks and the sea-lane MST's land branch had slope and nothing else**. `_civTravelHours` is the
+  one model now, in **hours per routing cell on level ground**. `buildTravelCost` stays for the debug
+  view and `_civAutoPolity` — a control flood is not a road.
+- **`1 + 50·sl²` took `sl` in field units per cell**, so one hillside scored differently at 512 and
+  2048 and no number was ever comparable with the Journey Planner's hours.
+- **Slope belongs on the EDGE, not the cell** — it is the only place a direction exists. Tobler on
+  signed rise/run (**not** degrees, **not** percent — F-2's documented misuse), **averaged over both
+  directions** because a road is bidirectional and a Prim MST is undirected (v1.98's own resolution).
+- **The per-cell array stays the carrier, and that is load-bearing**: settlement gravity, the ×0.25
+  existing-way discount and the usage-count reuse pass all multiply `cost[i]` in place and keep
+  working untouched — a multiplier on hours is a speed multiplier. Any future term must preserve that.
+- **Fords and bridges are additive HOURS**, not added cost. A crossing is a wait.
+- **It changed almost nothing, and the reason is measured**: p50 grade on the routing grid is 1.20%,
+  p90 5.77%, p99 14.66% — Tobler gives ×1.001, ×1.043, ×1.42 there, while the non-slope terms span
+  ×0.55–×1.8. **Slope was never binding, for either formula.** Refuted along the way: the routing
+  grid is NOT washing grades out (2.08 km cells reproduce the full-res distribution).
+- **`'land'` vs `'mixed'` is not a fair model comparison** — mixed may cross water, so the domains
+  differ. An earlier claim of mine that "the routers disagree by 71%" conflated the two; the honest
+  comparison is same-mode across versions.
+- **The leverage is in the terms that were never measured** — `_civBiomeFriction` 1.0–1.6, swamp 1.8,
+  river 0.65, reuse 0.55 are invented multipliers. Step two is to source them from **`JP_TERRAIN.land`**
+  (travel-speeds.md-grounded) via the classifier `_jpDeriveStages` already runs. **`JP_BIOMES` is not
+  that table** — it has water/forage/grazing/weather and no speed.
 
 ### gaussBlur's CPU path is the FAST path, not a fallback (v2.32, DCC-line file only)
 

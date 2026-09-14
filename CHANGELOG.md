@@ -10,6 +10,93 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.33 DCC test — land routing costs TIME, and that alone does not make routes quicker
+
+Owner: *"routes should always offer a quicker transport or lower cost and are therefore preferred,
+and at the same time they traverse terrain at its lowest costs."* This is
+`docs/research/routing-audit.md`'s own **P1 item 5**, deferred when v1.98 shipped the sea half.
+`tests/run.sh` 1175 passed / **0 failed** · `tests/run_um.sh` 852/852. **Read the "what it did not
+do" section before building on this** — it is step one of two, and on its own it moves nothing.
+
+### What was actually wrong
+
+Three land cost functions were live, and which one you got depended on how you drew the road:
+
+| how the road was made | model | slope | biome | passes | swamp | fords | nav. river | reuse |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| auto network, `_civConnectPlaceToNetwork` | `_civEnhancedTravelCost` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Route tool (`'mixed'`, the default) | `_civMixedCostGrid` | ✓ | ✓ | — | — | — | ✓ | — |
+| **Way tool, village tracks, sea-lane MST land branch** | `buildTravelCost` | ✓ | — | — | — | — | — | — |
+
+And none of the three was time-valued. Worse, `1 + 50·sl²` takes `sl` in **field units per cell**,
+so the same hillside scored differently at 512 and 2048 and the number could never be compared
+against the Journey Planner, which reports hours.
+
+### What was built
+
+`_civTravelHours` is the one land model, in **hours per routing cell on level ground**, carrying
+every term `_civEnhancedTravelCost` had. Slope moved to the `edgeCost` hook v1.98 added to
+`roadDijkstra`, because that is the only place a direction exists: a Tobler speed curve
+(`6·exp(−3.5·|S+0.05|)`, rise/run — **not** degrees, **not** percent, the misuse F-2 warns about)
+on the signed grade, **averaged over both directions** because a road is bidirectional and a Prim
+MST is undirected — the same resolution v1.98 reached for sea lanes. Fords and bridges became
+additive **hours** rather than added cost, which is what a crossing delay always was.
+
+Keeping the per-cell array as the carrier is the load-bearing decision: `_civApplySettlementGravity`,
+the ×0.25 existing-way discount and the usage-count reuse pass all multiply `cost[i]` in place, and
+every one keeps working untouched — a multiplier on hours is a speed multiplier, which is what they
+always meant. Wired into all five land searches. `buildTravelCost` stays where it belongs: the
+debug view and `_civAutoPolity`, whose flood is a projection of control, not a road.
+
+### What it did not do, measured
+
+Same mode, same pairs, v2.32 → v2.33, priced in Tobler hours over the real heightmap:
+
+| | travel hours | path km | total climb | pairs faster / slower |
+|---|---|---|---|---|
+| `'land'` | 1761 → 1764 (+0.1 %) | 8811 → 8828 | 47.6 → 49.7 km (+4.5 %) | 7 / 9 |
+| `'mixed'` | 1821 → 1828 (+0.4 %) | 9105 → 9141 | 53.5 → 55.1 km (+2.9 %) | 4 / 13 |
+
+**It does not make routes quicker.** The reason is measured, not guessed: this world's grades are
+gentle. On the routing grid, p50 **1.20 %**, p90 5.77 %, p99 14.66 % — and Tobler at those grades is
+×1.001, ×1.043, ×1.42. The non-slope terms span ×0.55 (road reuse) to ×1.8 (swamp), a 3.3× range
+that dominates everywhere except the top percentile. **Slope was never the binding constraint — not
+for the new formula and not for the old one.** The model is right and the terrain is simply not steep
+enough for it to matter.
+
+A hypothesis of mine, refuted before it reached the code: that the downsampled routing grid was
+washing the grade out. It is not — 2.08 km cells reproduce the full-res distribution closely
+(p50 1.20 % vs 1.35 %, p99 14.66 % vs 14.41 %).
+
+### A measurement of mine that was wrong, and the corrected one
+
+I first reported "the two routers disagree by up to 71 % on a pair's travel hours" as evidence of a
+model mismatch. That compared `'land'` against `'mixed'` — **different allowed domains**, not just
+different cost functions: mixed mode may cross water, so of course it differs, and the disagreement
+was mostly legitimate. The real defect is the three-models table above, which is structural and
+stands. The corrected comparison is the same-mode A/B in the previous section.
+
+### Connectivity: reshuffled, not broken
+
+`probe_roadconnect.js` fails one seed on **both** builds — v2.32 on 99001 (27/28), v2.33 on 31337
+(49/51) — and road components improved on two of four seeds (4242 4→3, 99001 2→1) while worsening on
+one (31337 2→3). The assertion is really about whether a way's endpoint lands inside the settlement
+snap radius, so moving route geometry inevitably reshuffles which pairs sit at that edge. Pre-existing
+and marginal on both sides; no systematic degradation, and no improvement claimed either.
+
+### Where the remaining leverage actually is
+
+The binding terms are the ones that were never measured: `_civBiomeFriction` (1.0–1.6), swamp 1.8,
+navigable river 0.65, road reuse 0.55 — invented multipliers, not speeds. The genuine unification
+P1 item 5 asks for is to source them from **`JP_TERRAIN.land`**, the Journey Planner's own
+travel-speeds.md-grounded table, via the same terrain classifier `_jpDeriveStages` already runs over
+a drawn route. Then the router minimises literally the Planner's objective and "quicker" means one
+thing in both. Note `JP_BIOMES` is **not** that table — it carries water/forage/grazing/weather and
+no speed; the speed lives in `JP_TERRAIN.land`, keyed by terrain class, which is why the classifier
+and not the biome raster is the piece to reuse. That is step two, and it is where the gain is.
+
+---
+
 ## v2.32 DCC test — the GPU blur was the slow path, at every size and every radius
 
 Owner: *"are there any performance or rendering upgrades or gains to be made?"* Answered by
