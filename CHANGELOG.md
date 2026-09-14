@@ -10,6 +10,111 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.26 DCC test — the save file becomes the project tree
+
+Owner: *"Update the saving structure to match the GDT spec."*
+
+**Half of this was already built, and the half that was missing was the half nothing could
+notice.** v2.11 implemented a complete READER for `SAVEFILE_COMPAT.md`'s tree — that is the
+"second independent implementation" the spec's own §1.2 records being tested against, and eleven
+of its defects were fixed because of it. Its header ends *"This is the reading half. exportZip()
+below is untouched."* So for fifteen versions this app **accepted** the tree and still **saved**
+the flat layout. `DECISIONS.md` §7h, quoted verbatim in the spec's §1, is one sentence: readers
+accept both layouts, **writers produce only the tree**. This is the writing half.
+
+`tests/run.sh` 1160/1160 · `tests/run_um.sh` 852/852 · `hash_gen1.js` vs v2.25 **ALL IDENTICAL**
+in every scenario — nothing here is reachable from `generate()` or `renderNow()`.
+`tests/perf/probe_savetree.js` (new) **35/35**.
+
+### `_treeWriteEntries()` is the exact inverse of `_treeRead`, and sits beside it
+
+Member for member, in the same order. A reader/writer pair is the "two functions answering one
+question" shape this file has paid for seven times (v1.30, v1.33, v1.35, v1.38, v1.48, v1.50,
+v1.95) with a longer feedback loop: nothing catches a mismatch until someone reopens a save.
+
+Written now: `project.json` (§7), `params.json`'s `reference` view (§13.1), ten `rasters/`
+(§8.1), `entities/` settlements + factions + ways + continents (§9), `history/timeline.json` plus
+per-year `history/territory/<year>.i32` (§10), `annotations/` labels + icons + region (§11), and
+`vault.json` (§13.3). Documents this build does not model ride back out from `state.treeCarried`
+as the exact bytes they arrived as — §6.5's rule, and §14.2's KV-04 is what decoding them costs.
+
+### The one mapping that is not symmetric, and it is the one this file keeps getting wrong
+
+§9.3's `from`/`to` are indices into **`entities/settlements.json`'s array**. This app's `aIdx`/
+`bIdx` index **`state.places`**, which also holds POIs — the spec's §15.1 says so explicitly.
+Writing `aIdx` straight through points a road at whichever settlement happens to land at that
+position once the POIs are filtered out: exactly the "one list, two index bases" defect v1.75 and
+v2.18 both shipped, and which neither threw for, because a wrong-but-plausible index is an
+ordinary answer. `_twSettleIndex` builds the remap; a road whose endpoint is not a settlement is
+dropped rather than silently repointed. The probe forces the two bases apart the v1.75 way — two
+POIs **inserted ahead of** the settlements — and checks every road still joins the same two
+settlements **by name**, before and after a full round trip.
+
+### A real bug this introduced, found by measuring rather than reading
+
+The first cut stripped `places` from `params.json` wholesale, since settlements now have their
+own entry. A round trip then took **20 places to 18**: the author's two POIs, deleted by a save.
+The tree has no slot for them and correctly so — §9.1's `kind` is a closed six-tier settlement
+set, §15.1 forbids inventing a settlement from a point that is not one, and §11's annotations are
+things nothing downstream reads, which a named, editable POI is not. §13.1 says `reference` is
+precisely where a payload one vocabulary has and the other does not belongs, so they ride there
+under their own `pois` key; `_treeRead` appends them **after** the settlements, the one order that
+cannot disturb the indices every `from`/`to` is measured against. A port reader ignores the member
+(§14.3).
+
+### What is deliberately not written — none of it an omission
+
+- **`heightmap_rg16.bin`** — §15.2: no equivalent in the tree and MUST NOT be written into one.
+  It is a 16-bit quantisation of a heightmap the archive already carries losslessly, so an archive
+  holding both holds two disagreeing elevations with no rule about which wins. The only entry
+  deleted rather than moved; `packHeight16` stays, because the atlas and refined tiles still use it.
+- **The grid, inside `params.json`** — §13.1: it lives in `project.json` and only there. The flat
+  layout stored it in both places; that is the duplication the tree exists to remove.
+- **`appearance.json`** — a MAY, and `_treeRead` already declines to READ it for a stated reason:
+  this app's presentation arrives inside `reference.viz`, and writing it twice gives one look two
+  homes that can disagree. Declining symmetrically is what keeps that true.
+- **`entities/provinces.json` of this app's own derivation** — §9.4: provinces here are re-derived
+  from territory and settlements on demand, and that section is explicit that such an
+  implementation MUST NOT write a derived document into an archive whose provinces it ignored,
+  which would replace the author's names with generated ones. One that arrived FROM a tree is
+  re-emitted unchanged; one this app derived is not written.
+
+### The downstream half of the export is untouched
+
+`biome_baked.bin`, `cartalith_grid.json`, the lithology and resource fields, `features.json`, the
+baked `map.png`, the channel atlas and the asset library all still ride along. §6.1 calls every
+entry past the minimal two "optional enrichment" and §6.3 requires a reader to ignore what it does
+not recognise, so they are conformant — which is what lets the save format change without breaking
+the pipeline that consumes them.
+
+### Verification is a probe, not a smoke block
+
+Every assertion needs a real `exportZip()` → `loadZip()` round trip on a real populated world, and
+the backward-compatibility half needs **two builds open at once**. `smoke_gen1.js` runs one page
+against one file and, in this environment, crashes near its own end (disclosed since v1.100), so
+these would never have run there. `probe_savetree.js` drives the SHIPPED `exportZip()` — capturing
+the Blob it hands `URL.createObjectURL`, v1.90's technique — never a reimplementation of the zip
+writer. Measured: territory bit-identical through the sparse↔i32 conversion (27 096 cells, FNV
+`739932449` both sides); heightmap bit-identical; labels, icons, the region marquee, factions,
+seed, sea level and map width all intact; **zero** damage reports on load. And a v2.25 export —
+confirmed flat — opens in v2.26 with its settlements, ways and labels intact and a bit-identical
+heightmap, which is §4's "readers accept both layouts" proven across two real builds rather than
+asserted.
+
+### Known scope cuts
+
+- No `cartalith` view in `params.json` (§13.1's flat dotted key map). This app has no way to
+  produce one, so it is absent rather than guessed; §13.1 says a reader reads whichever view it
+  understands and neither is authoritative.
+- `entities/journeys.json` (§9.6) stays reserved and unwritten — this app's journeys are written
+  as §9.3's `routes`, which is what they are.
+- `library/` and `drafts/` stay reserved (§16.3, §16.5).
+- §1.1's interoperability export — a deliberately lossy flat export for handing a file to an
+  unmodified pre-upgrade build — is not offered. Nothing has asked for one, and it MUST be
+  presented as an export rather than as saving, so it is a UI decision as much as a format one.
+
+---
+
 ## v2.25 DCC test — rivers that scale with zoom; LOD tile hillshade normalised
 
 Owner, on v2.24: *"Can you check if we can optimise the rendering pipeline to get more detail as we

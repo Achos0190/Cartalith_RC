@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.25 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.24's frame plus three render fixes: rivers now switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. `field`/`temp`/`rain`/`flow` IDENTICAL vs v2.24; the `rgba` delta is proven to be only the river overlay (byte-identical with `riverWays=false`). Run the suites against it explicitly: `tests/run.sh "Cartalith v2.25 DCC test.html"`. |
+| `Cartalith v2.26 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.25 plus the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
+| `Cartalith v2.25 DCC test.html` | Previous DCC-line file — three render fixes: rivers switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. Still writes the flat save layout. |
 | `Cartalith v2.24 DCC test.html` | Previous DCC-line file — the GUI FRAME replacement: app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path vs v2.22. |
 | `Cartalith v2.23 DCC test.html` | The theme layer alone, kept. Every DCC-line file is deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.2x` name would have made an experiment the suite's default target. |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
@@ -1033,6 +1034,45 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The save file is the project TREE (v2.26, DCC-line file only)
+
+Owner: *"Update the saving structure to match the GDT spec."* `SAVEFILE_COMPAT.md` §1 (=
+`DECISIONS.md` §7h) is one sentence: **readers accept both layouts, writers produce only the tree.**
+v2.11 built the reader — it is the "second independent implementation" that spec's own §1.2 records,
+and eleven of its defects were fixed because of it — and its header ends *"exportZip() below is
+untouched."* So this app accepted the tree and still SAVED the flat layout for fifteen versions.
+`hash_gen1.js` vs v2.25 ALL IDENTICAL; nothing here is reachable from `generate()`/`renderNow()`.
+
+- **`_treeWriteEntries()` is the exact inverse of `_treeRead`, member for member, and lives beside
+  it.** A reader/writer pair is the "two functions answering one question" shape this file has paid
+  for seven times, with a longer feedback loop: nothing catches a mismatch until someone reopens a
+  save. **Change one, change the other, in the same edit.**
+- **§9.3's `from`/`to` index `entities/settlements.json`'s ARRAY; this app's `aIdx`/`bIdx` index
+  `state.places`, which also holds POIs.** Writing `aIdx` through repoints every road — the v1.75 /
+  v2.18 "one list, two index bases" defect, which never throws because a wrong-but-plausible index
+  is an ordinary answer. `_twSettleIndex` is the remap; an endpoint that is not a settlement drops
+  the road rather than repointing it. **Test it by forcing the bases apart** (POIs inserted AHEAD of
+  the settlements) and checking roads still join the same settlements BY NAME.
+- **The tree has no POI slot, and stripping `places` from `params.json` deletes them.** Measured:
+  a round trip took 20 places to 18 before this was caught. §9.1's `kind` is a closed six-tier
+  settlement set, §15.1 forbids inventing a settlement from a point that is not one, and a named
+  editable POI is not an §11 annotation. They ride in `reference.pois` (§13.1's stated home for a
+  payload one vocabulary has and the other does not) and `_treeRead` appends them **after** the
+  settlements — the one order that cannot disturb the indices.
+- **Four things are deliberately NOT written**: `heightmap_rg16.bin` (§15.2 — MUST NOT be in a tree;
+  `packHeight16` stays, the atlas still uses it), the grid inside `params.json` (§13.1 — it lives in
+  `project.json` and only there), `appearance.json` (the reader already declines to READ it, so
+  writing it would give one look two homes), and `entities/provinces.json` of this app's own
+  derivation (§9.4 — a re-deriving implementation MUST NOT overwrite the author's province names).
+- **The downstream entries still ride along and that is conformant** — §6.1 calls everything past
+  the minimal two "optional enrichment", §6.3 makes a reader ignore what it does not recognise. That
+  is what lets the save format change without breaking `biome_baked.bin`/`cartalith_grid.json`.
+- **Verification is `tests/perf/probe_savetree.js`, not a smoke block.** Every assertion needs a real
+  `exportZip()`→`loadZip()` round trip, and the backward-compatibility half needs TWO builds open at
+  once; `smoke_gen1.js` runs one page against one file and crashes near its end here (v1.100). It
+  drives the SHIPPED `exportZip()` by capturing the Blob handed to `URL.createObjectURL` (v1.90's
+  technique), never a reimplementation.
 
 ### Rivers: symbol vs. real width, and the sub-cell shoreline (v2.25, DCC-line file only)
 
@@ -4143,6 +4183,7 @@ node tests/perf/probe_manpower.js A.html    # v2.19 military manpower incl. the 
 node tests/perf/probe_landmass.js A.html    # v2.20 landmass names, the map layer, rename + the search fix
 node tests/perf/probe_trade.js A.html       # v2.21 multi-good supply matching + the value-density curve
 node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: controls, saturation, size shift
+node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
