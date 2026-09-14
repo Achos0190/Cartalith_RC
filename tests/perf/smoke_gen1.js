@@ -33,7 +33,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     shown: getComputedStyle(document.getElementById('onboard')).display !== 'none',
     introOn: document.getElementById('obStepIntro').classList.contains('on'),
     actionBtns: document.querySelectorAll('#obStepIntro .ob-btns button').length,
-    noSkip: !document.getElementById('obDismiss'),
+    skipBtn: !!document.getElementById('obSkip'),   // v2.15 made the gate dismissible; v0.67's assertion predates that
     // v2.24: WIDENED, not merely retargeted. The v0.68 gate is the only thing making controls inert
     // while no world exists, and the DCC frame hoists Regenerate into the tool-options bar and
     // navigation into the domain rail — both outside every dock. Checking one dock would have
@@ -1631,8 +1631,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     world: getComputedStyle(document.getElementById('genWorld')).display !== 'none',
     civ: getComputedStyle(document.getElementById('genCiv')).display === 'none',
     carto: getComputedStyle(document.getElementById('genCarto')).display === 'none',
-    inspectorHidden: getComputedStyle(document.getElementById('inspector')).display === 'none'
+    // v2.24: Properties is PERSISTENT with an empty state (it used to vanish on World/Sculpt), so the
+    // subject shifts from "is it hidden" to "is it empty and in the information pane" — which is what
+    // the assertion was protecting: World must not show a stale Cartography editor.
+    inspectorEmpty: /Nothing selected/.test(document.getElementById('inspectorBody').textContent),
+    inspectorInRightDock: !!document.querySelector('.dock-right #inspector')
   }));
+  R.worldCatSeg = await page.$$eval('#worldCatSeg button[data-wcat]', els => els.length);
   R.factionPickerInGenCiv = await page.evaluate(() => !!document.getElementById('genCiv').querySelector('#civFactionPicker'));
   R.mapStyleInGenCarto = await page.evaluate(() => !!document.getElementById('genCarto').querySelector('#stylePresetSeg'));
   await page.evaluate(() => document.querySelector('#domainRail [data-gsub="civ"]').click());
@@ -1821,8 +1826,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
   // ---- v0.65 (§Stage 2 follow-up): Assets/Export moved to header utilities; tab bar is a genuine
   //      2-position phase switch ----
-  R.tabCount = await page.$$eval('.tab', els => els.length);
-  R.tabsOnly2 = await page.$$eval('.tab', els => JSON.stringify(els.map(e => e.dataset.tab)) === JSON.stringify(['generate','explore']));
+  // v2.24: #tabBar is gone. What v0.65 asserted — that phase navigation is ONE explicit control, not
+  // a scattering of .tab buttons — now belongs to the domain rail, and the count is four.
+  R.tabCount = await page.$$eval('#domainRail .dr-btn', els => els.length);
+  R.tabsOnly2 = await page.evaluate(() => document.querySelectorAll('.tab').length === 0 && !document.getElementById('tabBar'));
   await page.click('#fileMenuBtn');   // v0.87: Import+Export consolidated into one "File ▾" menu
   await page.waitForTimeout(150);
   R.fileMenuOpen = await page.$eval('#fileMenu', el => el.classList.contains('open'));
@@ -6999,7 +7006,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('no page/console errors on load', errors.length === 0);
   if (errors.length) errors.forEach(e => console.log('      ' + e));
   // ── v0.67: hard setup gate + scale/height calibration ──
-  A('setup gate shows on load: intro step, 3 actions, no Skip', R.gate.shown && R.gate.introOn && R.gate.actionBtns === 3 && R.gate.noSkip);
+  A('setup gate shows on load: intro step, 3 real actions + the v2.15 Skip', R.gate.shown && R.gate.introOn && R.gate.actionBtns === 4 && R.gate.skipBtn);
   A('sidebar is locked (inert) while the gate is open', R.gate.sidebarLocked === true);
   A('sidebar unlocks after committing a world', R.sidebarUnlocked === true);
   A('nothing is simulated until commit (empty field behind the gate)', R.noAutoGen === true);
@@ -7085,8 +7092,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('un-finalize clears phase-explore', R.phaseOff === false);
   A('v0.74 finalize button is the first button in Generate → World, not behind a disclosure', R.finalizeTop.inFinalizeSec && R.finalizeTop.notInDetails && R.finalizeTop.isFirstButton && R.finalizeTop.depthInSec);
   A('Undo button lives in header', R.undoInHeader === true);
-  A('Generate sub-tab bar has world/civ/carto/sculpt (v1.15 adds the Sculpt editor)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','sculpt']));
-  A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);
+  A('v2.24: the domain rail carries world/civ/carto/explore (Sculpt became a WORLD category, Explore became a domain)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','explore']));
+  A('v2.24: ...and Sculpt is still reachable, as a category switch inside WORLD', R.worldCatSeg === 2);
+  A('World is the default branch; Civ/Carto hidden and Properties shows its empty state', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorEmpty && R.worldDefault.inspectorInRightDock);
   A('faction picker lives in Generate → Civilization', R.factionPickerInGenCiv === true);
   A('Map style lives in Generate → Cartography', R.mapStyleInGenCarto === true);
   A('Civilization branch shows genCiv + pinned inspector', R.civBranch.civShown && R.civBranch.worldHidden && R.civBranch.inspectorShown);
@@ -7123,7 +7131,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('pressing B sets the Biomes layer', R.debugAfterB === 'bclass');
   A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
   A('typing "B" in a text field does not trigger the hotkey', R.debugUnchangedWhileTyping === true);
-  A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
+  A('v2.24: the domain rail is the single 4-position phase switch, and no stray .tab button survives', R.tabCount === 4 && R.tabsOnly2 === true);
   A('v0.87: consolidated File ▾ dropdown opens with both Import and Export sections', R.fileMenuOpen === true && R.fileMenuHasBoth.hasImport && R.fileMenuHasBoth.hasExport);
   A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
   A('v0.88: standalone atlas import/export retired; File → Export .zip is the sole 100% round-trip', R.atlasStandaloneGone.noImportBtnInFileMenu && R.atlasStandaloneGone.noEmbedCheckbox && R.atlasStandaloneGone.noExportBtnInSidebar);
