@@ -124,13 +124,37 @@ both inside the map box.
 
 ### Tests
 
-`smoke_gen1.js` gained 24 assertions and 13 existing ones were retargeted or widened. Three of
+`smoke_gen1.js` gained 24 assertions and 17 existing ones were retargeted or widened. Three of
 those were **structure assertions that would have passed vacuously** and were rewritten to assert
 behaviour instead: two direct `_activeTab = …` assignments (inert once derived), and v0.86's
-layers-popover wheel containment — that hazard is closed structurally now (the list is outside
-`.canvas-wrap`), so the assertion pins the reason rather than the retired `stopPropagation` patch.
-A test that still passes after the element it targeted was deleted was never asserting what it
+layers-popover wheel containment (later restored verbatim, once Layers went back to the map). A
+test that still passes after the element it targeted was deleted was never asserting what it
 claimed.
+
+**The remaining failures were separated from inherited ones by running the UNTOUCHED suite against
+the UNTOUCHED mainline**, not by probing them in isolation and inferring — isolation showed them
+identical, but that is a different claim from "identical after 700 assertions of accumulated world
+state." A first attempt ran the *updated* suite against v2.22 and died at line 1643 in 420 bytes,
+because the retargeted `#domainRail` selectors do not exist there; a 0-FAIL count from a run that
+executed two assertions would have been a comfortable, meaningless number.
+
+| assertion | v2.22 + pre-v2.24 suite | v2.24 |
+|---|---|---|
+| setup gate `actionBtns === 3` | **FAIL** | fixed (v2.15 added `#obSkip` and never updated the count; its `#obDismiss` half tested an id that has never existed, so it passed vacuously) |
+| v0.92 overview canvas cap | **FAIL** | FAIL (inherited) |
+| v0.87 LOD/atlas fills the viewport | **FAIL** | **passes** — the new ResizeObserver, which is exactly what that assertion measures |
+| v1.35 riverOrder populates | **FAIL** | FAIL (inherited) |
+| v1.40 no settlement on a speck | **FAIL** | FAIL (inherited) |
+| `Target page closed` near the end | line 7816 | line 7849 — same position |
+
+So v2.24 introduces **zero** new smoke failures, fixes one outright and one incidentally. The
+end-of-run crash v1.100 documented for this environment reproduces identically on the untouched
+mainline — confirmed rather than assumed.
+
+**One defect the new assertions caught in this version's own work**: the Properties panel had TWO
+empty states — the markup placeholder and `_civRenderInspector`'s `else` branch — saying different
+things, so the panel silently rewrote its own wording the first time anything deselected. Invisible
+before v2.24 because the panel was hidden outright on World and Sculpt.
 
 **Still owed a real-device pass**, per this file's own headless carve-out: touch drag on the new
 bands, the drawer gesture, and the joystick at the new chrome height.
