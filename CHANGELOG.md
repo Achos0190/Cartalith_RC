@@ -88,8 +88,10 @@ generated world moves. Measured at seed 12345/512px, GPU on for both sides:
 | `temp` | 1.03e-2 °C | 2.45e-6 | 0.0266 % |
 | `rain` | 3.83e-5 | 9.25e-8 | 0.0038 % |
 
-The mean is below float32 resolution; the worst single cell moves 2.31e-4 of a [0,1] heightmap,
-about **2 m** on this file's own 8848 m scale. It is the same world. `hash_gen1.js` nonetheless
+The mean is below float32 resolution; the worst single cell moves 2.31e-4 of a [0,1] heightmap.
+This engine has no fixed elevation span — `metersPerUnit() = state.peakM/(1-seaLevel)`, so at the
+defaults (`peakM 4000`, sea 0.42) a unit is **6897 m** and that worst cell moves **≈1.6 m**. It is
+the same world. `hash_gen1.js` nonetheless
 mismatches in every scenario, and that is honest rather than hidden — note that the **headless
 suite is bit-identical** (no WebGL2 there, so it always took the CPU path), which is what makes it
 a clean confirmation that only the blur route changed.
