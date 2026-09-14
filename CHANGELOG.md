@@ -151,6 +151,16 @@ So v2.24 introduces **zero** new smoke failures, fixes one outright and one inci
 end-of-run crash v1.100 documented for this environment reproduces identically on the untouched
 mainline — confirmed rather than assumed.
 
+**A flapping assertion is not a flake, and chasing it found a real test defect.** Three v1.52 snap
+assertions failed on two of three v2.24 runs and passed on the v2.22 baseline — which reads exactly
+like a regression. It is not one: at a pinned seed both files produce the same 47 settlements, the
+same pick radius (14.63) and the same result, and v2.24's narrower viewport does not change
+`viewT.scale` (the first hypothesis, wrong); a neighbour out-snapping `settles[0]` was the second,
+also wrong across six auto-populate runs. The three fail *as a group* because the probe
+early-returns on an empty `_jpSettlements()`, leaving every field `undefined` — so "snapping broke"
+and "the fixture was empty" are indistinguishable in the output. The count is asserted separately
+now; with that in place the trio passes and the empty case would name itself.
+
 **One defect the new assertions caught in this version's own work**: the Properties panel had TWO
 empty states — the markup placeholder and `_civRenderInspector`'s `else` branch — saying different
 things, so the panel silently rewrote its own wording the first time anything deselected. Invisible
