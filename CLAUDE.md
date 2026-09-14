@@ -1067,6 +1067,11 @@ Quote the suite as "0 failed", not as a count, until that is tracked down.
   `field` (mean 8.03e-8 — below float32 resolution; ~2 m at the worst cell on an 8848 m scale). The
   **headless suite is bit-identical**, having no WebGL2, which is what confirms only this route
   changed.
+- **An assertion naming a NEW top-level constant breaks `tests/run.sh` for every older target.**
+  `check('…', GAUSS_BLUR_GPU === false)` is a `ReferenceError` on any file predating it, which kills
+  the run before it prints a summary — it reads as "no output", not as a failure. Guard with
+  `typeof`; put the guard that must FAIL on the old build in a `tests/perf/` probe instead. **Run
+  `tests/run.sh` against an older file before adding one.**
 - **`tests/stub_head.js` returns `null` for any `getContext` but `'2d'`** — the headless suite has
   no WebGL2 at all, so it never took the shader route and cannot see any of this. That is also the
   proof that a sporadic `world seam avg delta` failure seen once on this build is not from here:

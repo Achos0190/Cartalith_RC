@@ -120,6 +120,20 @@ fix is v2.25's own prescription — measure an aggregate across several PINNED s
 deterministic and broader coverage than one arbitrary world — and it belongs to a deliberate pass
 over both of them, not bolted onto a performance version. Recorded here rather than quietly re-run.
 
+### A new global referenced bare in `test_tail.js` breaks the harness for every older file
+
+Self-inflicted, and caught only because this version's verification happened to run the suite
+against the PREVIOUS build as a control. `check('…', GAUSS_BLUR_GPU === false)` is a
+`ReferenceError` on any file predating the constant — which killed the whole run before it printed
+a summary, for `v2.31` and, by extension, for every target back to `v0.57` that `tests/run.sh` is
+documented to accept. It reads as "the suite produced no output", not as a failing assertion.
+
+Guarded with `typeof`, and the "absent" arm is deliberate rather than slack: a build predating the
+flag is not in scope for the claim, while any build that has it must have it false. The real
+regression guard — the one that actually fails on v2.31 — lives in `probe_blur.js`, because proving
+which route is faster needs the WebGL2 this harness deliberately lacks. **Before adding an
+assertion that names a new top-level constant, run `tests/run.sh` against an older file.**
+
 ### A dropped argument on the route this version switches off
 
 `gaussBlur` has always called `GPU.blurArr(src, r, wrapX)`. `blurArr` took **two** parameters and

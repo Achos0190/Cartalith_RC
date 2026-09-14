@@ -4720,7 +4720,16 @@ if (typeof carveRiverValleys === 'function') {
     /* Pins the decision, not the timing: the measured evidence lives in tests/perf/probe_blur.js
        (it needs WebGL2, which this harness does not have). If someone re-enables the shader route,
        this fails and sends them to that probe rather than letting it back in silently. */
-    check('v2.32 blur: the GPU blur route is off by default', GAUSS_BLUR_GPU === false);
+    /* `typeof` guard, and the "absent" arm is not slack: run.sh is documented to take ANY explicit
+       target ("Cartalith Gen1 v0.57.html"), and a bare reference to a constant a 2019-era build does
+       not have is a ReferenceError that kills the whole suite before it prints a summary — which is
+       exactly what this assertion did to every older file until it was caught. A build predating the
+       flag simply is not in scope for the claim; one that HAS it must have it false. The real
+       regression guard, the one that fails on v2.31, lives in tests/perf/probe_blur.js, because
+       proving the CPU route is the fast one needs the WebGL2 this harness deliberately lacks.
+       Safe from v2.15's TDZ trap: the engine block is fully evaluated before this tail runs. */
+    check('v2.32 blur: the GPU blur route is off wherever the flag exists',
+      typeof GAUSS_BLUR_GPU === 'undefined' || GAUSS_BLUR_GPU === false);
 
     /* boxH/boxV carry a RUNNING SUM — that is the whole reason the CPU path is radius-free and so
        beats the shader. A broken sum shows up first as a constant field that does not survive. */
