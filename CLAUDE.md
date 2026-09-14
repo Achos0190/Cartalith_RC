@@ -11,8 +11,9 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.28 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
-| `Cartalith v2.27 DCC test.html` | Previous DCC-line file — five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
+| `Cartalith v2.29 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
+| `Cartalith v2.28 DCC test.html` | Previous DCC-line file — the cog window's two faults: v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
+| `Cartalith v2.27 DCC test.html` | Earlier DCC-line file — five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
 | `Cartalith v2.26 DCC test.html` | Previous DCC-line file — the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
 | `Cartalith v2.25 DCC test.html` | Previous DCC-line file — three render fixes: rivers switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. Still writes the flat save layout. |
 | `Cartalith v2.24 DCC test.html` | Previous DCC-line file — the GUI FRAME replacement: app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path vs v2.22. |
@@ -23,7 +24,7 @@ threads; `file://` must degrade gracefully, never break).
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1158-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1161-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -35,7 +36,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1158 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1161 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1036,6 +1037,36 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Rivers must be carved, not only drawn (v2.29, DCC-line file only)
+
+Owner: *"the only rivers I'm getting are drawn lines, nothing that is rendered into terrain."*
+`tests/perf/probe_carve.js` (7 assertions, 4 of them fail on v2.28) is the verification.
+
+- **`state.viz.riverWays` is an EITHER/OR, not an addition.** The per-pixel branch is gated
+  `!(state.viz && state.viz.riverWays)`, so the stroked line ON means the terrain-blended raster
+  river is OFF. It shipped `true` (and `checked`) for fresh worlds, which IS the report. Both
+  default `false` now. A save without the field has always loaded `false` — that asymmetry is why
+  an older project looked right and a new world did not.
+- **Do not re-chase these three.** Frozen flow routing, MFD-vs-D8 drainage area, and restoring
+  `stream.uplift` were each measured against the shipped kernel and each REFUTED: re-routing and D8
+  both come out *smoother*, and uplift builds ridges (84,928 cells raised) while cutting the traced
+  network from 899 polylines to 696. The difference from v0.015 is scale, not structure — its carve
+  moves ~100x more terrain from the same algorithm.
+- **`CARVE_STRENGTH_K` multiplies `state.stream.k` inside `carveRiverValleys()` and nowhere else.**
+  The manual Stream-power button, `evolveCoupled` and the erosion worker keep the raw slider. 8x is
+  calibrated, not chosen: it is where this pass reaches 3.08x the un-carved surface's Laplacian
+  energy, against v0.015's own measured 3.16x. **Raising `P.iters` buys the same energy at ~2x the
+  time** — strength is the cheap lever. 16x overshoots to 4.99x and costs 14% of the polylines.
+- **Widening the polyline carve is refuted — the stamp is the inner CHANNEL.**
+  `enforceChannelDescent` stamps a disc of radius `halfW` around every point of ~840 polylines, so
+  area grows as `halfW²` over thousands of headwaters: x1.5 carves 18% of the map, x3 carves **96%**,
+  and mean valley relief only moves +16% / +57%. Order-weighting is no better. The erosion pass is
+  what broadens a valley, exactly as the function's own comment says.
+- **`eroSettle` is rebound AND the river clamp, and the old assertion conflated them.** Whether an
+  ambient world holds a locked channel cell sitting above its floor is luck — v2.29's deeper carve
+  produced exactly two of 6666. Test the rebound claim with the lock cleared, then raise a locked
+  cell on purpose and assert the clamp fires.
 
 ### A flex container must never centre an item that can overflow it (v2.28, DCC-line file only)
 
@@ -4215,7 +4246,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1158-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1161-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -4232,6 +4263,7 @@ node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: contr
 node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
 node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
 node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
+node tests/perf/probe_carve.js A.html      # v2.29 river carve: ways default off, incision strength, network cost
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 

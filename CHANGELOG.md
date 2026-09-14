@@ -10,6 +10,110 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.29 DCC test — rivers rendered into the terrain, and a carve that actually cuts
+
+Owner: *"the only rivers I'm getting are drawn lines, nothing that is rendered into terrain,"* then,
+after seeing the comparison shots, *"All of them maybe?"* to three candidate fixes. Two shipped; the
+third was built, measured, and refuted by its own numbers. `tests/run.sh` **1161/1161** (+1) ·
+`tests/run_um.sh` 852/852 · `tests/perf/probe_carve.js` (new) **7/7**, and **4 of those 7 fail on
+v2.28** · `hash_gen1.js` vs v2.28 diverges in every scenario — a deliberate, isolated re-baseline,
+see below.
+
+### The reported symptom was one word in the state literal
+
+`state.viz.riverWays` shipped `true` for fresh worlds, and the checkbox shipped `checked`. That flag
+is an **EITHER/OR** with the terrain-blended raster river: the per-pixel branch is gated
+`state.showRivers && _riverNet && !(state.viz && state.viz.riverWays)`, so turning the stroked line
+ON turns the terrain river OFF. A new world therefore painted rivers as vector strokes over an
+otherwise unmarked surface — exactly the report. Old saves were never affected: `loadZip`'s compat
+line has always defaulted a save without the field to `false`, which is why an older file looked
+different. Both defaults are now `false`; the stale v0.94 comment claiming "new default is ON" is
+replaced with the either/or rule, since that is the thing a future reader needs.
+
+### Three structural hypotheses for "v0.015 was way better", all refuted by measurement
+
+The owner supplied `elevation_foundation_v0.015.html` — *"the stream power carve function in this one
+is crude, but was way better in its result."* Three plausible differences were tested against the
+SHIPPED kernel before any fix. **Do not re-chase these:**
+
+| Hypothesis | Predicted | Measured |
+|---|---|---|
+| v2.28 freezes flow routing; v0.015 re-routes every iteration | re-routing sharpens | **smoother** — Laplacian 0.00243 → 0.00192, below the un-carved 0.00215 |
+| v2.28 spreads drainage area MFD; v0.015 is single-receiver D8 | D8 concentrates | **smoother** — meanDrop 0.00108 → 0.00066, channel share unchanged |
+| v2.28 defaults `stream.uplift` to 0; v0.015 to 0.18 | more valleys | **ridges** — 84,928 cells *raised*, max rise 0.63, polylines 899 → 696 |
+
+The real difference is scale, not structure. Running v0.015's own carve at its own defaults measures
+**Laplacian ×3.16** (0.00243 → 0.00767) and a mean |Δheight| of 0.101. v2.28's carve measures
+**×1.13** and a mean drop of 0.0011 — about a hundredfold less terrain movement from the same
+algorithm. v0.015 has no river overlay at all, so every river it shows is carved relief; that is what
+"way better in its result" was pointing at.
+
+### `CARVE_STRENGTH_K = 8` — calibrated, not picked
+
+A multiplier on `state.stream.k` applied **inside `carveRiverValleys()` and nowhere else**; the
+manual Stream-power button, `evolveCoupled` and the erosion worker all keep the raw slider value.
+Swept against this build's own un-carved surface at seed 12345 / 512px:
+
+| K | Laplacian | ×base | polylines | max incision |
+|---|---|---|---|---|
+| ×1 (v2.28) | 0.002523 | 1.17 | 839 | 0.036 |
+| ×4 | 0.004311 | 2.00 | 830 | 0.084 |
+| **×8** | **0.006636** | **3.08** | 808 | 0.136 |
+| ×16 | 0.010741 | 4.99 | 725 | 0.204 |
+
+×8 reproduces v0.015's own measured ratio at the same 9 iterations. Doubling `P.iters` instead buys
+the same energy for roughly twice the time, so **strength is the cheap lever and iterations are not**.
+×16 overshoots and costs 14% of the traced network.
+
+### Widening the carved valley was built, measured, and dropped
+
+The third candidate — widen `carveRiverValleys`' polyline stamp — does not do what it sounds like.
+`enforceChannelDescent` stamps a disc of radius `halfW` around every point of ~840 polylines, so the
+carved AREA grows as `halfW²` across thousands of *headwaters*:
+
+| half-width | map carved | mean valley relief |
+|---|---|---|
+| ×1 (shipped) | 6.9% | 0.0241 |
+| ×1.5 | 18.1% | 0.0280 |
+| ×2 | 40.4% | 0.0308 |
+| ×3 | **96.2%** | 0.0379 |
+
+Re-weighting by stream order instead of a flat multiplier (wide trunks, untouched trickles) is no
+better: ×1.1 carves 15.3% of the map for +9% relief. **The polyline carve is the inner CHANNEL — the
+function's own comment already says the erosion pass is what broadens the valley.** Widening the
+stamp lowers the landscape; it does not cut valleys into it. Not shipped.
+
+### Bit-identity, isolated precisely
+
+The standard battery mismatches on `field`/`temp`/`rain`/`flow`/`rgba` in all five scenarios, which
+is the documented closed-loop consequence (a changed heightmap changes flow, which changes climate —
+the v1.78 cascade). Isolated with `state.carveRivers=false` on both sides: **field, temp, rain, flow
+AND rgba are byte-identical**, and with ways off as well the render path is byte-identical too. So
+the only field divergence is `CARVE_STRENGTH_K`, and the only render divergence is which of the two
+river renderers the default selects. Same class of deliberate re-baseline as v1.60 / v1.78 / v1.82.
+
+### A suite assertion that was passing by luck
+
+`v2.17 passes: eroSettle() against an unchanged snapshot moves nothing` went red. Instrumented on
+both builds before touching it: on v2.29 exactly **2 of 6666** locked river cells sit above their
+floor (by 0.010) and `enforceRiverChannels` correctly clamps them; on v2.28, zero. The assertion's
+own comment claims only that *isostatic rebound is one-sided* — but `eroSettle` also runs the river
+clamp, which is deliberately not a no-op, and whether the ambient world happens to contain such a
+cell is luck. The test now clears the lock to check the rebound claim on its own, then **raises a
+locked cell on purpose and asserts the clamp fires** — coverage the entangled version never had. It
+passes on v2.28 and v2.29 alike; net +1 assertion.
+
+### Known scope cuts
+
+Valley WIDENING is measured and declined, above. The beaded look at deep zoom past ×4 — the channel
+floor dipping below sea level in single cells — is real and disclosed: lake-cell area moves only
++0.4% at ×8 and +3.8% at ×16, so it is a redistribution into many small pools, not a flood. The
+strength is a module constant, not a slider or a saved field: it is a generation-model value like
+v2.10's `blockBlur`, and putting it in `state.stream` would churn the save format for a number with
+one correct setting.
+
+---
+
 ## v2.28 DCC test — the cog window centred itself off the top of the screen
 
 Owner: *"The cog wheel menu falls out of view as soon as we open it. On smartphone the X button is

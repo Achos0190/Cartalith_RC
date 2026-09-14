@@ -4452,10 +4452,33 @@ if (typeof carveRiverValleys === 'function') {
 
     /* glacialPass() carries eroSettle -- the physics half of the button's tail. Isostatic rebound
        is one-sided (only removal rebounds), so calling it against an unchanged snapshot must be a
-       no-op; that is what lets a pass run it without a render. */
+       no-op; that is what lets a pass run it without a render.
+       eroSettle ALSO runs enforceRiverChannels, which is deliberately not a no-op when a locked
+       channel cell sits above its floor -- a separate mechanism, and on an ambient world whether
+       any such cell exists is luck (v2.29's deeper carve produced exactly two). So clear the lock
+       to test the rebound claim on its own, then raise a locked cell on purpose and check the
+       clamp really fires -- which the entangled version never verified. */
+    const rm0 = riverMask ? riverMask.slice() : null, ra0 = _riverAny;
+    if (riverMask) riverMask.fill(0);
     field.set(F0); eroSettle(F0.slice());
     check('v2.17 passes: eroSettle() against an unchanged snapshot moves nothing (rebound is one-sided)',
       same(Array.from(field), Array.from(F0)));
+    if (rm0) { riverMask.set(rm0); }
+    _riverAny = ra0;
+    {
+      let ci = -1;
+      if (riverMask && riverFloor) for (let i = 0; i < riverMask.length; i++) if (riverMask[i]) { ci = i; break; }
+      field.set(F0);
+      if (ci >= 0) {
+        field[ci] = riverFloor[ci] + 0.05; eroSettle(F0.slice());
+        check('v2.17 passes: ...and eroSettle DOES re-clamp a locked river cell that was raised',
+          field[ci] <= riverFloor[ci] + 1e-6);
+      } else {
+        check('v2.17 passes: ...and eroSettle DOES re-clamp a locked river cell that was raised',
+          false, 'no locked river cell on the harness world');
+      }
+      field.set(F0);
+    }
     state.glacial.passes = 1; state.glacial.snowline = 0.2;   // low snowline: guarantee ice on this world
     field.set(F0); glacialPass();
     check('v2.17 passes: glacialPass() carved', !same(Array.from(field), Array.from(F0)));
