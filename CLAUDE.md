@@ -3,21 +3,21 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.21**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.22**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.21.html` | **Current** unified tool (~30.5k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.20.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1136-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1158-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -29,7 +29,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1136 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1158 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1030,6 +1030,25 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Physical crater model (v2.22)
+
+**`state.crater.physical`, default off.** The legacy path picks an absolute `count` and three
+hardcoded size buckets, so a 50 km region and a 40,000 km world get the same hundred impacts.
+
+- Count = rate per Mkm² per Myr × real area × surface age. Size from `N(>D) ∝ D^−1.8` (bounded
+  Pareto, inverse transform). Wear from exposure time against `τ ∝ D`.
+- **The count SATURATES with age — do not "fix" that.** Production is linear in age while
+  obliteration removes in proportion to the standing population, so an old surface settles at fewer,
+  larger, more degraded craters. Measured 90 / 102 / 78 at 500 / 3000 / 6000 Myr, median diameter
+  1.00 → 1.53 km. That is the terrestrial record.
+- **Anchor the rate on the SURVIVING population, never on production** — a first cut anchored
+  production at 100 and stamped only 19. The headless test pins the production identity
+  (`rate × area × age`), not a tuned number, so re-anchoring cannot silently invalidate it.
+- The stamping ceiling raises the smallest diameter kept (closed-form inverse of the size law),
+  never a random thinning.
+- The checkbox CHOOSES which pair `stampCraters` reads; `count`/`age` stay saved and are disabled,
+  not cleared.
 
 ### Multi-good supply matching (v2.21)
 
@@ -4018,7 +4037,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1136-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1158-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -4031,6 +4050,7 @@ node tests/perf/probe_roadconnect.js A.html # v2.18 road connectivity: a real ro
 node tests/perf/probe_manpower.js A.html    # v2.19 military manpower incl. the spec's two worked examples
 node tests/perf/probe_landmass.js A.html    # v2.20 landmass names, the map layer, rename + the search fix
 node tests/perf/probe_trade.js A.html       # v2.21 multi-good supply matching + the value-density curve
+node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: controls, saturation, size shift
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 

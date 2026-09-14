@@ -4555,6 +4555,92 @@ if (typeof carveRiverValleys === 'function') {
     })());
   }
 
+
+  /* ---- v2.22: the physical crater model -----------------------------------------------------
+     The legacy path picks an absolute count and three hardcoded size buckets, so a 50 km region and
+     a 40,000 km world get the same hundred impacts. What is worth pinning here is that the three
+     replacements have the properties their physics claims: count scales with area AND age, the size
+     law is a real power law, and wear depends on diameter so an old surface keeps its basins. */
+  {
+    const P0 = JSON.parse(JSON.stringify(state.crater));
+
+    check('v2.22 craters: default OFF, so every existing world takes the legacy path', state.crater.physical === false);
+
+    /* Count: linear in area and in age, zero at either extreme. */
+    const p = (a, age) => craterPopulation(a, age, 0.49, 3000).count;
+    check('v2.22 craters: the count scales with AREA', p(800000, 500) > p(400000, 500) && p(400000, 500) > p(1600, 500));
+    check('v2.22 craters: ...and with surface AGE', p(400000, 1000) > p(400000, 500) && p(400000, 500) > p(400000, 50));
+    check('v2.22 craters: a young or tiny surface gets essentially none', p(1600, 500) < 5 && p(400000, 0) === 0);
+    /* Production is exactly rate x area x age below the ceiling -- assert the identity rather than a
+       tuned number, so re-anchoring the default rate (which this version did once) cannot silently
+       invalidate this. How many SURVIVE is a stamping question and is measured in probe_craters.js. */
+    check('v2.22 craters: production is exactly rate x area x age below the ceiling', (() => {
+      const area = 400000, age = 500, rate = 2.6;
+      return craterPopulation(area, age, rate, 1e9).count === Math.round(rate * (area / 1e6) * age);
+    })());
+    check('v2.22 craters: ...and the shipped default is a sane population for the default region', (() => {
+      const cellKm = 800 / 2048, area = 800 * (cellKm * gridH(2048));
+      const c = craterPopulation(area, 500, state.crater.ratePerMkm2Myr, 3000).count;
+      return c > 100 && c < 1200;
+    })());
+
+    /* The stamping ceiling raises the smallest diameter kept, rather than thinning at random --
+       and the small end is exactly what an old surface has already lost. */
+    const huge = craterPopulation(1e9, 500, 0.49, 3000);
+    check('v2.22 craters: a world too cratered to stamp is capped, not truncated', huge.count === 3000 && huge.produced > 3000);
+    check('v2.22 craters: ...by raising the smallest diameter kept', huge.dMinKm > CRATER_REF_MIN_KM * 2);
+    check('v2.22 craters: an ordinary world keeps the reference floor', craterPopulation(400000, 500, 0.49, 3000).dMinKm === CRATER_REF_MIN_KM);
+
+    /* Size: a real power law, not three buckets. Small craters must dominate by a wide margin. */
+    const D = u => craterDiameterKm(u, 0.5, 200, 1.8);
+    check('v2.22 craters: the diameter sample stays inside its bounds', [0, 0.25, 0.5, 0.9, 0.999, 1].every(u => D(u) >= 0.5 - 1e-9 && D(u) <= 200 + 1e-6));
+    check('v2.22 craters: it is monotone in u', [0.1, 0.3, 0.6, 0.95].every((u, i, a) => i === 0 || D(u) >= D(a[i - 1])));
+    check('v2.22 craters: u=0 is the floor', Math.abs(D(0) - 0.5) < 1e-9);
+    check('v2.22 craters: the population is dominated by small craters, as a power law demands', (() => {
+      let small = 0, big = 0;
+      for (let k = 0; k < 2000; k++) { const d = D(k / 2000); if (d < 2) small++; if (d >= 25) big++; }
+      return small > 1400 && big > 0 && big < 60;
+    })());
+    check('v2.22 craters: N(>D) really follows D^-b — the decade 5–50 km thins by about 10^1.8', (() => {
+      let n5 = 0, n50 = 0;
+      const N = 20000;
+      for (let k = 0; k < N; k++) { const d = D(k / N); if (d >= 5) n5++; if (d >= 50) n50++; }
+      if (!n50) return false;
+      const ratio = n5 / n50, expected = Math.pow(10, 1.8);
+      return ratio > expected * 0.6 && ratio < expected * 1.7;
+    })());
+
+    /* Wear: the whole point is that it depends on DIAMETER, so an old surface keeps its basins. */
+    check('v2.22 craters: wear is in [0,1] and rises with exposure', (() => {
+      const a = craterDegradation(5, 0), b = craterDegradation(5, 100), c = craterDegradation(5, 5000);
+      return a === 0 && b > a && c > b && c <= 1;
+    })());
+    check('v2.22 craters: a small crater is erased where a large basin is barely touched', (() => {
+      const small = craterDegradation(1, 500), basin = craterDegradation(150, 500);
+      return small > 0.9 && basin < 0.2;
+    })());
+    check('v2.22 craters: wear falls monotonically with diameter at fixed exposure',
+      [1, 5, 25, 100, 200].every((d, i, arr) => i === 0 || craterDegradation(d, 500) <= craterDegradation(arr[i - 1], 500)));
+    check('v2.22 craters: a pristine surface wears nothing at any size', [1, 50, 200].every(d => craterDegradation(d, 0) === 0));
+
+    /* The physical path actually stamps, and stamps a DIFFERENT world than the legacy one. */
+    const savedField = field.slice(), savedImpact = impactField.slice();
+    impactField.fill(0); state.crater.physical = false; stampCraters();
+    let legacySum = 0; for (let i = 0; i < impactField.length; i++) legacySum += impactField[i];
+    impactField.fill(0); state.crater.physical = true;
+    state.crater.ratePerMkm2Myr = 0.49; state.crater.surfaceAgeMyr = 500;
+    stampCraters();
+    let physSum = 0; for (let i = 0; i < impactField.length; i++) physSum += impactField[i];
+    check('v2.22 craters: the physical path genuinely stamps impacts', physSum !== 0);
+    check('v2.22 craters: ...and a different surface than the legacy path', Math.abs(physSum - legacySum) > 1e-6);
+    impactField.fill(0); state.crater.physical = true; state.crater.surfaceAgeMyr = 0; stampCraters();
+    let youngSum = 0; for (let i = 0; i < impactField.length; i++) youngSum += impactField[i];
+    check('v2.22 craters: a brand-new surface has no craters at all', youngSum === 0);
+
+    state.crater = P0; field.set(savedField); impactField.set(savedImpact);
+    check('v2.22 craters: the harness world is restored', state.crater.physical === false);
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

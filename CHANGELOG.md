@@ -12,6 +12,51 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ## Gen1 merged-file line
 
+### v2.22 — Craters get units: a production rate, a size-frequency law, and wear from a real age
+
+Fifth build off `PORT_ONLY_FEATURES.md`'s engine-simulation track. The legacy path picks an
+absolute `count` (100), splits it across three hardcoded size buckets, and wears each crater by
+`rng() × age` with `age` a bare 0–1 slider — so a 50 km region and a 40,000 km world get the same
+hundred impacts and nothing says how old the surface is. Engine only, opt-in
+(`state.crater.physical`, default false). Hash vs v2.21 **ALL IDENTICAL**; 1158/1158 (+22);
+852/852; 19 probe assertions.
+
+- **Three replacements, each with units.** Count from a production rate per million km² per Myr ×
+  the map's real area × the surface age. Size from the standard crater size-frequency law
+  `N(>D) ∝ D^−1.8`, sampled from a bounded Pareto by inverse transform instead of three buckets.
+  Wear from each crater's own exposure time against an obliteration timescale **proportional to its
+  diameter** — which is why small craters vanish from an old surface and large basins stay legible,
+  without either being special-cased.
+- **The count SATURATES with age, and that is the point, not a bug.** Production grows linearly with
+  age while obliteration removes in proportion to the standing population, so an old surface settles
+  at a steady state whose craters are fewer, larger and more degraded. Measured across 500/3000/6000
+  Myr: 90 / 102 / 78 craters, median diameter 1.00 → 1.53 km, largest 15.7 → 39.5 km. That is the
+  terrestrial record, and it is why Earth looks uncratered beside the Moon. A future pass must not
+  "fix" the flat count-versus-age curve; the comment at the constants says so.
+- **The calibration anchor was wrong on the first try, and measuring is what caught it.** The rate
+  was first set so the default region PRODUCES about the legacy 100 — and only ~19 survived, because
+  most are erased. Anchoring on the surviving population instead (rate 0.49 → 2.60) puts the default
+  at **90 stamped craters**, right beside the legacy 100. The headless assertion was rewritten at the
+  same time to pin the production IDENTITY (`rate × area × age`) rather than a tuned number, so
+  re-anchoring the default can never silently invalidate it again.
+- **The stamping ceiling raises the smallest diameter kept rather than thinning at random.**
+  `N(>D) ∝ D^−b` inverts in closed form, so the cut-off is computed directly and no sample is
+  wasted — and the small end is exactly what an old surface has already lost. A 40,000 km world
+  produces ~250,000 craters and stamps the largest 3000.
+- **Honest about what is and is not sourced.** `b = 1.8` is the conventional cumulative slope and
+  `τ ∝ D` is the standard obliteration scaling; the two CONSTANTS are anchored to this file's own
+  default rather than to a terrestrial flux I cannot verify — the same discipline v1.31 used when
+  it normalised agrarian density to the previous version's integral, and stated as such at the
+  constants.
+- **The checkbox chooses which pair is read; it never overwrites the other.** `count`/`age` stay
+  wired and stay saved, and are disabled rather than cleared while the physical model is on —
+  asserted, so turning it off restores exactly the world you had.
+- **Known scope cuts**: ejecta, secondary craters and multi-ring structures are untouched
+  (`stampOneCrater` is shared verbatim with the legacy path — only *how many*, *how big* and *how
+  worn* are decided differently); the `>200 km` basin branch is reachable in principle but a real
+  default world never produces one, so it stays unexercised; there is no impactor-flux history
+  (a Late Heavy Bombardment spike), just a constant rate over the stated age.
+
 ### v2.21 — The supply match runs for all fifteen goods, not just food
 
 Fourth build off `PORT_ONLY_FEATURES.md`'s engine-simulation track. v1.33 built a real supply
