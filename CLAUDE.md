@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.26 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.25 plus the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
+| `Cartalith v2.27 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.26 plus five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
+| `Cartalith v2.26 DCC test.html` | Previous DCC-line file — the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
 | `Cartalith v2.25 DCC test.html` | Previous DCC-line file — three render fixes: rivers switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. Still writes the flat save layout. |
 | `Cartalith v2.24 DCC test.html` | Previous DCC-line file — the GUI FRAME replacement: app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path vs v2.22. |
 | `Cartalith v2.23 DCC test.html` | The theme layer alone, kept. Every DCC-line file is deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.2x` name would have made an experiment the suite's default target. |
@@ -1034,6 +1035,41 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Shell fixes: one header row, the sidebar's own controls, and `dvh` (v2.27, DCC-line file only)
+
+Five owner reports, all shell. `hash_gen1.js` vs v2.26 ALL IDENTICAL; verification is
+`tests/perf/probe_shellui.js` (19 assertions), since every claim here is a rendered geometry or a real
+click.
+
+- **`vh` and `%` resolve against the LARGE viewport — the one with the phone's address bar retracted.**
+  Three separate reports ("layers don't all show", "the list isn't scrollable", "the last items are
+  hidden behind the address bar") were this one fact: `html,body{height:100%}`, `.dockwrap`'s mobile
+  sheet, and the Layers popover's `max-height:72vh`. **Write `100dvh`, and leave the `vh`/`%`
+  declaration FIRST as the fallback.** The list itself was never short — it renders all 34 entries, one
+  per `#debugSeg` button.
+- **A popover positioned inside the map cannot be capped as a fraction of the viewport.**
+  `_syncChromeTop()` publishes **`--canvas-top`** (the measured top of `.canvas-wrap`) and the cap is
+  `calc(100dvh - var(--canvas-top,120px) - 54px)`. Measuring the band is also the only version correct
+  on both layouts — the domain rail is a column on desktop and a 44px row at ≤860px.
+- **The mobile `.dockwrap` sheet must out-stack the domain rail** (32 vs the rail's 31, both below the
+  dropdown layer at 40). Invisible on desktop, where `.dockwrap` is `display:contents` and the rail has
+  no `z-index` — which is why the rail painted over the drawer it opens for three versions.
+- **A control is INERT, not broken, when its prerequisite is off** (v1.52's rule, second occurrence).
+  Every View mode always drove `state.mode` — four distinct render hashes, measured before any fix — but
+  `state.debug` paints over the base view. A View click therefore clears the layer; **never the
+  reverse.** It clears it through **`_setLayer('off')`**, which clicks the real `#debugSeg` button so
+  one handler still owns the state change, the popup dismissals, the wind-streak sync, the render and
+  the popover rebuild. A first cut called a `_syncLayersList` that does not exist, where the `typeof`
+  guard would have made the line a permanent silent no-op.
+- **`#extentSeg`/`#resSeg` are back in `#genWorld` and were MOVED, not copied** — two segments writing
+  one `state.world`/`state.resW` is v1.57's one-control-two-surfaces defect. No JS changed, by v2.24's
+  design: `_stampGenLock()` stamps `[data-genlock]` by ID, never by containment, and both handlers
+  already call `confirmRegenerate()` themselves.
+- **`header{flex-wrap:nowrap}` is desktop-only in effect** — the ≤860px rule's own `flex-wrap:wrap`
+  stays, because a phone header SHOULD wrap rather than be squeezed to nothing. `#undoMem` keeps its id
+  and `updateUndoUI()` still writes it; it is `hidden`, with its live text mirrored onto the Undo
+  button's tooltip. A symbol-only button carries the word in BOTH `title` and `aria-label`.
 
 ### The save file is the project TREE (v2.26, DCC-line file only)
 
@@ -4184,6 +4220,7 @@ node tests/perf/probe_landmass.js A.html    # v2.20 landmass names, the map laye
 node tests/perf/probe_trade.js A.html       # v2.21 multi-good supply matching + the value-density curve
 node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: controls, saturation, size shift
 node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
+node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 

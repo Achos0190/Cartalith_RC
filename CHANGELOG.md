@@ -10,6 +10,131 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.27 DCC test — the header cluster, the sidebar's own controls, and three phone symptoms with one cause
+
+Five owner reports in one pass, all shell (markup + CSS + two small wiring changes). **Nothing here is
+reachable from `generate()` or `renderNow()`'s pixel output**: `tests/run.sh` 1160/1160 ·
+`tests/run_um.sh` 852/852 · `hash_gen1.js` vs v2.26 **ALL IDENTICAL** in every scenario.
+`tests/perf/probe_shellui.js` (new) **19/19**.
+
+### Extent and Grid go back under the heading that names them
+
+Owner: *"The size and world type buttons should go back in the sidebar under extent and resolution."*
+v2.24 hoisted `#extentSeg`/`#resSeg` into the document bar and left a hint in Geology → Extent &
+resolution pointing at them; they are back under it.
+
+**MOVED, not copied.** Two segments writing the same `state.world`/`state.resW` is the one-control-two-
+editing-surfaces defect v1.57 removed from the faction picker — they can disagree on screen, and the
+loser is whichever one nothing re-syncs. Seed, View and Generate stay in the document bar: those are
+per-render actions wanted from every domain, while extent and grid are world-creation settings that
+belong with the rest of Geology.
+
+**No JS changed, and that is a property of v2.24's own design rather than luck.** `_stampGenLock()`
+stamps `[data-genlock]` by ID and never by DOM containment, precisely so a hoisted control keeps its
+finalize lock; and both handlers already call `confirmRegenerate()` themselves, which is what a control
+outside `#genWorld` needed and what one inside it still wants. The probe checks both directly.
+
+### Search · Undo · Redo · File · cog, one line
+
+Owner: *"Undo, redo, file and the cog can be on one line next to the search bar. And redo and undo can
+be symbols."* Then: *"The cog you can use an emoticon."*
+
+`margin-left:auto` on `#findWrap` pushes everything from the search box rightward into one cluster;
+`header{flex-wrap:nowrap}` keeps it on one row, and the identity text to its left is what gives way —
+`.tag` truncates with an ellipsis rather than letting the controls wrap to a second line. **The ≤860px
+rule's own `flex-wrap:wrap` is deliberately untouched**: on a phone these SHOULD wrap rather than be
+squeezed to nothing.
+
+`↩`/`↪` are symbol-only, with the word in `title` **and** `aria-label` so the control is still named on
+hover and to a screen reader. The cog's hand-drawn SVG becomes `⚙️`, matching that convention.
+
+**The step readout moved rather than being deleted.** `#undoMem`'s sentence of text, sitting between
+Redo and File, was the one thing splitting the cluster. It keeps its id and `updateUndoUI()` still
+writes it — it is `hidden`, and its live text is mirrored onto the Undo button's own tooltip, so
+"3 steps · 12.6 MB" stays reachable.
+
+### The domain rail painted over the drawer it opens
+
+Owner: *"the world / civil / carto / explore bar draws over the sidebar when it's opened, this obscures
+options."* The mobile rail carries `z-index:31`; `.dockwrap`'s fixed sheet carried **30** — so the rail
+painted on top of the panel it had just opened, covering its first ~44px. The sheet moves to 32: above
+the rail, still below the dropdown layer (40), with the rail's own z-index untouched so its
+relationship to the canvas and the scrim (25) does not move.
+
+Mobile-only by construction, which is why this could sit unnoticed: on desktop `.dockwrap` is
+`display:contents` and the rail has no `z-index` at all, so the two are ordinary flex siblings that
+cannot overlap.
+
+### "Biome, height and shade map don't do anything" — measured first, and they do
+
+All four View modes drive `state.mode` and change the canvas: **four distinct render hashes** on a real
+world, before any fix. What makes them read as dead is **a debug layer being on** — `state.debug` paints
+over the base view, so choosing a different base underneath it is invisible, with nothing on screen
+saying why.
+
+That is v1.52's *"a control that changes nothing is INERT, not broken"* case, and its remedy applies
+unchanged: make the control turn its own prerequisite on. Picking a View mode now clears the debug
+layer — **asking for Biome is asking to see Biome**. Never the reverse: a layer click must not reset the
+base view.
+
+**`_setLayer('off')` is the one path that clears a layer** — it clicks the real `#debugSeg` button, so
+the existing `seg('debugSeg',…)` handler does the state change, the popup dismissals, the wind-streak
+sync, the render AND the popover rebuild that makes its own Off entry reflect the change. Writing any of
+that out again here would be a second function answering one question. A first cut called
+`_syncLayersList`, which does not exist — and its `typeof` guard would have made the whole line a
+permanent silent no-op, shipping dead code that tests green.
+
+### Three phone symptoms, one root cause: `vh` and `%` resolve against the LARGE viewport
+
+Owner: *"the layers don't all show and the entire list isn't scrollable on smartphone. The last items
+are hidden behind the address bar."*
+
+The layers list was never short: it renders **all 34 entries** — one per `#debugSeg` button, so nothing
+is missing from it — and was already a scroller. The bug is that `vh` and `%` resolve against the
+viewport with the address bar **retracted**, so the bottom of any box sized that way sits behind the
+toolbar whenever it is showing. `100dvh` is the dynamic viewport and tracks the bar. Three boxes were
+sized the old way and all three are fixed the same way, with the `vh`/`%` declaration left FIRST as the
+fallback for a browser without `dvh`:
+
+- `html,body{height:100%}` → `height:100dvh` — the whole app.
+- `.dockwrap`'s mobile sheet gained `height:100dvh` (it had `top:0;bottom:0`, which is the same trap).
+- The Layers popover's `max-height:72vh`.
+
+**The popover needed more than the unit swap, and only measuring showed it.** It is absolutely
+positioned inside the map, so a cap written as a fraction of the viewport cannot know where the popover
+actually starts: at `72dvh` on a 720px phone it measured a 518px box beginning ~200px down, still
+running its last entries off the bottom. `_syncChromeTop()` now also publishes **`--canvas-top`** — the
+measured top of `.canvas-wrap`, below whatever chrome is stacked above it — and the cap is
+`calc(100dvh - var(--canvas-top,120px) - 54px)`. Measuring the band is also the only version correct on
+both layouts, since the rail is a vertical column on desktop and a 44px row on a phone.
+`overscroll-behavior:contain` stops a flick that reaches the end of the list from scrolling the page
+behind it.
+
+Measured after: popover cap 482px holding 874px of content, scrolls, **last entry reachable**; dock
+sheet 720px against a 720px body.
+
+### Verification
+
+`tests/perf/probe_shellui.js` — 19 assertions, one group per report: both segments resolve inside
+`#genWorld` and are gone from `#docBar`, still carry `[data-genlock]`, and a real click still routes
+through `confirmRegenerate()`; the five header controls share one row (identical `getBoundingClientRect
+().top`) with Undo/Redo carrying a symbol plus an `aria-label` and the cog its emoji; `#undoMem` is
+hidden and its text is on the Undo tooltip; the mobile dock out-stacks the rail; a View-mode click with
+a layer up clears it and repaints; and, at a 390×720 portrait viewport, the popover's own cap, content
+height, scrollability and last-entry reachability.
+
+`tests/run.sh` showed the documented v2.25 SST flake once in five runs (`SST anomaly has warm + cold
+cells`, unpinned ambient seed) and 1160/1160 on the other four — that entry's *"if this goes red, re-run
+before believing it"* holding exactly as written.
+
+### Known scope cuts
+
+The `54px` popover allowance and the `120px` `--canvas-top` fallback are reasoned constants, not derived
+from the FAB's own measured box. `--canvas-top` is published from `_syncChromeTop()`, so it refreshes
+when the chrome bands do — a viewport change that resizes nothing above the map would leave it stale,
+which no current path produces. Actual on-device behaviour of `dvh` during the address bar's animated
+retraction is under this file's headless carve-out and still wants a phone pass.
+
 ## v2.26 DCC test — the save file becomes the project tree
 
 Owner: *"Update the saving structure to match the GDT spec."*
