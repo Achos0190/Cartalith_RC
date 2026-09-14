@@ -10,6 +10,60 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.31 DCC test — the domain rail is the phone drawer's head, not a band above the map
+
+Owner: *"in smartphone mode I'd like to put the buttons for world, carto, explore and civil back on
+top of the sidebar that is behind the hamburger button. On a phone screen it's scarce real estate."*
+Markup and CSS only — no JS changed. `hash_gen1.js` vs v2.30 **ALL IDENTICAL** · `tests/run.sh`
+1171/1171 · `probe_shellui.js` 19/19 · `probe_cogmodal.js` 33/33 ·
+`tests/perf/probe_domainrail.js` (new) **23/23**, and **6 of those 23 fail on v2.30**.
+
+### One set of buttons that moves, not a second set that appears
+
+`#domainRail` now lives inside `#dockWrap` instead of being a sibling band in `.stage`. Duplicating
+the four buttons for small screens would have been the v1.57 one-control-two-surfaces defect, and
+every id, handler and `data-domain` literal is untouched, so `_setDomain`, `_applyDomainUI` and
+`_findPanelOwners` needed no change at all.
+
+**Desktop geometry is decided by `order`, not by DOM order**, because `.dockwrap` is
+`display:contents` there and every band is an ordinary `.stage` flex item. Four explicit
+declarations (`dock-left:-1`, `domain-rail:0`, `canvas-wrap:1`, `dock-right:2`) reproduce the
+measured v2.30 arrangement exactly: dock-left 0–372 | rail 372–412 | canvas 412–1096 | dock-right
+1096–1400, `--canvas-top` 81px. Asserted, not assumed.
+
+At ≤860px the rail takes `order:-2` (beating `.dock-left`'s own `-1`), `position:sticky; top:0` so it
+stays reachable while a long panel scrolls, and `min-height:44px` per button. Measured on a 390×760
+viewport: the map now starts at **140px instead of 184px** and is **594px tall instead of 550** — the
+44px band, back.
+
+### A conflict that is now gone by construction
+
+v2.27 raised the mobile sheet from z-index 30 to 32 because the rail, then a separate band at 31,
+painted over the drawer it opens. The rail is now *inside* that drawer at z-index 2, so the fight
+cannot recur; the sheet's 32 still matters only against the scrim (25) and the dropdown layer (40),
+and the comment says so rather than describing a problem that no longer exists.
+
+### Verification
+
+`probe_domainrail.js` asserts rendered geometry and real clicks, since none of this is visible to
+`tests/run.sh`: exactly one rail and exactly four buttons in the document; it is inside the drawer
+and not in the stage; it is the drawer's first band, flush with its top, on screen and full width;
+every button clears 44px **with its glyph and its label both unclipped inside the row** (a stacked
+glyph-over-label squeezed into 44px is a real clipping risk, and a class-name assertion would never
+have noticed); a click from in there switches domain, reveals that domain's panel, and does not
+close the drawer over it; the drawer scrolls and the rail stays stuck to its top; the setup gate
+still dims and disables it; desktop stays a 40px vertical spine between the tools dock and the map.
+The 44px claim is a *comparison* against v2.30 rather than a magic number — the probe takes the
+before-build as an optional second argument.
+
+**One flake worth recording**: the first `tests/run.sh` run on this build reported 1170/1, and two
+further runs reported 1171/1171. Nothing in this version touches JS and `hash_gen1.js` is ALL
+IDENTICAL, which is consistent with the unpinned-seed assertion `tests/test_tail.js` already carries
+a warning about (v2.25: *"if this goes red, re-run before believing it"*). Recorded rather than
+quietly re-run.
+
+---
+
 ## v2.30 DCC test — the carve follows a river, not a receiver chain
 
 Owner, after v2.29: *"the lines seem rather straight, not the natural curvy/pronged sense you see in

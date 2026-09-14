@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.30 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
+| `Cartalith v2.31 DCC test.html` | **The DCC shell line's current head, not a mainline version.** `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
+| `Cartalith v2.30 DCC test.html` | Previous DCC-line file. The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
 | `Cartalith v2.29 DCC test.html` | Previous DCC-line file. Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
 | `Cartalith v2.28 DCC test.html` | Previous DCC-line file — the cog window's two faults: v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
 | `Cartalith v2.27 DCC test.html` | Earlier DCC-line file — five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
@@ -1038,6 +1039,27 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The domain rail is the phone drawer's head (v2.31, DCC-line file only)
+
+Owner: *"on a phone screen it's scarce real estate."* `#domainRail` moved INSIDE `#dockWrap`.
+`hash_gen1.js` vs v2.30 ALL IDENTICAL; verification is `tests/perf/probe_domainrail.js`
+(23 assertions, 6 of them fail on v2.30).
+
+- **One set of buttons that MOVES, never a second set that appears on small screens** — that is
+  v1.57's one-control-two-surfaces defect. Every id, handler and `data-domain` literal is untouched,
+  so `_setDomain`/`_applyDomainUI`/`_findPanelOwners` needed no change.
+- **On desktop the bands are arranged by CSS `order`, not DOM order**, because `.dockwrap` is
+  `display:contents` there and each band is an ordinary `.stage` flex item. The four declarations
+  (`dock-left:-1`, `domain-rail:0`, `canvas-wrap:1`, `dock-right:2`) reproduce the measured v2.30
+  layout exactly — dock-left 0–372 | rail 372–412 | canvas | dock-right. **Any future band added to
+  `.dockwrap` needs an `order`**, or it lands after the canvas.
+- At ≤860px the rail takes `order:-2` (beating `.dock-left`'s `-1`) and `position:sticky;top:0`.
+  Map top 184px → 140px, height 550px → 594px at 390×760.
+- **v2.27's rail-over-drawer z-index conflict is gone by construction** — the rail is now inside the
+  drawer. The sheet's `z-index:32` still matters only against the scrim (25) and dropdowns (40).
+- **A 44px row stacking a glyph over a label is a clipping risk**, and a class-name assertion would
+  never see it. The probe measures both boxes against the row's own rect.
 
 ### The carve follows a river, not a receiver chain (v2.30, DCC-line file only)
 
@@ -4304,6 +4326,7 @@ node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: contr
 node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
 node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
 node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
+node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer head on a phone, unchanged on desktop
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
