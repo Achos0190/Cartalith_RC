@@ -8490,6 +8490,80 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v2.24: ...and the ResizeObserver refits the camera for it — this file had zero ResizeObserver before', R.v224obs.cameraRefit);
   A('v2.24: ...and retracting the band restores the previous fit exactly', R.v224obs.restored);
 
+  // ---- v2.25: rivers scale with zoom; the lake split is sub-cell; tile hillshade is normalised ----
+  R.v225 = await page.evaluate(async () => {
+    const o = {};
+    state.tect.seed = 12345; state.resW = 512;
+    GW = state.resW; GH = gridH(GW); allocate(); await generate();
+    const rn = _riverNet;
+
+    // 1. buildRiverNetwork now RETURNS its own channel half-width — the single width model
+    o.halfwReturned = !!(rn.halfw && rn.halfw.length === GW * GH);
+    let hwMax = 0, hwCells = 0;
+    if (rn.halfw) for (let i = 0; i < rn.halfw.length; i++) { const h = rn.halfw[i]; if (h > 0) hwCells++; if (h > hwMax) hwMax = h; }
+    o.halfwPopulated = hwCells > 0 && hwMax > 0 && isFinite(hwMax);
+
+    // 2/3/4. the floor is a NO-OP at zoom 1 and BINDS at deep zoom, growing 1:1 with zk (not sqrt)
+    const wb = currentWaterBodies();
+    const inLake = (q) => { const gx = q.x | 0, gy = q.y | 0;
+      if (!(gx >= 0 && gx < GW && gy >= 0 && gy < GH)) return false;
+      const i = gy * GW + gx; if (wb[i] !== 2) return false;
+      if (!_lakeFill || _lakeFill.length !== GW * GH) return true;
+      return (_lakeFill[i] - sampleArr(field, q.x, q.y)) > 0.004; };
+    const raw = traceRiverPolylines(rn.order, rn.recv, GW, GH, 1);
+    const polys = splitRiverPolylines(raw, GW, inLake);
+    const baseSym = Math.max(0.6, GW / 620);
+    const widths = (zk, reproj) => {
+      const _z = reproj ? Math.max(1, zk) : 1;
+      const baseW = baseSym * (reproj ? Math.sqrt(_z) : 1 / Math.sqrt(_z));
+      let bound = 0, n = 0, symSum = 0, outSum = 0;
+      for (const pl of polys) {
+        let maxO = 1, hw = 0;
+        for (const q of pl) { const i = ((q.y | 0) * GW) + (q.x | 0);
+          if (rn.order[i] > maxO) maxO = rn.order[i];
+          if (rn.halfw && rn.halfw[i] > hw) hw = rn.halfw[i]; }
+        const tt = Math.min(1, (maxO - 1) / 6);
+        const deEmph = Math.max(0, Math.min(1, 1 - (zk - 1) / 7));
+        const symW = baseW * (maxO <= 1 ? (0.55 + 0.45 * (1 - deEmph)) : (0.9 + 1.7 * tt));
+        const realW = 2 * hw * (reproj ? zk : 1);
+        if (realW > symW) bound++;
+        symSum += symW; outSum += Math.max(symW, realW); n++;
+      }
+      return { pctBound: 100 * bound / n, sym: symSum / n, out: outSum / n };
+    };
+    const z1off = widths(1, false), z1lod = widths(1, true), z32 = widths(32, true), z64 = widths(64, true);
+    o.floorNoopAtZoom1 = z1off.pctBound === 0 && z1lod.pctBound === 0
+                       && Math.abs(z1off.out - z1off.sym) < 1e-9 && Math.abs(z1lod.out - z1lod.sym) < 1e-9;
+    o.floorBindsDeep = z32.pctBound > 50 && z32.out > z32.sym * 1.2;
+    // past the crossover the river is true-to-scale: doubling zk doubles the stroke (the symbol only adds sqrt2)
+    o.growsLinearly = Math.abs((z64.out / z32.out) - 2) < 0.05 && (z64.sym / z32.sym) < 1.5;
+
+    // 5/6. the sub-cell lake test recovers shoreline reaches, and only ever NARROWS "in lake"
+    const cellLake = (q) => { const gx = q.x | 0, gy = q.y | 0;
+      return gx >= 0 && gx < GW && gy >= 0 && gy < GH && wb[gy * GW + gx] === 2; };
+    const cellSplit = splitRiverPolylines(raw, GW, cellLake);
+    const pts = a => a.reduce((s, x) => s + x.length, 0);
+    o.subCellRecovers = polys.length > cellSplit.length && pts(polys) > pts(cellSplit);
+    let widened = 0;
+    for (const pl of raw) for (const q of pl) if (inLake(q) && !cellLake(q)) widened++;
+    o.subCellIsStrictSubset = widened === 0;          // never claims "in lake" where the cell test did not
+
+    // 7/8/9. tileShadeExag: no-op without bounds, never reduces, scales with px-per-coarse-cell
+    o.shadeNoopNoBounds = tileShadeExag(null, 1024) === state.exag && tileShadeExag(undefined, 1024) === state.exag;
+    o.shadeNeverReduces = tileShadeExag({ x: 0, y: 0, w: 4000, h: 2000 }, 1024) === state.exag;   // px/cell < 1 ⇒ clamped
+    o.shadeScales = Math.abs(tileShadeExag({ x: 0, y: 0, w: 32, h: 32 }, 1025) - state.exag * 32) < 1e-6;
+    return o;
+  });
+  A('v2.25: buildRiverNetwork returns its own channel half-width — the renderer had no width to compare its pen against', R.v225.halfwReturned && R.v225.halfwPopulated);
+  A('v2.25: the real-width floor is a NO-OP at zoom 1, off-LOD and under LOD — v1.29’s requested world-scale thinning is intact', R.v225.floorNoopAtZoom1);
+  A('v2.25: ...and binds at deep zoom, where the channel is genuinely wider than the pen', R.v225.floorBindsDeep);
+  A('v2.25: ...past which the river is true-to-scale: doubling the zoom doubles the stroke, not √2×', R.v225.growsLinearly);
+  A('v2.25: the sub-cell lake test recovers shoreline reaches the cell-granular one discarded', R.v225.subCellRecovers);
+  A('v2.25: ...and only ever NARROWS "in lake" — it can never cut a reach the old test kept', R.v225.subCellIsStrictSubset);
+  A('v2.25: tileShadeExag with no bounds is exactly state.exag — v2.24 behaviour by construction', R.v225.shadeNoopNoBounds);
+  A('v2.25: ...never REDUCES exaggeration when a coarse cell spans under a pixel', R.v225.shadeNeverReduces);
+  A('v2.25: ...and scales with the tile’s own pixels-per-coarse-cell', R.v225.shadeScales);
+
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

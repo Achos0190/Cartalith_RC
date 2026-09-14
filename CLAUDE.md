@@ -11,8 +11,9 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.24 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.23 was a repaint of v2.22 (colour/radius/density only); v2.24 replaces the GUI FRAME — app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path (`hash_gen1.js` vs v2.22 ALL IDENTICAL); run the suites against it explicitly: `tests/run.sh "Cartalith v2.24 DCC test.html"`. |
-| `Cartalith v2.23 DCC test.html` | Previous DCC-line file — the theme layer alone, kept. Both are deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.2x` name would have made an experiment the suite's default target. |
+| `Cartalith v2.25 DCC test.html` | **The DCC shell line's current head, not a mainline version.** v2.24's frame plus three render fixes: rivers now switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. `field`/`temp`/`rain`/`flow` IDENTICAL vs v2.24; the `rgba` delta is proven to be only the river overlay (byte-identical with `riverWays=false`). Run the suites against it explicitly: `tests/run.sh "Cartalith v2.25 DCC test.html"`. |
+| `Cartalith v2.24 DCC test.html` | Previous DCC-line file — the GUI FRAME replacement: app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path vs v2.22. |
+| `Cartalith v2.23 DCC test.html` | The theme layer alone, kept. Every DCC-line file is deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.2x` name would have made an experiment the suite's default target. |
 | `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
@@ -1032,6 +1033,63 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Rivers: symbol vs. real width, and the sub-cell shoreline (v2.25, DCC-line file only)
+
+Owner: rivers *"don't seem to scale when we zoom in. They tend to stay lines (and broken at that)"*,
+then *"I think it's a regression from one of the very first versions... Somewhere I asked to change
+the algorithm and it broke."* Both symptoms bisected to **v1.29** — correct on the owner's own
+recollection. `field`/`temp`/`rain`/`flow` IDENTICAL; the `rgba` delta is proven to be only the river
+overlay (`riverWays=false` ⇒ byte-identical, FNV `4270251260`).
+
+- **`buildRiverNetwork` now RETURNS its channel half-width (`halfw`), and that is the only width
+  model.** It always computed `halfW` — hydraulic geometry, real-km-aware since v2.07 — and threw it
+  away after stamping `intensity`/`depth`/`omax`, so `drawRiverWays` had nothing to compare its pen
+  against and v1.29's own boundary condition (*"until the channel is wide enough to draw as a
+  polygon"*) could never fire. **Never re-derive `halfW`'s formula at a renderer** — that is the
+  "two functions answering one question" trap this file has already paid for seven times.
+- **The stroke is `max(symbol, real)` — a FLOOR.** The symbol still wins at world scale, so v1.29's
+  requested thinning is intact: measured 0% of polylines floored at zoom 1 (off-LOD *and* LOD), 1% at
+  zk=8, 100% at zk=32. Past the crossover the river grows 1:1 with zoom instead of √z.
+- **The real width converts once per camera convention, like the symbol.** v1.29's two branches carry
+  the zoom factor in opposite places: under LOD coords are canvas px (1 grid cell = `zk` px ⇒
+  `2·halfW·zk`), off LOD they are grid units and CSS scales after (⇒ `2·halfW`). Any future width term
+  needs the same two-branch treatment.
+- **A cell-granular water test against a sub-cell shoreline shatters the line.**
+  `splitRiverPolylines`' lake predicate read `_waterBody[i]===2` per cell while lake shorelines draw
+  sub-cell (v1.05), and every run left under 2 points is dropped: **517 polylines / 5910 points → 393
+  / 3931**, a third of the network, with each survivor stopping a cell short of the water. Now tests
+  whether the pooled surface genuinely stands above the terrain under the point
+  (`_lakeFill[i] − sampleArr(field,p.x,p.y) > 0.004`, this file's own "nothing pooled here" epsilon).
+  Recovers 404 / 4163. Same mismatch `_civLakeFlooded` fixes for placement — **grep for the other
+  cell-granular water tests before adding one.**
+
+### LOD tile passes must be told how many pixels a coarse cell spans (v2.25)
+
+- **`tileShadeExag(bounds, W)` scales hillshade exaggeration by `(W−1)/bounds.w`.** All three tile
+  renderers hillshaded with a bare `state.exag` while the main map uses `state.exag/s` and
+  `renderBiomeTileRGBA` normalises its *material* slope by `cx`/`cy` one line later — the shading term
+  was the lone un-normalised pass, so relief flattened exactly where the LOD viewer exists to show it.
+  Clamped at 1 (never *reduces* exaggeration); **bounds omitted ⇒ v2.24's value exactly**. Shaded-pixel
+  share at z=4: 22.4% → 36.1%; z=0 identical. The native port found the same gap independently at
+  `lod_bridge.rs:420`.
+- **Two plausible LOD fixes were refuted by their own measurement — do not re-chase them.**
+  Raising `lodDetailFreqK` measures 3.7× more Laplacian energy but the octaves land ABOVE the tile's
+  Nyquist limit from z=4 up (freq=4 ⇒ 8, 16 at z=4; 8/16/32/64 at z=6) — that is aliasing, not detail.
+  And scaling `burnChannels`' `widthK` (a radius in TILE PIXELS, so 6.0 coarse cells at z=0 down to
+  0.023 at z=8) costs **17× the time for a 0.3-point change in burned area**, because `mag` is
+  bilinearly interpolated coarse flow: **the `mag ≥ thresh` band already scales with zoom on its own**
+  (1.35% burned at z=0 → 7.48% at z=8) and `widthK` only feathers the rim. `featureDetailPass` is
+  already correct — coarse-cell units throughout — so a burn-flag split frees nothing.
+
+### A flaky suite assertion, disclosed not fixed (v2.25)
+
+`tests/test_tail.js`'s **`SST anomaly has warm + cold cells`** runs on an unpinned ambient seed and
+demands a single cell past ±0.01. Measured on **untouched v2.22**: 9/10 seeds pass, seed 8080 fails
+outright (min −0.0016), seed 2 is marginal (−0.0124). The cold side is the fragile one, matching the
+documented Sverdrup/Stommel asymmetry. It is the single-outlier shape v1.82's entry says to replace
+with an aggregate — left alone rather than loosened inside an unrelated rendering version. **If this
+goes red, re-run before believing it.**
 
 ### The DCC editor frame (v2.24, DCC-line file only)
 

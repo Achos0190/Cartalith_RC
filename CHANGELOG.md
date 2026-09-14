@@ -10,6 +10,126 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.25 DCC test — rivers that scale with zoom; LOD tile hillshade normalised
+
+Owner, on v2.24: *"Can you check if we can optimise the rendering pipeline to get more detail as we
+zoom in more? Much like de extra LOD I formation in the GDT github"*, then *"And rivers don't seem to
+scale when we zoom in. They tend to stay lines (and broken at that)"*, then — decisively —
+*"I think it's a regression from one of the very first versions of the html. Somewhere I asked to
+change the algorithm and it broke."*
+
+That last message was right, and it is what this version is built on. A bisect traced BOTH river
+symptoms to **v1.29**, the version whose own entry records an owner asking for the opposite change.
+
+`field`/`temp`/`rain`/`flow` are **IDENTICAL in every hash scenario**; `rgba` differs, and that delta
+is *proven* to be only the river overlay — with `state.viz.riverWays=false` on both sides the canvas
+is byte-identical (FNV `4270251260`), the same attribution v1.29 itself used. 1160/1160, 852/852.
+
+### Rivers "stay lines" — the symbol never yields to the channel
+
+v1.29 replaced a fully zoom-proportional stroke with a damped cartographic SYMBOL (`base·√z` under
+LOD, `base/√z` off it). That was a correct fix for what was reported then — a stroke growing 1:1 with
+zoom — and its own comment names the boundary condition it did not implement: a river is a symbol
+*"until the channel is wide enough to draw as a polygon"*. Nothing ever measured whether it was.
+
+It could not: **`buildRiverNetwork` computed a channel half-width and threw it away.** `halfW` is
+built per channel cell (hydraulic geometry, real-km-aware since v2.07), consumed immediately to stamp
+`intensity`/`depth`/`omax`, and never returned — so the renderer had no width to compare its pen
+against. It is now recorded at the channel centre cell and returned as `halfw`. Purely additive:
+nothing on the carve/generate path reads it, which is why `field` stays bit-identical.
+
+`drawRiverWays` then floors the stroke at the real width, converted once per camera convention
+exactly as the symbol already is (v1.29's two branches carry the zoom factor in opposite places):
+
+    under LOD  — coords are canvas px, 1 grid cell = zk px  ⇒ realW = 2·halfW·zk
+    off LOD    — coords are grid units, CSS then applies ×z ⇒ realW = 2·halfW
+
+`max(symbol, real)` — so the symbol still wins wherever it is the wider of the two. Measured at seed
+12345/512px, as average stroke across every drawn polyline:
+
+| view | symbol | with floor | polylines where the floor binds |
+|---|---|---|---|
+| off-LOD z=1 | 2.32 | 2.32 | **0%** |
+| LOD zk=1 | 2.32 | 2.32 | **0%** |
+| LOD zk=8 | 9.79 | 9.81 | 1% |
+| LOD zk=32 | 19.58 | **32.41** | **100%** |
+
+So the world-scale view is untouched and v1.29's requested thinning is fully preserved; the crossover
+lands between zk=8 and zk=32, and past it the river grows 1:1 with zoom instead of at √z. **This is a
+floor, never a second width model** — the file has consolidated "two functions answering one question"
+seven times (v1.30, v1.33, v1.35, v1.38, v1.48, v1.50, v1.95) and re-deriving `halfW`'s formula at the
+renderer would have made it eight.
+
+### Rivers "broken at that" — a cell-granular test against a sub-cell shoreline
+
+`splitRiverPolylines`' lake predicate read the water-body raster at **cell** granularity
+(`_waterBody[i]===2`) while the renderer draws lake shorelines **sub-cell** (v1.05). A chain merely
+grazing a lake cell was therefore cut, and every run left under two points is dropped outright.
+Measured at seed 12345/512px — region mode, so the seam half of the split never fires and every cut
+here is the lake test: the raw network's **517 polylines / 5910 points fall to 393 / 3931**. A third
+of the drawn network discarded, and every surviving reach stopping a cell short of the water rather
+than at it.
+
+This is precisely the mismatch `_civLakeFlooded` (v1.29, same version) fixes one layer up for
+settlement placement: *"a class-0 cell lower than the lake next door reads dry at map scale and is
+under water at zoom."* The predicate now asks whether the pooled surface genuinely stands above the
+terrain beneath the point — `_lakeFill[i] − sampleArr(field, p.x, p.y) > 0.004`, bilinear at the
+point's own fractional position, reusing this file's established "nothing actually pooled here"
+epsilon. Recovers **404 / 4163** (+11 polylines, +232 points). The remaining loss is reaches genuinely
+inside a lake, which is the predicate doing its job — and matches the GeoJSON export, which already
+declines the lake predicate on the stated grounds that *"a lake reach is real hydrology."*
+
+### LOD tile hillshade normalised to the tile's own scale
+
+The three tile renderers (`renderHeightTileRGBA`, `renderBiomeTileRGBA`, `renderAffordanceTileRGBA`)
+hillshaded with a bare `state.exag` while the main map's own per-pixel path uses `state.exag/s`, and
+`renderBiomeTileRGBA` normalises its *material* slope by `cx`/`cy` one line later — so the shading
+term was the only thing in the tile pipeline not told how many pixels a coarse cell now spans. Slope
+in tile-pixel space shrinks as zoom deepens, so relief flattened out exactly where the LOD viewer
+exists to show it. New `tileShadeExag(bounds, W)` scales by `(W−1)/bounds.w`, clamped at 1 so it can
+never *reduce* exaggeration; **bounds omitted ⇒ v2.24's value exactly**. Measured, shaded-pixel share:
+
+| level | v2.24 | v2.25 |
+|---|---|---|
+| 0 | 65.8% | 65.8% (identical — clamp holds) |
+| 2 | 23.0% | 26.6% |
+| 4 | 22.4% | **36.1%** |
+| 6 | 31.8% | 35.0% |
+
+Independently corroborated: the native port's own audit reached the same conclusion at
+`lod_bridge.rs:420`, one of only two genuine gaps it found between the two implementations.
+
+### Two ranked LOD options investigated and NOT built — both refuted by their own measurement
+
+- **Raising `lodDetailFreqK` for detail synthesis.** A Laplacian probe looked like it vindicated the
+  idea (freq 1→4 gives 3.7× energy, 0.001151→0.004219, height range unchanged). Working the octave
+  schedule against the tile's Nyquist limit shows most of that is **aliasing**: at z=4 (16 px per
+  coarse cell ⇒ Nyquist 8) freq=4 puts octaves at 8 and 16; at z=6, at 8/16/32/64. Current freq=1
+  keeps every octave at or below Nyquist for z≤6. More measured energy, not more resolvable detail.
+- **Scaling `burnChannels`' width, or splitting the burn-rivers flag.** `widthK=3.0` is a radius in
+  **tile pixels**, so a channel's real-world radius halves per level — 6.0 coarse cells at z=0 down to
+  0.023 at z=8 — which looks like the same defect class as the hillshade. It is not. Scaling it 3→384
+  px at z=8 costs **17× the time (50 → 887 ms) for a 0.3-point change in burned area** (7.48% →
+  7.78%), because `mag` is bilinearly interpolated coarse flow: the `mag ≥ thresh` band already scales
+  with zoom on its own (1.35% burned at z=0 → 7.48% at z=8). `widthK` only feathers the rim; it never
+  set the channel's extent. `featureDetailPass` was checked in the same pass and is already correct —
+  it works in coarse-cell units throughout — so there is nothing for a flag split to free.
+
+### Known scope cuts
+
+- The `#lodBurnChk` / Zoom-detail-slider default-off question is untouched; this version changes no
+  defaults.
+- The supersample cap (2560 px) still yields 1.25×, not 2×, at `resW` 2048 — separate, still open.
+- v1.29's disclosed per-tile seam residue is unchanged.
+- **Pre-existing, disclosed, not fixed here:** `tests/test_tail.js`'s `SST anomaly has warm + cold
+  cells` runs on an unpinned ambient seed and demands a single cell past ±0.01. Measured on
+  **untouched v2.22**: 9/10 seeds pass, seed 8080 fails outright (min −0.0016) and seed 2 is marginal
+  (−0.0124). A tile renderer cannot reach `oceanSSTAnomaly`, so this is not v2.25's; it is the
+  single-outlier test shape v1.82's own entry says to replace with an aggregate. Left alone rather
+  than loosened inside an unrelated rendering version.
+
+---
+
 ## v2.24 DCC test — the GUI frame itself, not a repaint
 
 Owner, on v2.23: *"Compare it to your proposed design. There is no left bar, no rail. Double check
