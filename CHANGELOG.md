@@ -10,6 +10,41 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.23 DCC test — a duplicate of v2.22 wearing the port's shell theme
+
+**A parallel experiment, not a mainline bump**, and named `Cartalith v2.23 DCC test.html` without
+`Gen1` on purpose: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort,
+so a `Gen1 v2.23` name would have silently made an experiment the default target of the engine
+suite. Verified that the default still resolves to `Cartalith Gen1 v2.22.html`.
+
+Colour, geometry and type only — no markup moved, no handler touched, no element id changed, so
+every selector in the new theme layer overrides a rule that already existed above it.
+
+- **`--line` and `--border` stop being the same value.** .10 separates regions, .16 outlines
+  controls. Collapsing the two is what the port's own handoff records as having once made every
+  chip read as a suggestion rather than an edge. `--muted` likewise stops aliasing `--dim`.
+- **Radius 0 everywhere**, with the two joystick circles re-asserted — a knob is not a panel. An
+  active surface is a wash plus an edge; a filled accent carries reversed type in *both* themes,
+  never near-black on the light amber.
+- **A three-`:not()` rule out-specifies `button.on`.** The generic button restyle was
+  `button:not(.accent):not(.subtab):not(.tab)` — specificity (0,3,1) against `button.on`'s (0,1,1)
+  — so every armed segment silently lost its fill: Region, 2K, the picked tool. Nothing threw and
+  nothing failed a test; it was caught by diffing screenshots against v2.22. Fixed with `:not(.on)`.
+- **The light palette is derived here, and the first derivation was worse than what it replaced.**
+  The port's handoff only says "inks inverted" for light, so these values are this file's own. A
+  contrast probe measured panel labels at 4.09:1 and hints at 2.83:1 — both under AA, and both
+  below the v2.22 light theme. Darkened two steps to 5.93 and 4.46, now better than the baseline on
+  every row sampled. **Measuring found this; looking did not — a first read of the same screenshot
+  wrongly called the header text a contrast failure, and it measures 15.29:1.**
+- Light also gains its own scrim for the legend, the city-viewer legend and the scale bar, all
+  three hardcoded dark in both themes since long before this change.
+- **Tests**: `tests/run.sh` 1158/1158, `tests/run_um.sh` 852/852, `hash_gen1.js` vs v2.22 **ALL
+  IDENTICAL**. Bit-identity holds by construction — `getComputedStyle` appears seven times in this
+  file and never reads a colour, so no CSS token can reach the rendered map.
+- **Known scope cuts**: structure is untouched, so this is the v2.22 shell in DCC clothing, not the
+  cog/domain-rail redesign; the header's emoji (`🎨 🌙 ⓘ 📌`) stay, since replacing them with drawn
+  glyphs is markup work, not a theme; the 12px base is one density step, not the DCC's own 11.5.
+
 ## Gen1 merged-file line
 
 ### v2.22 — Craters get units: a production rate, a size-frequency law, and wear from a real age
