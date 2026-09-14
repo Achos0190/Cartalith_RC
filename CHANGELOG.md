@@ -10,6 +10,109 @@ the project's memory). Each one states what changed, why, the verification perfo
 
 ---
 
+## v2.30 DCC test — the carve follows a river, not a receiver chain
+
+Owner, after v2.29: *"the lines seem rather straight, not the natural curvy/pronged sense you see in
+reality,"* then *"so like can we not use d8 and have natural looking rivers?"*, then — shown a
+five-way visual ladder at seed 12345/1024px — **"B+D"**: smooth the path, and meander it. `tests/run.sh`
+**1171/1171** (+10) · `tests/run_um.sh` 852/852 · `tests/perf/probe_carve.js` **10/10** (+3), and the
+new coverage guard **fails on v2.29** · `hash_gen1.js` vs v2.29 diverges in every scenario — a
+deliberate re-baseline, isolated below.
+
+### D8 was never the problem; using its output as geometry was
+
+`traceRiverPolylines` returns a **receiver chain**: one point per grid cell, each step one of eight
+lattice directions. That is the right answer to a topological question and the wrong thing to hand a
+carving kernel. `drawRiverWays` already knew this — it runs `rdpSimplify` → `catmullRomSample` →
+`riverSinuosity` on the identical polyline. `carveRiverValleys` handed the raw chain straight to
+`enforceChannelDescent`. So with ways ON you got curvy rivers that were not in the terrain, and with
+ways OFF (v2.29's new default) rivers in the terrain that were raw D8 straight.
+
+Replacing D8 outright buys less than it sounds like. `buildRiverNetwork` **already** implements a
+single-receiver projection of D∞ (R3b, Tarboton 1997 — it picks the downhill neighbour best aligned
+with the *continuous* aspect, not the steepest of eight). What remains is only that the receiver must
+still be one of eight lattice neighbours, which is exactly what a spline removes. Two measured
+alternatives, both refuted as poor value: velocity erosion moves median sinuosity 1.076 → 1.108 for
+~1.8x the generate time, and raising domain warp 0.45 → 1.00 gives 1.097 while thinning the network.
+
+### The dotted rivers were a boundary condition, and they were the bigger half
+
+`enforceChannelDescent` stamps a disc of radius `halfW` around each **integer** point, keeping cells
+with `d <= halfW`. At order 1, `halfW = 0.8*widthK`, so the four orthogonal neighbours sit at `d = 1
+> 0.8` and the carve is a **single cell**; consecutive chain points on a diagonal step are √2 apart,
+so the trench breaks. Measured at seed 12345, the share of the final drainage network with any trench
+under it:
+
+| | carved cells | **channel → trench** | trench → channel | traced network |
+|---|---|---|---|---|
+| v2.29 | 6 960 | **64.3 %** (512px: 57.8 %) | 91.5 % | −13.7 % |
+| v2.30 | 11 224 | **97.1 %** | 86.5 % | −24.1 % |
+
+Water fraction is unchanged (47.77 % both sides at 1024px; the 0.15-point *drop* the carve already
+caused is pre-existing), max cut is identical at 0.2103, and the renderer paints ~15 % more river
+pixels on land while stamping *fewer* intensity cells — the stamps are spread along a channel instead
+of piling up on staircase corners.
+
+The network thinning is real and understood, not hand-waved: a carve flattens the valley floor it
+cuts, and `channelThreshold()` demands more drainage area on gentle ground, so marginal headwaters
+legitimately drop out of the detected mask. The probe bounds it rather than pretending it is zero.
+
+### Three findings that only appeared because the prototype was measured
+
+- **`riverSinuAmp` has been very nearly a no-op since R4 shipped.** It divides by `1+6*slopeN` as if
+  `slopeN` were a 0..1 grade; the slope it is actually passed is `buildRiverNetwork`'s `slopeF`, which
+  is `hypot(grad)*W` — median **1.74** at GW=1024. Measured amplitude over 176 polylines: median
+  **0.081 cells**. `RIVER_SINU_SLOPE_K=0.4` fixes it at source rather than adding a second amplitude
+  function, so the drawn line and the carved valley cannot disagree about one river.
+- **`enforceChannelDescent`'s `drop` is per POINT, so the resample step silently sets the gradient.**
+  Halving the step from the ~1.2-cell chain doubled every river's enforced descent. Found by measuring
+  network cost, not by reading: the first cut lost 29.2 % of traced km against v2.29's 14.3 %.
+  `CHANNEL_DROP_PER_CELL` is now named and the carve scales it by its own step, so the number means
+  the same thing at any step or channel width. The steeper gradient that accident produced is *kept* —
+  as an explicit `CARVE_GRADIENT_K=2`, because it is what makes a reach read as a valley rather than a
+  scratch, and because with the coupling removed it is now a choice instead of an artefact. The other
+  `enforceChannelDescent` caller — the Sculpt editor's hand-drawn River stamp, whose points a person
+  places at arbitrary spacing — keeps the plain default.
+- **`riverSinuosity` at a real amplitude is jitter, not a meander, if you sample it at the carving
+  step.** `fbm` is multi-octave; sampled every 0.4 cells its top octaves vary fully between
+  neighbours, and consecutive points separated by up to **1.74 cells** against a `halfW` of 0.8 —
+  re-opening the very gaps the resample exists to close. The wave is now sampled at
+  `CARVE_MEANDER_CTRL_PER_WAVE=8` control points per wavelength and splined through at the carving
+  step: perturb control points, spline the result, which is simply how a meandering line is built.
+  Worst gap 1.74 → 0.40 cells, and the curves read smoother than the prototype the owner picked.
+
+### Calibration and its ceiling
+
+`CARVE_SINU_K=8` is measured, not chosen. At 8x the carved geometry reaches a median sinuosity of
+1.080 while 86.5 % of the trench is still a genuine drainage line after the closing `computeFlow()`;
+at 20x it looks curvier and that falls to **73.4 %** — the trench starts wandering off the water.
+**That number is the ceiling on this technique.** A real meander belt is formed by lateral migration
+across a floodplain, not by displacing a drainage path, so past a few cells the wobble stops being
+hydrology. Do not raise it without re-running `probe_carve.js`.
+
+### Bit-identity, stated precisely
+
+`hash_gen1.js` vs v2.29 mismatches `field`/`temp`/`rain`/`flow`/`rgba` in **every** scenario:
+`carveRiverValleys` runs by default, so a different carve propagates through the closing
+`computeFlow(true); refreshClimate()` into climate as well as terrain. Isolated with
+`state.carveRivers=false` on both sides at the pinned seed: `field`/`temp`/`rain`/`flow`/`rgba` are
+all **IDENTICAL**, confirming the change is confined to the carve. The one further difference is
+`rgba` with `riverWays` ON, which is `riverSinuAmp`'s recalibration reaching `drawRiverWays` — an
+opt-in renderer, default off since v2.29.
+
+### Tests
+
+Ten new assertions in `tests/test_tail.js` (the amplitude is meaningful at the slope the engine
+really passes, and still monotone in order and slope; the path is finer than its chain; **no gap
+between points wider than the channel**; a chain too short to smooth keeps the chain gradient; and
+the two that pin the coupling — carving one straight line at steps 1.0 and 0.25 must land the floor
+in the same place, and that place must be exactly 2x the brushed-river default). Three new in
+`probe_carve.js` for the coverage claims, and its network budget now measures traced **extent**
+rather than segment count, because a carve that joins two runs into one changes the count without
+losing any river. Its water assertion is directional on purpose: only a *gain* would be a bug.
+
+---
+
 ## v2.29 DCC test — rivers rendered into the terrain, and a carve that actually cuts
 
 Owner: *"the only rivers I'm getting are drawn lines, nothing that is rendered into terrain,"* then,

@@ -4669,6 +4669,52 @@ if (typeof carveRiverValleys === 'function') {
     check('v2.22 craters: the harness world is restored', state.crater.physical === false);
   }
 
+  /* ---- v2.30: the geometry carveRiverValleys() carves along ------------------------------------ */
+  {
+    /* riverSinuAmp used to divide by 1+6*slopeN as if slopeN were a 0..1 grade, while the slope it is
+       called with is buildRiverNetwork's hypot(grad)*W, median ~1.74 at GW=1024. The amplitude that
+       produced had a median of 0.081 CELLS, so R4 was doing nothing wherever it was called. */
+    check('v2.30 sinuosity: the amplitude is meaningful at the slope the engine really passes',
+      riverSinuAmp(3, 1.74) > 0.5);
+    check('v2.30 sinuosity: it still rises with Strahler order',
+      riverSinuAmp(4, 1.0) > riverSinuAmp(2, 1.0) && riverSinuAmp(2, 1.0) > riverSinuAmp(1, 1.0));
+    check('v2.30 sinuosity: ...and still falls with slope (straight headwaters, meandering trunks)',
+      riverSinuAmp(3, 0.2) > riverSinuAmp(3, 2.0) && riverSinuAmp(3, 2.0) > riverSinuAmp(3, 12.0));
+
+    /* A raw receiver chain: one point per cell, 45-degree runs. */
+    const chain = []; for (let k = 0; k < 40; k++) chain.push({ x: 10 + k, y: 10 + (k >> 1) });
+    const res = carveChannelPath(chain, 3, 1.0, 0.8, 1024, 12345);
+    check('v2.30 carve path: it reports the step it resampled at', res.step > 0 && res.step <= CARVE_RESAMPLE_MAX_STEP);
+    check('v2.30 carve path: the path is finer than the one-point-per-cell chain it came from',
+      res.pts.length > chain.length);
+    /* Continuity is the whole point: enforceChannelDescent stamps a disc per point and never
+       interpolates, so no gap between consecutive points may exceed the channel it is carving. */
+    let worst = 0;
+    for (let k = 1; k < res.pts.length; k++)
+      worst = Math.max(worst, Math.hypot(res.pts[k].x - res.pts[k - 1].x, res.pts[k].y - res.pts[k - 1].y));
+    check('v2.30 carve path: no gap between points wider than the channel (halfW 0.8)', worst <= 0.8);
+    check('v2.30 carve path: it starts where the chain starts',
+      Math.hypot(res.pts[0].x - chain[0].x, res.pts[0].y - chain[0].y) < 1.5);
+    check('v2.30 carve path: a chain too short to smooth is returned untouched, at the chain gradient',
+      carveChannelPath([{ x: 1, y: 1 }, { x: 2, y: 2 }], 2, 1, 1, 1024, 7).step === 1);
+
+    /* THE regression this version exists to prevent twice over: enforceChannelDescent's drop is per
+       POINT, so resampling finer silently steepens every river unless the caller scales it. Carve one
+       straight line at two different steps and the channel floor must land in the same place. */
+    const W2 = 64, H2 = 64, flat = new Float32Array(W2 * H2).fill(0.8);
+    const run = (step) => {
+      const f = flat.slice(), pts = [];
+      for (let t = 0; t <= 40; t += step) pts.push([10 + t, 32]);
+      enforceChannelDescent(f, W2, H2, pts, 0.42, 1.2, { drop: CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K * step });
+      return f[32 * W2 + 50];
+    };
+    const coarse = run(1), fine = run(0.25);
+    check('v2.30 carve path: the channel gradient does not depend on the resample step',
+      Math.abs(coarse - fine) < 1e-5, 'coarse ' + coarse.toFixed(6) + ' vs fine ' + fine.toFixed(6));
+    check('v2.30 carve path: ...and that gradient really is 2x the brushed-river default',
+      Math.abs((0.8 - coarse) - 40 * CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K) < 1e-5);
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

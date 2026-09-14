@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.29 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
+| `Cartalith v2.30 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
+| `Cartalith v2.29 DCC test.html` | Previous DCC-line file. Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
 | `Cartalith v2.28 DCC test.html` | Previous DCC-line file — the cog window's two faults: v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
 | `Cartalith v2.27 DCC test.html` | Earlier DCC-line file — five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
 | `Cartalith v2.26 DCC test.html` | Previous DCC-line file — the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
@@ -24,7 +25,7 @@ threads; `file://` must degrade gracefully, never break).
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1161-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1171-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -36,7 +37,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1161 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1171 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1037,6 +1038,46 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The carve follows a river, not a receiver chain (v2.30, DCC-line file only)
+
+Owner: the lines *"seem rather straight, not the natural curvy/pronged sense you see in reality"*,
+then **"B+D"** off a five-way visual ladder. Verification is `tests/perf/probe_carve.js` (10
+assertions; the coverage guard fails on v2.29) plus 10 unit assertions in `tests/test_tail.js`.
+
+- **`traceRiverPolylines` returns a receiver chain, and a chain is not drawable OR carvable
+  geometry.** `drawRiverWays` already ran `rdpSimplify` → `catmullRomSample` → `riverSinuosity` on
+  the identical polyline; `carveRiverValleys` handed the raw chain straight to
+  `enforceChannelDescent`. `carveChannelPath()` is now the one place that conversion happens.
+- **D8 is not the defect and replacing it buys little.** `buildRiverNetwork` already routes by the
+  CONTINUOUS aspect (R3b, a single-receiver projection of D∞); what is left is only that the
+  receiver is one of eight lattice neighbours, which a spline removes. Velocity erosion (1.076 →
+  1.108 for ~1.8x the generate time) and warp 0.45→1.00 (1.097, thinner network) were both measured
+  and are poor value. **Do not re-chase them.**
+- **`enforceChannelDescent` stamps a disc per point and NEVER interpolates.** So the resample must
+  be finer than the channel, and it must not be `drawRiverWays`' `GW/360` — at 2.8 cells the carve
+  comes out as a dotted line of pits and measures *worse* than the raw chain (4 068 cells vs 6 960).
+  Assert the invariant directly: no gap between consecutive points wider than `halfW`.
+- **Its `drop` is PER POINT, so the resample step silently sets the channel gradient.** Halving the
+  step doubled every river's enforced descent, which cost 29.2% of the traced network against
+  v2.29's 13.7%. `CHANNEL_DROP_PER_CELL` is named and the carve scales it by its own step;
+  `CARVE_GRADIENT_K=2` then re-applies the steeper gradient **deliberately**. The Sculpt editor's
+  hand-drawn River stamp keeps the plain default — a person places those points.
+- **`riverSinuAmp` was a no-op and had been since R4.** It divides by `1+6*slopeN` as if slopeN were
+  a 0..1 grade; `net.slope` is `hypot(grad)*W`, median 1.74 at GW=1024, so the median amplitude was
+  **0.081 cells**. Fixed at source (`RIVER_SINU_SLOPE_K`), not by adding a second function.
+- **`fbm` sampled at the carving step is jitter, not a meander.** Its top octaves vary fully between
+  points 0.4 cells apart, separating neighbours by up to 1.74 cells — re-opening the gaps the
+  resample exists to close. Perturb `CARVE_MEANDER_CTRL_PER_WAVE=8` control points per wavelength,
+  then spline through them at the carving step.
+- **`CARVE_SINU_K=8` is a calibration with a hard ceiling.** At 8x, 86.5% of the trench is still a
+  real drainage line after the closing `computeFlow()`; at 20x that falls to 73.4% and the trench
+  wanders off the water. A real meander belt comes from lateral migration across a floodplain, not
+  from displacing a drainage path.
+- **The network thins and that is understood, not a bug**: a flatter carved floor raises
+  `channelThreshold`, so marginal headwaters leave the detected mask (−24.1% of traced extent). The
+  probe bounds it. Measure **extent**, never polyline count — a carve that joins two runs into one
+  changes the count without losing any river.
 
 ### Rivers must be carved, not only drawn (v2.29, DCC-line file only)
 
@@ -4246,7 +4287,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1161-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1171-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -4263,7 +4304,7 @@ node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: contr
 node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
 node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
 node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
-node tests/perf/probe_carve.js A.html      # v2.29 river carve: ways default off, incision strength, network cost
+node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
