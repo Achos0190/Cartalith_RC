@@ -124,6 +124,8 @@
      chrome beside it .al-grid collapses to a single column. */
   body.assets-mode .dock,body.assets-mode .domain-rail,body.assets-mode .toolrail,
   body.assets-mode .toolopts{display:none}
+  #assetsBackBtn{display:none}
+  body.assets-mode #assetsBackBtn{display:inline-block;border-color:var(--accent);color:var(--accent)}
   .canvas-wrap{flex:1;position:relative;display:flex;align-items:center;justify-content:center;background:repeating-linear-gradient(0deg,#0c0e13 0 24px,#0d0f15 24px 48px);overflow:hidden;padding:18px;touch-action:none}
   canvas#view{max-width:100%;max-height:100%;background:#000;border:1px solid var(--line);image-rendering:auto;cursor:crosshair;box-shadow:0 0 0 1px #000}
   .legend{position:absolute;left:24px;bottom:20px;font-family:var(--mono);font-size:10px;color:var(--dim);background:rgba(10,12,17,.74);border:1px solid var(--line);border-radius:6px;padding:8px 10px;line-height:1.7;pointer-events:none}
@@ -765,6 +767,11 @@ details.adv>summary{font-size:10.5px;letter-spacing:.02em}
 <body>
 <header>
   <button id="panelToggle" class="panel-toggle" aria-label="Toggle controls">☰</button>
+  <!-- v2.24 fix: Assets mode hides the domain rail (the library needs the full stage), and the
+       Assets toggle itself now lives inside the cog's Settings window - so entering Assets removed
+       every VISIBLE way back to the map, on desktop as well as on mobile. This is that way back;
+       it is CSS-gated on body.assets-mode, so the existing class toggle is all the state it needs. -->
+  <button class="menubtn" id="assetsBackBtn">← Map</button>
   <h1>Cartalith Gen1</h1>
   <span class="ver" id="verTag">v2.24</span>
   <span class="tag">terrain · climate · civilization · 2D/3D · cartalith gen1</span>
@@ -15165,6 +15172,7 @@ function _carExitAssetsMode(){
   document.body.classList.remove('assets-mode');
 }
 { const ab=document.getElementById('assetsHeaderBtn'); if(ab) ab.addEventListener('click',()=>{ _assetsModeOn?_carExitAssetsMode():_carEnterAssetsMode(); }); }
+{ const bb=document.getElementById('assetsBackBtn'); if(bb) bb.addEventListener('click',()=>_carExitAssetsMode()); }
 /* Explore map-filter funnel — toggle + close-on-outside-click/Escape (mirrors Cartalith V1.915's
    #layersFunnelBtn/#layersPopover). Unlike the Import menu, clicking inside does NOT auto-close —
    this popover holds many independent toggles (+ a timeline slider), meant to stay open across

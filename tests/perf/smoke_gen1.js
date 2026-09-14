@@ -2177,10 +2177,16 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const inAssets = getComputedStyle(document.getElementById('assetLibrary')).display !== 'none'
       && document.body.classList.contains('assets-mode')
       && getComputedStyle(document.querySelector('#domainRail')).display === 'none';
-    _carExitAssetsMode();
+    // v2.24 fix: Assets mode hides the domain rail and the Assets toggle lives in the cog's Settings
+    // window, so #assetsBackBtn is the only VISIBLE way back to the map. Exercise that button rather
+    // than the function it calls — the regression was that nothing on screen invoked it.
+    const backBtn = document.getElementById('assetsBackBtn');
+    const backBtnVisible = !!backBtn && getComputedStyle(backBtn).display !== 'none';
+    if (backBtn) backBtn.click(); else _carExitAssetsMode();
     const back = getComputedStyle(document.querySelector('.canvas-wrap')).display !== 'none'
       && !document.body.classList.contains('assets-mode');
-    return { inAssets, back };
+    const backBtnHidesAgain = !!backBtn && getComputedStyle(backBtn).display === 'none';
+    return { inAssets, back, backBtnVisible, backBtnHidesAgain };
   });
 
   // v0.86: geological Resources layer is full-map (computed below sea too) and re-derives on a sea change
@@ -8459,6 +8465,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v2.24: un-finalizing releases the hoisted controls again', R.v224.unlockedAfterUnfinalize);
   A('v2.24: the cog opens and closes the Settings window', R.v224.settingsOpens && R.v224.settingsCloses);
   A('v2.24: GPU use is behind the cog, as asked', R.v224.gpuBehindCog);
+  A('v2.24: Assets mode offers a VISIBLE way back to the map, and taking it restores the map', R.assetsToggle.backBtnVisible && R.assetsToggle.back);
+  A('v2.24: ...and that button is gone again once you are back on the map', R.assetsToggle.backBtnHidesAgain);
   A('v2.24: so are the data locations — autosave/snapshots, the tile atlas and region export', R.v224.storageBehindCog && R.v224.regionBehindCog);
   A('v2.24: the right dock is the information pane — Properties and the Info readout', R.v224.propsInRightDock && R.v224.infoInRightDock);
   A('v2.24: ...and Layers stayed on the map, where a map-view control belongs', R.v224.layersNotInDock && R.v224.layersPopulated);
