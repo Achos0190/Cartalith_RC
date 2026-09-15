@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.33 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
+| `Cartalith v2.34 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
+| `Cartalith v2.33 DCC test.html` | Previous DCC-line file. Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
 | `Cartalith v2.32 DCC test.html` | Previous DCC-line file. `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~1.6 m at default peakM) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
 | `Cartalith v2.31 DCC test.html` | Previous DCC-line file. `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
 | `Cartalith v2.30 DCC test.html` | Previous DCC-line file. The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
@@ -1041,6 +1042,42 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The land surface is a SPEED, from the Planner's own table (v2.34, DCC-line file only)
+
+Step two of the owner's routing ask. v2.33 was step one and made routes no quicker; this is the
+half with the leverage. `hash_gen1.js` vs v2.33 ALL IDENTICAL; verification is
+`tests/perf/probe_landsurface.js` (19 assertions).
+
+- **A multiplier that barely varies cannot steer anything, and `_civBiomeFriction` was worse than
+  flat — it was INVERTED.** Measured over the routing grid: Open Plains 1.418, Rocky Terrain 1.373.
+  It keys on climate vegetation, so a bare rocky mountain reads cheap and a forested plain reads
+  dear. Spread 1.10 / 1.39 / 1.45 against `JP_TERRAIN.land`'s 2.11 / 2.37 / 2.37. **Check the
+  spread of any new cost term before trusting it** — the sibling of v1.30's "check the land-mean".
+- **`CART_TERRAINS` and `JP_TERRAIN.land` are the same thirteen names**, so `_civSurfaceSpeed` maps
+  1:1 by name with nothing invented between. `hours = flatHours / speed` composes with v2.33's
+  per-edge Tobler exactly as `jpCalcLand` composes its own answer, so the router minimises
+  literally the quantity the Planner reports.
+- **The grade double-count is real and small, and it is measured**: Tobler charges ×1.001–×1.068 on
+  the slope-derived classes against the ×1.43–×2.22 the table asks. Grade is the rise BETWEEN two
+  routing cells; the class is the roughness WITHIN one, and a routing cell aggregates several
+  full-res cells.
+- **`buildCartTerrain` can never emit four of its thirteen classes**, and `'Forest Path'` is the one
+  NATURAL omission — so the Planner calls flat woodland "Open Plains", 0.95, faster than Hills. A
+  branch fixing that was built and **reverted**: `'Forest Path'` is in `JP_WHEEL_BLOCKED`, so
+  emitting it hard-blocks every cart and wagon crossing woodland — a claim that set makes about a
+  hand-painted NARROW CUT PATH, not ordinary forest. **The headless suite's own v0.102 assertion is
+  what surfaced it.** A Planner decision, flagged in both files, not bundled into a routing fix.
+- **So the router prices forest itself, from the same table's `Forest Path` entry, by `min` — the
+  slowest surface binds, NEVER a product.** 0.50 × 0.75 is a number nothing supports, and a rocky
+  forested slope is slow because of the rock. It moves only the 3.5–15.9% of land that is flat AND
+  wooded, which is exactly where trees are the constraint.
+- **Two tests for one question, again**: the old `dfld<sea+0.06 && flow>thresh*8` swamp proxy is
+  gone — `'Swamp / Marsh'` is already a class, at 0.40, and it is the one the Planner reads.
+- **Measure the objective you changed, not the one you changed last time.** v2.33's A/B priced
+  Tobler-grade hours only; for a surface change that is the wrong referee. Scored on the Planner's
+  own composite (both sides against the identical, unchanged terrain grid): −3.8% / −4.2% /
+  −13.9% / −21.0%, 61 pairs quicker to 11 slower, **with km and climb falling too**.
 
 ### Land routing costs TIME — and slope is not the binding term (v2.33, DCC-line file only)
 
@@ -4406,6 +4443,7 @@ node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, head
 node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
 node tests/perf/probe_blur.js A.html       # v2.32 gaussBlur: the CPU path is the fast one (needs a real browser — the headless suite has no WebGL2)
 node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer head on a phone, unchanged on desktop
+node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```

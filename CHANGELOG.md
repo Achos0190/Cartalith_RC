@@ -4,6 +4,80 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.34 (DCC line) — the land surface is a SPEED, and it comes from the Planner's own table
+
+Step two of the routing work the owner asked for: *"Routes should always offer a quicker transport
+or lower cost … and at the same time they traverse terrain at its lowest costs."* v2.33 was step
+one and reported honestly that it made routes no quicker — it unified three land cost models and
+moved slope onto the edge as a Tobler curve, but p50 grade on the routing grid is 1.20%, where
+Tobler charges ×1.001. **Slope was never the binding term.** This version replaces the term that
+was.
+
+**Measured before building, and the measurement is what condemned the old term.** Over the routing
+grid on three seeds, `_civBiomeFriction`'s mean charge per terrain class was: Rocky Terrain 1.373,
+Open Plains 1.418, Hills 1.369, Swamp 1.600, Mountain Pass 1.104. It charges **Open Plains MORE
+than Rocky Terrain** — not merely coarse but inverted on the single largest distinction the map
+has, because it keys on climate vegetation and a bare rocky mountain has none. Its spread across
+the classes covering >0.5% of land: **1.10 / 1.39 / 1.45**. A router cannot prefer one surface over
+another with a multiplier that barely varies.
+
+- **`_civSurfaceSpeed(terrIdx, biomeKey)` replaces `_civBiomeFriction`.** The multiplier is now a
+  SPEED, read from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded
+  table — through `buildCartTerrain()`'s full-grid classification, which is the exact classifier
+  `_jpDeriveStages` runs over a drawn route. `CART_TERRAINS` and `JP_TERRAIN.land` are the same
+  thirteen names, so the mapping is 1:1 by name with nothing invented in between. Measured spread
+  **2.11 / 2.37 / 2.37**. `hours = flatHours / speed` is a real conversion (`TOBLER_FLAT_KMH` is
+  Tobler's flat-ground pace; the table is the fraction of nominal pace a surface allows), and it
+  composes with v2.33's per-edge Tobler grade exactly the way `jpCalcLand` composes its own answer
+  — base pace × `jpAnimalTerrainMod` × the grade terms. **The router now minimises literally the
+  quantity the Planner reports.**
+- **The double-count with v2.33's grade term is measured, not waved at.** Tobler's mean charge on
+  the slope-derived classes is ×1.001–×1.007 (Hills, Mountain Pass), ×1.029–×1.047 (Rocky) and
+  ×1.046–×1.068 (Mountain Trails), against the ×1.43–×2.22 the table asks for. Grade is the net
+  rise BETWEEN two routing cells; the class is the roughness WITHIN one, and a routing cell
+  aggregates several full-res cells — a rocky cell can be net-flat edge to edge and still be rocky.
+  At worst ~3% of a ~122% charge is counted twice.
+- **The swamp proxy is gone.** `_civTravelHours` had its own `dfld[i]<sea+0.06 && flow>thresh*8`
+  marshland test while `'Swamp / Marsh'` is already one of the thirteen classes, at 0.40 — the
+  strongest penalty in the table — and it is the one the Planner reads. Two tests for one question
+  is the shape this file has paid for eight times.
+- **Forest is the one thing `buildCartTerrain` cannot say, and a branch adding it was built and
+  REVERTED.** The cascade can never emit four of the thirteen classes; three (Paved Road, Dirt
+  Track, Ruins / Debris) are human features and correctly unreachable from climate, but Forest Path
+  is the one natural class it omits — so `_jpDeriveStages` reports flat wooded country as "Open
+  Plains" (0.95, *faster* than Hills). Adding the branch made the headless suite's own v0.102
+  assertion fail, which is what surfaced the real reason not to: **`'Forest Path'` is also in
+  `JP_WHEEL_BLOCKED`**, so emitting it would hard-block every cart and wagon journey crossing
+  woodland. That set was written to make that claim about a hand-painted NARROW CUT PATH, not about
+  ordinary flat forest, and changing it is a Journey-Planner decision, not a routing one. Flagged
+  in both files, not bundled.
+- **So the router prices forest itself, out of the same table's own `Forest Path` entry (0.75).**
+  That was `_civBiomeFriction`'s one genuine signal and dropping it would be a silent capability
+  loss. The combination is **`min` — the slowest surface binds — never a product**: 0.50 × 0.75 is
+  a number nothing in the table supports, and a rocky forested slope is slow because of the rock.
+  Measured: forest biomes cover 39 / 43 / 60% of land but only **3.5 / 3.4 / 15.9%** of it reads
+  Open Plains, so the term moves exactly the flat wooded ground where trees ARE the constraint. It
+  is also where the old term was most clearly wrong — it charged its flat 1.6 on a BARE rocky
+  mountain standing inside a forest biome. The biome test is `classifyBiome`'s own verdict, not a
+  re-derived rain/temp threshold. Scrub and savanna are deliberately excluded.
+- **Result, on the Planner's own objective** (same pairs, same mode, both sides scored against the
+  identical unchanged terrain grid): land/mixed at seed 12345 **−3.8% / −4.2%**, at seed 31337
+  **−13.9% / −21.0%**; 61 pairs quicker against 11 slower. It is not buying time with distance —
+  **path km falls too** (−1.3% to −9.0%) **and so does cumulative climb** (−1.2% to −15.3%),
+  because the inverted friction had been actively pushing routes onto rough ground.
+- **Verification**: `tests/run.sh` 1175 passed / 0 failed, `tests/run_um.sh` 852/852,
+  `hash_gen1.js` vs v2.33 **ALL IDENTICAL** (nothing here is reachable from `generate()`/
+  `renderNow()`), new `tests/perf/probe_landsurface.js` 19/19, and `probe_roadconnect.js` now
+  passes every seed where v2.33 fails one (49/51 on 31337) — reshuffled geometry, not a claimed
+  causal fix. `_civLandCostGrid` costs 2.9 → 5.3 ms for the added `classifyBiome` call; "Generate
+  Roads" as a whole is 2632 → 2560 ms, i.e. unchanged within noise.
+- **Known scope cuts**: `buildCartTerrain` still cannot express forest (above), so the Planner's own
+  reported stage terrain is unchanged and the router knows one thing the Planner does not — a
+  narrow, disclosed asymmetry, where the alternative was a silent wagon hard-block. The
+  `buildCartTerrain` cascade's own calibration is inherited untouched, including Rocky Terrain
+  reading 34–50% of land; retuning it would move the Planner too and belongs in its own pass. Sea
+  lanes (v1.98) and the river/sea tables are untouched.
+
 Formatting note: these entries were written as working notes for agent sessions (they double as
 the project's memory). Each one states what changed, why, the verification performed
 (assertion counts, bit-identity claims at the pinned seed), and any browser passes still owed.
