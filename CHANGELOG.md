@@ -4,6 +4,88 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.38 (DCC line) — a long operation that says nothing reads as a broken one
+
+Owner: *"Auto populate doesn't seem to work"*, then, on being shown it does: *"Yeah it's long"*.
+
+### It was never broken
+
+Driven through the genuine user path on the owner's own reported world (seed 21811, World, 1024,
+20 000 km) — the setup gate, then the CIVIL domain, then the Generation sub-tab, then a real mouse
+click on the button — Auto-populate produces 43 settlements (4 capitals, 1 city, 9 towns, 8
+villages, 21 hamlets), 63 ways and 99 221 drawn civ-layer pixels, with zero page errors. It takes
+**11.2 s of synchronous main-thread work** and the click was acknowledged by nothing at all: no busy
+overlay, no disabled button, no cursor change. The tab freezes in silence, and on the owner's phone
+for far longer. That is the whole report.
+
+An early probe of mine mis-read this: it never navigated to the CIVIL domain, found the button
+hidden inside `#civSubGeneration`, and briefly looked like a visibility bug. It was my probe's own
+fault. **Drive the real navigation before believing a reachability finding.**
+
+### `withBusy` had zero call sites in the entire civ layer
+
+Block 1 declares `withBusy` at top level and block 2 is a later script block in the same scope, so
+the civ layer could always reach it — the probe asserts `typeof withBusy === 'function'` against
+v2.37 as well, and it passes there. It simply had never been called from block 2. All three long
+civ buttons were bare synchronous calls:
+
+    autoPopulate.onclick = () => _civAutoWorld();
+    autoRoutes.onclick   = () => _civAutoRoutes();
+    autoP.onclick        = () => { _civAutoPolity(); };
+
+The load-bearing part of `withBusy` is not the overlay, it is the **20 ms `setTimeout`**: it lets the
+browser paint before the blocking pass begins. A bare `showBusy()` on the same tick paints nothing,
+because the pass never yields. Its `finally { hideBusy() }` is what keeps `_busyDepth` balanced —
+v1.24 BUG-3's invariant, asserted here.
+
+### This does not make anything quicker, and the profile says why that is the honest fix
+
+Wrapping the three sub-passes and totalling them (1024 px world, 43 settlements):
+
+| stage | time | calls |
+|---|---|---|
+| **`roadDijkstra`** | **8 593 ms (77%)** | **326** |
+| `_civHierarchicalNetwork` (contains the above) | 8 773 ms | 4 |
+| `currentSettlementSuitability` | 1 854 ms | 3 |
+| `_civApplyFoodShedCeilings` | 217 ms | 1 |
+| `findSettlementSeeds` | 24 ms | 2 |
+| `_civNetworkMetrics` | 7 ms | 3 |
+| **total** | **11 190 ms** | |
+
+`_civHierarchicalNetwork` runs `2 x settlements` full-grid Dijkstras (one per settlement for the
+Prim MST's all-pairs matrix, then a second set for the minimum-degree pass), and it is rebuilt from
+scratch **four** times — the three `_civIterativeAutoWorld` passes plus the crossroads re-route.
+
+**The cost does not scale with world resolution.** `_civRoutingGrid` is `Math.min(GW,384)`, so the
+routing grid is 384x192 at every world size; a 4K world costs what a 512 one does. The driver is
+settlement count. Do not chase this by lowering the resolution, and do not blame a large map for it.
+
+### Refuted as a cheap win
+
+v2.33's per-edge `edgeCost` closure is a genuine 44% overhead on each Dijkstra — 26 ms with it
+against 18 ms with it null, on the identical grid and source. But it is only ~2.6 s of the 11, and
+removing it deletes the Tobler slope model outright. Inlining the arithmetic would be bit-identical
+and buys 23%, not an order of magnitude. Not worth touching a hot, load-bearing function for.
+
+### What a real speedup would cost, and why it is not bundled here
+
+The all-pairs matrix the Prim MST consumes could come from **one multi-source Voronoi Dijkstra**
+instead of n per-settlement ones, and the two intermediate passes (which exist to let settlement
+tiers settle, and whose network geometry is thrown away) could promote/demote on a cheaper distance
+proxy. Either would be a several-fold win on the dominant 77%. Both **change the generated road
+network**, i.e. re-baseline every existing world — which is not something to bundle into a fix for a
+report about feedback. Flagged for the owner, not attempted.
+
+### Verification
+
+`tests/perf/probe_civbusy.js` — 11 assertions, **5 of which fail on v2.37**: the three handlers
+mention `withBusy`, the overlay is genuinely shown while the pass runs (sampled through a
+`MutationObserver` armed before the click, since a poll can miss every window between macrotasks on
+a blocked main thread), its label names the operation, the overlay is hidden again, `_busyDepth`
+returns to 0, and — the point — the pass still produces the identical world (43 places, 63 ways).
+`tests/run.sh` 1180 passed / 0 failed; `tests/run_um.sh` 852/852; `hash_gen1.js` vs v2.37 **ALL
+IDENTICAL** in every scenario.
+
 ## v2.37 (DCC line) — the carve was laying trenches across the antimeridian, below sea level
 
 Owner: *"There is something wrong with the river rendering, it generates near horizontal lines at

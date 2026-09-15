@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.37 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The carve was laying trenches ACROSS THE ANTIMERIDIAN, below sea level, and they rendered as water — the owner's "near horizontal lines". `carveRiverValleys` consumed a raw wrapped receiver chain; v1.29 exempted it *in a comment* because `enforceChannelDescent` "never interpolates", and **v2.30 destroyed that premise** by inserting `carveChannelPath`, which resamples the seam jump into a dense sweep. The descent ladder then bottoms out at `sea−0.06` for the rest of the traverse. Measured: **28 of 11 802 chains carried 22.7% of the entire carve**, pinning 24 830 cells at the floor in 30 horizontal runs of 100+ cells. Fix is ONE line — the third call site of `splitRiverPolylines`. Channel cells **59 481 → 71 654**: the trenches were drowning real rivers. Also fixes `_suGenCommit` computing `GH` before assigning `state.world`. `hash_gen1.js` vs v2.36 ALL IDENTICAL (region mode cannot wrap). Verify with `tests/perf/probe_seamcarve.js` (8 assertions; 3 fail on v2.36). |
+| `Cartalith v2.38 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Auto-populate is a synchronous **11.2 s** main-thread pass and it ran as a bare `onclick=()=>_civAutoWorld()` — no overlay, no disabled button, nothing. So the tab froze in silence and the owner reported it as *"auto populate doesn't seem to work"*: it worked, it just never said so. **`withBusy` had ZERO call sites in the whole of block 2**, though block 1 declares it at top level and the civ layer could always reach it. Wrapped at all three long civ buttons. This does NOT make them quicker, and the profile says why a wrap is the honest fix: **`roadDijkstra` is 77% of the time (8 593 ms, 326 full-grid runs)** across four `_civHierarchicalNetwork` rebuilds, and the routing grid is already capped at 384x192 **regardless of world resolution** — so a 4K world costs the same as a 512 one and the driver is settlement count, not the map. `hash_gen1.js` vs v2.37 ALL IDENTICAL. Verify with `tests/perf/probe_civbusy.js` (11 assertions; 5 fail on v2.37). |
+| `Cartalith v2.37 DCC test.html` | Previous DCC-line file. The carve was laying trenches ACROSS THE ANTIMERIDIAN, below sea level, and they rendered as water — the owner's "near horizontal lines". `carveRiverValleys` consumed a raw wrapped receiver chain; v1.29 exempted it *in a comment* because `enforceChannelDescent` "never interpolates", and **v2.30 destroyed that premise** by inserting `carveChannelPath`, which resamples the seam jump into a dense sweep. The descent ladder then bottoms out at `sea−0.06` for the rest of the traverse. Measured: **28 of 11 802 chains carried 22.7% of the entire carve**, pinning 24 830 cells at the floor in 30 horizontal runs of 100+ cells. Fix is ONE line — the third call site of `splitRiverPolylines`. Channel cells **59 481 → 71 654**: the trenches were drowning real rivers. Also fixes `_suGenCommit` computing `GH` before assigning `state.world`. `hash_gen1.js` vs v2.36 ALL IDENTICAL (region mode cannot wrap). Verify with `tests/perf/probe_seamcarve.js` (8 assertions; 3 fail on v2.36). |
 | `Cartalith v2.36 DCC test.html` | Previous DCC-line file. The collision belt is a STACK of thrust sheets, not one Gaussian ridge: ONE shared long-wavelength bend keeps the sheets parallel while each sheet's deviation is a fraction of SPACING, so a sheet can never close the gap to its neighbour. `orogenyWidthScaleK` gives the belt a fixed REAL width (exactly 1 at the 800 km default, so default terrain is unchanged). Also fixes a **v2.35 defect**: the forward-preferring walk skipped same-group cells, so the pure-loop pass retraced chains — 2.86 points per distinct skeleton cell against v2.34's 1.45, traced length 1.75x the boundary-cell count against the suite's own <2x bound, which v2.35 passed partly by luck. Now 1.23x. Himalaya-width anchoring was built, measured (0.57→0.93 of stations) and **REVERTED** — it draws a 550 km belt against a 161 km margin, aspect 0.29. **Aspect is bound by MARGIN LENGTH, not belt width.** `hash_gen1.js` vs v2.35 ALL IDENTICAL. Verify with `tests/perf/probe_orogeny.js` (12 assertions). |
 | `Cartalith v2.35 DCC test.html` | Previous DCC-line file. A collision margin was being cut at STAIRCASES, not at triple junctions. `thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED; `traceBoundaries` set `deg` to the raw 8-neighbour count, and a plain diagonal staircase gives an interior cell 3-4 neighbours — so `isNode` fired along straight segments. Measured **1040 "junctions" on a 14-plate world, only 77 of them at a real plate triple point**, against a planar graph's own ~2n−4 ≈ 24. The predicate is the **crossing number** now (0→1 transitions around the ring = distinct neighbour groups), which `thinMask` already computes as its own `A`. Longest collision margin **88.9 → 161.0 / 91.5 → 288.0 / 57.7 → 226.4 km**; junctions 1040 → 23. The walk changed with it — see the section below. `hash_gen1.js` vs v2.34 ALL IDENTICAL. Verify with `tests/perf/probe_margins.js "Cartalith v2.35 DCC test.html"` (21 assertions; 4 fail on v2.34). |
 | `Cartalith v2.34 DCC test.html` | Previous DCC-line file. The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
@@ -1045,6 +1046,38 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### A long operation that says nothing reads as a broken one (v2.38, DCC-line file only)
+
+Owner: *"Auto populate doesn't seem to work"*, then *"Yeah it's long"*. It was never broken — it is a
+synchronous **11.2 s** main-thread pass that gave the click no acknowledgement of any kind.
+`hash_gen1.js` vs v2.37 ALL IDENTICAL; verification is `tests/perf/probe_civbusy.js`.
+
+- **`withBusy` had ZERO call sites in the entire civ layer.** Block 1 declares it at top level and
+  block 2 shares that scope, so it was always reachable — the probe asserts `typeof withBusy` on
+  v2.37 too, and it passes there. Auto-populate, Generate roads and Recalculate territories were all
+  bare `onclick=()=>fn()`. **Before adding a progress mechanism, check whether the file already has
+  one and the layer simply never called it.**
+- **`withBusy`'s 20 ms `setTimeout` is the load-bearing part**, not the overlay: it lets the browser
+  PAINT before the blocking work starts. `showBusy()` alone on the same tick paints nothing, because
+  the pass never yields. The `finally{hideBusy()}` is what keeps `_busyDepth` balanced (v1.24 BUG-3).
+- **This does not make anything quicker and must not be read as if it had.** Profiled:
+  **`roadDijkstra` is 8 593 ms of 11 190 (77%), over 326 full-grid runs** — `2 x settlements`
+  Dijkstras per `_civHierarchicalNetwork`, and that runs **four** times (three
+  `_civIterativeAutoWorld` passes plus the crossroads re-route), each rebuilding the whole network
+  from scratch. Everything else is noise: suitability 1 854 ms, food-shed 217 ms, seeds 24 ms,
+  `_civNetworkMetrics` 7 ms.
+- **The cost does NOT scale with world resolution.** `_civRoutingGrid` is `Math.min(GW,384)`, so it
+  is 384x192 at every world size — a 4K world costs what a 512 one does. The driver is settlement
+  count. Do not chase this by lowering the resolution, and do not blame a big map for it.
+- **Refuted as a cheap win**: v2.33's per-edge `edgeCost` closure is a real 44% overhead on each
+  Dijkstra (26 ms vs 18 ms with it null), but it is only ~2.6 s of the 11 and removing it deletes the
+  Tobler slope model. Inlining it is bit-identical but buys 23%, not an order of magnitude.
+- **A real speedup is a routing REDESIGN, not a wrap** — the all-pairs matrix the Prim MST consumes
+  could come from one multi-source Voronoi Dijkstra instead of n per-settlement ones, and the
+  intermediate passes could settle tiers on a cheaper distance proxy. Both **change the generated
+  road network**, i.e. re-baseline every existing world, so neither is bundled into a fix for a
+  report about feedback. Owner's call.
 
 ### The carve trenched across the antimeridian (v2.37, DCC-line file only)
 
@@ -4553,6 +4586,7 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_civbusy.js A.html    # v2.38 the long civ ops must acknowledge the click (they are not made quicker)
 node tests/perf/probe_seamcarve.js A.html [seed] # v2.37 the carve must not trench across the antimeridian (WORLD mode; seed 21811 wraps, 12345 does not)
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
