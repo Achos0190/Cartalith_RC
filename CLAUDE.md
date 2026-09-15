@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.35 DCC test.html` | **The DCC shell line's current head, not a mainline version.** A collision margin was being cut at STAIRCASES, not at triple junctions. `thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED; `traceBoundaries` set `deg` to the raw 8-neighbour count, and a plain diagonal staircase gives an interior cell 3-4 neighbours — so `isNode` fired along straight segments. Measured **1040 "junctions" on a 14-plate world, only 77 of them at a real plate triple point**, against a planar graph's own ~2n−4 ≈ 24. The predicate is the **crossing number** now (0→1 transitions around the ring = distinct neighbour groups), which `thinMask` already computes as its own `A`. Longest collision margin **88.9 → 161.0 / 91.5 → 288.0 / 57.7 → 226.4 km**; junctions 1040 → 23. The walk changed with it — see the section below. `hash_gen1.js` vs v2.34 ALL IDENTICAL. Verify with `tests/perf/probe_margins.js "Cartalith v2.35 DCC test.html"` (21 assertions; 4 fail on v2.34). |
+| `Cartalith v2.36 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The collision belt is a STACK of thrust sheets, not one Gaussian ridge: ONE shared long-wavelength bend keeps the sheets parallel while each sheet's deviation is a fraction of SPACING, so a sheet can never close the gap to its neighbour. `orogenyWidthScaleK` gives the belt a fixed REAL width (exactly 1 at the 800 km default, so default terrain is unchanged). Also fixes a **v2.35 defect**: the forward-preferring walk skipped same-group cells, so the pure-loop pass retraced chains — 2.86 points per distinct skeleton cell against v2.34's 1.45, traced length 1.75x the boundary-cell count against the suite's own <2x bound, which v2.35 passed partly by luck. Now 1.23x. Himalaya-width anchoring was built, measured (0.57→0.93 of stations) and **REVERTED** — it draws a 550 km belt against a 161 km margin, aspect 0.29. **Aspect is bound by MARGIN LENGTH, not belt width.** `hash_gen1.js` vs v2.35 ALL IDENTICAL. Verify with `tests/perf/probe_orogeny.js` (12 assertions). |
+| `Cartalith v2.35 DCC test.html` | Previous DCC-line file. A collision margin was being cut at STAIRCASES, not at triple junctions. `thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED; `traceBoundaries` set `deg` to the raw 8-neighbour count, and a plain diagonal staircase gives an interior cell 3-4 neighbours — so `isNode` fired along straight segments. Measured **1040 "junctions" on a 14-plate world, only 77 of them at a real plate triple point**, against a planar graph's own ~2n−4 ≈ 24. The predicate is the **crossing number** now (0→1 transitions around the ring = distinct neighbour groups), which `thinMask` already computes as its own `A`. Longest collision margin **88.9 → 161.0 / 91.5 → 288.0 / 57.7 → 226.4 km**; junctions 1040 → 23. The walk changed with it — see the section below. `hash_gen1.js` vs v2.34 ALL IDENTICAL. Verify with `tests/perf/probe_margins.js "Cartalith v2.35 DCC test.html"` (21 assertions; 4 fail on v2.34). |
 | `Cartalith v2.34 DCC test.html` | Previous DCC-line file. The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
 | `Cartalith v2.33 DCC test.html` | Previous DCC-line file. Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
 | `Cartalith v2.32 DCC test.html` | Previous DCC-line file. `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~1.6 m at default peakM) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
@@ -1043,6 +1044,37 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The collision belt is a stack of thrust sheets (v2.36, DCC-line file only)
+
+Owner, on the two halves v2.35 left open: **"Together."** `hash_gen1.js` vs v2.35 ALL IDENTICAL
+(collision geometry is reachable only under `state.tect.tectonicGraph`, default off); verification is
+`tests/perf/probe_orogeny.js`.
+
+- **What makes it a belt and not four parallel lines: ONE bend shared by every sheet, and per-sheet
+  deviation expressed as a fraction of SPACING** — never of belt width, or a sheet closes the gap to
+  its neighbour and the stack collapses back into a single ridge.
+- **Calibrate on a PER-STATION crest count, never a mean cross-section.** Each sheet's crest wanders
+  independently, so a mean smears them back into one hump and undercounts ridges.
+- **Whether a cross-section reads as separate ranges is set by sheet spacing IN CELLS**, and that is
+  a resolution limit rather than a tuning knob: 0.86-0.96 of stations carry the full stack at 35.3
+  cells, 0.50-0.57 at 17.7, 0.07-0.18 at 8.8. **Five hypotheses were tested against it and refuted**
+  — `smoothOrogeny` (its blur HELPS), the fold-ripple period, the shared crest jitter (removing it
+  is worse), `aj` stacking on `vig`, and per-group walk starts (a measured no-op). Do not re-chase.
+- **ASPECT IS BOUND BY MARGIN LENGTH, NOT BELT WIDTH.** Anchoring the belt at a real orogen width
+  (125 km half-width) fixes sheet resolution outright (0.57 -> 0.93) and was still REVERTED: it draws
+  550 km of belt against a 161 km margin, 69% of an 800 km map, aspect 0.29. At the default extent a
+  Himalaya's proportions and its internal structure are not simultaneously available — a real
+  Himalaya is 2400 km long, three times the whole map.
+- **A v2.35 defect fixed here**: the forward-preferring step skips a same-group diagonal and leaves
+  it UNVISITED, so the pure-loop pass walks a second polyline retracing the chain (81 of 121
+  polylines came from that pass). The walk claims the skipped cell now. Costs 7.6% of skeleton cells
+  as emitted geometry and takes seed 31337's longest margin 288 -> 224 km.
+- **Rewrite a metric only after verifying the claim it tests.** `T5 higher fold intensity` measured
+  `max-min` above an absolute cutoff, which is dominated by peak height and runs BACKWARDS for a
+  stack (1.179/1.072/1.010). Col depth was confirmed monotonic (0.475/0.546/0.596) BEFORE the metric
+  was touched. A fold ripple at ~one sheet sigma manufactures false crests — keep it incommensurate
+  with the stack (`0.80*spacing`).
 
 ### A margin was cut at staircases, not at triple junctions (v2.35, DCC-line file only)
 
@@ -4478,6 +4510,7 @@ node tests/perf/probe_blur.js A.html       # v2.32 gaussBlur: the CPU path is th
 node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer head on a phone, unchanged on desktop
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
+node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```

@@ -1082,8 +1082,10 @@ fieldsFinite('generate(world)');
   // T3: collision has a foreland-basin depression beyond one flank (negative somewhere)
   check('collision → foreland basin (negative cell present)', U.some(v => v < -0.05));
 
-  // kernel support: cells beyond the collision radius (blurR*3.3) are bit-untouched (exactly 0)
-  const RAD = 18 * 3.3;
+  /* kernel support: cells beyond the collision radius are bit-untouched (exactly 0). v2.36 replaced
+     the single ridge with a thrust-sheet stack, so the radius is the belt's own (halfBelt*2.2), not
+     blurR*3.3 — derive it from the shipped function rather than restating a constant that moved. */
+  const RAD = (typeof orogenBeltHalfWidth === 'function') ? orogenBeltHalfWidth(18, 1, W, H) * 2.2 : 18 * 3.3;
   let outside = 0;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
     if (Math.abs(x - 60) > RAD + 1.5 && U[y * W + x] !== 0) outside++;
@@ -1177,7 +1179,24 @@ fieldsFinite('generate(world)');
     const Uexp = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.16, trenchK: 1.0 });
     check('T5 omitted foldK/trenchK ⇒ legacy defaults (bit-identical)', Udef.every((v, i) => v === Uexp[i]));
     // stronger fold intensity ⇒ larger crest-to-col ripple along the collision belt
-    const ripple = (U) => { let mx = -1e9, mn = 1e9; for (let x = 0; x < W; x++){ const v = U[48 * W + x]; if (v > 0.1){ mx = Math.max(mx, v); mn = Math.min(mn, v); } } return mx - mn; };
+    /* v2.36: measure the COL DEPTH between adjacent crests, not max-min over the whole row. The old
+       metric was max-min above an absolute 0.1 cutoff, which is dominated by PEAK HEIGHT -- fine
+       while the collision profile was one ridge, wrong once it became a stack of thrust sheets,
+       because a stronger ripple lowers the peak wherever its cosine is negative and the metric then
+       moves the wrong way (measured 1.179 / 1.072 / 1.010 for foldK 0.05 / 0.16 / 0.5). The claim
+       itself is intact and was verified independently before this metric was rewritten: col depth
+       rises monotonically, 0.475 / 0.546 / 0.596 over the same three values. */
+    const ripple = (U) => {
+      const prof = []; for (let x = 0; x < W; x++) prof.push(U[48 * W + x]);
+      const cr = []; for (let x = 1; x < W - 1; x++) if (prof[x] > 0.1 && prof[x] > prof[x - 1] && prof[x] >= prof[x + 1]) cr.push(x);
+      if (cr.length < 2) return 0;
+      let s = 0, n = 0;
+      for (let k = 0; k + 1 < cr.length; k++){
+        let lo = Infinity; for (let x = cr[k]; x <= cr[k + 1]; x++) lo = Math.min(lo, prof[x]);
+        s += Math.min(prof[cr[k]], prof[cr[k + 1]]) - lo; n++;
+      }
+      return s / n;
+    };
     const Ulow = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.05 });
     const Uhigh = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.5 });
     check('T5 higher fold intensity ⇒ deeper intermontane cols (more ripple)', ripple(Uhigh) > ripple(Ulow));

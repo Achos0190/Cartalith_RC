@@ -4,6 +4,108 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.36 (DCC line) — the collision belt becomes a stack of thrust sheets, at a fixed real width
+
+Owner, on the two halves left open after v2.35: **"Together."** So this ships the calibrated
+multi-sheet belt profile and the belt's real-km width scaling in one version. It also fixes a defect
+v2.35 shipped.
+
+### The belt
+
+`buildOrogenyField`'s collision branch was one Gaussian ridge plus two satellites. It is now a stack
+of `nSheet` thrust sheets (default 4) across `1.55*halfBelt`, each tapering toward the foreland,
+over the same orogenic plateau and foreland basin.
+
+Two things make it a BELT rather than four parallel lines or one merged hump:
+
+- **ONE bend is shared by every sheet** (`beltBendK`, at a long wavelength), so the belt curves as a
+  unit and the sheets stay parallel.
+- **Each sheet's own deviation is a fraction of the SPACING** (`beltDevK`), never of the belt width —
+  which is what stops a sheet ever closing the gap to its neighbour and collapsing the stack back
+  into a single ridge.
+
+Calibrated by sweeping (sheets, sigK, bendK, devK) against a **per-station** crest count. A MEAN
+cross-section is the wrong instrument and undercounts: each sheet's crest wanders independently, so
+averaging across strike smears them back into one hump.
+
+### Width
+
+`orogenyWidthScaleK(mapWidthKm)` — the sixth sibling of `terrainDetailK` -> `riverCoarseEase` ->
+`_jpDrinkingCoarseEase` -> `lodDetailFreqK` -> `riverWidthScaleK`, and keyed on `mapWidthKm` alone
+for the same reason they are. The belt now holds a fixed REAL width instead of a fixed fraction of
+the grid. Exactly 1 at the 800 km default, so default terrain and stamping cost are unchanged.
+Capped at `OROGEN_BELT_MAX_FRAC` of the grid because `RAD` is 2.2x the half-width and the
+per-segment stamp cost grows as its square.
+
+### A v2.35 defect, fixed here
+
+v2.35's forward-preferring walk steps orthogonally past a same-group diagonal and **leaves it
+unvisited**; the pure-loop pass then walks a whole second polyline from it, retracing the chain.
+Measured at a pinned seed: **2.86 points per distinct skeleton cell against v2.34's 1.45**, on an
+identical 1230-cell skeleton, with the loop pass emitting **81 of 121 polylines** and 567 cells
+skipped this way. Traced length ran at 1.75x the boundary-cell count against the suite's own `< 2x`
+bound — **so v2.35's green run passed that assertion partly by luck**, and an ambient-seed world in
+this version's own testing pushed it to 2.21 and failed it. The walk now claims the skipped cell.
+Ratio 1.75 -> **1.23**; cells traced twice or more 781 -> 174; polylines 121 -> 86.
+
+**Its cost, stated**: 7.6% of skeleton cells (1230 -> 1137) are now claimed without being emitted as
+geometry, and seed 31337's longest collision margin falls 288.0 -> 223.7 km. Still far above v2.34's
+91.5 km, and every polyline remains 8-connected (asserted).
+
+### Six hypotheses, five refuted — do not re-chase them
+
+The sheet stack did not resolve at the default extent, and the reason was none of these:
+
+| hypothesis | prediction | measured |
+|---|---|---|
+| `smoothOrogeny` erasing the sheets | removing the blur helps | the blur HELPS (raw 0.32 -> smoothed 0.57) |
+| fold ripple keyed to sheet spacing | `foldK:0` helps | 0.32 -> 0.36, noise |
+| the shared crest jitter `de` smearing it | dropping it helps | WORSE everywhere (0.57->0.50, 0.18->0.07) |
+| `aj` stacking on the per-sheet `vig` | removing it helps | 0.57 -> 0.54, noise |
+| one walk per raw neighbour at a junction | per-GROUP starts help | 2.86 -> 2.86, a no-op; reverted |
+
+What every one of them agreed on is the real answer: **whether a cross-section reads as separate
+ranges is set by sheet spacing IN CELLS** — 0.86-0.96 of stations carry the full stack at 35.3
+cells, 0.50-0.57 at 17.7, 0.07-0.18 at 8.8. It is a resolution limit, not a tuning knob, which is
+why the probe's bar asserts the belt is a STACK rather than pinning a number the grid controls.
+
+### Himalaya-width anchoring: built, measured, REVERTED
+
+Anchoring the belt on a real orogen half-width (`OROGEN_HALF_WIDTH_KM = 125`, a ~250 km belt —
+Himalaya 250-400, Alps 150-250, Zagros 200-300) is the obvious way to buy the sheets room, and it
+works: 0.57 -> **0.93** of stations carrying the full stack at the default, median 4 crests.
+
+It was reverted anyway. It draws a belt measuring **550 km against a 161 km margin** — 69% of an
+800 km map, **aspect 0.29**. That is a mountain continent, not a range. **The binding constraint on
+aspect is MARGIN LENGTH, not belt width**, and widening trades the first away for the second. It
+would also have re-baselined terrain at the DEFAULT extent, which is a bigger change than the
+scale-awareness fix that was asked for.
+
+The honest consequence: at 800 km / 512px you cannot have both a Himalaya's proportions and its
+internal structure. A real Himalaya is 2400 km long — three times the whole default map.
+
+### Two suite assertions rewritten, each verified before being touched
+
+- **`T5 higher fold intensity => deeper intermontane cols`** measured `max-min` over cells above an
+  absolute cutoff on one row, which is dominated by PEAK HEIGHT. Fine for one ridge; wrong for a
+  stack, because a stronger ripple lowers the peak where its cosine is negative and the metric then
+  moves backwards (1.179 / 1.072 / 1.010 for foldK 0.05 / 0.16 / 0.5). **The claim itself was
+  verified independently first**: col depth rises monotonically, 0.475 / 0.546 / 0.596 over the same
+  values. The metric now measures col depth between adjacent crests.
+- **`cells beyond kernel radius exactly 0`** restated `blurR*3.3` as a literal. The collision radius
+  is the belt's own now, so the test derives it from `orogenBeltHalfWidth` instead of a constant
+  that moved.
+
+The fold ripple itself moved from `beltSpacing*0.34` (about one sheet sigma — it manufactured false
+crests on each sheet's flank, which is what broke the collision acceptance test with 7 maxima in
+pairs 3 cells apart) to `beltSpacing*0.80`, preserving v0.144's own period:sigma ratio and staying
+incommensurate with the stack.
+
+### Verification
+
+`tests/run.sh` 1175 passed / 0 failed. `tests/run_um.sh` 852/852 (block 4 untouched). New
+`tests/perf/probe_orogeny.js` — 12 assertions. `tests/perf/probe_margins.js` still 14/14.
+
 ## v2.35 (DCC line) — a mountain margin was being cut at staircases, not at triple junctions
 
 Owner: *"I look at for example the Himalayas and this is a formidable mountain range. Not simply
