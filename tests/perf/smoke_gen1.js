@@ -33,8 +33,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     shown: getComputedStyle(document.getElementById('onboard')).display !== 'none',
     introOn: document.getElementById('obStepIntro').classList.contains('on'),
     actionBtns: document.querySelectorAll('#obStepIntro .ob-btns button').length,
-    noSkip: !document.getElementById('obDismiss'),
-    sidebarLocked: document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents === 'none'   // v0.68: sidebar inert while gated
+    skipBtn: !!document.getElementById('obSkip'),   // v2.15 made the gate dismissible; v0.67's assertion predates that
+    // v2.24: WIDENED, not merely retargeted. The v0.68 gate is the only thing making controls inert
+    // while no world exists, and the DCC frame hoists Regenerate into the tool-options bar and
+    // navigation into the domain rail — both outside every dock. Checking one dock would have
+    // passed while the most destructive control on screen stayed live.
+    sidebarLocked: document.body.classList.contains('setup-gated') && ['.dock-left','.dock-right','#toolOpts','#domainRail','#statusBar']
+      .every(sel => { const e = document.querySelector(sel); return e && getComputedStyle(e).pointerEvents === 'none'; })
   }));
   // no auto-generate: the field should still be all-zero (empty world) behind the modal
   R.noAutoGen = await page.evaluate(() => { let s = 0; for (let i = 0; i < field.length; i += 997) s += field[i]; return s === 0; });
@@ -87,7 +92,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   R.setupSeedApplied = await page.evaluate(() => (typeof state !== 'undefined' && state.tect) ? state.tect.seed === 31337 : false);
   if (R.setupSeed && R.setupSeed.present === false) R.setupSeedApplied = 'vacuous';   // pre-v1.06 target file
   R.gateHidden = await page.evaluate(() => getComputedStyle(document.getElementById('onboard')).display === 'none');
-  R.sidebarUnlocked = await page.evaluate(() => !document.body.classList.contains('setup-gated') && getComputedStyle(document.querySelector('aside')).pointerEvents !== 'none');   // v0.68: sidebar live after commit
+  R.sidebarUnlocked = await page.evaluate(() => !document.body.classList.contains('setup-gated') && ['.dock-left','.dock-right','#toolOpts','#domainRail']
+    .every(sel => { const e = document.querySelector(sel); return e && getComputedStyle(e).pointerEvents !== 'none'; }));   // v0.68 / v2.24: every band live after commit
   // 1e. import-calibration step exists and auto-infers on commit (drive it directly; a real file picker
   //     can't be scripted). withBusy→showBusy sets #busyLabel synchronously, so the "inferring tectonics…"
   //     label right after the click proves the infer path fired.
@@ -1617,16 +1623,24 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // ---- v0.66: corrected IA — Generate branches restored (World | Civilization | Cartography);
   //      Explore is the planning phase ----
   R.undoInHeader = await page.$eval('header #undoBtn', el => !!el);
-  R.subTabs = await page.$$eval('#genSubBar .subtab', els => els.map(e => e.dataset.gsub));
+  // v2.24: #genSubBar was replaced by the vertical domain rail. Still asserting that the same
+  // branches exist and in the same order — Sculpt left the bar (it is a category inside WORLD) and
+  // Explore joined it (it was a separate top-level tab), so the token list is the rail's.
+  R.subTabs = await page.$$eval('#domainRail .dr-btn', els => els.map(e => e.dataset.domain));
   R.worldDefault = await page.evaluate(() => ({
     world: getComputedStyle(document.getElementById('genWorld')).display !== 'none',
     civ: getComputedStyle(document.getElementById('genCiv')).display === 'none',
     carto: getComputedStyle(document.getElementById('genCarto')).display === 'none',
-    inspectorHidden: getComputedStyle(document.getElementById('inspector')).display === 'none'
+    // v2.24: Properties is PERSISTENT with an empty state (it used to vanish on World/Sculpt), so the
+    // subject shifts from "is it hidden" to "is it empty and in the information pane" — which is what
+    // the assertion was protecting: World must not show a stale Cartography editor.
+    inspectorEmpty: /Nothing selected/.test(document.getElementById('inspectorBody').textContent),
+    inspectorInRightDock: !!document.querySelector('.dock-right #inspector')
   }));
+  R.worldCatSeg = await page.$$eval('#worldCatSeg button[data-wcat]', els => els.length);
   R.factionPickerInGenCiv = await page.evaluate(() => !!document.getElementById('genCiv').querySelector('#civFactionPicker'));
   R.mapStyleInGenCarto = await page.evaluate(() => !!document.getElementById('genCarto').querySelector('#stylePresetSeg'));
-  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="civ"]').click());
+  await page.evaluate(() => document.querySelector('#domainRail [data-gsub="civ"]').click());
   await page.waitForTimeout(150);
   R.civBranch = await page.evaluate(() => ({
     civShown: getComputedStyle(document.getElementById('genCiv')).display !== 'none',
@@ -1643,7 +1657,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     document.querySelectorAll('[data-civtool]').forEach(b => { seen[b.dataset.civtool] = (seen[b.dataset.civtool]||0)+1; });
     return Object.entries(seen).filter(([,v]) => v > 1).map(([k]) => k);
   });
-  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="carto"]').click());
+  await page.evaluate(() => document.querySelector('#domainRail [data-gsub="carto"]').click());
   await page.waitForTimeout(150);
   await page.evaluate(() => document.querySelector('#cartoToolPalette [data-civtool="icon"]').click());
   await page.waitForTimeout(150);
@@ -1659,10 +1673,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   await page.evaluate(() => { const pc = document.getElementById('carPaintChk'); pc.checked = true; pc.dispatchEvent(new Event('change')); });
   await page.waitForTimeout(100);
   R.paintArmsOnCarto = await page.evaluate(() => _paintMode === true);
-  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="world"]').click());
+  await page.evaluate(() => document.querySelector('#domainRail [data-gsub="world"]').click());
   await page.waitForTimeout(100);
   R.paintDisarmsLeavingCarto = await page.evaluate(() => _paintMode === false && document.getElementById('carPaintChk').checked === false);
-  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="civ"]').click());
+  await page.evaluate(() => document.querySelector('#domainRail [data-gsub="civ"]').click());
   await page.waitForTimeout(100);
 
   // ---- v0.64 (§4.7): pinned selection inspector (shared by the Civ + Carto branches) ----
@@ -1750,7 +1764,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // v1.16: the sidebar settlement list was replaced by the virtualized Settlements-page table
   // (#stSpacer) — switch to that sub-page so the table is populated before checking it.
   await page.evaluate(() => {
-    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.querySelector('#domainRail [data-gsub="civ"]').click();
     document.querySelector('#civSubBar [data-civsub="settlements"]').click();
     _civSelectedPlace = state.places[0]; _civRenderPlaceEditor();
   });
@@ -1800,7 +1814,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   R.debugUnchangedWhileTyping = await page.evaluate(() => state.debug) === 'flow';
 
   // ---- v0.66: Explore = the planning/reading phase (Info/Route, journeys, planner) ----
-  await page.click('[data-tab="explore"]');
+  await page.click('#domainRail [data-domain="explore"]');
   await page.waitForTimeout(150);
   R.exploreShape = await page.evaluate(() => ({
     journeys: !!document.getElementById('explorePanel').querySelector('#civJourneyList'),
@@ -1812,8 +1826,10 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
 
   // ---- v0.65 (§Stage 2 follow-up): Assets/Export moved to header utilities; tab bar is a genuine
   //      2-position phase switch ----
-  R.tabCount = await page.$$eval('.tab', els => els.length);
-  R.tabsOnly2 = await page.$$eval('.tab', els => JSON.stringify(els.map(e => e.dataset.tab)) === JSON.stringify(['generate','explore']));
+  // v2.24: #tabBar is gone. What v0.65 asserted — that phase navigation is ONE explicit control, not
+  // a scattering of .tab buttons — now belongs to the domain rail, and the count is four.
+  R.tabCount = await page.$$eval('#domainRail .dr-btn', els => els.length);
+  R.tabsOnly2 = await page.evaluate(() => document.querySelectorAll('.tab').length === 0 && !document.getElementById('tabBar'));
   await page.click('#fileMenuBtn');   // v0.87: Import+Export consolidated into one "File ▾" menu
   await page.waitForTimeout(150);
   R.fileMenuOpen = await page.$eval('#fileMenu', el => el.classList.contains('open'));
@@ -1872,7 +1888,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // label) is now three separately-labeled top-level sections. All element ids from the old accordion
   // must still resolve (no JS wiring changed) and none of the summaries should still read "Tiles & LOD".
   R.tilesLodSplit = await page.evaluate(() => {
-    const summaries = [...document.querySelectorAll('#genWorld > .sec > details.cat-acc > summary, #genWorld details.cat-acc > summary')].map(s => s.textContent.trim());
+    // v2.24: all three moved behind the cog (they are program settings, not world parameters), so the
+    // query spans both homes — what v0.92 asserted is that the labels are SEPARATE, not where they sit.
+    const summaries = [...document.querySelectorAll('#genWorld details.cat-acc > summary, #settingsModal details.cat-acc > summary')].map(s => s.textContent.trim());
     const idsPresent = ['lodChk', 'lodAutoChk', 'zoomDetailR', 'lodTileSeg', 'lodLevels', 'lodRefineBtn', 'lodBurnChk', 'lodMicroChk',
       'lodBakeBtn', 'lodClearAtlasBtn', 'atlasStat', 'lodDbgSeg',
       'refCols', 'refRows', 'refSize', 'refGzip', 'lodShowGrid', 'regionBtn', 'refineBtn'].every(id => !!document.getElementById(id));
@@ -1883,11 +1901,19 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     };
   });
 
+  // v2.24: the Assets entry point is behind the cog (Settings → Workspace), and Assets mode hides
+  // the domain rail — the library takes the whole stage — so the exit runs through the function the
+  // rail would have called rather than a click on a deliberately-hidden button.
+  await page.click('#cogBtn');
+  await page.waitForTimeout(150);
+  await page.click('#setNav button[data-setpage="workspace"]');
+  await page.waitForTimeout(100);
   await page.click('#assetsHeaderBtn');
   await page.waitForTimeout(250);
   R.assetsCanvasHidden = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display === 'none');
   R.assetsLibraryShown = await page.$eval('#assetLibrary', el => getComputedStyle(el).display !== 'none');
-  await page.click('[data-tab="generate"]');
+  R.assetsClosedSettings = await page.evaluate(() => !document.getElementById('settingsModal').classList.contains('open'));
+  await page.evaluate(() => _setDomain('world'));
   await page.waitForTimeout(200);
   R.assetsExitedViaGenerate = await page.$eval('.canvas-wrap', el => getComputedStyle(el).display !== 'none');
 
@@ -1970,7 +1996,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // UI wiring: mode toggle swaps rows, slider updates its live label, and clicking Simulate writes
   // civTimeline entries WITHOUT touching state.places/civWays (the architectural invariant every other
   // timeline write already follows).
-  await page.evaluate(() => document.querySelector('#genSubBar [data-gsub="civ"]').click());
+  await page.evaluate(() => document.querySelector('#domainRail [data-gsub="civ"]').click());
   await page.waitForTimeout(150);
   R.collapseSimUI = await page.evaluate(() => {
     _civAutoWorld();
@@ -2078,7 +2104,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // as a filter control, not an editing surface, and is easy to miss entirely. Timeline is now a
   // plain always-visible Explore sidebar section (same footing as Info/Journeys) — reachable without
   // opening the funnel or expanding any <details>.
-  await page.evaluate(() => document.querySelector('[data-tab="explore"]').click());
+  await page.evaluate(() => document.querySelector('#domainRail [data-tab="explore"]').click());
   await page.waitForTimeout(150);
   R.timelineDiscoverable = await page.evaluate(() => {
     const sec = document.getElementById('explTimelineSection');
@@ -2142,13 +2168,25 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   });
 
   // Assets header button is a toggle: enter shows the library + relabels to "← Map"; click again returns.
+  // v2.24: the button lives inside the cog's Settings window, which closes on entry — the return trip
+  // is the same _carExitAssetsMode() the domain rail calls. The toggle BEHAVIOUR is what this
+  // asserted; the label check went with the header button that carried it.
   R.assetsToggle = await page.evaluate(() => {
     const btn = document.getElementById('assetsHeaderBtn');
     btn.click();
-    const inAssets = getComputedStyle(document.getElementById('assetLibrary')).display !== 'none' && /Map/.test(btn.textContent);
-    btn.click();
-    const back = getComputedStyle(document.querySelector('.canvas-wrap')).display !== 'none' && /Assets/.test(btn.textContent);
-    return { inAssets, back };
+    const inAssets = getComputedStyle(document.getElementById('assetLibrary')).display !== 'none'
+      && document.body.classList.contains('assets-mode')
+      && getComputedStyle(document.querySelector('#domainRail')).display === 'none';
+    // v2.24 fix: Assets mode hides the domain rail and the Assets toggle lives in the cog's Settings
+    // window, so #assetsBackBtn is the only VISIBLE way back to the map. Exercise that button rather
+    // than the function it calls — the regression was that nothing on screen invoked it.
+    const backBtn = document.getElementById('assetsBackBtn');
+    const backBtnVisible = !!backBtn && getComputedStyle(backBtn).display !== 'none';
+    if (backBtn) backBtn.click(); else _carExitAssetsMode();
+    const back = getComputedStyle(document.querySelector('.canvas-wrap')).display !== 'none'
+      && !document.body.classList.contains('assets-mode');
+    const backBtnHidesAgain = !!backBtn && getComputedStyle(backBtn).display === 'none';
+    return { inAssets, back, backBtnVisible, backBtnHidesAgain };
   });
 
   // v0.86: geological Resources layer is full-map (computed below sea too) and re-derives on a sea change
@@ -2846,7 +2884,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     //     settlement's grid cell — while the old plain mapping would have landed far away.
     _civAutoWorld();
     const p = state.places.find(pl => pl.kind === 'capital' || pl.kind === 'city') || state.places[0];
-    _activeTab = 'explore'; _civTool = 'info';
+    _setDomain('explore'); _civTool = 'info';   /* v2.24: _activeTab is DERIVED — assigning it here would leave the app in WORLD and the assertion would pass vacuously */
     _lodOn = true; const lc = document.getElementById('lodChk'); if (lc) lc.checked = true;
     _lodCx = p.x; _lodCy = p.y; _lodZoom = 8; applyView(); renderNow();
     let infoGx = null, infoGy = null;
@@ -2858,14 +2896,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     out.lodClickHandlerErr = (infoGx == null) ? 999 : +Math.hypot(infoGx - p.x, infoGy - p.y).toFixed(2);
     const plain = evtToGrid({ clientX: sx, clientY: sy });   // what the pre-v1.13 handler would have used
     out.plainMappingErr = +Math.hypot(plain[0] - p.x, plain[1] - p.y).toFixed(2);
-    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; _activeTab = 'generate'; _civTool = 'inspect'; applyView(); renderNow();
+    _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; _setDomain('world'); _civTool = 'inspect'; applyView(); renderNow();
     return out;
   });
 
   R.sculpt = await page.evaluate(async () => {
     const out = {};
     // (1) tab mechanics: the 4th Generate sub-tab shows its panel, hides World, and arms the editor
-    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    _setGenSubTab('sculpt');   /* v2.24: Sculpt is a category inside WORLD, not a rail domain — the setter is the navigation API now */
     out.panelShown = getComputedStyle(document.getElementById('genSculpt')).display !== 'none';
     out.worldHidden = getComputedStyle(document.getElementById('genWorld')).display === 'none';
     out.featureButtons = document.querySelectorAll('#sculptFeatureSeg button').length;
@@ -2924,14 +2962,14 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     out.kmReadoutDoublesWithBrushSize = Math.abs(numAt64 - 2 * numAt32) < 0.05;
     brushEl.value = 32; brushEl.dispatchEvent(new Event('input'));   // restore
 
-    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    document.querySelector('#domainRail [data-gsub="world"]').click();
     return out;
   });
 
   // ── v1.17: geography-driven settlement generation (audit S1–S7) ──
   R.v117 = await page.evaluate(async () => {
     const out = {};
-    document.querySelector('#genSubBar [data-gsub="civ"]').click();
+    document.querySelector('#domainRail [data-gsub="civ"]').click();
     document.getElementById('civAutoPopulateBtn').click();
     await new Promise(r => setTimeout(r, 150));
     const settlements = state.places.filter(p => p && p.category === 'settlement');
@@ -2964,7 +3002,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     if (chk) { chk.checked = true; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 250)); }
     out.diagDraws = snap() !== before;
     if (chk) { chk.checked = false; chk.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 120)); }
-    document.querySelector('#genSubBar [data-gsub="world"]').click();
+    document.querySelector('#domainRail [data-gsub="world"]').click();
     return out;
   });
 
@@ -3063,8 +3101,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     out.domPresent = !!(pad && stick && knob);
 
     // entering Sculpt on a non-touch (headless) browser never shows the joystick — isMobile is false
-    document.querySelector('.tab[data-tab="generate"]').click();
-    document.querySelector('#genSubBar [data-gsub="sculpt"]').click();
+    document.querySelector('#domainRail [data-domain="world"]').click();
+    _setGenSubTab('sculpt');   /* v2.24: Sculpt is a category inside WORLD, not a rail domain — the setter is the navigation API now */
     await new Promise(r => setTimeout(r, 50));
     out.sculptActiveOnTab = _sculptEditorActive();
     out.hiddenOnDesktop = getComputedStyle(pad).display === 'none';
@@ -3119,9 +3157,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     _lodOn = false; if (lc) lc.checked = false; _lodZoom = 1; applyView(); renderNow();
 
     // leaving Sculpt/Generate and coming back cycles _sculptNavSync with no throw
-    document.querySelector('#genSubBar [data-gsub="world"]').click();
-    document.querySelector('.tab[data-tab="explore"]').click();
-    document.querySelector('.tab[data-tab="generate"]').click();
+    document.querySelector('#domainRail [data-gsub="world"]').click();
+    document.querySelector('#domainRail [data-tab="explore"]').click();
+    document.querySelector('#domainRail [data-domain="world"]').click();
     await new Promise(r => setTimeout(r, 50));
     out.noThrowOnTabCycle = true;
 
@@ -3137,8 +3175,8 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   // the manual-placement side (gallery/arm/place/draw) works end-to-end in the real UI.
   R.v120 = await page.evaluate(async () => {
     const out = {};
-    document.querySelector('.tab[data-tab="generate"]').click();
-    document.querySelector('#genSubBar [data-gsub="carto"]').click();
+    document.querySelector('#domainRail [data-domain="world"]').click();
+    document.querySelector('#domainRail [data-gsub="carto"]').click();
     await new Promise(r => setTimeout(r, 50));
 
     // the gallery is populated at load time with the default 'feature' family (v1.20.html:19671)
@@ -5419,7 +5457,13 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   Object.assign(R.v152, await page.evaluate(() => {
     const o = {};
     const settles = _jpSettlements();
-    if (!settles.length) { o.settleCount = 0; return o; }
+    // A probe that early-returns leaves every field undefined, so all three assertions below fail
+    // with no hint that the WORLD, not the snap logic, is what went missing. Record the count and
+    // assert it separately — a silently-empty fixture is the failure mode this file has been bitten
+    // by before, and "three assertions failed" reads identically whether snapping broke or the
+    // suite simply had no settlements left by this point.
+    o.settleCount = settles.length;
+    if (!settles.length) return o;
     const s0 = settles[0];
     o.snapDefaultOn = _civSnapEnabled();
 
@@ -6974,7 +7018,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('no page/console errors on load', errors.length === 0);
   if (errors.length) errors.forEach(e => console.log('      ' + e));
   // ── v0.67: hard setup gate + scale/height calibration ──
-  A('setup gate shows on load: intro step, 3 actions, no Skip', R.gate.shown && R.gate.introOn && R.gate.actionBtns === 3 && R.gate.noSkip);
+  A('setup gate shows on load: intro step, 3 real actions + the v2.15 Skip', R.gate.shown && R.gate.introOn && R.gate.actionBtns === 4 && R.gate.skipBtn);
   A('sidebar is locked (inert) while the gate is open', R.gate.sidebarLocked === true);
   A('sidebar unlocks after committing a world', R.sidebarUnlocked === true);
   A('nothing is simulated until commit (empty field behind the gate)', R.noAutoGen === true);
@@ -7060,8 +7104,9 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('un-finalize clears phase-explore', R.phaseOff === false);
   A('v0.74 finalize button is the first button in Generate → World, not behind a disclosure', R.finalizeTop.inFinalizeSec && R.finalizeTop.notInDetails && R.finalizeTop.isFirstButton && R.finalizeTop.depthInSec);
   A('Undo button lives in header', R.undoInHeader === true);
-  A('Generate sub-tab bar has world/civ/carto/sculpt (v1.15 adds the Sculpt editor)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','sculpt']));
-  A('World is the default branch; Civ/Carto/inspector hidden', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorHidden);
+  A('v2.24: the domain rail carries world/civ/carto/explore (Sculpt became a WORLD category, Explore became a domain)', JSON.stringify(R.subTabs) === JSON.stringify(['world','civ','carto','explore']));
+  A('v2.24: ...and Sculpt is still reachable, as a category switch inside WORLD', R.worldCatSeg === 2);
+  A('World is the default branch; Civ/Carto hidden and Properties shows its empty state', R.worldDefault.world && R.worldDefault.civ && R.worldDefault.carto && R.worldDefault.inspectorEmpty && R.worldDefault.inspectorInRightDock);
   A('faction picker lives in Generate → Civilization', R.factionPickerInGenCiv === true);
   A('Map style lives in Generate → Cartography', R.mapStyleInGenCarto === true);
   A('Civilization branch shows genCiv + pinned inspector', R.civBranch.civShown && R.civBranch.worldHidden && R.civBranch.inspectorShown);
@@ -7098,7 +7143,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('pressing B sets the Biomes layer', R.debugAfterB === 'bclass');
   A('pressing F sets the Flow layer', R.debugAfterF === 'flow');
   A('typing "B" in a text field does not trigger the hotkey', R.debugUnchangedWhileTyping === true);
-  A('tab bar is a genuine 2-position phase switch', R.tabCount === 2 && R.tabsOnly2 === true);
+  A('v2.24: the domain rail is the single 4-position phase switch, and no stray .tab button survives', R.tabCount === 4 && R.tabsOnly2 === true);
   A('v0.87: consolidated File ▾ dropdown opens with both Import and Export sections', R.fileMenuOpen === true && R.fileMenuHasBoth.hasImport && R.fileMenuHasBoth.hasExport);
   A('v0.87: ticking an Export-form control keeps the File menu open', R.fileMenuHasBoth.stillOpenAfterFormClick === true);
   A('v0.88: standalone atlas import/export retired; File → Export .zip is the sole 100% round-trip', R.atlasStandaloneGone.noImportBtnInFileMenu && R.atlasStandaloneGone.noEmbedCheckbox && R.atlasStandaloneGone.noExportBtnInSidebar);
@@ -7530,6 +7575,7 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v1.52: the cost model breaks down to its total and scales with cargo', R.v152.costSums && R.v152.costScales);
   A('v1.52: carriage rates keep the Diocletian land:river:sea ordering', R.v152.costRatios);
   A('v1.52: a cargo journey reports a break-even price per tonne; a blocked one prices at null', R.v152.costBreakEven && R.v152.costBlockedNull);
+  A('v1.52: the snap probe actually had a world to test against (guards the three assertions below from failing as a group on an empty fixture)', R.v152.settleCount > 0);
   A('v1.52: snap-to-place/way is on by default and a nearby click lands exactly on the settlement (V1.915 parity)', R.v152.snapDefaultOn && R.v152.snapsToPlaceNearby);
   A('v1.52: a far-away click does not snap, and the toggle genuinely disables it', R.v152.noSnapFarAway && R.v152.disableWorks);
   A('v1.52: drawing also snaps onto an existing way\'s curve, and a real draw_way click lands exactly on the pin', R.v152.snapsToWay && R.v152.snappedExactly);
@@ -8092,31 +8138,35 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
     const btn = document.getElementById('genInfoBtn'), panel = document.getElementById('genInfoPanel'), ta = document.getElementById('genInfoText');
     o.readoutExists = !!readout;
     o.infoButtonExists = !!btn; o.infoPanelExists = !!panel; o.infoTextareaExists = !!ta;
-    o.sameSecAsReadout = !!(readout && btn && readout.closest('.sec') === btn.closest('.sec'));
+    // v2.24: the pair split by design — #readout became the status bar, and the parameter dump went
+    // into the cog's Settings window (a rows="10" textarea cannot live in a 26px band). What v2.03
+    // actually asked for was that the button stay reachable from EVERY domain; that is asserted
+    // below, and is now true of both halves rather than of one shared .sec.
+    o.sameSecAsReadout = !!(readout && btn && btn.closest('#statusBar') && readout.closest('#statusBar'));
     o.notInsideGenWorld = !(btn && btn.closest('#genWorld'));
     o.notInsideExplorePanel = !(btn && btn.closest('#explorePanel'));
     o.notInsideAssetsPanel = !(btn && btn.closest('#assetsPanel'));
-    const aside = document.querySelector('aside');
-    o.insideAside = !!(btn && aside && aside.contains(btn));
-    o.infoPanelStartsClosed = panel && panel.style.display === 'none';
+    o.insideAside = !!(btn && btn.closest('#statusBar'));   // v2.24: the status bar is its home now
+    // v2.24: the button OPENS the Settings window now; the panel inside it is always visible there,
+    // so the old show/hide toggle became the window's own open/close.
+    const sm = document.getElementById('settingsModal');
+    o.infoPanelStartsClosed = !!(sm && !sm.classList.contains('open'));
     if (btn) btn.click();
-    o.infoPanelOpensOnClick = panel && panel.style.display !== 'none';
+    o.infoPanelOpensOnClick = !!(sm && sm.classList.contains('open') && panel && getComputedStyle(panel).display !== 'none');
     o.infoTextHasVersion = ta && /Elevation Foundation v/.test(ta.value);
-    if (btn) btn.click();
-    o.infoPanelClosesOnSecondClick = panel && panel.style.display === 'none';
+    { const cl = document.getElementById('settingsClose'); if (cl) cl.click(); }
+    o.infoPanelClosesOnSecondClick = !!(sm && !sm.classList.contains('open'));
     // the actual point of the move: switch to the Explore tab and confirm the button is still
     // present/visible/clickable (it would have been display:none-ancestor-hidden pre-v2.03)
-    const exploreTabBtn = document.querySelector('[data-tab="explore"]');
-    if (exploreTabBtn) exploreTabBtn.click();
+    _setDomain('explore');
     const btnRect = btn ? btn.getBoundingClientRect() : null;
     o.visibleUnderExploreTab = !!(btn && getComputedStyle(btn).display !== 'none' && btnRect && btnRect.width > 0 && btnRect.height > 0);
-    const genTabBtn = document.querySelector('[data-tab="generate"]');
-    if (genTabBtn) genTabBtn.click();   // restore for any later smoke block reading Generate-tab DOM state
+    _setDomain('world');   // restore for any later smoke block reading Generate-side DOM state
     return o;
   });
-  A('v2.03: #readout and the info button share the same sidebar .sec (they were moved to sit together)', R.v203.readoutExists && R.v203.infoButtonExists && R.v203.sameSecAsReadout);
+  A('v2.03/v2.24: #readout and the info button both live in the status bar', R.v203.readoutExists && R.v203.infoButtonExists && R.v203.sameSecAsReadout);
   A('v2.03: the info button/panel are no longer inside any of the three tab panels (genWorld/explorePanel/assetsPanel)', R.v203.notInsideGenWorld && R.v203.notInsideExplorePanel && R.v203.notInsideAssetsPanel);
-  A('v2.03: the info button is still inside <aside>, just relocated within it', R.v203.insideAside);
+  A('v2.03/v2.24: the info button is in the status bar, outside every dock', R.v203.insideAside);
   A('v2.03: the info panel still starts closed and opens/closes on click from its new location', R.v203.infoPanelStartsClosed && R.v203.infoPanelOpensOnClick && R.v203.infoPanelClosesOnSecondClick);
   A('v2.03: the info text still renders real generation-parameter content from its new location', R.v203.infoTextHasVersion);
   A('v2.03: the info button stays visible/clickable under the Explore tab — the whole point of the move (it never did before)', R.v203.visibleUnderExploreTab);
@@ -8325,6 +8375,194 @@ const FILE = 'file://' + path.resolve(process.argv[2] || 'Cartalith Gen1 v0.68.h
   A('v2.08: a real zoom-in (_lodZoom=4) still fills/covers the viewport — the v0.87 fix this shares code with is not regressed', R.v208.zoomedInFillsViewport);
   A('v2.08: the on-screen "⟳" reset button (the one #zoomOverlay exposes on mobile) re-fits the canvas at the floor immediately, not just on resize/toggle', R.v208.resetBtnRefitsAtFloor);
   A('v2.08: _lodZoom itself still ends exactly at the floor (1) — the camera state, unaffected by the display-sizing fix', R.v208.lodZoomAtEnd === 1);
+
+
+  // ---- v2.24: the DCC frame replaces the GUI --------------------------------------------------
+  // Each of these protects a BEHAVIOUR the restructure could break silently — a frame change that
+  // "looks right" but leaves a control unreachable, a destructive path unguarded, or a camera stale.
+  R.v224 = await page.evaluate(async () => {
+    const o = {}, g = s => document.querySelector(s);
+    // 1. every band exists and the stage really is [rail | left dock | map | right dock]
+    const rect = s => { const e = g(s); return e ? e.getBoundingClientRect() : null; };
+    const rail = rect('#domainRail'), dl = rect('.dock-left'), cw = rect('.canvas-wrap'), dr = rect('.dock-right');
+    o.bandsExist = !!(g('#toolOpts') && rail && dl && cw && dr && g('#statusBar') && g('#cogBtn') && g('#toolRail'));
+    o.stageOrder = !!(rail && dl && cw && dr && rail.x < dl.x && dl.x < cw.x && cw.x < dr.x);
+    o.railIsVertical = !!(rail && rail.height > rail.width * 3);
+    // 2. the retired chrome is gone, not merely hidden
+    o.oldChromeGone = !g('#tabBar') && !g('#genSubBar') && !g('#layersPopover');
+    // 3. Sculpt is a WORLD category, and it is what _sculptEditorActive() keys on
+    _setDomain('world');
+    o.sculptOffByDefault = _sculptEditorActive() === false;
+    _setSculptCategory(true);
+    o.sculptArms = _sculptEditorActive() === true && _genSubTab === 'sculpt';
+    o.toolRailShows = getComputedStyle(g('#toolRail')).display !== 'none';
+    o.featuresInRail = g('#toolRail #sculptFeatureSeg').querySelectorAll('button').length >= 13;
+    _setSculptCategory(false);
+    o.sculptDisarms = _sculptEditorActive() === false && getComputedStyle(g('#toolRail')).display === 'none';
+    // 4. v1.96's hidden-panel guard survives the class-vs-inline-display question
+    _setDomain('explore'); o.civHiddenOnExplore = _civSubPageVisible() === false;
+    _setDomain('civ');     o.civVisibleOnCivil  = _civSubPageVisible() === true;
+    _setDomain('world');   o.civHiddenOnWorld   = _civSubPageVisible() === false;
+    // 5. an armed tool's contextual options stay on screen from a non-owning domain
+    _setDomain('civ'); _civSetTool('territory');
+    const terr = g('#civTerritoryToolRow');
+    o.toolOptionsVisible = !!terr && getComputedStyle(terr).display !== 'none' && !!g('#civTerRadius');
+    _civSetTool('inspect'); _setDomain('world');
+    // 6. the finalize lock travels with the control, not with #genWorld
+    setFinalized(true);
+    o.lockedWhenFinalized = g('#seedN').disabled && [...g('#resSeg').children].every(b => b.disabled)
+      && [...g('#extentSeg').children].every(b => b.disabled) && g('#genBtn').disabled && g('#centerBtn').disabled;
+    o.unfinalizeStillLive = g('#unfinalizeBtn').disabled === false;                       // v0.66's escape hatch
+    o.relocatedStillLocked = !!(g('#lodClearAtlasBtn') && g('#lodClearAtlasBtn').disabled); // now in Settings, previously locked only by #genWorld ancestry
+    o.v3dStillExempt = !!(g('#v3dExag') && g('#v3dExag').disabled === false);             // visualization-only, the documented exemption
+    // 7. THE destructive path — a finalized grid click must never reach allocate()
+    const realAlloc = window.allocate, realAlert = window.alert; let allocHits = 0;
+    window.allocate = function () { allocHits++; return realAlloc.apply(this, arguments); };
+    window.alert = () => {};
+    const resBefore = state.resW;
+    g('#resSeg button[data-w="512"]').click();
+    window.allocate = realAlloc; window.alert = realAlert;
+    o.finalizedResegNeverAllocates = allocHits === 0 && state.resW === resBefore;
+    setFinalized(false);
+    o.unlockedAfterUnfinalize = g('#seedN').disabled === false;
+    // 8. the cog really holds the program options
+    g('#cogBtn').click();
+    const sm = g('#settingsModal');
+    o.settingsOpens = sm.classList.contains('open');
+    o.gpuBehindCog = !!(g('#gpuToggle') && sm.contains(g('#gpuToggle')));
+    o.storageBehindCog = !!(g('#autosaveChk') && sm.contains(g('#autosaveChk')) && g('#lodBakeBtn') && sm.contains(g('#lodBakeBtn')));
+    o.regionBehindCog = !!(g('#regionNewWorldBtn') && sm.contains(g('#regionNewWorldBtn')));
+    g('#settingsClose').click();
+    o.settingsCloses = !sm.classList.contains('open');
+    // 9. the right dock is the INFORMATION pane — properties of the selection, and the Info tool's
+    //    readout. Layers describes the map view, not the selection, so it stays on the map.
+    o.propsInRightDock = !!g('.dock-right #inspector') && !!g('.dock-right #inspectorBody');
+    o.infoInRightDock = !!g('.dock-right #civInfoSec');
+    o.layersNotInDock = !g('.dock-right #layersList') && !!g('.canvas-wrap #layersList');
+    g('#layersBtn').click();
+    o.layersPopulated = g('#layersList').querySelectorAll('[data-ld]').length > 5;
+    g('#layersBtn').click();
+    o.debugSegStillHidden = getComputedStyle(g('#debugOverlaySec')).display === 'none';
+    // 10. the theme layer's :not() allowlist must not out-specify the .seg border system
+    const segBtn = g('#extentSeg button');
+    o.segBordersIntact = getComputedStyle(segBtn).borderTopWidth === '0px';
+    return o;
+  });
+  A('v2.24: every DCC band exists — tool-options, conditional tool rail, domain rail, both docks, status bar, cog', R.v224.bandsExist);
+  A('v2.24: the stage really reads left-to-right as rail | left dock | viewport | right dock', R.v224.stageOrder);
+  A('v2.24: the domain rail is vertical, not a horizontal tab strip wearing a new name', R.v224.railIsVertical);
+  A('v2.24: #tabBar, #genSubBar and the layers popover are removed, not merely hidden', R.v224.oldChromeGone);
+  A('v2.24: Sculpt is off by default under WORLD', R.v224.sculptOffByDefault);
+  A('v2.24: opening the Sculpt category arms _sculptEditorActive() — no rail token can, so it needs its own flag', R.v224.sculptArms);
+  A('v2.24: ...and reveals the conditional tool rail with the full 13-feature picker in it', R.v224.toolRailShows && R.v224.featuresInRail);
+  A('v2.24: closing the category disarms the editor and retracts the rail', R.v224.sculptDisarms);
+  A('v2.24: _civSubPageVisible() is false on EXPLORE/WORLD and true on CIVIL — v1.96’s 686ms-per-generate guard survives the domain rail', R.v224.civHiddenOnExplore && R.v224.civVisibleOnCivil && R.v224.civHiddenOnWorld);
+  A('v2.24: an armed tool’s contextual options are visible from the unified TOOLS block', R.v224.toolOptionsVisible);
+  A('v2.24: finalize locks seed/extent/grid/generate/center from their new home outside #genWorld', R.v224.lockedWhenFinalized);
+  A('v2.24: ...while Un-finalize (v0.66) and the 3D-view dials (v0.62) stay exempt', R.v224.unfinalizeStillLive && R.v224.v3dStillExempt);
+  A('v2.24: ...and the accordions the cog absorbed are still locked, having lost their #genWorld ancestry', R.v224.relocatedStillLocked);
+  A('v2.24: a grid click on a FINALIZED world never reaches allocate() — the one-click no-confirm array wipe', R.v224.finalizedResegNeverAllocates);
+  A('v2.24: un-finalizing releases the hoisted controls again', R.v224.unlockedAfterUnfinalize);
+  A('v2.24: the cog opens and closes the Settings window', R.v224.settingsOpens && R.v224.settingsCloses);
+  A('v2.24: GPU use is behind the cog, as asked', R.v224.gpuBehindCog);
+  A('v2.24: Assets mode offers a VISIBLE way back to the map, and taking it restores the map', R.assetsToggle.backBtnVisible && R.assetsToggle.back);
+  A('v2.24: ...and that button is gone again once you are back on the map', R.assetsToggle.backBtnHidesAgain);
+  A('v2.24: so are the data locations — autosave/snapshots, the tile atlas and region export', R.v224.storageBehindCog && R.v224.regionBehindCog);
+  A('v2.24: the right dock is the information pane — Properties and the Info readout', R.v224.propsInRightDock && R.v224.infoInRightDock);
+  A('v2.24: ...and Layers stayed on the map, where a map-view control belongs', R.v224.layersNotInDock && R.v224.layersPopulated);
+  A('v2.24: ...over the same hidden #debugSeg source of truth, not a second list to keep in sync', R.v224.debugSegStillHidden);
+  A('v2.24: the DCC theme’s :not() allowlist no longer out-specifies .seg’s border model (shipped broken in v2.23)', R.v224.segBordersIntact);
+
+  // The ResizeObserver is the one assertion that needs a real layout change with NO window resize.
+  R.v224obs = await page.evaluate(async () => {
+    const o = {}, cw = document.querySelector('.canvas-wrap'), tr = document.getElementById('toolRail');
+    const w0 = cw.getBoundingClientRect().height, s0 = viewT.scale;
+    tr.style.display = '';                                   // a band appears, exactly as arming Sculpt does
+    await new Promise(r => setTimeout(r, 350));
+    o.heightShrank = cw.getBoundingClientRect().height < w0;
+    o.cameraRefit = viewT.scale !== s0;
+    tr.style.display = 'none';
+    await new Promise(r => setTimeout(r, 350));
+    o.restored = Math.abs(viewT.scale - s0) < 1e-9;
+    return o;
+  });
+  A('v2.24: a band appearing shrinks the viewport with no window resize...', R.v224obs.heightShrank);
+  A('v2.24: ...and the ResizeObserver refits the camera for it — this file had zero ResizeObserver before', R.v224obs.cameraRefit);
+  A('v2.24: ...and retracting the band restores the previous fit exactly', R.v224obs.restored);
+
+  // ---- v2.25: rivers scale with zoom; the lake split is sub-cell; tile hillshade is normalised ----
+  R.v225 = await page.evaluate(async () => {
+    const o = {};
+    state.tect.seed = 12345; state.resW = 512;
+    GW = state.resW; GH = gridH(GW); allocate(); await generate();
+    const rn = _riverNet;
+
+    // 1. buildRiverNetwork now RETURNS its own channel half-width — the single width model
+    o.halfwReturned = !!(rn.halfw && rn.halfw.length === GW * GH);
+    let hwMax = 0, hwCells = 0;
+    if (rn.halfw) for (let i = 0; i < rn.halfw.length; i++) { const h = rn.halfw[i]; if (h > 0) hwCells++; if (h > hwMax) hwMax = h; }
+    o.halfwPopulated = hwCells > 0 && hwMax > 0 && isFinite(hwMax);
+
+    // 2/3/4. the floor is a NO-OP at zoom 1 and BINDS at deep zoom, growing 1:1 with zk (not sqrt)
+    const wb = currentWaterBodies();
+    const inLake = (q) => { const gx = q.x | 0, gy = q.y | 0;
+      if (!(gx >= 0 && gx < GW && gy >= 0 && gy < GH)) return false;
+      const i = gy * GW + gx; if (wb[i] !== 2) return false;
+      if (!_lakeFill || _lakeFill.length !== GW * GH) return true;
+      return (_lakeFill[i] - sampleArr(field, q.x, q.y)) > 0.004; };
+    const raw = traceRiverPolylines(rn.order, rn.recv, GW, GH, 1);
+    const polys = splitRiverPolylines(raw, GW, inLake);
+    const baseSym = Math.max(0.6, GW / 620);
+    const widths = (zk, reproj) => {
+      const _z = reproj ? Math.max(1, zk) : 1;
+      const baseW = baseSym * (reproj ? Math.sqrt(_z) : 1 / Math.sqrt(_z));
+      let bound = 0, n = 0, symSum = 0, outSum = 0;
+      for (const pl of polys) {
+        let maxO = 1, hw = 0;
+        for (const q of pl) { const i = ((q.y | 0) * GW) + (q.x | 0);
+          if (rn.order[i] > maxO) maxO = rn.order[i];
+          if (rn.halfw && rn.halfw[i] > hw) hw = rn.halfw[i]; }
+        const tt = Math.min(1, (maxO - 1) / 6);
+        const deEmph = Math.max(0, Math.min(1, 1 - (zk - 1) / 7));
+        const symW = baseW * (maxO <= 1 ? (0.55 + 0.45 * (1 - deEmph)) : (0.9 + 1.7 * tt));
+        const realW = 2 * hw * (reproj ? zk : 1);
+        if (realW > symW) bound++;
+        symSum += symW; outSum += Math.max(symW, realW); n++;
+      }
+      return { pctBound: 100 * bound / n, sym: symSum / n, out: outSum / n };
+    };
+    const z1off = widths(1, false), z1lod = widths(1, true), z32 = widths(32, true), z64 = widths(64, true);
+    o.floorNoopAtZoom1 = z1off.pctBound === 0 && z1lod.pctBound === 0
+                       && Math.abs(z1off.out - z1off.sym) < 1e-9 && Math.abs(z1lod.out - z1lod.sym) < 1e-9;
+    o.floorBindsDeep = z32.pctBound > 50 && z32.out > z32.sym * 1.2;
+    // past the crossover the river is true-to-scale: doubling zk doubles the stroke (the symbol only adds sqrt2)
+    o.growsLinearly = Math.abs((z64.out / z32.out) - 2) < 0.05 && (z64.sym / z32.sym) < 1.5;
+
+    // 5/6. the sub-cell lake test recovers shoreline reaches, and only ever NARROWS "in lake"
+    const cellLake = (q) => { const gx = q.x | 0, gy = q.y | 0;
+      return gx >= 0 && gx < GW && gy >= 0 && gy < GH && wb[gy * GW + gx] === 2; };
+    const cellSplit = splitRiverPolylines(raw, GW, cellLake);
+    const pts = a => a.reduce((s, x) => s + x.length, 0);
+    o.subCellRecovers = polys.length > cellSplit.length && pts(polys) > pts(cellSplit);
+    let widened = 0;
+    for (const pl of raw) for (const q of pl) if (inLake(q) && !cellLake(q)) widened++;
+    o.subCellIsStrictSubset = widened === 0;          // never claims "in lake" where the cell test did not
+
+    // 7/8/9. tileShadeExag: no-op without bounds, never reduces, scales with px-per-coarse-cell
+    o.shadeNoopNoBounds = tileShadeExag(null, 1024) === state.exag && tileShadeExag(undefined, 1024) === state.exag;
+    o.shadeNeverReduces = tileShadeExag({ x: 0, y: 0, w: 4000, h: 2000 }, 1024) === state.exag;   // px/cell < 1 ⇒ clamped
+    o.shadeScales = Math.abs(tileShadeExag({ x: 0, y: 0, w: 32, h: 32 }, 1025) - state.exag * 32) < 1e-6;
+    return o;
+  });
+  A('v2.25: buildRiverNetwork returns its own channel half-width — the renderer had no width to compare its pen against', R.v225.halfwReturned && R.v225.halfwPopulated);
+  A('v2.25: the real-width floor is a NO-OP at zoom 1, off-LOD and under LOD — v1.29’s requested world-scale thinning is intact', R.v225.floorNoopAtZoom1);
+  A('v2.25: ...and binds at deep zoom, where the channel is genuinely wider than the pen', R.v225.floorBindsDeep);
+  A('v2.25: ...past which the river is true-to-scale: doubling the zoom doubles the stroke, not √2×', R.v225.growsLinearly);
+  A('v2.25: the sub-cell lake test recovers shoreline reaches the cell-granular one discarded', R.v225.subCellRecovers);
+  A('v2.25: ...and only ever NARROWS "in lake" — it can never cut a reach the old test kept', R.v225.subCellIsStrictSubset);
+  A('v2.25: tileShadeExag with no bounds is exactly state.exag — v2.24 behaviour by construction', R.v225.shadeNoopNoBounds);
+  A('v2.25: ...never REDUCES exaggeration when a coarse cell spans under a pixel', R.v225.shadeNeverReduces);
+  A('v2.25: ...and scales with the tile’s own pixels-per-coarse-cell', R.v225.shadeScales);
 
   console.log('\n' + ok + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

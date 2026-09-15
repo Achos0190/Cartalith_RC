@@ -1082,8 +1082,10 @@ fieldsFinite('generate(world)');
   // T3: collision has a foreland-basin depression beyond one flank (negative somewhere)
   check('collision → foreland basin (negative cell present)', U.some(v => v < -0.05));
 
-  // kernel support: cells beyond the collision radius (blurR*3.3) are bit-untouched (exactly 0)
-  const RAD = 18 * 3.3;
+  /* kernel support: cells beyond the collision radius are bit-untouched (exactly 0). v2.36 replaced
+     the single ridge with a thrust-sheet stack, so the radius is the belt's own (halfBelt*2.2), not
+     blurR*3.3 — derive it from the shipped function rather than restating a constant that moved. */
+  const RAD = (typeof orogenBeltHalfWidth === 'function') ? orogenBeltHalfWidth(18, 1, W, H) * 2.2 : 18 * 3.3;
   let outside = 0;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
     if (Math.abs(x - 60) > RAD + 1.5 && U[y * W + x] !== 0) outside++;
@@ -1177,7 +1179,24 @@ fieldsFinite('generate(world)');
     const Uexp = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.16, trenchK: 1.0 });
     check('T5 omitted foldK/trenchK ⇒ legacy defaults (bit-identical)', Udef.every((v, i) => v === Uexp[i]));
     // stronger fold intensity ⇒ larger crest-to-col ripple along the collision belt
-    const ripple = (U) => { let mx = -1e9, mn = 1e9; for (let x = 0; x < W; x++){ const v = U[48 * W + x]; if (v > 0.1){ mx = Math.max(mx, v); mn = Math.min(mn, v); } } return mx - mn; };
+    /* v2.36: measure the COL DEPTH between adjacent crests, not max-min over the whole row. The old
+       metric was max-min above an absolute 0.1 cutoff, which is dominated by PEAK HEIGHT -- fine
+       while the collision profile was one ridge, wrong once it became a stack of thrust sheets,
+       because a stronger ripple lowers the peak wherever its cosine is negative and the metric then
+       moves the wrong way (measured 1.179 / 1.072 / 1.010 for foldK 0.05 / 0.16 / 0.5). The claim
+       itself is intact and was verified independently before this metric was rewritten: col depth
+       rises monotonically, 0.475 / 0.546 / 0.596 over the same three values. */
+    const ripple = (U) => {
+      const prof = []; for (let x = 0; x < W; x++) prof.push(U[48 * W + x]);
+      const cr = []; for (let x = 1; x < W - 1; x++) if (prof[x] > 0.1 && prof[x] > prof[x - 1] && prof[x] >= prof[x + 1]) cr.push(x);
+      if (cr.length < 2) return 0;
+      let s = 0, n = 0;
+      for (let k = 0; k + 1 < cr.length; k++){
+        let lo = Infinity; for (let x = cr[k]; x <= cr[k + 1]; x++) lo = Math.min(lo, prof[x]);
+        s += Math.min(prof[cr[k]], prof[cr[k + 1]]) - lo; n++;
+      }
+      return s / n;
+    };
     const Ulow = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.05 });
     const Uhigh = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.5 });
     check('T5 higher fold intensity ⇒ deeper intermontane cols (more ripple)', ripple(Uhigh) > ripple(Ulow));
@@ -3664,8 +3683,13 @@ if (typeof carveRiverValleys === 'function') {
 /* ---------- v1.15: Sculpt editor — draft layer + commit sequence (live world) ---------- */
 {
   state.world = false; state.resW = 256; GW = 256; GH = gridH(GW); allocate(); generate();
-  const saveActiveTab = _activeTab, saveSubTab = _genSubTab, saveFinalized = state.finalized;
-  _activeTab = 'generate'; _genSubTab = 'sculpt'; state.finalized = false;
+  /* v2.24: _activeTab/_genSubTab are DERIVED from _domain/_sculptCategoryOpen and are no longer
+     authoritative — assigning them here would leave _sculptEditorActive() false and every
+     assertion below would pass or fail for the wrong reason. Drive the real state instead. */
+  const saveDomain = _domain, saveSculptCat = _sculptCategoryOpen, saveFinalized = state.finalized;
+  _domain = 'world'; _sculptCategoryOpen = true; _syncLegacyTabVars(); state.finalized = false;
+  check('v2.24: driving _domain/_sculptCategoryOpen really arms the sculpt editor', _sculptEditorActive() === true);
+  check('v2.24: ...and the derived legacy tab vars agree with it', _activeTab === 'generate' && _genSubTab === 'sculpt');
   sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
   // sculptCommit()'s tail calls sculptSyncUI() to refresh the sliders/stamp-list DOM (createElement +
   // innerHTML + querySelector) — pure browser UI with no effect on engine data, already verified via
@@ -3746,7 +3770,7 @@ if (typeof carveRiverValleys === 'function') {
 
   sculptSyncUI = _sculptSyncUIOrig;
   global.confirm = _confirmOrig;
-  _activeTab = saveActiveTab; _genSubTab = saveSubTab; state.finalized = saveFinalized;
+  _domain = saveDomain; _sculptCategoryOpen = saveSculptCat; _syncLegacyTabVars(); state.finalized = saveFinalized;
   sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
   generate();   // restore a pristine field (this block committed mountains/river/lake stamps into the live world)
 }
@@ -4297,6 +4321,478 @@ if (typeof carveRiverValleys === 'function') {
       }
       return monotonic;
     })());
+  }
+
+  /* ---- v2.12: field-level redo, and the stale-snapshot fix ---------------------------------
+     undoLast() used to drop the state it was leaving, so an undo could not be walked back. The
+     stacks were also never cleared on a new world, which let a snapshot outlive the world that
+     made it (proven on v2.11: undo after a regenerate overwrote the new terrain with the old,
+     and after a resolution DECREASE field.set() threw RangeError outright). */
+  {
+    const h = a => { let x = 2166136261 >>> 0; for (let i = 0; i < a.length; i += 17) { x ^= Math.round(a[i] * 1e6) | 0; x = Math.imul(x, 16777619) >>> 0; } return x >>> 0; };
+    clearUndoHistory();
+    const A = h(field);
+    check('v2.12 redo: a fresh history starts with both stacks empty', undoStack.length === 0 && redoStack.length === 0);
+
+    pushUndo();
+    for (let i = 0; i < field.length; i += 3) field[i] = Math.min(1, field[i] + 0.05);
+    const B = h(field);
+    check('v2.12 redo: the simulated edit actually changed the field (guards every check below)', A !== B);
+
+    undoLast();
+    check('v2.12 redo: undoLast() restores the previous field', h(field) === A);
+    check('v2.12 redo: undoLast() captures the state it left, so redo has somewhere to go', redoStack.length === 1);
+
+    redoLast();
+    check('v2.12 redo: redoLast() steps forward to the undone state', h(field) === B);
+    check('v2.12 redo: stepping forward moves the entry back onto the undo stack', undoStack.length === 1 && redoStack.length === 0);
+
+    redoLast();
+    check('v2.12 redo: redoLast() past the end is a no-op, not a corruption', h(field) === B);
+
+    undoLast(); pushUndo();
+    check('v2.12 redo: a fresh edit after an undo forks the history (the old redo chain is dropped)', redoStack.length === 0);
+
+    clearUndoHistory();
+    check('v2.12 redo: clearUndoHistory() empties both stacks', undoStack.length === 0 && redoStack.length === 0);
+    check('v2.12 redo: undo/redo on an empty history are no-ops that do not throw', (() => {
+      const before = h(field);
+      try { undoLast(); redoLast(); } catch (_) { return false; }
+      return h(field) === before;
+    })());
+
+    check('v2.12 redo: neither stack can grow past MAX_UNDO', (() => {
+      clearUndoHistory();
+      for (let k = 0; k < MAX_UNDO + 4; k++) { pushUndo(); field[k] = Math.min(1, field[k] + 0.01); }
+      if (undoStack.length !== MAX_UNDO) return false;
+      for (let k = 0; k < MAX_UNDO + 4; k++) undoLast();          // more undos than there are steps
+      return redoStack.length <= MAX_UNDO;
+    })());
+    clearUndoHistory();
+  }
+
+  /* ---- v2.12: autosave snapshots ------------------------------------------------------------
+     The whole design rests on one coupling: a snapshot carries exactly the entries loadZip()
+     reads back, and nothing else. If a future version teaches loadZip() to read a seventh entry
+     and does not add it here, restores silently lose it -- so assert the set by name. */
+  {
+    const names = _snapEntries().map(e => e.name).sort();
+    const expected = ['heightmap.f32','impact_field.f32','params.json','rainfall.f32','temperature.f32','volcanic_field.f32'];
+    check('v2.12 autosave: the snapshot carries exactly the six entries loadZip() reads back', names.length === expected.length && names.every((n, i) => n === expected[i]));
+    check('v2.12 autosave: every snapshot entry has real bytes', _snapEntries().every(e => e.data && e.data.length > 0));
+
+    const fp0 = _snapFingerprint();
+    check('v2.12 autosave: the fingerprint is stable when nothing changed', _snapFingerprint() === fp0);
+    const keep = field[7];
+    field[7] = keep > 0.5 ? keep - 0.25 : keep + 0.25;
+    check('v2.12 autosave: the fingerprint tracks the FIELD (a terrain edit is never missed)', _snapFingerprint() !== fp0);
+    field[7] = keep;
+    check('v2.12 autosave: restoring the field restores the fingerprint', _snapFingerprint() === fp0);
+
+    state.labels.push({ x: 1, y: 1, text: '__fp_probe__' });
+    check('v2.12 autosave: the fingerprint tracks serialized STATE too (a civ-layer edit is never missed)', _snapFingerprint() !== fp0);
+    state.labels = state.labels.filter(l => l.text !== '__fp_probe__');
+    check('v2.12 autosave: removing that state change restores the fingerprint', _snapFingerprint() === fp0);
+
+    /* Headless safety: there is no indexedDB in this harness, so every entry point must be an
+       immediate no-op and must never arm a timer that would keep the process alive. */
+    check('v2.12 autosave: no indexedDB here, so the harness genuinely exercises the no-op path', typeof indexedDB === 'undefined');
+    check('v2.12 autosave: autosaveReschedule() arms no timer without indexedDB', (() => {
+      autosaveReschedule(); return _snapTimer === null;
+    })());
+  }
+
+  /* ---- v2.13: route-corridor + travel-cost views -------------------------------------------
+     Both fields already existed as internal scoring inputs; this version only draws them. The
+     logic worth pinning is the two fixed normalisers and the travel-cost cache. */
+  {
+    check('v2.13 views: corridor normaliser is 0 at 0 and saturates by 0.2 (the field is sparse)', _corrNorm(0) === 0 && _corrNorm(0.2) === 1 && _corrNorm(0.1) > 0 && _corrNorm(0.1) < 1);
+    check('v2.13 views: corridor normaliser never leaves [0,1]', [0, 0.001, 0.5, 5, 1e9].every(v => _corrNorm(v) >= 0 && _corrNorm(v) <= 1));
+    check('v2.13 views: travel-cost normaliser is 0 at flat (cost 1) and 1 by cost 10', _tcostNorm(1) === 0 && _tcostNorm(10) === 1);
+    check('v2.13 views: travel-cost normaliser maps water (Infinity) to the far end rather than NaN', _tcostNorm(Infinity) === 1);
+    check('v2.13 views: travel-cost normaliser never leaves [0,1]', [0, 1, 3, 10, 1e6, Infinity].every(v => _tcostNorm(v) >= 0 && _tcostNorm(v) <= 1));
+    check('v2.13 views: currentTravelCost() is cached — the same array comes back until the field changes', currentTravelCost() === currentTravelCost());
+    check('v2.13 views: currentTravelCost() is land-finite and water-impassable, matching buildTravelCost', (() => {
+      const tc = currentTravelCost();
+      let land = 0, water = 0;
+      for (let i = 0; i < tc.length; i += 401) { if (field[i] < state.seaLevel) { if (!isFinite(tc[i])) water++; } else if (isFinite(tc[i]) && tc[i] >= 1) land++; }
+      return land > 0 && water > 0;
+    })());
+  }
+
+
+  /* ---- v2.17: the four erosion ops as generation passes --------------------------------------
+     Nothing new is computed here -- velocity, glacial, coastal and hillslope diffusion already
+     existed as buttons. What is new is that generate() can run them, which means two things have
+     to hold: each *Pass() must be the button's own field mutation and nothing more (or the two
+     paths drift), and all four must default off (or every existing world re-baselines). */
+  {
+    const P0 = JSON.parse(JSON.stringify(state.passes));
+    const F0 = field.slice(), g0 = state.planet.g;
+    const v0 = JSON.parse(JSON.stringify(state.velo)), gl0 = JSON.parse(JSON.stringify(state.glacial));
+    const c0 = JSON.parse(JSON.stringify(state.coastal)), e0 = state.erosion.diffusePasses;
+    const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+    check('v2.17 passes: all four default off (a pre-v2.17 world regenerates unchanged)',
+      state.passes && state.passes.velocity === false && state.passes.glacial === false &&
+      state.passes.coastal === false && state.passes.hillslope === false);
+    check('v2.17 passes: runGenerationPasses() reports nothing ran, and changes no byte, when all are off',
+      runGenerationPasses() === false && same(Array.from(field), Array.from(F0)));
+
+    /* hillslopePass() must be exactly hillslopeDiffuseCPU on this harness (no GPU), so run both
+       over the same bytes and compare. A divergence here is the button and generate() disagreeing. */
+    state.erosion.diffusePasses = 2;
+    const ref = F0.slice(); hillslopeDiffuseCPU(2, state.erosion.diffuseD, ref, GW, GH);
+    field.set(F0); hillslopePass();
+    check('v2.17 passes: hillslopePass() is bit-identical to the CPU kernel the button runs',
+      same(Array.from(field), Array.from(ref)));
+    check('v2.17 passes: ...and it genuinely moved the terrain, so that comparison means something',
+      !same(Array.from(ref), Array.from(F0)));
+
+    /* coastalPass() swaps a gravity-scaled copy into state.coastal for the GPU path's benefit and
+       restores it in a finally. With g === 1 the scaling is a divide by one, so a broken restore
+       would be invisible -- force g away from 1 to make the leak observable. */
+    state.planet.g = 2; state.coastal.passes = 1;
+    const cObj = state.coastal, wave0 = state.coastal.waveStr;
+    field.set(F0); coastalPass();
+    check('v2.17 passes: coastalPass() restores state.coastal (the g-scaled copy never leaks)',
+      state.coastal === cObj && state.coastal.waveStr === wave0);
+    check('v2.17 passes: coastalPass() reworked the shoreline', !same(Array.from(field), Array.from(F0)));
+    state.planet.g = g0;
+
+    /* velocityPass() is the one pass with a side product: the velocity/water buffers the Velocity
+       debug view reads. generate() nulls them at its top, so the pass has to refill them. */
+    state.velo.iters = 10;
+    _veloVx = _veloVy = _veloWater = null;
+    field.set(F0); velocityPass();
+    check('v2.17 passes: velocityPass() refills the velocity buffers generate() nulled',
+      _veloVx && _veloVy && _veloWater && _veloVx.length === GW * GH);
+    check('v2.17 passes: velocityPass() eroded the field', !same(Array.from(field), Array.from(F0)));
+
+    /* glacialPass() carries eroSettle -- the physics half of the button's tail. Isostatic rebound
+       is one-sided (only removal rebounds), so calling it against an unchanged snapshot must be a
+       no-op; that is what lets a pass run it without a render.
+       eroSettle ALSO runs enforceRiverChannels, which is deliberately not a no-op when a locked
+       channel cell sits above its floor -- a separate mechanism, and on an ambient world whether
+       any such cell exists is luck (v2.29's deeper carve produced exactly two). So clear the lock
+       to test the rebound claim on its own, then raise a locked cell on purpose and check the
+       clamp really fires -- which the entangled version never verified. */
+    const rm0 = riverMask ? riverMask.slice() : null, ra0 = _riverAny;
+    if (riverMask) riverMask.fill(0);
+    field.set(F0); eroSettle(F0.slice());
+    check('v2.17 passes: eroSettle() against an unchanged snapshot moves nothing (rebound is one-sided)',
+      same(Array.from(field), Array.from(F0)));
+    if (rm0) { riverMask.set(rm0); }
+    _riverAny = ra0;
+    {
+      let ci = -1;
+      if (riverMask && riverFloor) for (let i = 0; i < riverMask.length; i++) if (riverMask[i]) { ci = i; break; }
+      field.set(F0);
+      if (ci >= 0) {
+        field[ci] = riverFloor[ci] + 0.05; eroSettle(F0.slice());
+        check('v2.17 passes: ...and eroSettle DOES re-clamp a locked river cell that was raised',
+          field[ci] <= riverFloor[ci] + 1e-6);
+      } else {
+        check('v2.17 passes: ...and eroSettle DOES re-clamp a locked river cell that was raised',
+          false, 'no locked river cell on the harness world');
+      }
+      field.set(F0);
+    }
+    state.glacial.passes = 1; state.glacial.snowline = 0.2;   // low snowline: guarantee ice on this world
+    field.set(F0); glacialPass();
+    check('v2.17 passes: glacialPass() carved', !same(Array.from(field), Array.from(F0)));
+
+    /* The run order is fixed, so the whole stage is reproducible: same starting field in, same
+       field out. Without that, a saved pass set would not reproduce its own world. */
+    state.passes.hillslope = true; state.passes.coastal = true;
+    field.set(F0); const ranA = runGenerationPasses(); const A = field.slice();
+    field.set(F0); const ranB = runGenerationPasses(); const B = field.slice();
+    check('v2.17 passes: runGenerationPasses() reports that something ran', ranA === true && ranB === true);
+    check('v2.17 passes: the chained stage is deterministic (a saved world regenerates identically)',
+      same(Array.from(A), Array.from(B)));
+    check('v2.17 passes: the chained stage moved the terrain', !same(Array.from(A), Array.from(F0)));
+
+    state.passes = P0; state.planet.g = g0; state.velo = v0; state.glacial = gl0;
+    state.coastal = c0; state.erosion.diffusePasses = e0;
+    field.set(F0); _veloVx = _veloVy = _veloWater = null;
+    _fieldGen++; invalidateDerived(); computeFlow(true);
+    check('v2.17 passes: the harness world is restored byte-for-byte for the checks after this one',
+      same(Array.from(field), Array.from(F0)));
+  }
+
+
+  /* ---- v2.20: landmasses as named entities -------------------------------------------------
+     buildLandmassQuality already found and ranked the components; what is new is identity. The
+     parts worth pinning are the ones a future edit could silently break: the kind thresholds are
+     shares of LAND (not km2), the name key is POSITIONAL (so it survives renumbering), and a
+     world-mode landmass straddling the seam must not get its centroid dropped in mid-ocean. */
+  {
+    check('v2.20 landmass: kind is a share of the world\'s land, with an archipelago allowed no continent',
+      landmassKind(0.5) === 'continent' && landmassKind(0.10) === 'continent' &&
+      landmassKind(0.099) === 'island' && landmassKind(0.005) === 'island' &&
+      landmassKind(0.004) === 'islet' && landmassKind(0) === 'islet');
+
+    check('v2.20 landmass: a name is deterministic in its seed', landmassNameFrom(12345, 'continent') === landmassNameFrom(12345, 'continent'));
+    check('v2.20 landmass: different seeds give different names', landmassNameFrom(1, 'continent') !== landmassNameFrom(2, 'continent'));
+    check('v2.20 landmass: the suffix pool follows the kind', (() => {
+      const c = landmassNameFrom(777, 'continent'), i = landmassNameFrom(777, 'islet');
+      return LANDMASS_SFX.continent.some(sf => c.endsWith(sf)) && LANDMASS_SFX.islet.some(sf => i.endsWith(sf)) && c !== i;
+    })());
+    check('v2.20 landmass: a name starts capitalised and is non-trivial',
+      /^[A-Z][a-z]/.test(landmassNameFrom(42, 'island')) && landmassNameFrom(42, 'island').length >= 5);
+
+    /* The key must move with position, not with a scan index -- that is the whole point of it. */
+    check('v2.20 landmass: the key is positional and tolerates a small drift (8-cell block)',
+      landmassKey(40, 40, 7) === landmassKey(42, 41, 7) && landmassKey(40, 40, 7) !== landmassKey(400, 40, 7));
+    check('v2.20 landmass: the key is per-world', landmassKey(40, 40, 7) !== landmassKey(40, 40, 8));
+
+    /* A synthetic two-blob world: one 20x20 block and one 2x2 speck, on a 64x40 grid. */
+    const W = 64, H = 40, comp = new Int32Array(W * H).fill(-1);
+    for (let y = 4; y < 24; y++) for (let x = 4; x < 24; x++) comp[y * W + x] = 0;
+    /* ONE cell for the speck, not four: the kind rule is a share of the world's own land, so in a
+       world holding only 401 land cells even a 4-cell speck is 1% of it and honestly reads as an
+       island. A first draft of this fixture used four and failed here -- the rule working, not a
+       bug, and exactly the property a share-based threshold is supposed to have. */
+    comp[30 * W + 50] = 1;
+    const idx = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, null, false);
+    check('v2.20 landmass: every component becomes one entry', idx.length === 2);
+    check('v2.20 landmass: entries are ranked largest first', idx[0].cells === 400 && idx[1].cells === 1 && idx[0].rank === 0 && idx[1].rank === 1);
+    check('v2.20 landmass: km2 is cells x cellKm2', idx[0].km2 === 1600 && idx[1].km2 === 4);
+    check('v2.20 landmass: share is of LAND, not of the whole grid', Math.abs(idx[0].share - 400 / 401) < 1e-9);
+    check('v2.20 landmass: the big block reads as a continent and the speck as an islet', idx[0].kind === 'continent' && idx[1].kind === 'islet');
+    check('v2.20 landmass: the centroid is the block centre', Math.abs(idx[0].cx - 13.5) < 1e-9 && Math.abs(idx[0].cy - 13.5) < 1e-9);
+    check('v2.20 landmass: the bbox is the block extent', idx[0].x0 === 4 && idx[0].y0 === 4 && idx[0].x1 === 23 && idx[0].y1 === 23);
+    check('v2.20 landmass: an underived name is flagged as not user-given', idx[0].named === false && !!idx[0].name);
+    check('v2.20 landmass: two builds of the same world agree, name included', (() => {
+      const b = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, null, false);
+      return b[0].name === idx[0].name && b[0].key === idx[0].key;
+    })());
+
+    /* A rename is stored against the key and must win, and must mark itself as user-given. */
+    const over = {}; over[idx[0].key] = 'Testerra';
+    const named = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, over, false);
+    check('v2.20 landmass: a stored name overrides the derived one and is flagged', named[0].name === 'Testerra' && named[0].named === true);
+    check('v2.20 landmass: ...and only that one', named[1].name === idx[1].name && named[1].named === false);
+
+    /* World mode wraps in X. A landmass straddling the antimeridian must not have its centroid
+       averaged into the middle of the ocean -- the case a plain arithmetic mean gets wrong. */
+    const comp2 = new Int32Array(W * H).fill(-1);
+    for (let y = 10; y < 20; y++) { for (let x = 0; x < 5; x++) comp2[y * W + x] = 0; for (let x = W - 5; x < W; x++) comp2[y * W + x] = 0; }
+    const flat = buildLandmassIndex({ comp: comp2, count: 1 }, W, H, 1, 5, null, false);
+    const wrapped = buildLandmassIndex({ comp: comp2, count: 1 }, W, H, 1, 5, null, true);
+    check('v2.20 landmass: a plain mean would put a seam-straddling centroid mid-map', Math.abs(flat[0].cx - W / 2) < 6);
+    check('v2.20 landmass: the circular mean puts it ON the seam instead', (() => {
+      const d = Math.min(Math.abs(wrapped[0].cx), Math.abs(wrapped[0].cx - W));
+      return d < 1.0;
+    })());
+    check('v2.20 landmass: a seam-straddling landmass is flagged, and only in world mode', wrapped[0].wraps === true && flat[0].wraps === false);
+
+    /* The live accessor: cached, and reflects this harness's real world. */
+    const live = currentLandmasses();
+    check('v2.20 landmass: currentLandmasses() is cached — the same array until the world changes', currentLandmasses() === live);
+    check('v2.20 landmass: the real world produces named landmasses whose shares sum to 1', (() => {
+      if (!live.length) return false;
+      let sum = 0; for (const l of live) sum += l.share;
+      return Math.abs(sum - 1) < 1e-6 && live.every(l => l.name && l.key && l.km2 > 0);
+    })());
+    check('v2.20 landmass: every entry carries a kind from the frozen three', live.every(l => ['continent', 'island', 'islet'].indexOf(l.kind) >= 0));
+    check('v2.20 landmass: names are unique enough to be useful as identities', (() => {
+      const top = live.slice(0, Math.min(8, live.length)).map(l => l.name);
+      return new Set(top).size === top.length;
+    })());
+  }
+
+
+  /* ---- v2.22: the physical crater model -----------------------------------------------------
+     The legacy path picks an absolute count and three hardcoded size buckets, so a 50 km region and
+     a 40,000 km world get the same hundred impacts. What is worth pinning here is that the three
+     replacements have the properties their physics claims: count scales with area AND age, the size
+     law is a real power law, and wear depends on diameter so an old surface keeps its basins. */
+  {
+    const P0 = JSON.parse(JSON.stringify(state.crater));
+
+    check('v2.22 craters: default OFF, so every existing world takes the legacy path', state.crater.physical === false);
+
+    /* Count: linear in area and in age, zero at either extreme. */
+    const p = (a, age) => craterPopulation(a, age, 0.49, 3000).count;
+    check('v2.22 craters: the count scales with AREA', p(800000, 500) > p(400000, 500) && p(400000, 500) > p(1600, 500));
+    check('v2.22 craters: ...and with surface AGE', p(400000, 1000) > p(400000, 500) && p(400000, 500) > p(400000, 50));
+    check('v2.22 craters: a young or tiny surface gets essentially none', p(1600, 500) < 5 && p(400000, 0) === 0);
+    /* Production is exactly rate x area x age below the ceiling -- assert the identity rather than a
+       tuned number, so re-anchoring the default rate (which this version did once) cannot silently
+       invalidate this. How many SURVIVE is a stamping question and is measured in probe_craters.js. */
+    check('v2.22 craters: production is exactly rate x area x age below the ceiling', (() => {
+      const area = 400000, age = 500, rate = 2.6;
+      return craterPopulation(area, age, rate, 1e9).count === Math.round(rate * (area / 1e6) * age);
+    })());
+    check('v2.22 craters: ...and the shipped default is a sane population for the default region', (() => {
+      const cellKm = 800 / 2048, area = 800 * (cellKm * gridH(2048));
+      const c = craterPopulation(area, 500, state.crater.ratePerMkm2Myr, 3000).count;
+      return c > 100 && c < 1200;
+    })());
+
+    /* The stamping ceiling raises the smallest diameter kept, rather than thinning at random --
+       and the small end is exactly what an old surface has already lost. */
+    const huge = craterPopulation(1e9, 500, 0.49, 3000);
+    check('v2.22 craters: a world too cratered to stamp is capped, not truncated', huge.count === 3000 && huge.produced > 3000);
+    check('v2.22 craters: ...by raising the smallest diameter kept', huge.dMinKm > CRATER_REF_MIN_KM * 2);
+    check('v2.22 craters: an ordinary world keeps the reference floor', craterPopulation(400000, 500, 0.49, 3000).dMinKm === CRATER_REF_MIN_KM);
+
+    /* Size: a real power law, not three buckets. Small craters must dominate by a wide margin. */
+    const D = u => craterDiameterKm(u, 0.5, 200, 1.8);
+    check('v2.22 craters: the diameter sample stays inside its bounds', [0, 0.25, 0.5, 0.9, 0.999, 1].every(u => D(u) >= 0.5 - 1e-9 && D(u) <= 200 + 1e-6));
+    check('v2.22 craters: it is monotone in u', [0.1, 0.3, 0.6, 0.95].every((u, i, a) => i === 0 || D(u) >= D(a[i - 1])));
+    check('v2.22 craters: u=0 is the floor', Math.abs(D(0) - 0.5) < 1e-9);
+    check('v2.22 craters: the population is dominated by small craters, as a power law demands', (() => {
+      let small = 0, big = 0;
+      for (let k = 0; k < 2000; k++) { const d = D(k / 2000); if (d < 2) small++; if (d >= 25) big++; }
+      return small > 1400 && big > 0 && big < 60;
+    })());
+    check('v2.22 craters: N(>D) really follows D^-b — the decade 5–50 km thins by about 10^1.8', (() => {
+      let n5 = 0, n50 = 0;
+      const N = 20000;
+      for (let k = 0; k < N; k++) { const d = D(k / N); if (d >= 5) n5++; if (d >= 50) n50++; }
+      if (!n50) return false;
+      const ratio = n5 / n50, expected = Math.pow(10, 1.8);
+      return ratio > expected * 0.6 && ratio < expected * 1.7;
+    })());
+
+    /* Wear: the whole point is that it depends on DIAMETER, so an old surface keeps its basins. */
+    check('v2.22 craters: wear is in [0,1] and rises with exposure', (() => {
+      const a = craterDegradation(5, 0), b = craterDegradation(5, 100), c = craterDegradation(5, 5000);
+      return a === 0 && b > a && c > b && c <= 1;
+    })());
+    check('v2.22 craters: a small crater is erased where a large basin is barely touched', (() => {
+      const small = craterDegradation(1, 500), basin = craterDegradation(150, 500);
+      return small > 0.9 && basin < 0.2;
+    })());
+    check('v2.22 craters: wear falls monotonically with diameter at fixed exposure',
+      [1, 5, 25, 100, 200].every((d, i, arr) => i === 0 || craterDegradation(d, 500) <= craterDegradation(arr[i - 1], 500)));
+    check('v2.22 craters: a pristine surface wears nothing at any size', [1, 50, 200].every(d => craterDegradation(d, 0) === 0));
+
+    /* The physical path actually stamps, and stamps a DIFFERENT world than the legacy one. */
+    const savedField = field.slice(), savedImpact = impactField.slice();
+    impactField.fill(0); state.crater.physical = false; stampCraters();
+    let legacySum = 0; for (let i = 0; i < impactField.length; i++) legacySum += impactField[i];
+    impactField.fill(0); state.crater.physical = true;
+    state.crater.ratePerMkm2Myr = 0.49; state.crater.surfaceAgeMyr = 500;
+    stampCraters();
+    let physSum = 0; for (let i = 0; i < impactField.length; i++) physSum += impactField[i];
+    check('v2.22 craters: the physical path genuinely stamps impacts', physSum !== 0);
+    check('v2.22 craters: ...and a different surface than the legacy path', Math.abs(physSum - legacySum) > 1e-6);
+    impactField.fill(0); state.crater.physical = true; state.crater.surfaceAgeMyr = 0; stampCraters();
+    let youngSum = 0; for (let i = 0; i < impactField.length; i++) youngSum += impactField[i];
+    check('v2.22 craters: a brand-new surface has no craters at all', youngSum === 0);
+
+    state.crater = P0; field.set(savedField); impactField.set(savedImpact);
+    check('v2.22 craters: the harness world is restored', state.crater.physical === false);
+  }
+
+  /* ---- v2.30: the geometry carveRiverValleys() carves along ------------------------------------ */
+  {
+    /* riverSinuAmp used to divide by 1+6*slopeN as if slopeN were a 0..1 grade, while the slope it is
+       called with is buildRiverNetwork's hypot(grad)*W, median ~1.74 at GW=1024. The amplitude that
+       produced had a median of 0.081 CELLS, so R4 was doing nothing wherever it was called. */
+    check('v2.30 sinuosity: the amplitude is meaningful at the slope the engine really passes',
+      riverSinuAmp(3, 1.74) > 0.5);
+    check('v2.30 sinuosity: it still rises with Strahler order',
+      riverSinuAmp(4, 1.0) > riverSinuAmp(2, 1.0) && riverSinuAmp(2, 1.0) > riverSinuAmp(1, 1.0));
+    check('v2.30 sinuosity: ...and still falls with slope (straight headwaters, meandering trunks)',
+      riverSinuAmp(3, 0.2) > riverSinuAmp(3, 2.0) && riverSinuAmp(3, 2.0) > riverSinuAmp(3, 12.0));
+
+    /* A raw receiver chain: one point per cell, 45-degree runs. */
+    const chain = []; for (let k = 0; k < 40; k++) chain.push({ x: 10 + k, y: 10 + (k >> 1) });
+    const res = carveChannelPath(chain, 3, 1.0, 0.8, 1024, 12345);
+    check('v2.30 carve path: it reports the step it resampled at', res.step > 0 && res.step <= CARVE_RESAMPLE_MAX_STEP);
+    check('v2.30 carve path: the path is finer than the one-point-per-cell chain it came from',
+      res.pts.length > chain.length);
+    /* Continuity is the whole point: enforceChannelDescent stamps a disc per point and never
+       interpolates, so no gap between consecutive points may exceed the channel it is carving. */
+    let worst = 0;
+    for (let k = 1; k < res.pts.length; k++)
+      worst = Math.max(worst, Math.hypot(res.pts[k].x - res.pts[k - 1].x, res.pts[k].y - res.pts[k - 1].y));
+    check('v2.30 carve path: no gap between points wider than the channel (halfW 0.8)', worst <= 0.8);
+    check('v2.30 carve path: it starts where the chain starts',
+      Math.hypot(res.pts[0].x - chain[0].x, res.pts[0].y - chain[0].y) < 1.5);
+    check('v2.30 carve path: a chain too short to smooth is returned untouched, at the chain gradient',
+      carveChannelPath([{ x: 1, y: 1 }, { x: 2, y: 2 }], 2, 1, 1, 1024, 7).step === 1);
+
+    /* v2.37: the carve must never be handed a WRAPPED receiver chain. In world mode
+       buildRiverNetwork picks receivers through nx=((nx%W)+W)%W, so a river crossing the
+       antimeridian has consecutive points at x~W-0.5 then x~0.5. v1.29 split that at the render and
+       export sites only, on the stated grounds that the carve "stamps a disc per POINT and never
+       interpolates" -- true then, destroyed by v2.30's carveChannelPath, which resamples through
+       catmullRomSample and FILLS THE JUMP IN. enforceChannelDescent's ladder then bottoms out at
+       sea-0.06 for the rest of the traverse: a full-map-width strip below sea level, rendering as
+       water. The synthetic minimal repro, both halves of the guard: */
+    {
+      const W2 = 1024, seam = [];
+      for (let x = 1018; x <= 1023; x++) seam.push({ x, y: 40 + (x - 1018) * 0.2 });
+      for (let x = 0; x <= 5; x++) seam.push({ x, y: 41.2 + x * 0.2 });
+      const xs = a => a.reduce((m, q) => Math.max(m, q.x), -Infinity) - a.reduce((m, q) => Math.min(m, q.x), Infinity);
+      check('v2.37 seam: the raw chain really does wrap (fixture is valid)',
+        seam.some((q, i) => i > 0 && Math.abs(q.x - seam[i - 1].x) > W2 / 2));
+      const parts = splitRiverPolylines([seam], W2);
+      check('v2.37 seam: splitRiverPolylines cuts it into two runs', parts.length === 2);
+      check('v2.37 seam: neither run spans the map', parts.every(q => xs(q) < W2 / 2),
+        parts.map(xs).join(','));
+      // and the reason it matters: carveChannelPath on the UNSPLIT chain sweeps the whole width
+      const bad = carveChannelPath(seam, 3, 1.0, 0.25, W2, 21811);
+      check('v2.37 seam: the unsplit chain DOES sweep the map when carved (the bug, reproduced)',
+        xs(bad.pts) > W2 / 2, xs(bad.pts).toFixed(0));
+      check('v2.37 seam: each split half carves within a sane span',
+        parts.every(q => q.length < 3 || xs(carveChannelPath(q, 3, 1.0, 0.25, W2, 21811).pts) < W2 / 2));
+    }
+
+    /* THE regression this version exists to prevent twice over: enforceChannelDescent's drop is per
+       POINT, so resampling finer silently steepens every river unless the caller scales it. Carve one
+       straight line at two different steps and the channel floor must land in the same place. */
+    const W2 = 64, H2 = 64, flat = new Float32Array(W2 * H2).fill(0.8);
+    const run = (step) => {
+      const f = flat.slice(), pts = [];
+      for (let t = 0; t <= 40; t += step) pts.push([10 + t, 32]);
+      enforceChannelDescent(f, W2, H2, pts, 0.42, 1.2, { drop: CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K * step });
+      return f[32 * W2 + 50];
+    };
+    const coarse = run(1), fine = run(0.25);
+    check('v2.30 carve path: the channel gradient does not depend on the resample step',
+      Math.abs(coarse - fine) < 1e-5, 'coarse ' + coarse.toFixed(6) + ' vs fine ' + fine.toFixed(6));
+    check('v2.30 carve path: ...and that gradient really is 2x the brushed-river default',
+      Math.abs((0.8 - coarse) - 40 * CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K) < 1e-5);
+  }
+
+  /* ---- v2.32: gaussBlur's CPU path is now the ONLY path on the hot route ---------------------- */
+  {
+    /* Pins the decision, not the timing: the measured evidence lives in tests/perf/probe_blur.js
+       (it needs WebGL2, which this harness does not have). If someone re-enables the shader route,
+       this fails and sends them to that probe rather than letting it back in silently. */
+    /* `typeof` guard, and the "absent" arm is not slack: run.sh is documented to take ANY explicit
+       target ("Cartalith Gen1 v0.57.html"), and a bare reference to a constant a 2019-era build does
+       not have is a ReferenceError that kills the whole suite before it prints a summary — which is
+       exactly what this assertion did to every older file until it was caught. A build predating the
+       flag simply is not in scope for the claim; one that HAS it must have it false. The real
+       regression guard, the one that fails on v2.31, lives in tests/perf/probe_blur.js, because
+       proving the CPU route is the fast one needs the WebGL2 this harness deliberately lacks.
+       Safe from v2.15's TDZ trap: the engine block is fully evaluated before this tail runs. */
+    check('v2.32 blur: the GPU blur route is off wherever the flag exists',
+      typeof GAUSS_BLUR_GPU === 'undefined' || GAUSS_BLUR_GPU === false);
+
+    /* boxH/boxV carry a RUNNING SUM — that is the whole reason the CPU path is radius-free and so
+       beats the shader. A broken sum shows up first as a constant field that does not survive. */
+    const W = 64, H = 48, flat = new Float32Array(W * H).fill(0.375);
+    check('v2.32 blur: a constant field survives a blur unchanged, at any radius',
+      [2, 9, 40].every(r => { const o = gaussBlur(flat, r, W, H, false);
+        for (let i = 0; i < o.length; i++) if (Math.abs(o[i] - 0.375) > 1e-5) return false; return true; }));
+
+    /* and it is a blur: more radius, less variance, monotonically. */
+    const spike = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) spike[y * W + x] = ((x >> 2) + (y >> 2)) % 2;
+    const varOf = a => { let m = 0; for (const v of a) m += v; m /= a.length;
+      let s2 = 0; for (const v of a) s2 += (v - m) * (v - m); return s2 / a.length; };
+    const v0 = varOf(spike), v1 = varOf(gaussBlur(spike, 3, W, H, false)), v2 = varOf(gaussBlur(spike, 20, W, H, false));
+    check('v2.32 blur: variance falls monotonically with radius', v0 > v1 && v1 > v2, v0 + '/' + v1 + '/' + v2);
+    check('v2.32 blur: r<1 returns a COPY, never the caller\'s own array',
+      (() => { const o = gaussBlur(flat, 0, W, H, false); return o !== flat && o.length === flat.length; })());
   }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');

@@ -3,20 +3,38 @@
 > **New session? Read `docs/HANDOFF.md` first** — current state, next task, how to verify.
 
 Single-file HTML worldbuilding tool. **The main deliverable is the newest
-`Cartalith Gen1 v*.html`** (currently **v2.10**) — a zero-dependency HTML/JS/CSS application,
+`Cartalith Gen1 v*.html`** (currently **v2.22**) — a zero-dependency HTML/JS/CSS application,
 designed to open via `file://` (a local HTTP server is an accepted fallback for Workers/WASM
 threads; `file://` must degrade gracefully, never break).
 
 | File | Role |
 |------|------|
-| `Cartalith Gen1 v2.10.html` | **Current** unified tool (~30.3k lines, 4 script blocks — see architecture below) |
-| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.09.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
+| `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
+| `Cartalith v2.39 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Rivers were invisible under Tiled LOD at defaults. **`surfaceColor` — where the Beer-Lambert river blend lives — is structurally unreachable under LOD**: `_lodBuildTileRGBA` selects `renderBiomeTileRGBA`, which calls `landColorCore` DIRECTLY. Proven, not argued — colorizing one tile with `_riverNet` nulled is byte-identical (FNV `262842011` both ways). So `drawLODView`'s vector overlay is the ONLY river renderer LOD has, and it was gated on `state.viz.riverWays` — which **v2.29 flipped to false**, rightly for the off-LOD report it answered, silently removing LOD's only renderer. Measured: river-vs-land blue contrast **28.27 off-LOD against 10.95 under LOD**, that residual matching the main map with the network nulled (10.96) to 0.01 — the water colour was **100% gone**, only `carveRiverValleys`' groove left. Fix is one gate, widened with `||` so it is a strict SUPERSET. `hash_gen1.js` vs v2.38 ALL IDENTICAL (it never sets `_lodOn`). Verify with `tests/perf/probe_lodrivers.js` (13 assertions; 4 fail on v2.38, by exactly 0.00). |
+| `Cartalith v2.38 DCC test.html` | Previous DCC-line file. Auto-populate is a synchronous **11.2 s** main-thread pass and it ran as a bare `onclick=()=>_civAutoWorld()` — no overlay, no disabled button, nothing. So the tab froze in silence and the owner reported it as *"auto populate doesn't seem to work"*: it worked, it just never said so. **`withBusy` had ZERO call sites in the whole of block 2**, though block 1 declares it at top level and the civ layer could always reach it. Wrapped at all three long civ buttons. This does NOT make them quicker, and the profile says why a wrap is the honest fix: **`roadDijkstra` is 77% of the time (8 593 ms, 326 full-grid runs)** across four `_civHierarchicalNetwork` rebuilds, and the routing grid is already capped at 384x192 **regardless of world resolution** — so a 4K world costs the same as a 512 one and the driver is settlement count, not the map. `hash_gen1.js` vs v2.37 ALL IDENTICAL. Verify with `tests/perf/probe_civbusy.js` (11 assertions; 5 fail on v2.37). |
+| `Cartalith v2.37 DCC test.html` | Previous DCC-line file. The carve was laying trenches ACROSS THE ANTIMERIDIAN, below sea level, and they rendered as water — the owner's "near horizontal lines". `carveRiverValleys` consumed a raw wrapped receiver chain; v1.29 exempted it *in a comment* because `enforceChannelDescent` "never interpolates", and **v2.30 destroyed that premise** by inserting `carveChannelPath`, which resamples the seam jump into a dense sweep. The descent ladder then bottoms out at `sea−0.06` for the rest of the traverse. Measured: **28 of 11 802 chains carried 22.7% of the entire carve**, pinning 24 830 cells at the floor in 30 horizontal runs of 100+ cells. Fix is ONE line — the third call site of `splitRiverPolylines`. Channel cells **59 481 → 71 654**: the trenches were drowning real rivers. Also fixes `_suGenCommit` computing `GH` before assigning `state.world`. `hash_gen1.js` vs v2.36 ALL IDENTICAL (region mode cannot wrap). Verify with `tests/perf/probe_seamcarve.js` (8 assertions; 3 fail on v2.36). |
+| `Cartalith v2.36 DCC test.html` | Previous DCC-line file. The collision belt is a STACK of thrust sheets, not one Gaussian ridge: ONE shared long-wavelength bend keeps the sheets parallel while each sheet's deviation is a fraction of SPACING, so a sheet can never close the gap to its neighbour. `orogenyWidthScaleK` gives the belt a fixed REAL width (exactly 1 at the 800 km default, so default terrain is unchanged). Also fixes a **v2.35 defect**: the forward-preferring walk skipped same-group cells, so the pure-loop pass retraced chains — 2.86 points per distinct skeleton cell against v2.34's 1.45, traced length 1.75x the boundary-cell count against the suite's own <2x bound, which v2.35 passed partly by luck. Now 1.23x. Himalaya-width anchoring was built, measured (0.57→0.93 of stations) and **REVERTED** — it draws a 550 km belt against a 161 km margin, aspect 0.29. **Aspect is bound by MARGIN LENGTH, not belt width.** `hash_gen1.js` vs v2.35 ALL IDENTICAL. Verify with `tests/perf/probe_orogeny.js` (12 assertions). |
+| `Cartalith v2.35 DCC test.html` | Previous DCC-line file. A collision margin was being cut at STAIRCASES, not at triple junctions. `thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED; `traceBoundaries` set `deg` to the raw 8-neighbour count, and a plain diagonal staircase gives an interior cell 3-4 neighbours — so `isNode` fired along straight segments. Measured **1040 "junctions" on a 14-plate world, only 77 of them at a real plate triple point**, against a planar graph's own ~2n−4 ≈ 24. The predicate is the **crossing number** now (0→1 transitions around the ring = distinct neighbour groups), which `thinMask` already computes as its own `A`. Longest collision margin **88.9 → 161.0 / 91.5 → 288.0 / 57.7 → 226.4 km**; junctions 1040 → 23. The walk changed with it — see the section below. `hash_gen1.js` vs v2.34 ALL IDENTICAL. Verify with `tests/perf/probe_margins.js "Cartalith v2.35 DCC test.html"` (21 assertions; 4 fail on v2.34). |
+| `Cartalith v2.34 DCC test.html` | Previous DCC-line file. The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
+| `Cartalith v2.33 DCC test.html` | Previous DCC-line file. Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
+| `Cartalith v2.32 DCC test.html` | Previous DCC-line file. `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~1.6 m at default peakM) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
+| `Cartalith v2.31 DCC test.html` | Previous DCC-line file. `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
+| `Cartalith v2.30 DCC test.html` | Previous DCC-line file. The carve follows a river instead of a receiver chain: `carveChannelPath()` resamples each traced polyline finer than the channel it is cutting (v2.29's order-1 `halfW=0.8` kept only the centre cell, so a diagonal step broke the trench — only **64.3%** of the drainage had any trench under it, now **97.1%**) and meanders it on coarse control points at `CARVE_SINU_K=8`. Also fixes two latent defects found while measuring it: `riverSinuAmp`'s slope denominator (`RIVER_SINU_SLOPE_K`) and `enforceChannelDescent`'s per-point `drop` silently setting the gradient (`CHANNEL_DROP_PER_CELL`/`CARVE_GRADIENT_K`). Verify with `tests/perf/probe_carve.js "Cartalith v2.30 DCC test.html"` (10 assertions; the coverage guard fails on v2.29). |
+| `Cartalith v2.29 DCC test.html` | Previous DCC-line file. Rivers are rendered INTO the terrain again: `state.viz.riverWays` defaults OFF (it is an either/or with the terrain-blended raster river — on means the stroked line is the only river renderer), and `CARVE_STRENGTH_K=8` multiplies the incision K inside `carveRiverValleys()` only, calibrated so the carve reaches 3.08x the un-carved surface's relief energy — matching the 3.16x measured from `elevation_foundation_v0.015`. A deliberate, isolated re-baseline: with the carve off on both sides, `hash_gen1.js` vs v2.28 is byte-identical on field/temp/rain/flow/rgba. Verify with `tests/perf/probe_carve.js "Cartalith v2.29 DCC test.html"` (7 assertions; 4 fail on v2.28). |
+| `Cartalith v2.28 DCC test.html` | Previous DCC-line file — the cog window's two faults: v2.27 plus the cog window's two faults: `.set-shell` still sized in `vh` (the one box v2.27's `dvh` pass missed) and `#settingsModal` centring a shell that can overflow, which put the head — and the only ✕ — off the TOP where no scroll reaches it. `align-items:flex-start` + `margin:auto` + `overflow:auto`, a sticky head, and a 44px ✕ on mobile. `hash_gen1.js` vs v2.27 ALL IDENTICAL. Verify with `tests/perf/probe_cogmodal.js "Cartalith v2.28 DCC test.html"` (33 assertions; 18 fail on v2.27). |
+| `Cartalith v2.27 DCC test.html` | Earlier DCC-line file — five owner-reported SHELL fixes: `#extentSeg`/`#resSeg` moved back out of the document bar into Geology → Extent & resolution; Search · Undo · Redo · File · cog collapsed onto one header row with symbol Undo/Redo and an emoji cog; the mobile domain rail no longer paints over the drawer it opens; a View-mode click clears an obscuring debug layer; and `vh`/`%` → `100dvh` (+ a measured `--canvas-top`) so nothing sits behind a phone address bar. `hash_gen1.js` vs v2.26 ALL IDENTICAL. Verify with `tests/perf/probe_shellui.js "Cartalith v2.27 DCC test.html"` (19 assertions). |
+| `Cartalith v2.26 DCC test.html` | Previous DCC-line file — the SAVE FORMAT: `exportZip()` now writes the `SAVEFILE_COMPAT.md` project TREE (`project.json` + `rasters/` + `entities/` + `history/` + `annotations/`), not the flat layout. v2.11 had built the READER and left the writer; this is the other half. Reads both layouts still. `hash_gen1.js` vs v2.25 ALL IDENTICAL. Verify with `tests/perf/probe_savetree.js "Cartalith v2.26 DCC test.html" "Cartalith v2.25 DCC test.html"` (35 assertions). |
+| `Cartalith v2.25 DCC test.html` | Previous DCC-line file — three render fixes: rivers switch from a cartographic symbol to their REAL width past the crossover (`buildRiverNetwork` returns `halfw`), the lake split test became sub-cell, and the LOD tile hillshade is normalised to the tile's own scale. Still writes the flat save layout. |
+| `Cartalith v2.24 DCC test.html` | Previous DCC-line file — the GUI FRAME replacement: app bar + cog, document bar, conditional tool rail, vertical domain rail (WORLD·CIVIL·CARTO·EXPLORE), left dock 372 (tools + domain body), right dock 304 (**the information pane** — Properties + the Info readout; Layers stays on the map), status bar, and a Settings window holding every program-scope option. Bit-identical render path vs v2.22. |
+| `Cartalith v2.23 DCC test.html` | The theme layer alone, kept. Every DCC-line file is deliberately named without `Gen1`: `tests/run.sh` globs `Cartalith Gen1 v*.html` and takes the last by version sort, so a `Gen1 v2.2x` name would have made an experiment the suite's default target. |
+| `PORT_ONLY_FEATURES.md` | What the Rust/Godot native port has that this app does not — pulled in from `Cartalith_GDT`, three of its rows corrected here against the real file. The back-port source list. |
 | `Cartalith_V1.915.html` | Pre-merge cartographic editor, kept as reference (routes, settlements, paint grid, politics, journey planner) |
 | `urban-morphology/Urban Morphology v0.1.html` | Standalone procedural city-layout PoC, kept as reference — its engine was ported into Gen1's 4th script block (v0.95); the PoC file itself is never edited |
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1031-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1175-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -28,7 +46,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1031 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1175 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1029,6 +1047,773 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The LOD path never calls surfaceColor, so it never had a river (v2.39, DCC-line file only)
+
+Owner: *"When using LOD tiling the rivers seem to disappear."* They did — completely. One gate is the
+fix; the lesson is that a flag's justification can be true in one render path and meaningless in
+another. `hash_gen1.js` vs v2.38 ALL IDENTICAL; verification is `tests/perf/probe_lodrivers.js`.
+
+- **`surfaceColor` is where the river water colour lives, and the LOD path cannot reach it.**
+  `waterShade` — the Beer-Lambert blend — has **exactly one call site in the whole file**, inside
+  `surfaceColor`. `_lodBuildTileRGBA` selects `renderBiomeTileRGBA`, which calls `landColorCore`
+  **directly**, bypassing the wrapper. **Proven by nulling `_riverNet` and re-colorizing one tile:
+  byte-identical, FNV `262842011` both ways.** `renderHeightTileRGBA` and `bakePixel` are blind the
+  same way. Do not re-argue this from the `sdfRivers` default — that SDF is a decorative bank tint
+  and is not the mechanism.
+- **So `state.viz.riverWays` is an EITHER/OR off-LOD and a plain ON/OFF under LOD.** v1.14 added
+  that flag to stop the raster blend and the spline drawing one network as two parallel rivers —
+  a hazard of the per-pixel path ONLY. Under LOD there is no raster copy, so nothing can
+  double-draw. **v2.29 flipped the default to false correctly for off-LOD and removed LOD's only
+  renderer in the same edit.** Third occurrence of the v2.37 shape: a gate reused where its premise
+  does not hold. **When you change a flag's default, grep every call site that reads it and re-derive
+  whether its reason still applies there.**
+- **The gate is widened with `||`, never replaced.** `((riverWays) || state.showRivers)` is a strict
+  superset — the riverWays-on case still draws exactly as before, so nothing is taken away.
+  **Do NOT instead default `riverWays` true**: `surfaceColor`'s branch is gated
+  `!(state.viz&&state.viz.riverWays)`, so that re-suppresses the off-LOD raster river and reinstates
+  the very report v2.29 answered.
+- **A contrast threshold measures TERRAIN, not water, and will pass on the broken build.** Carved
+  valleys plus `landColorCore`'s TWI wetness term already make river cells **25.48 (z4) / 42.91
+  (z8)** bluer than the land around them with no water drawn at all — a first cut asserted
+  `contrast > 14` and passed on v2.38. Key the assertion to a **delta against the same build's own
+  overlay-suppressed baseline**: that gain is **exactly 0.00** on v2.38 and 22.8 / 20.3 here. Assert
+  the mechanism too — `drawRiverWays` call count is 0 against 5.
+- **Disclosed, not fixed**: LOD now draws the cartographic SYMBOL (v1.29's sqrt-z-damped stroke with
+  v2.25's real-width floor) where off-LOD draws the terrain-blended `waterShade`, so the two views
+  render rivers in different STYLES rather than matching pixel-for-pixel. Matching them means
+  porting the `_riverNet.intensity`/`depth` blend into `renderBiomeTileRGBA` sampled at world
+  coords — which re-baselines every cached tile AND every baked atlas chunk, and needs
+  `_lodRenderKey()` to gain a `state.showRivers` term. **`bakePixel` is still river-blind, so an
+  exported `map.png` has no river water either** — the same root cause, a separate fix.
+
+### A long operation that says nothing reads as a broken one (v2.38, DCC-line file only)
+
+Owner: *"Auto populate doesn't seem to work"*, then *"Yeah it's long"*. It was never broken — it is a
+synchronous **11.2 s** main-thread pass that gave the click no acknowledgement of any kind.
+`hash_gen1.js` vs v2.37 ALL IDENTICAL; verification is `tests/perf/probe_civbusy.js`.
+
+- **`withBusy` had ZERO call sites in the entire civ layer.** Block 1 declares it at top level and
+  block 2 shares that scope, so it was always reachable — the probe asserts `typeof withBusy` on
+  v2.37 too, and it passes there. Auto-populate, Generate roads and Recalculate territories were all
+  bare `onclick=()=>fn()`. **Before adding a progress mechanism, check whether the file already has
+  one and the layer simply never called it.**
+- **`withBusy`'s 20 ms `setTimeout` is the load-bearing part**, not the overlay: it lets the browser
+  PAINT before the blocking work starts. `showBusy()` alone on the same tick paints nothing, because
+  the pass never yields. The `finally{hideBusy()}` is what keeps `_busyDepth` balanced (v1.24 BUG-3).
+- **This does not make anything quicker and must not be read as if it had.** Profiled:
+  **`roadDijkstra` is 8 593 ms of 11 190 (77%), over 326 full-grid runs** — `2 x settlements`
+  Dijkstras per `_civHierarchicalNetwork`, and that runs **four** times (three
+  `_civIterativeAutoWorld` passes plus the crossroads re-route), each rebuilding the whole network
+  from scratch. Everything else is noise: suitability 1 854 ms, food-shed 217 ms, seeds 24 ms,
+  `_civNetworkMetrics` 7 ms.
+- **The cost does NOT scale with world resolution.** `_civRoutingGrid` is `Math.min(GW,384)`, so it
+  is 384x192 at every world size — a 4K world costs what a 512 one does. The driver is settlement
+  count. Do not chase this by lowering the resolution, and do not blame a big map for it.
+- **Refuted as a cheap win**: v2.33's per-edge `edgeCost` closure is a real 44% overhead on each
+  Dijkstra (26 ms vs 18 ms with it null), but it is only ~2.6 s of the 11 and removing it deletes the
+  Tobler slope model. Inlining it is bit-identical but buys 23%, not an order of magnitude.
+- **A real speedup is a routing REDESIGN, not a wrap** — the all-pairs matrix the Prim MST consumes
+  could come from one multi-source Voronoi Dijkstra instead of n per-settlement ones, and the
+  intermediate passes could settle tiers on a cheaper distance proxy. Both **change the generated
+  road network**, i.e. re-baseline every existing world, so neither is bundled into a fix for a
+  report about feedback. Owner's call.
+
+### The carve trenched across the antimeridian (v2.37, DCC-line file only)
+
+Owner: *"the river rendering... generates near horizontal lines."* One line fixes it; the lesson is
+in why it survived six versions. `hash_gen1.js` vs v2.36 ALL IDENTICAL; verification is
+`tests/perf/probe_seamcarve.js`.
+
+- **A comment recording WHY something is safe is load-bearing, and it can expire.** v1.29 exempted
+  the carve from `splitRiverPolylines` and wrote the reason down: `enforceChannelDescent` "stamps a
+  disc per POINT and never interpolates between them". True in v1.29. **v2.30 inserted
+  `carveChannelPath` between the trace and the stamp**, which resamples through `catmullRomSample` —
+  and nobody re-read the exemption it invalidated. **When you add interpolation to a path, grep for
+  every comment that claims that path does not interpolate.**
+- **The damage is not the number of bad polylines, it is how many POINTS each lays down.** 28 of
+  11 802 chains wrapped — 0.23% of the geometry carrying **22.7% of the whole carve's points**. A
+  previous count of "2 of 9884" measured the POST-carve network and concluded it was negligible. The
+  wrapping chains only exist BEFORE the carve consumes them.
+- **Match the detector to what the bug writes.** The carve writes seam cells to a FLAT ABSOLUTE
+  `sea−0.06`. Searching for cells *depressed relative to their neighbours* cannot find a flat floor —
+  it found 45-cell runs where searching for cells *at* that value finds 355.
+- **Every harness ran in the one mode that cannot reproduce it.** `probe_carve.js` sets
+  `state.world=false`; `hash_gen1.js` never sets `state.world`. Seed 12345 has ZERO seam-crossing
+  rivers even in world mode — so the battery seed itself was blind. **A field hash would not have
+  caught this**, and would have gone red for innocent reasons a dozen times first.
+- **Assert the MECHANISM as well as the symptom**: `no carve path spans more than half the map`
+  fails even if the floor clamp is later changed. And key a run-length assertion on what the bug
+  writes — keyed on `riverMask` it PASSED on a build with 13 058 floor cells.
+- **Refuted, do not re-chase**: the east receiver bias is the TERRAIN, not the routing rule (plain
+  D8 reproduces the same 2.022 ratio, and the bias is unchanged by the fix while every line goes);
+  the resample-step underflow is real but contributes **0%** of the artefact (implemented, measured
+  byte-identical) and costs v2.30's trench coverage 0.9049 → 0.8858.
+- **`gridH()` reads the module global `state.world`**, so anything computing `GH` must assign the
+  extent FIRST. `_suGenCommit` had the two lines the wrong way round and gave world maps the region
+  aspect (1024×655 instead of 1024×512).
+
+### The collision belt is a stack of thrust sheets (v2.36, DCC-line file only)
+
+Owner, on the two halves v2.35 left open: **"Together."** `hash_gen1.js` vs v2.35 ALL IDENTICAL
+(collision geometry is reachable only under `state.tect.tectonicGraph`, default off); verification is
+`tests/perf/probe_orogeny.js`.
+
+- **What makes it a belt and not four parallel lines: ONE bend shared by every sheet, and per-sheet
+  deviation expressed as a fraction of SPACING** — never of belt width, or a sheet closes the gap to
+  its neighbour and the stack collapses back into a single ridge.
+- **Calibrate on a PER-STATION crest count, never a mean cross-section.** Each sheet's crest wanders
+  independently, so a mean smears them back into one hump and undercounts ridges.
+- **Whether a cross-section reads as separate ranges is set by sheet spacing IN CELLS**, and that is
+  a resolution limit rather than a tuning knob: 0.86-0.96 of stations carry the full stack at 35.3
+  cells, 0.50-0.57 at 17.7, 0.07-0.18 at 8.8. **Five hypotheses were tested against it and refuted**
+  — `smoothOrogeny` (its blur HELPS), the fold-ripple period, the shared crest jitter (removing it
+  is worse), `aj` stacking on `vig`, and per-group walk starts (a measured no-op). Do not re-chase.
+- **ASPECT IS BOUND BY MARGIN LENGTH, NOT BELT WIDTH.** Anchoring the belt at a real orogen width
+  (125 km half-width) fixes sheet resolution outright (0.57 -> 0.93) and was still REVERTED: it draws
+  550 km of belt against a 161 km margin, 69% of an 800 km map, aspect 0.29. At the default extent a
+  Himalaya's proportions and its internal structure are not simultaneously available — a real
+  Himalaya is 2400 km long, three times the whole map.
+- **A v2.35 defect fixed here**: the forward-preferring step skips a same-group diagonal and leaves
+  it UNVISITED, so the pure-loop pass walks a second polyline retracing the chain (81 of 121
+  polylines came from that pass). The walk claims the skipped cell now. Costs 7.6% of skeleton cells
+  as emitted geometry and takes seed 31337's longest margin 288 -> 224 km.
+- **Rewrite a metric only after verifying the claim it tests.** `T5 higher fold intensity` measured
+  `max-min` above an absolute cutoff, which is dominated by peak height and runs BACKWARDS for a
+  stack (1.179/1.072/1.010). Col depth was confirmed monotonic (0.475/0.546/0.596) BEFORE the metric
+  was touched. A fold ripple at ~one sheet sigma manufactures false crests — keep it incommensurate
+  with the stack (`0.80*spacing`).
+
+### A margin was cut at staircases, not at triple junctions (v2.35, DCC-line file only)
+
+Owner: the Himalaya *"is a formidable mountain range. Not simply one line of mountains"*, then
+*"go after margin length next."* This lengthens the margins a belt sits on; it does NOT touch the
+belt profile. `hash_gen1.js` vs v2.34 ALL IDENTICAL; verification is `tests/perf/probe_margins.js`
+(21 assertions, 4 of which fail on v2.34).
+
+- **`thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED, and a raw 8-neighbour count is not a
+  branch count.** A diagonal staircase gives an interior cell 3-4 neighbours in only 2 groups, so
+  the old `deg !== 2` test cut chains along straight segments. The correct test is the **crossing
+  number** — 0→1 transitions around the ring — which `thinMask` already computes as its own `A`,
+  one function above. Ring `[0,0,0,1,1,0,1,1]`: raw 4, crossing 2.
+- **Check a detector's output against what the topology can actually contain.** 1040 junctions on a
+  14-plate world, where a planar graph has ~2n−4 ≈ 24 — and only 77 of the 1040 sat at a real plate
+  triple point. That ratio is what condemned the predicate, not the rendered result.
+- **The WALK must change with the predicate.** Under the crossing number an interior cell can still
+  have 4 neighbours in 2 groups, so `nbrs[0]` can step back into the group just left and spin
+  forever. Prefer a neighbour NOT 8-adjacent to the previous cell, orthogonal first, with a `W*H`
+  cap. **A spinning walk looks exactly like a slow one** — two probes hung before idle CPU gave it
+  away. The probe asserts both invariants directly: max step 1, and no walk reaching the cap.
+- **The owner's own other option is refuted by the code, and saying so is part of the answer.**
+  `currentBoundaryGraph` assigns type by majority vote AFTER tracing, so along-strike hysteresis in
+  the classifier can never split a chain. Stitching nearly-collinear fragments was measured first
+  (89→148 / 91→192 / 58→120 km) and beaten by the predicate fix on every seed; it still composes.
+- **Stated, not banked**: total collision km rises far more than the longest margin does
+  (340→984, 432→1599, 899→3607), because a longer chain's majority vote also RECLASSIFIES
+  fragments. The type mix moved, and that is not separately verified. Aspect reaches ~1.9:1 /
+  3.5:1 / 2.7:1 against the belt's ~83 km span — against ~7:1 for the Himalaya.
+- **v2.35 WAS A PHONE FREEZE, and v2.36 fixes it**: the spinning walk reached the `W*H` cap and
+  built a 524 290-point polyline that orogeny then stamped along — `buildOrogenyField` measured
+  **93 885 ms** on v2.35 against 6 307 on v2.34 and 1 878 on v2.36, at World/1024/20000 km.
+- **A belt that vanishes is not scale-invariance.** `orogenyWidthScaleK` put the belt at 2.14 cells
+  at mapWidthKm 20000 — structured orogeny rendering nothing at world extent. `OROGEN_BELT_MIN_CELLS`
+  (8) floors it, so invariance holds to ~5000 km then clamps. **The sheet stack still needs ~35 cells
+  of spacing, so at world extent the belt is honestly one ridge again.**
+- **Still open**: belt WIDTH is `blurR` in grid cells and never reads `mapWidthKm`, so it does not
+  scale with map extent — the v1.60 / v2.05 / v2.07 defect shape, in the one subsystem those passes
+  never reached.
+
+### The land surface is a SPEED, from the Planner's own table (v2.34, DCC-line file only)
+
+Step two of the owner's routing ask. v2.33 was step one and made routes no quicker; this is the
+half with the leverage. `hash_gen1.js` vs v2.33 ALL IDENTICAL; verification is
+`tests/perf/probe_landsurface.js` (19 assertions).
+
+- **A multiplier that barely varies cannot steer anything, and `_civBiomeFriction` was worse than
+  flat — it was INVERTED.** Measured over the routing grid: Open Plains 1.418, Rocky Terrain 1.373.
+  It keys on climate vegetation, so a bare rocky mountain reads cheap and a forested plain reads
+  dear. Spread 1.10 / 1.39 / 1.45 against `JP_TERRAIN.land`'s 2.11 / 2.37 / 2.37. **Check the
+  spread of any new cost term before trusting it** — the sibling of v1.30's "check the land-mean".
+- **`CART_TERRAINS` and `JP_TERRAIN.land` are the same thirteen names**, so `_civSurfaceSpeed` maps
+  1:1 by name with nothing invented between. `hours = flatHours / speed` composes with v2.33's
+  per-edge Tobler exactly as `jpCalcLand` composes its own answer, so the router minimises
+  literally the quantity the Planner reports.
+- **The grade double-count is real and small, and it is measured**: Tobler charges ×1.001–×1.068 on
+  the slope-derived classes against the ×1.43–×2.22 the table asks. Grade is the rise BETWEEN two
+  routing cells; the class is the roughness WITHIN one, and a routing cell aggregates several
+  full-res cells.
+- **`buildCartTerrain` can never emit four of its thirteen classes**, and `'Forest Path'` is the one
+  NATURAL omission — so the Planner calls flat woodland "Open Plains", 0.95, faster than Hills. A
+  branch fixing that was built and **reverted**: `'Forest Path'` is in `JP_WHEEL_BLOCKED`, so
+  emitting it hard-blocks every cart and wagon crossing woodland — a claim that set makes about a
+  hand-painted NARROW CUT PATH, not ordinary forest. **The headless suite's own v0.102 assertion is
+  what surfaced it.** A Planner decision, flagged in both files, not bundled into a routing fix.
+- **So the router prices forest itself, from the same table's `Forest Path` entry, by `min` — the
+  slowest surface binds, NEVER a product.** 0.50 × 0.75 is a number nothing supports, and a rocky
+  forested slope is slow because of the rock. It moves only the 3.5–15.9% of land that is flat AND
+  wooded, which is exactly where trees are the constraint.
+- **Two tests for one question, again**: the old `dfld<sea+0.06 && flow>thresh*8` swamp proxy is
+  gone — `'Swamp / Marsh'` is already a class, at 0.40, and it is the one the Planner reads.
+- **Measure the objective you changed, not the one you changed last time.** v2.33's A/B priced
+  Tobler-grade hours only; for a surface change that is the wrong referee. Scored on the Planner's
+  own composite (both sides against the identical, unchanged terrain grid): −3.8% / −4.2% /
+  −13.9% / −21.0%, 61 pairs quicker to 11 slower, **with km and climb falling too**.
+
+### Land routing costs TIME — and slope is not the binding term (v2.33, DCC-line file only)
+
+`docs/research/routing-audit.md`'s P1 item 5, deferred since v1.98. **Read the last bullet before
+building on this.**
+
+- **Three land cost functions were live** and which you got depended on how the road was made: the
+  auto network had the full terrain model, the Route tool a partial one, and the **Way tool, village
+  tracks and the sea-lane MST's land branch had slope and nothing else**. `_civTravelHours` is the
+  one model now, in **hours per routing cell on level ground**. `buildTravelCost` stays for the debug
+  view and `_civAutoPolity` — a control flood is not a road.
+- **`1 + 50·sl²` took `sl` in field units per cell**, so one hillside scored differently at 512 and
+  2048 and no number was ever comparable with the Journey Planner's hours.
+- **Slope belongs on the EDGE, not the cell** — it is the only place a direction exists. Tobler on
+  signed rise/run (**not** degrees, **not** percent — F-2's documented misuse), **averaged over both
+  directions** because a road is bidirectional and a Prim MST is undirected (v1.98's own resolution).
+- **The per-cell array stays the carrier, and that is load-bearing**: settlement gravity, the ×0.25
+  existing-way discount and the usage-count reuse pass all multiply `cost[i]` in place and keep
+  working untouched — a multiplier on hours is a speed multiplier. Any future term must preserve that.
+- **Fords and bridges are additive HOURS**, not added cost. A crossing is a wait.
+- **It changed almost nothing, and the reason is measured**: p50 grade on the routing grid is 1.20%,
+  p90 5.77%, p99 14.66% — Tobler gives ×1.001, ×1.043, ×1.42 there, while the non-slope terms span
+  ×0.55–×1.8. **Slope was never binding, for either formula.** Refuted along the way: the routing
+  grid is NOT washing grades out (2.08 km cells reproduce the full-res distribution).
+- **`'land'` vs `'mixed'` is not a fair model comparison** — mixed may cross water, so the domains
+  differ. An earlier claim of mine that "the routers disagree by 71%" conflated the two; the honest
+  comparison is same-mode across versions.
+- **The leverage is in the terms that were never measured** — `_civBiomeFriction` 1.0–1.6, swamp 1.8,
+  river 0.65, reuse 0.55 are invented multipliers. Step two is to source them from **`JP_TERRAIN.land`**
+  (travel-speeds.md-grounded) via the classifier `_jpDeriveStages` already runs. **`JP_BIOMES` is not
+  that table** — it has water/forage/grazing/weather and no speed.
+
+### gaussBlur's CPU path is the FAST path, not a fallback (v2.32, DCC-line file only)
+
+Owner: *"are there any performance or rendering upgrades or gains to be made?"* Found by profiling.
+**`generate()` 5919 → 3894 ms at 1024px (−34%)**; 2057 → 1631 at 512px, 20153 → 13758 at 2048px. Verification is
+`tests/perf/probe_blur.js` (7 assertions, 2 of which fail on v2.31) plus 4 headless ones.
+**`tests/run.sh`'s assertion TOTAL is not constant** — three clean runs reported 1175/1175/1174
+passed with zero failures, so at least one `check()` is reached conditionally on ambient state.
+Quote the suite as "0 failed", not as a count, until that is tracked down.
+
+- **`gaussBlur` and `GPU.blurArr` are one algorithm, not two** — three separable box-blur passes at
+  `pr=round(r/1.6)`, agreeing to 1.2e-7. They are not one COMPLEXITY: `boxH`/`boxV` carry a running
+  sum (O(N), radius free — 36 ms at 1024 whether pr is 4 or 40) while the shader scans the whole
+  2·pr+1 kernel (O(N·pr)) and then blocks on `readPixels`. Measured **2.1x–21.7x** in the CPU's
+  favour at every size and radius, **widening with radius**. That shape is algorithmic; more cores
+  move the constant, not the exponent. **Do not "restore" the GPU route without re-running the
+  probe on the hardware you are claiming it for.**
+- **Only the five full-grid callers ever took it**, and they are the expensive ones: `stressField`,
+  `shearField`, the flexural blur at `blurR*3` (the file's largest radius), `baseField`, and
+  `isostaticRebound` inside `carveRiverValleys()`. `readPixels` was **24.2%** of a 1024px generate.
+- **A startup timing calibration is the wrong fix and was rejected.** The blur feeds `stressField`
+  and flexure, so picking the path by measurement would make the terrain depend on how busy the
+  machine was at load — one seed, two worlds, on one computer. `GAUSS_BLUR_GPU` is a fixed flag.
+- **The re-baseline is quantified, not waved at**: with WebGL2 up the world moves by max 2.31e-4 on
+  `field` (mean 8.03e-8 — below float32 resolution). Elevation scale is `metersPerUnit() =
+  state.peakM/(1-seaLevel)`, **not** a fixed span — at the defaults that is 6897 m/unit, so the worst
+  cell moves ≈1.6 m. The
+  **headless suite is bit-identical**, having no WebGL2, which is what confirms only this route
+  changed.
+- **An assertion naming a NEW top-level constant breaks `tests/run.sh` for every older target.**
+  `check('…', GAUSS_BLUR_GPU === false)` is a `ReferenceError` on any file predating it, which kills
+  the run before it prints a summary — it reads as "no output", not as a failure. Guard with
+  `typeof`; put the guard that must FAIL on the old build in a `tests/perf/` probe instead. **Run
+  `tests/run.sh` against an older file before adding one.**
+- **`tests/stub_head.js` returns `null` for any `getContext` but `'2d'`** — the headless suite has
+  no WebGL2 at all, so it never took the shader route and cannot see any of this. That is also the
+  proof that a sporadic `world seam avg delta` failure seen once on this build is not from here:
+  both versions run byte-identical code under that harness. It is the **second** `test_tail.js`
+  assertion found deciding on an unpinned ambient seed (with v2.25's SST one) — the seam block
+  generates on whatever seed ~630 earlier assertions left behind. v2.25's prescription (an aggregate
+  over PINNED seeds) applies to both, as one deliberate pass; do not loosen either threshold.
+- Measured and NOT acted on: `carveRivers` is still the largest stage (38.5%) and is real
+  `streamPowerKernel` work; the interactive render path is already fully cached (20 `renderNow()`
+  calls = 7 ms); and **v2.29/v2.30 did not make the carve slower** — 1774 ms on v2.31 vs 2085 ms on
+  v2.28, with v2.30's 2.4x extra carve points costing 5 ms.
+
+### The domain rail is the phone drawer's head (v2.31, DCC-line file only)
+
+Owner: *"on a phone screen it's scarce real estate."* `#domainRail` moved INSIDE `#dockWrap`.
+`hash_gen1.js` vs v2.30 ALL IDENTICAL; verification is `tests/perf/probe_domainrail.js`
+(23 assertions, 6 of them fail on v2.30).
+
+- **One set of buttons that MOVES, never a second set that appears on small screens** — that is
+  v1.57's one-control-two-surfaces defect. Every id, handler and `data-domain` literal is untouched,
+  so `_setDomain`/`_applyDomainUI`/`_findPanelOwners` needed no change.
+- **On desktop the bands are arranged by CSS `order`, not DOM order**, because `.dockwrap` is
+  `display:contents` there and each band is an ordinary `.stage` flex item. The four declarations
+  (`dock-left:-1`, `domain-rail:0`, `canvas-wrap:1`, `dock-right:2`) reproduce the measured v2.30
+  layout exactly — dock-left 0–372 | rail 372–412 | canvas | dock-right. **Any future band added to
+  `.dockwrap` needs an `order`**, or it lands after the canvas.
+- At ≤860px the rail takes `order:-2` (beating `.dock-left`'s `-1`) and `position:sticky;top:0`.
+  Map top 184px → 140px, height 550px → 594px at 390×760.
+- **v2.27's rail-over-drawer z-index conflict is gone by construction** — the rail is now inside the
+  drawer. The sheet's `z-index:32` still matters only against the scrim (25) and dropdowns (40).
+- **A 44px row stacking a glyph over a label is a clipping risk**, and a class-name assertion would
+  never see it. The probe measures both boxes against the row's own rect.
+
+### The carve follows a river, not a receiver chain (v2.30, DCC-line file only)
+
+Owner: the lines *"seem rather straight, not the natural curvy/pronged sense you see in reality"*,
+then **"B+D"** off a five-way visual ladder. Verification is `tests/perf/probe_carve.js` (10
+assertions; the coverage guard fails on v2.29) plus 10 unit assertions in `tests/test_tail.js`.
+
+- **`traceRiverPolylines` returns a receiver chain, and a chain is not drawable OR carvable
+  geometry.** `drawRiverWays` already ran `rdpSimplify` → `catmullRomSample` → `riverSinuosity` on
+  the identical polyline; `carveRiverValleys` handed the raw chain straight to
+  `enforceChannelDescent`. `carveChannelPath()` is now the one place that conversion happens.
+- **D8 is not the defect and replacing it buys little.** `buildRiverNetwork` already routes by the
+  CONTINUOUS aspect (R3b, a single-receiver projection of D∞); what is left is only that the
+  receiver is one of eight lattice neighbours, which a spline removes. Velocity erosion (1.076 →
+  1.108 for ~1.8x the generate time) and warp 0.45→1.00 (1.097, thinner network) were both measured
+  and are poor value. **Do not re-chase them.**
+- **`enforceChannelDescent` stamps a disc per point and NEVER interpolates.** So the resample must
+  be finer than the channel, and it must not be `drawRiverWays`' `GW/360` — at 2.8 cells the carve
+  comes out as a dotted line of pits and measures *worse* than the raw chain (4 068 cells vs 6 960).
+  Assert the invariant directly: no gap between consecutive points wider than `halfW`.
+- **Its `drop` is PER POINT, so the resample step silently sets the channel gradient.** Halving the
+  step doubled every river's enforced descent, which cost 29.2% of the traced network against
+  v2.29's 13.7%. `CHANNEL_DROP_PER_CELL` is named and the carve scales it by its own step;
+  `CARVE_GRADIENT_K=2` then re-applies the steeper gradient **deliberately**. The Sculpt editor's
+  hand-drawn River stamp keeps the plain default — a person places those points.
+- **`riverSinuAmp` was a no-op and had been since R4.** It divides by `1+6*slopeN` as if slopeN were
+  a 0..1 grade; `net.slope` is `hypot(grad)*W`, median 1.74 at GW=1024, so the median amplitude was
+  **0.081 cells**. Fixed at source (`RIVER_SINU_SLOPE_K`), not by adding a second function.
+- **`fbm` sampled at the carving step is jitter, not a meander.** Its top octaves vary fully between
+  points 0.4 cells apart, separating neighbours by up to 1.74 cells — re-opening the gaps the
+  resample exists to close. Perturb `CARVE_MEANDER_CTRL_PER_WAVE=8` control points per wavelength,
+  then spline through them at the carving step.
+- **`CARVE_SINU_K=8` is a calibration with a hard ceiling.** At 8x, 86.5% of the trench is still a
+  real drainage line after the closing `computeFlow()`; at 20x that falls to 73.4% and the trench
+  wanders off the water. A real meander belt comes from lateral migration across a floodplain, not
+  from displacing a drainage path.
+- **The network thins and that is understood, not a bug**: a flatter carved floor raises
+  `channelThreshold`, so marginal headwaters leave the detected mask (−24.1% of traced extent). The
+  probe bounds it. Measure **extent**, never polyline count — a carve that joins two runs into one
+  changes the count without losing any river.
+
+### Rivers must be carved, not only drawn (v2.29, DCC-line file only)
+
+Owner: *"the only rivers I'm getting are drawn lines, nothing that is rendered into terrain."*
+`tests/perf/probe_carve.js` (7 assertions, 4 of them fail on v2.28) is the verification.
+
+- **`state.viz.riverWays` is an EITHER/OR, not an addition.** The per-pixel branch is gated
+  `!(state.viz && state.viz.riverWays)`, so the stroked line ON means the terrain-blended raster
+  river is OFF. It shipped `true` (and `checked`) for fresh worlds, which IS the report. Both
+  default `false` now. A save without the field has always loaded `false` — that asymmetry is why
+  an older project looked right and a new world did not.
+- **Do not re-chase these three.** Frozen flow routing, MFD-vs-D8 drainage area, and restoring
+  `stream.uplift` were each measured against the shipped kernel and each REFUTED: re-routing and D8
+  both come out *smoother*, and uplift builds ridges (84,928 cells raised) while cutting the traced
+  network from 899 polylines to 696. The difference from v0.015 is scale, not structure — its carve
+  moves ~100x more terrain from the same algorithm.
+- **`CARVE_STRENGTH_K` multiplies `state.stream.k` inside `carveRiverValleys()` and nowhere else.**
+  The manual Stream-power button, `evolveCoupled` and the erosion worker keep the raw slider. 8x is
+  calibrated, not chosen: it is where this pass reaches 3.08x the un-carved surface's Laplacian
+  energy, against v0.015's own measured 3.16x. **Raising `P.iters` buys the same energy at ~2x the
+  time** — strength is the cheap lever. 16x overshoots to 4.99x and costs 14% of the polylines.
+- **Widening the polyline carve is refuted — the stamp is the inner CHANNEL.**
+  `enforceChannelDescent` stamps a disc of radius `halfW` around every point of ~840 polylines, so
+  area grows as `halfW²` over thousands of headwaters: x1.5 carves 18% of the map, x3 carves **96%**,
+  and mean valley relief only moves +16% / +57%. Order-weighting is no better. The erosion pass is
+  what broadens a valley, exactly as the function's own comment says.
+- **`eroSettle` is rebound AND the river clamp, and the old assertion conflated them.** Whether an
+  ambient world holds a locked channel cell sitting above its floor is luck — v2.29's deeper carve
+  produced exactly two of 6666. Test the rebound claim with the lock cleared, then raise a locked
+  cell on purpose and assert the clamp fires.
+
+### A flex container must never centre an item that can overflow it (v2.28, DCC-line file only)
+
+Owner: the cog window *"falls out of view as soon as we open it"*, ✕ *"barely accessible"*. CSS only; `hash_gen1.js` vs v2.27 ALL IDENTICAL. `tests/perf/probe_cogmodal.js` — 33 assertions, **18 of them fail on v2.27**.
+
+- **Centring splits overflow across BOTH edges, and the top half cannot be scrolled to.** `#settingsModal` was `align-items:center`, so an over-tall shell put the head — which carries the only way out — off the top. Measured on v2.27: `top = −129px`, and the modal was not a scroll container at all. **This file already paid for this once: v1.21, `.al-slice-cv-wrap`.** The fix is the same — do not centre; use `align-items:flex-start` + `margin:auto`, which centres identically while keeping the top edge reachable, plus `overflow:auto`. The head is `position:sticky`.
+- **`vh` again, in the box v2.27 missed.** `.set-shell{height:100vh}` at ≤860px and `min(680px,90vh)` on the desktop rule. Same remedy as v2.27's three boxes: `dvh`, `vh` first as the fallback, and `#settingsModal` itself gains `height:100dvh`. **When you fix `vh` anywhere, grep for the rest.**
+- **The ✕ was 34×26** — under every touch minimum, and the only exit from a full-screen sheet. 44×44 at ≤860px only.
+- **`getComputedStyle().margin` returns the USED value**, so `margin:auto` reads back as resolved pixels (`110px 210px`), never `auto`. Assert the outcome (equal gap above and below), not the mechanism.
+
+### Shell fixes: one header row, the sidebar's own controls, and `dvh` (v2.27, DCC-line file only)
+
+Five owner reports, all shell. `hash_gen1.js` vs v2.26 ALL IDENTICAL; verification is
+`tests/perf/probe_shellui.js` (19 assertions), since every claim here is a rendered geometry or a real
+click.
+
+- **`vh` and `%` resolve against the LARGE viewport — the one with the phone's address bar retracted.**
+  Three separate reports ("layers don't all show", "the list isn't scrollable", "the last items are
+  hidden behind the address bar") were this one fact: `html,body{height:100%}`, `.dockwrap`'s mobile
+  sheet, and the Layers popover's `max-height:72vh`. **Write `100dvh`, and leave the `vh`/`%`
+  declaration FIRST as the fallback.** The list itself was never short — it renders all 34 entries, one
+  per `#debugSeg` button.
+- **A popover positioned inside the map cannot be capped as a fraction of the viewport.**
+  `_syncChromeTop()` publishes **`--canvas-top`** (the measured top of `.canvas-wrap`) and the cap is
+  `calc(100dvh - var(--canvas-top,120px) - 54px)`. Measuring the band is also the only version correct
+  on both layouts — the domain rail is a column on desktop and a 44px row at ≤860px.
+- **The mobile `.dockwrap` sheet must out-stack the domain rail** (32 vs the rail's 31, both below the
+  dropdown layer at 40). Invisible on desktop, where `.dockwrap` is `display:contents` and the rail has
+  no `z-index` — which is why the rail painted over the drawer it opens for three versions.
+- **A control is INERT, not broken, when its prerequisite is off** (v1.52's rule, second occurrence).
+  Every View mode always drove `state.mode` — four distinct render hashes, measured before any fix — but
+  `state.debug` paints over the base view. A View click therefore clears the layer; **never the
+  reverse.** It clears it through **`_setLayer('off')`**, which clicks the real `#debugSeg` button so
+  one handler still owns the state change, the popup dismissals, the wind-streak sync, the render and
+  the popover rebuild. A first cut called a `_syncLayersList` that does not exist, where the `typeof`
+  guard would have made the line a permanent silent no-op.
+- **`#extentSeg`/`#resSeg` are back in `#genWorld` and were MOVED, not copied** — two segments writing
+  one `state.world`/`state.resW` is v1.57's one-control-two-surfaces defect. No JS changed, by v2.24's
+  design: `_stampGenLock()` stamps `[data-genlock]` by ID, never by containment, and both handlers
+  already call `confirmRegenerate()` themselves.
+- **`header{flex-wrap:nowrap}` is desktop-only in effect** — the ≤860px rule's own `flex-wrap:wrap`
+  stays, because a phone header SHOULD wrap rather than be squeezed to nothing. `#undoMem` keeps its id
+  and `updateUndoUI()` still writes it; it is `hidden`, with its live text mirrored onto the Undo
+  button's tooltip. A symbol-only button carries the word in BOTH `title` and `aria-label`.
+
+### The save file is the project TREE (v2.26, DCC-line file only)
+
+Owner: *"Update the saving structure to match the GDT spec."* `SAVEFILE_COMPAT.md` §1 (=
+`DECISIONS.md` §7h) is one sentence: **readers accept both layouts, writers produce only the tree.**
+v2.11 built the reader — it is the "second independent implementation" that spec's own §1.2 records,
+and eleven of its defects were fixed because of it — and its header ends *"exportZip() below is
+untouched."* So this app accepted the tree and still SAVED the flat layout for fifteen versions.
+`hash_gen1.js` vs v2.25 ALL IDENTICAL; nothing here is reachable from `generate()`/`renderNow()`.
+
+- **`_treeWriteEntries()` is the exact inverse of `_treeRead`, member for member, and lives beside
+  it.** A reader/writer pair is the "two functions answering one question" shape this file has paid
+  for seven times, with a longer feedback loop: nothing catches a mismatch until someone reopens a
+  save. **Change one, change the other, in the same edit.**
+- **§9.3's `from`/`to` index `entities/settlements.json`'s ARRAY; this app's `aIdx`/`bIdx` index
+  `state.places`, which also holds POIs.** Writing `aIdx` through repoints every road — the v1.75 /
+  v2.18 "one list, two index bases" defect, which never throws because a wrong-but-plausible index
+  is an ordinary answer. `_twSettleIndex` is the remap; an endpoint that is not a settlement drops
+  the road rather than repointing it. **Test it by forcing the bases apart** (POIs inserted AHEAD of
+  the settlements) and checking roads still join the same settlements BY NAME.
+- **The tree has no POI slot, and stripping `places` from `params.json` deletes them.** Measured:
+  a round trip took 20 places to 18 before this was caught. §9.1's `kind` is a closed six-tier
+  settlement set, §15.1 forbids inventing a settlement from a point that is not one, and a named
+  editable POI is not an §11 annotation. They ride in `reference.pois` (§13.1's stated home for a
+  payload one vocabulary has and the other does not) and `_treeRead` appends them **after** the
+  settlements — the one order that cannot disturb the indices.
+- **Four things are deliberately NOT written**: `heightmap_rg16.bin` (§15.2 — MUST NOT be in a tree;
+  `packHeight16` stays, the atlas still uses it), the grid inside `params.json` (§13.1 — it lives in
+  `project.json` and only there), `appearance.json` (the reader already declines to READ it, so
+  writing it would give one look two homes), and `entities/provinces.json` of this app's own
+  derivation (§9.4 — a re-deriving implementation MUST NOT overwrite the author's province names).
+- **The downstream entries still ride along and that is conformant** — §6.1 calls everything past
+  the minimal two "optional enrichment", §6.3 makes a reader ignore what it does not recognise. That
+  is what lets the save format change without breaking `biome_baked.bin`/`cartalith_grid.json`.
+- **Verification is `tests/perf/probe_savetree.js`, not a smoke block.** Every assertion needs a real
+  `exportZip()`→`loadZip()` round trip, and the backward-compatibility half needs TWO builds open at
+  once; `smoke_gen1.js` runs one page against one file and crashes near its end here (v1.100). It
+  drives the SHIPPED `exportZip()` by capturing the Blob handed to `URL.createObjectURL` (v1.90's
+  technique), never a reimplementation.
+
+### Rivers: symbol vs. real width, and the sub-cell shoreline (v2.25, DCC-line file only)
+
+Owner: rivers *"don't seem to scale when we zoom in. They tend to stay lines (and broken at that)"*,
+then *"I think it's a regression from one of the very first versions... Somewhere I asked to change
+the algorithm and it broke."* Both symptoms bisected to **v1.29** — correct on the owner's own
+recollection. `field`/`temp`/`rain`/`flow` IDENTICAL; the `rgba` delta is proven to be only the river
+overlay (`riverWays=false` ⇒ byte-identical, FNV `4270251260`).
+
+- **`buildRiverNetwork` now RETURNS its channel half-width (`halfw`), and that is the only width
+  model.** It always computed `halfW` — hydraulic geometry, real-km-aware since v2.07 — and threw it
+  away after stamping `intensity`/`depth`/`omax`, so `drawRiverWays` had nothing to compare its pen
+  against and v1.29's own boundary condition (*"until the channel is wide enough to draw as a
+  polygon"*) could never fire. **Never re-derive `halfW`'s formula at a renderer** — that is the
+  "two functions answering one question" trap this file has already paid for seven times.
+- **The stroke is `max(symbol, real)` — a FLOOR.** The symbol still wins at world scale, so v1.29's
+  requested thinning is intact: measured 0% of polylines floored at zoom 1 (off-LOD *and* LOD), 1% at
+  zk=8, 100% at zk=32. Past the crossover the river grows 1:1 with zoom instead of √z.
+- **The real width converts once per camera convention, like the symbol.** v1.29's two branches carry
+  the zoom factor in opposite places: under LOD coords are canvas px (1 grid cell = `zk` px ⇒
+  `2·halfW·zk`), off LOD they are grid units and CSS scales after (⇒ `2·halfW`). Any future width term
+  needs the same two-branch treatment.
+- **A cell-granular water test against a sub-cell shoreline shatters the line.**
+  `splitRiverPolylines`' lake predicate read `_waterBody[i]===2` per cell while lake shorelines draw
+  sub-cell (v1.05), and every run left under 2 points is dropped: **517 polylines / 5910 points → 393
+  / 3931**, a third of the network, with each survivor stopping a cell short of the water. Now tests
+  whether the pooled surface genuinely stands above the terrain under the point
+  (`_lakeFill[i] − sampleArr(field,p.x,p.y) > 0.004`, this file's own "nothing pooled here" epsilon).
+  Recovers 404 / 4163. Same mismatch `_civLakeFlooded` fixes for placement — **grep for the other
+  cell-granular water tests before adding one.**
+
+### LOD tile passes must be told how many pixels a coarse cell spans (v2.25)
+
+- **`tileShadeExag(bounds, W)` scales hillshade exaggeration by `(W−1)/bounds.w`.** All three tile
+  renderers hillshaded with a bare `state.exag` while the main map uses `state.exag/s` and
+  `renderBiomeTileRGBA` normalises its *material* slope by `cx`/`cy` one line later — the shading term
+  was the lone un-normalised pass, so relief flattened exactly where the LOD viewer exists to show it.
+  Clamped at 1 (never *reduces* exaggeration); **bounds omitted ⇒ v2.24's value exactly**. Shaded-pixel
+  share at z=4: 22.4% → 36.1%; z=0 identical. The native port found the same gap independently at
+  `lod_bridge.rs:420`.
+- **Two plausible LOD fixes were refuted by their own measurement — do not re-chase them.**
+  Raising `lodDetailFreqK` measures 3.7× more Laplacian energy but the octaves land ABOVE the tile's
+  Nyquist limit from z=4 up (freq=4 ⇒ 8, 16 at z=4; 8/16/32/64 at z=6) — that is aliasing, not detail.
+  And scaling `burnChannels`' `widthK` (a radius in TILE PIXELS, so 6.0 coarse cells at z=0 down to
+  0.023 at z=8) costs **17× the time for a 0.3-point change in burned area**, because `mag` is
+  bilinearly interpolated coarse flow: **the `mag ≥ thresh` band already scales with zoom on its own**
+  (1.35% burned at z=0 → 7.48% at z=8) and `widthK` only feathers the rim. `featureDetailPass` is
+  already correct — coarse-cell units throughout — so a burn-flag split frees nothing.
+
+### A flaky suite assertion, disclosed not fixed (v2.25)
+
+`tests/test_tail.js`'s **`SST anomaly has warm + cold cells`** runs on an unpinned ambient seed and
+demands a single cell past ±0.01. Measured on **untouched v2.22**: 9/10 seeds pass, seed 8080 fails
+outright (min −0.0016), seed 2 is marginal (−0.0124). The cold side is the fragile one, matching the
+documented Sverdrup/Stommel asymmetry. It is the single-outlier shape v1.82's entry says to replace
+with an aggregate — left alone rather than loosened inside an unrelated rendering version. **If this
+goes red, re-run before believing it.**
+
+### The DCC editor frame (v2.24, DCC-line file only)
+
+**`Cartalith v2.24 DCC test.html` replaces v0.65's header + single 324px `<aside>` with the native
+port's editor frame.** Mainline `Cartalith Gen1 v2.22.html` still carries the old shell — this
+section describes the DCC line only. `hash_gen1.js` vs v2.22 is ALL IDENTICAL in every scenario.
+
+- **`_domain` is the ONE writable navigation variable.** `_activeTab`/`_genSubTab` are DERIVED from
+  it by `_syncLegacyTabVars()` and must never be assigned directly — they each had exactly one
+  writer (the two deleted bars) and ~8 readers, every one a guard that fails CLOSED and silently.
+  `_setDomain`/`_setGenSubTab`/`_setActiveTab`/`_setSculptCategory` are the navigation API;
+  `_applyDomainUI()` does all the DOM work, reading state rather than the clicked button.
+- **Sculpt is a CATEGORY inside WORLD, not a domain** (`_sculptCategoryOpen`). No rail token can
+  encode it, and `_sculptEditorActive()` is the master switch for the whole sculpt input pipeline.
+- **The finalize lock is `[data-genlock]`, never DOM containment.** `_stampGenLock()` stamps it.
+  Any control hoisted out of `#genWorld` needs the attribute AND its own `confirmRegenerate()` —
+  `#resSeg` calls `allocate()` before `generate()`'s guard can refuse.
+- **Domain bodies keep INLINE `style.display`.** `_civSubPageVisible()` reads `#genCiv`'s inline
+  display exactly (v1.96); a class-based hide makes it return true unconditionally and restores the
+  686 ms-per-generate hidden aggregate pass.
+- **Any band that can resize the viewport needs `_scheduleViewportRefit()`.** There was no
+  `ResizeObserver` in this file before v2.24; one observes `.canvas-wrap`. The window listeners stay
+  (DPR, orientation).
+- **`.dockwrap` holds ONLY the docks.** `display:contents` on desktop, the fixed mobile sheet at
+  ≤860px. Nesting `.canvas-wrap` inside it is invisible on desktop and puts the map in the drawer
+  on a phone.
+- **`:not()` contributes its argument's specificity.** The theme layer's button allowlist is wrapped
+  in `:where()` for exactly this reason — unwrapped it read (0,4,1) and silently killed the whole
+  `.seg` border system, including `#debugSeg`'s 6-column grid, for the life of v2.23.
+- **The cog owns program scope; File owns document scope.** GPU, Tiled LOD, Atlas cache, Region
+  export, autosave/snapshots, 3D view, theme, Asset Library and the generation-parameter dump are
+  in `#settingsModal`; import/export stay in File. Search can open the window.
+
+### Physical crater model (v2.22)
+
+**`state.crater.physical`, default off.** The legacy path picks an absolute `count` and three
+hardcoded size buckets, so a 50 km region and a 40,000 km world get the same hundred impacts.
+
+- Count = rate per Mkm² per Myr × real area × surface age. Size from `N(>D) ∝ D^−1.8` (bounded
+  Pareto, inverse transform). Wear from exposure time against `τ ∝ D`.
+- **The count SATURATES with age — do not "fix" that.** Production is linear in age while
+  obliteration removes in proportion to the standing population, so an old surface settles at fewer,
+  larger, more degraded craters. Measured 90 / 102 / 78 at 500 / 3000 / 6000 Myr, median diameter
+  1.00 → 1.53 km. That is the terrestrial record.
+- **Anchor the rate on the SURVIVING population, never on production** — a first cut anchored
+  production at 100 and stamped only 19. The headless test pins the production identity
+  (`rate × area × age`), not a tuned number, so re-anchoring cannot silently invalidate it.
+- The stamping ceiling raises the smallest diameter kept (closed-form inverse of the size law),
+  never a random thinning.
+- The checkbox CHOOSES which pair `stampCraters` reads; `count`/`age` stay saved and are disabled,
+  not cleared.
+
+### Multi-good supply matching (v2.21)
+
+**`_civResourceSupply(p)` answers "where would each import actually come from".** v1.33 built this
+match for food alone; `_civGoodReach` classified every other export and nothing read it.
+
+- **Reuses v1.33's machinery — do not add a second distance law.** `_civFoodMode` /
+  `_civFoodConnected` / `_civFoodDeliverable` are the mode, the road gate and the curve.
+- **The only addition is VALUE DENSITY**: `_civGoodDeliverable` divides the distance by a class
+  multiplier (bulk 1, general 3, luxury 20) and calls the same curve — the same law with a longer
+  half-distance. A bulk good is therefore bit-identical to the food answer; asserted.
+- **An unlisted good falls to `general`**, never to bulk, so a new resource key behaves sensibly
+  before anyone classifies it.
+- **It depends on v2.18.** Before that fix `_civFoodConnected` refused every overland supplier past
+  50 km, so this match would have reported almost nothing and looked deliberate.
+- **`_civTradeNetwork()` is one cached pass** — calling `_civPlaceTrade` per candidate per good is
+  quadratic over a 235-settlement world.
+- Display-only: it feeds no population or economy figure, so the v1.34 ACYCLIC rule is intact.
+
+### Landmasses as named entities (v2.20)
+
+**`buildLandmassIndex` is pure; `currentLandmasses()` is the cached live accessor.** Detection was
+never the gap — `buildLandmassQuality` (v1.40) already labelled and ranked every component. This
+adds identity: a name, a stable key, an extent.
+
+- **`landmassKind` is a share of the world's own LAND**, never km². An archipelago world honestly
+  has no continent; do not add a "promote the biggest" fallback.
+- **`landmassKey` is POSITIONAL (centroid quantised to 8 cells + the seed), never the component
+  index** — those renumber on any coastline change, so an index-keyed rename would reshuffle after
+  a sculpt edit. `state.landmassNames` stores only user renames, keyed that way.
+- **World mode needs the CIRCULAR centroid.** A landmass straddling the antimeridian has cells at
+  x≈0 and x≈W−1; a plain mean puts its label in mid-ocean. The bbox stays raw and carries `wraps`.
+- **No outline is traced** — the coastline is already what the renderer draws.
+- The map layer is `state.viz.landmassLabels`, default off, drawn beneath user labels and
+  settlements (a continent is the ground, it never wins a collision against a town).
+
+### Military manpower (v2.19)
+
+**`civManpowerModel(inp)` is PURE and is the whole model**; `_civFactionManpowerAll()` gathers the
+real inputs. Ported from the owner's specification (verbatim in the native port's
+`MILITARY_MANPOWER_SCOPE.md` §1) — read it before touching any `MANPOWER_*` constant.
+
+- **The two worked examples in that specification are the calibration target and both reproduce to
+  the unit.** `tests/perf/probe_manpower.js` pins every figure. Do not retune a constant without
+  re-running it: those numbers are the only external check this model has.
+- **Four outputs, never one.** Standing / field / emergency / duration differ radically and the
+  force-by-duration ladder is what makes them comparable.
+- **Technology is not the driver** — it sets the labour ratio only. The era is an OUTPUT of the
+  labour ratio split by state capacity, never a lookup on the ag-tech key.
+- **Era bands are shares of the CITIZEN population**, per the owner's ruling. Both bases are shown;
+  nothing is clamped into a band. `MANPOWER_CITIZEN_MODERNISATION` is written as
+  `CEILING − min(share)` on purpose, so editing the lowest row without editing it fails loudly.
+- **Unknown government keys read as `chiefdom` in BOTH tables, for opposite reasons**: it denies an
+  unclassifiable state an imperial treasury, and it gives it a HIGH citizen fraction, which makes a
+  share of that body smaller and so cannot flatter it into a band.
+- **`MANPOWER_ROAD_REFERENCE = 10`, not the ~40 a Roman road inventory suggests** — this file's way
+  network is inter-settlement trunk roads only, so it is not comparable to a road inventory.
+- **Derived and stored nowhere.** Nothing manpower-shaped reaches the save format; asserted.
+- The state-capacity splits inside each labour-ratio band are FITTED to the eight faction
+  assignments the specification publishes, not stated by it. The probe checks all eight.
+
+### Road connectivity: check the ARRAY and the POINT SHAPE (v2.18)
+
+**`_civRoadComponents()`/`_civRoadConnected()` returned "not connected" for every pair from v1.33
+until v2.18**, so v1.33's long-range overland food import was never reachable. Two stacked defects:
+
+- **`state.ways` is never assigned anywhere in this file.** The live array is `civWays`. Grep before
+  reading a `state.*` collection — this one had two other readers, and the other already guarded it
+  with the `civWays` fallback.
+- **Way points are not uniformly shaped**: `_civMstRoutes`/`_civHierarchicalNetwork` emit `[x,y]`
+  ARRAYS, other builders `{x,y}` objects (v1.42 documented this). Reading `.x` gives undefined →
+  NaN → every comparison false → a pass that silently does nothing.
+- **Neither threw.** "Not connected" is an ordinary answer, which is why it survived versions. Any
+  predicate whose false branch is unremarkable needs a test that a TRUE case really is true — here,
+  that two settlements joined by a real road read as connected (`tests/perf/probe_roadconnect.js`).
+- Sea lanes are excluded: this answers "is there a ROAD", and `_civFoodConnected` only asks it for
+  land-mode supply.
+
+### Erosion passes as generation parameters (v2.17)
+
+**`state.passes={velocity,glacial,coastal,hillslope}`, all false by default.** Velocity erosion,
+glacial carving, coastal processes and hillslope diffusion used to be buttons you press *after*
+generation, so an eroded world could not be reproduced from its seed. `generate()` now runs them.
+
+- **The split is `*Pass()` (field mutation) vs. the button wrapper (mutation + the interactive tail
+  `computeFlow(true); refreshClimate(); renderNow()`).** `generate()` calls the SAME `*Pass()` the
+  button does. Do not add a generation-side copy of a kernel's parameters — each pass reads its own
+  existing sliders (`state.velo` / `state.glacial` / `state.coastal` / `state.erosion`).
+- **`eroSettle(pre)` is the physics half of `eroFinish(pre)`** (rebound + exhumation hardening +
+  `enforceRiverChannels`); `eroFinish` = `eroSettle` + the tail. `enforceRiverChannels` early-returns
+  unless a river was brushed, and `generate()` clears `riverMask` at its top, so it no-ops there.
+- **Fixed order: velocity → glacial → coastal → hillslope**, matching the panels' own hints
+  ("erode first, then glaciate"; diffusion "softens cliffs… between fluvial passes"). Fixed order is
+  what makes a saved pass set reproduce its world — do not make it configurable without replacing
+  that guarantee.
+- **Staged after climate, before `carveRiverValleys()`** — velocity reads `rainField`, glacial
+  `tempField`, coastal `flowField`. `runGenerationPasses()` returns whether anything ran so
+  `generate()` re-derives once, in its own order (`refreshClimate()` then `computeFlow(true)`). The
+  button path re-derives the other way round; pre-existing, deliberately untouched.
+- **`coastalPass()` must restore `state.coastal`** — it swaps in a gravity-scaled copy for the GPU
+  path and restores in a `finally`. At g = 1 a broken restore is invisible; test at g ≠ 1.
+- Live verification is `tests/perf/probe_passes.js` — the checkboxes, `syncUI()`, and `generate()`
+  itself are all browser-only.
+
+### CSS tokens: use the canonical names (v2.16)
+
+**The palette is `--bg --panel --panel2 --line --ink --dim --faint --accent --accent2 --warn`.**
+`--border`/`--muted`/`--fg`/`--text`/`--bg2`/`--panel-darker` were used 105+ times and defined
+nowhere; they are now aliases in `:root`, but new code should use the canonical names.
+
+- **A `var()` with no fallback does not degrade gracefully — it invalidates the whole declaration**
+  at computed-value time, so the property takes its INITIAL value (`border-color` → `currentColor`).
+  That is why inactive tabs rendered transparent with a bright text-coloured border for versions
+  without anyone noticing. **Always write `var(--x,fallback)` for anything not in the list above.**
+- `--preview-al` looks undefined and is fine — it is always written with a fallback.
+
+### Unified search + dismissible setup gate (v2.15)
+
+- **The control index is SCRAPED from the DOM** (`label[for]` → its input), never hand-maintained —
+  a control added later is searchable for free. **Panel ownership is derivable, not mapped**:
+  `data-gsub="carto"`→`#genCarto`, `data-civsub="generation"`→`#civSubGeneration`. An entry whose
+  panel does not resolve is dropped, so a broken convention degrades to "found but no tab switch".
+- **A class added without a CSS rule is invisible** — `.find-hit` shipped that way for one edit.
+  Same shape as v1.80's `windFxCanvas`. **Asserting a class name is not asserting visibility.**
+- **`_hasLiveWorld()`'s contract is "gate hidden ⟺ a world exists", and `beforeunload` AND autosave
+  both read it.** A dismissible gate must therefore NOT satisfy it (`_setupSkipped`), or an empty
+  app warns on close and autosaves a blank world. `generate()` clears the flag.
+- **`typeof x` on a `let` in its temporal dead zone THROWS** — it cannot guard a forward reference.
+  Declare a cross-block flag `var`, beside its reader. (v1.24 BUG-1's shape, caught pre-ship.)
+
+### Ponytail pass — and how to run a dead-code sweep here (v2.14)
+
+- **A reference sweep MUST include `tests/perf/*.js`, not just the two headless tails.** Scanning
+  only `test_tail.js`/`um_test_tail.js` reports `grainKgPerHaMedieval` and
+  `CHARCOAL_KG_PER_HA_YR_MAX` as dead; both are asserted in `smoke_gen1.js`. v1.93's note calling
+  them deliberately-kept is CORRECT — this pass nearly deleted them before checking.
+- **The file is already clean.** 1128 functions and 3115 `const`/`let` declarations; exactly one
+  dead (`flowC`, removed). Do not go looking for cruft that is not there.
+- **Most repeated code here is mandatory and must stay**: the `MinHeap` and `D8` copies exist
+  because invariant 11 requires self-contained worker kernels; the D8 loop headers are the hottest
+  loops in the file (v1.92); the GL `texParameteri` pairs are untestable headlessly.
+- **A control that is not reflected in `syncUI()` will go stale on load.** v2.12's autosave
+  controls were set at boot only, so a loaded project left the checkbox and the running timer on
+  the previous values. Every control belongs in `syncUI()`'s tail.
+- **Comment rule, refined**: v1.27's "rationale comments stay" is about CONSTRAINTS — what breaks
+  if you change this. Narrative (how the bug was found, what the first cut got wrong) belongs in
+  `CHANGELOG.md`, not at the call site.
+
+### Corridor/travel-cost views + wall towers (v2.13)
+
+Second `PORT_ONLY_FEATURES.md` track. Hash vs v2.11 ALL IDENTICAL (both views opt-in; towers only
+under `urbanLayouts`/City Viewer).
+
+- **`buildRouteCorridors` and `buildTravelCost` were already computed and already consumed — only
+  never drawn.** Making them views added no computation: `currentTravelCost()` just mirrors
+  `currentRouteCorridors()`'s existing cache idiom. Seven wiring sites, exactly v1.17's
+  `siteprofile` pattern. **Before writing a new field, check whether the one you want is already
+  being computed as an internal scoring input.**
+- Debug-view normalisers are FIXED, not per-world: the same colour must mean the same value across
+  worlds, unlike the self-calibrating scales v1.25/v1.31/v1.34 use for simulation.
+- `_umWallTowers` spaces towers in SCREEN space, not model metres — the wall ring is finely
+  sampled, so per-vertex drawing alone smears once zoomed out.
+- **Three items skipped with reasons, not effort**: a flow wetness halo duplicates R5's existing
+  `state.viz.wetness`; local contrast is a spatial-neighbourhood pass and v1.29's seam rule makes
+  it not-cheap; a neatline has no canvas overlay stage to join (the scale bar is DOM) and a CSS
+  border would never reach the baked `map.png`.
+
+### Persistence: redo, autosave snapshots, failed-open recovery (v2.12)
+
+First build off `PORT_ONLY_FEATURES.md` (the native port's own list of what it has that this file
+doesn't, pulled into this repo this session). Hash vs v2.11 **ALL IDENTICAL** — nothing here is
+reachable from `generate()`/`renderNow()`.
+
+- **`loadZip()` reads back exactly SIX of `exportZip()`'s ~30 entries** (`params.json`,
+  `heightmap.f32`, `temperature.f32`, `rainfall.f32`, `volcanic_field.f32`, `impact_field.f32`).
+  Everything else is write-only, for downstream tools. **This is the fact autosave is built on** —
+  a restorable snapshot is those six, so it needs no bake and no atlas embed and is cheap enough
+  for a timer (112 ms / 1.5 MB at 512px; 436 ms / 6 MB at 1024px). `loadZip()` takes anything with
+  `.arrayBuffer()`, so a Blob from IndexedDB restores through the identical proven path. A suite
+  assertion pins the entry names to that list, so a future seventh reader cannot silently drop one.
+- **"Has the world changed" is a CONTENT fingerprint over the whole field and whole serialized
+  state — never a dirty flag, and never a sampled one.** v1.24 BUG-5 rejected dirty-tracking
+  because one missed mutation site fails silently; the first cut here strided the field by 997 and
+  reintroduced exactly that (a small sculpt stroke fell between samples). A full pass is ~3M ops
+  against a timer measured in minutes. **Third time this file has learned that an optimisation
+  which samples instead of measuring hides a correctness hole.**
+- **`pushUndo()` is only ever called by the manual edit ops — never by `generate()`** — so a
+  snapshot belongs to exactly one world, and the stacks were never cleared. Two real bugs,
+  reproduced on v2.11 before fixing: undo after a regenerate overwrote the new world's terrain
+  with the old world's, and after a resolution DECREASE `field.set()` threw `RangeError` outright.
+  `clearUndoHistory()` runs from `generate()` and `loadZip()` now.
+- **`sculptRedo` (v1.15) is draft-scoped and is NOT the field-level redo** — different stack,
+  different thing, as its own comment says. `Ctrl+Shift+Z` was reserved at field level and inert;
+  it is redo now, matching the sculpt editor's shift convention rather than adding a `Ctrl+Y`.
+- **Known scope cuts**: no browsable undo-history list (`MAX_UNDO` is still 5, and each step is a
+  full `field` copy — a deeper stack is a memory decision); no cross-session "recent projects"
+  beyond the snapshot list (a browser has no project path to remember); snapshots live only in
+  this browser's IndexedDB — a crash/tab-close guard, not a replacement for `Export .zip`.
 
 ### LOD/bake terrain checkerboard from coarse-cell-quantized curvature (v2.09)
 
@@ -3764,7 +4549,8 @@ Pipeline (`generate()`): continentality → **`buildTectonicSubstrate()`** (warp
 stress → flexure → base blur + age → heterogeneity → resistance → orogeny; also replayed by
 `loadZip` to reconstruct the tectonic substrate exactly from the saved seed) → height formula →
 normalize → volcanism + craters → **flow(area) → climate → flow(discharge)** (rivers accumulate
-runoff — `computeFlow(true)` seeds cells with mean-normalised rain) → render. Canonical stage
+runoff — `computeFlow(true)` seeds cells with mean-normalised rain) → erosion passes
+(v2.17 `state.passes`, all off by default) → `carveRiverValleys()` → render. Canonical stage
 order rationale: `docs/research/pipeline-order-audit.md`.
 
 Erosion ops (droplet/stream-power/glacial/velocity) run in blob-URL Web Workers built by
@@ -3818,7 +4604,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1031-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1175-assertion suite
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -3826,6 +4612,24 @@ node tests/perf/perf_gen1.js               # timing harness (headless Chromium)
 node tests/perf/probe_foodshed.js A.html    # clean-world food-shed / urbanisation checks
 node tests/perf/probe_placement.js A.html   # clean-world settlement-placement checks
 node tests/perf/probe_travel.js A.html      # Journey-Planner km/day vs travel-speeds.md §8 bands
+node tests/perf/probe_passes.js A.html      # v2.17 generation passes: the DOM/syncUI half + generate() itself
+node tests/perf/probe_roadconnect.js A.html # v2.18 road connectivity: a real road must read as connected
+node tests/perf/probe_manpower.js A.html    # v2.19 military manpower incl. the spec's two worked examples
+node tests/perf/probe_landmass.js A.html    # v2.20 landmass names, the map layer, rename + the search fix
+node tests/perf/probe_trade.js A.html       # v2.21 multi-good supply matching + the value-density curve
+node tests/perf/probe_craters.js A.html     # v2.22 physical crater model: controls, saturation, size shift
+node tests/perf/probe_savetree.js A.html B.html  # v2.26 save tree: conformance, round trip, and B.html's flat save still opening
+node tests/perf/probe_shellui.js A.html    # v2.27 shell: sidebar segments, header row, rail z-order, View-mode layer clear, dvh
+node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-clip, sticky head, 44px close
+node tests/perf/probe_blur.js A.html       # v2.32 gaussBlur: the CPU path is the fast one (needs a real browser — the headless suite has no WebGL2)
+node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer head on a phone, unchanged on desktop
+node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
+node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
+node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_lodrivers.js A.html  # v2.39 rivers must be visible under Tiled LOD at DEFAULTS (delta vs the build's own overlay-suppressed baseline)
+node tests/perf/probe_civbusy.js A.html    # v2.38 the long civ ops must acknowledge the click (they are not made quicker)
+node tests/perf/probe_seamcarve.js A.html [seed] # v2.37 the carve must not trench across the antimeridian (WORLD mode; seed 21811 wraps, 12345 does not)
+node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
 
