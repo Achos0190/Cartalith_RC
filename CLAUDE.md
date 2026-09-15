@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.36 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The collision belt is a STACK of thrust sheets, not one Gaussian ridge: ONE shared long-wavelength bend keeps the sheets parallel while each sheet's deviation is a fraction of SPACING, so a sheet can never close the gap to its neighbour. `orogenyWidthScaleK` gives the belt a fixed REAL width (exactly 1 at the 800 km default, so default terrain is unchanged). Also fixes a **v2.35 defect**: the forward-preferring walk skipped same-group cells, so the pure-loop pass retraced chains — 2.86 points per distinct skeleton cell against v2.34's 1.45, traced length 1.75x the boundary-cell count against the suite's own <2x bound, which v2.35 passed partly by luck. Now 1.23x. Himalaya-width anchoring was built, measured (0.57→0.93 of stations) and **REVERTED** — it draws a 550 km belt against a 161 km margin, aspect 0.29. **Aspect is bound by MARGIN LENGTH, not belt width.** `hash_gen1.js` vs v2.35 ALL IDENTICAL. Verify with `tests/perf/probe_orogeny.js` (12 assertions). |
+| `Cartalith v2.37 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The carve was laying trenches ACROSS THE ANTIMERIDIAN, below sea level, and they rendered as water — the owner's "near horizontal lines". `carveRiverValleys` consumed a raw wrapped receiver chain; v1.29 exempted it *in a comment* because `enforceChannelDescent` "never interpolates", and **v2.30 destroyed that premise** by inserting `carveChannelPath`, which resamples the seam jump into a dense sweep. The descent ladder then bottoms out at `sea−0.06` for the rest of the traverse. Measured: **28 of 11 802 chains carried 22.7% of the entire carve**, pinning 24 830 cells at the floor in 30 horizontal runs of 100+ cells. Fix is ONE line — the third call site of `splitRiverPolylines`. Channel cells **59 481 → 71 654**: the trenches were drowning real rivers. Also fixes `_suGenCommit` computing `GH` before assigning `state.world`. `hash_gen1.js` vs v2.36 ALL IDENTICAL (region mode cannot wrap). Verify with `tests/perf/probe_seamcarve.js` (8 assertions; 3 fail on v2.36). |
+| `Cartalith v2.36 DCC test.html` | Previous DCC-line file. The collision belt is a STACK of thrust sheets, not one Gaussian ridge: ONE shared long-wavelength bend keeps the sheets parallel while each sheet's deviation is a fraction of SPACING, so a sheet can never close the gap to its neighbour. `orogenyWidthScaleK` gives the belt a fixed REAL width (exactly 1 at the 800 km default, so default terrain is unchanged). Also fixes a **v2.35 defect**: the forward-preferring walk skipped same-group cells, so the pure-loop pass retraced chains — 2.86 points per distinct skeleton cell against v2.34's 1.45, traced length 1.75x the boundary-cell count against the suite's own <2x bound, which v2.35 passed partly by luck. Now 1.23x. Himalaya-width anchoring was built, measured (0.57→0.93 of stations) and **REVERTED** — it draws a 550 km belt against a 161 km margin, aspect 0.29. **Aspect is bound by MARGIN LENGTH, not belt width.** `hash_gen1.js` vs v2.35 ALL IDENTICAL. Verify with `tests/perf/probe_orogeny.js` (12 assertions). |
 | `Cartalith v2.35 DCC test.html` | Previous DCC-line file. A collision margin was being cut at STAIRCASES, not at triple junctions. `thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED; `traceBoundaries` set `deg` to the raw 8-neighbour count, and a plain diagonal staircase gives an interior cell 3-4 neighbours — so `isNode` fired along straight segments. Measured **1040 "junctions" on a 14-plate world, only 77 of them at a real plate triple point**, against a planar graph's own ~2n−4 ≈ 24. The predicate is the **crossing number** now (0→1 transitions around the ring = distinct neighbour groups), which `thinMask` already computes as its own `A`. Longest collision margin **88.9 → 161.0 / 91.5 → 288.0 / 57.7 → 226.4 km**; junctions 1040 → 23. The walk changed with it — see the section below. `hash_gen1.js` vs v2.34 ALL IDENTICAL. Verify with `tests/perf/probe_margins.js "Cartalith v2.35 DCC test.html"` (21 assertions; 4 fail on v2.34). |
 | `Cartalith v2.34 DCC test.html` | Previous DCC-line file. The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
 | `Cartalith v2.33 DCC test.html` | Previous DCC-line file. Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
@@ -1044,6 +1045,40 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The carve trenched across the antimeridian (v2.37, DCC-line file only)
+
+Owner: *"the river rendering... generates near horizontal lines."* One line fixes it; the lesson is
+in why it survived six versions. `hash_gen1.js` vs v2.36 ALL IDENTICAL; verification is
+`tests/perf/probe_seamcarve.js`.
+
+- **A comment recording WHY something is safe is load-bearing, and it can expire.** v1.29 exempted
+  the carve from `splitRiverPolylines` and wrote the reason down: `enforceChannelDescent` "stamps a
+  disc per POINT and never interpolates between them". True in v1.29. **v2.30 inserted
+  `carveChannelPath` between the trace and the stamp**, which resamples through `catmullRomSample` —
+  and nobody re-read the exemption it invalidated. **When you add interpolation to a path, grep for
+  every comment that claims that path does not interpolate.**
+- **The damage is not the number of bad polylines, it is how many POINTS each lays down.** 28 of
+  11 802 chains wrapped — 0.23% of the geometry carrying **22.7% of the whole carve's points**. A
+  previous count of "2 of 9884" measured the POST-carve network and concluded it was negligible. The
+  wrapping chains only exist BEFORE the carve consumes them.
+- **Match the detector to what the bug writes.** The carve writes seam cells to a FLAT ABSOLUTE
+  `sea−0.06`. Searching for cells *depressed relative to their neighbours* cannot find a flat floor —
+  it found 45-cell runs where searching for cells *at* that value finds 355.
+- **Every harness ran in the one mode that cannot reproduce it.** `probe_carve.js` sets
+  `state.world=false`; `hash_gen1.js` never sets `state.world`. Seed 12345 has ZERO seam-crossing
+  rivers even in world mode — so the battery seed itself was blind. **A field hash would not have
+  caught this**, and would have gone red for innocent reasons a dozen times first.
+- **Assert the MECHANISM as well as the symptom**: `no carve path spans more than half the map`
+  fails even if the floor clamp is later changed. And key a run-length assertion on what the bug
+  writes — keyed on `riverMask` it PASSED on a build with 13 058 floor cells.
+- **Refuted, do not re-chase**: the east receiver bias is the TERRAIN, not the routing rule (plain
+  D8 reproduces the same 2.022 ratio, and the bias is unchanged by the fix while every line goes);
+  the resample-step underflow is real but contributes **0%** of the artefact (implemented, measured
+  byte-identical) and costs v2.30's trench coverage 0.9049 → 0.8858.
+- **`gridH()` reads the module global `state.world`**, so anything computing `GH` must assign the
+  extent FIRST. `_suGenCommit` had the two lines the wrong way round and gave world maps the region
+  aspect (1024×655 instead of 1024×512).
 
 ### The collision belt is a stack of thrust sheets (v2.36, DCC-line file only)
 
@@ -4518,6 +4553,7 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_seamcarve.js A.html [seed] # v2.37 the carve must not trench across the antimeridian (WORLD mode; seed 21811 wraps, 12345 does not)
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```

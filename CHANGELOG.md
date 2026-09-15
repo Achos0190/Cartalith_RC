@@ -4,6 +4,128 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.37 (DCC line) — the carve was laying trenches across the antimeridian, below sea level
+
+Owner: *"There is something wrong with the river rendering, it generates near horizontal lines at
+the moment"*, with a screenshot of a 20 000 km world showing ~25 long, roughly parallel,
+near-horizontal water lines over an otherwise normal dendritic network.
+
+### Root cause — and a safety argument that expired
+
+`carveRiverValleys` consumed a RAW antimeridian-wrapped receiver chain. The chain of facts:
+
+1. `buildRiverNetwork` picks receivers through `nx=((nx%W)+W)%W` in world mode, so a river crossing
+   the seam has consecutive points at `x≈W−0.5` then `x≈0.5`.
+2. `splitRiverPolylines` exists for exactly this and was applied at the render and export sites.
+3. **v1.29 exempted the carve, and wrote its reasoning into the file**: *"The carve path is
+   unaffected: enforceChannelDescent stamps a disc per POINT and never interpolates between them."*
+   That was true when it was written.
+4. **v2.30 destroyed that premise** by inserting `carveChannelPath` between the trace and the stamp.
+   It resamples through `catmullRomSample` at `step=min(0.5,halfW*0.5)`, so the seam jump is FILLED
+   IN as a dense continuous sweep. `rdpSimplify`'s epsilon is 1.14 cells — it never removes a
+   1023-cell deviation.
+5. `enforceChannelDescent` then walks every one of those points with a monotone descent ladder
+   clamped at `floorLim = sea−0.06 = 0.36`, against `seaLevel 0.42`. It bottoms out after ~75–370
+   cells and **holds below sea level for the rest of the 1024-cell traverse**. There is no land/sea
+   test. Rendered, a sub-sea strip paints as water.
+
+### Measured, on the owner's exact world
+
+| | |
+|---|---|
+| polylines reaching the carve | 11 802 |
+| of those, wrapping the seam | **28** (27 with ≥3 points; the 28th hits `poly.length<3` and is harmless) |
+| x-span of those 27 descent calls | **1013–1025 columns** of a 1024-wide map, over 6–26 rows |
+| widest of the other 11 774 | **91 columns** — cleanly bimodal, no overlap |
+| points they carry | **22.7% of the entire carve**, from 0.23% of the geometry |
+| cells pinned at `sea−0.06` | **24 830**, ~100% of them `riverMask` |
+| horizontal runs ≥100 cells | **30** (8 of them ≥200), longest **355**; vertical runs ≥100: **0** |
+
+**Bisect**: v2.29 clean (28 chains still wrapped, longest run 24, isotropic) → **v2.30 is the
+regression** (355, 30 runs) → v2.36 byte-for-byte v2.30's numbers. v2.31–v2.36, including the
+orogeny work, contributed nothing.
+
+### The fix is one line
+
+```js
+const polys=splitRiverPolylines(traceRiverPolylines(net.order, net.recv, GW, GH, 1), GW);
+```
+
+The primitive already existed with two call sites; this is the third. No `skip` predicate — a lake
+reach is real hydrology the carve SHOULD cut, the same choice the GeoJSON export makes.
+
+Measured effect: floor cells **24 830 → 0**, runs ≥100 **30 → 0**, longest horizontal run 355 → 42,
+carved-below-sea 26 366 → 86, and **channel cells 59 481 → 71 654 (+20%) — the bogus trenches were
+drowning ~12 000 real river cells**. `generate()` 8.7 s → 7.5 s, since 22% of the carve's point
+budget was the artefact.
+
+**Region mode is byte-identical** (no receiver can wrap), so `hash_gen1.js` — whose battery never
+sets `state.world` — stays ALL IDENTICAL. World mode is a deliberate re-baseline, and **not nil at
+the default extent**: at 800 km/world, seed 21811 still wraps once.
+
+### Also fixed: the setup gate built a world map with the region aspect
+
+`_suGenCommit` computed `GH=gridH(GW)` on the line BEFORE it assigned `state.world`, and `gridH`
+reads that module global. So the gate's extent choice landed one line too late: "Whole world" at 1K
+produced **1024×655** (the region aspect) instead of 1024×512, with the latitude mapping to match.
+`#extentSeg` never had this — it assigns `state.world` first. Two lines swapped.
+
+This is what made the owner's Generation-info panel self-contradictory. It does **not** cause the
+lines: they reproduce identically at the correct 1024×512 grid (19 seam chains, 13 058 floor cells).
+
+### Deliberately NOT bundled, each with its measurement
+
+- **A floor on `carveChannelPath`'s resample step.** The underflow is real (`riverWidthScaleK(20000)`
+  hits its 1/16 clamp, step collapses to 0.025–0.072, 38.98× oversampling). Two independent passes
+  implemented `max(0.25, halfW*0.5)` and measured the symptom **byte-identical** — runs ≥100 stayed
+  30, longest stayed 355. Any step ≤0.7 cells makes the seam trench continuous, so the step
+  contributes 0% of the artefact. Worse, it drops v2.30's own trench-coverage invariant **0.9049 →
+  0.8858**. The ~200 ms it would save at the seam, the fix above recovers for free.
+- **The two other raw consumers**, `buildFeatureRegistry` and `_civRiverPolys`. Same one-line
+  wrapper would fix both, but splitting re-baselines the feature registry's entry counts — its own
+  deliberate change in a subsystem unrelated to this symptom. Flagged, deferred.
+- **The east receiver bias** (due-east 11 742 vs due-west 8 293) is REFUTED as a cause: it is a
+  property of the terrain, not the routing rule. A hand-written plain-D8 pass reproduces the same
+  2.022 ratio and agrees on 94.17% of channel cells, and the bias is **unchanged by the fix** (2.022
+  → 2.020) while every line disappears. The earlier "74 of 90 channel cells horizontal on the worst
+  row" was measuring a seam trench's own flat floor.
+
+### Why six versions missed it
+
+**Every existing harness runs in region mode, where no receiver can wrap.** `probe_carve.js` sets
+`state.world=false`; `hash_gen1.js` never sets `state.world` at all. And the battery seed 12345 has
+**zero** seam-crossing rivers even in world mode. A `field` hash would have gone red for a hundred
+innocent reasons over six versions and green for this one.
+
+New `tests/perf/probe_seamcarve.js` (8 assertions, **3 of them fail on v2.36**) runs world mode at
+seed 21811 — chosen because it wraps where 12345 does not — and asserts the mechanism
+(`no carve path spans more than half the map`) as well as the symptom, so it fails even if the floor
+clamp is later changed. Plus 5 unit assertions in `test_tail.js` on the synthetic minimal repro:
+a 12-point chain walking x=1018→1023 then 0→5, which `carveChannelPath` sweeps across the map
+unsplit and does not once split.
+
+**One probe defect of my own, caught and fixed before shipping**: the run-length assertions first
+keyed on `riverMask`, whose runs are shorter than the trench, so they PASSED on a build carrying
+13 058 floor cells — a guard that did not guard. They measure the floor-clamped cells now, and the
+isotropy assertion correctly fails on v2.36 (H 93 vs V 26).
+
+### Ponytail pass over v2.35/v2.36's own code
+
+- The `NOTE (v2.36, measured)` block above the chain-emanation loop described the skipped-cell cause
+  as an open candidate "left for its own pass" — v2.36 had already fixed it in the walk directly
+  above. A comment asserting a live bug that is fixed is worse than none. Removed.
+- `CAP` was `W*H` = 670 720. The longest legitimate polyline measures 288 points; that cap is why
+  v2.35's spin cost 94 s instead of failing instantly. Now `2*(W+H)` — ~12× the longest real chain,
+  two orders of magnitude cheaper when it fires.
+- Narrative trimmed from three comment blocks per v2.14's rule: constraints stay at the call site,
+  history belongs here.
+
+### Verification
+
+`tests/run.sh` **1180 passed / 0 failed** (+5). `probe_seamcarve.js` 8/8 on v2.37, 3 failures on
+v2.36. `probe_carve.js` / `probe_orogeny.js` / `probe_margins.js` unchanged — the orogenic belt and
+the river carve are both untouched by this edit, which is strictly downstream of them.
+
 ## v2.36 (DCC line) — the collision belt becomes a stack of thrust sheets, at a fixed real width
 
 Owner, on the two halves left open after v2.35: **"Together."** So this ships the calibrated

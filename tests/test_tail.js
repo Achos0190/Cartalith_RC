@@ -4717,6 +4717,33 @@ if (typeof carveRiverValleys === 'function') {
     check('v2.30 carve path: a chain too short to smooth is returned untouched, at the chain gradient',
       carveChannelPath([{ x: 1, y: 1 }, { x: 2, y: 2 }], 2, 1, 1, 1024, 7).step === 1);
 
+    /* v2.37: the carve must never be handed a WRAPPED receiver chain. In world mode
+       buildRiverNetwork picks receivers through nx=((nx%W)+W)%W, so a river crossing the
+       antimeridian has consecutive points at x~W-0.5 then x~0.5. v1.29 split that at the render and
+       export sites only, on the stated grounds that the carve "stamps a disc per POINT and never
+       interpolates" -- true then, destroyed by v2.30's carveChannelPath, which resamples through
+       catmullRomSample and FILLS THE JUMP IN. enforceChannelDescent's ladder then bottoms out at
+       sea-0.06 for the rest of the traverse: a full-map-width strip below sea level, rendering as
+       water. The synthetic minimal repro, both halves of the guard: */
+    {
+      const W2 = 1024, seam = [];
+      for (let x = 1018; x <= 1023; x++) seam.push({ x, y: 40 + (x - 1018) * 0.2 });
+      for (let x = 0; x <= 5; x++) seam.push({ x, y: 41.2 + x * 0.2 });
+      const xs = a => a.reduce((m, q) => Math.max(m, q.x), -Infinity) - a.reduce((m, q) => Math.min(m, q.x), Infinity);
+      check('v2.37 seam: the raw chain really does wrap (fixture is valid)',
+        seam.some((q, i) => i > 0 && Math.abs(q.x - seam[i - 1].x) > W2 / 2));
+      const parts = splitRiverPolylines([seam], W2);
+      check('v2.37 seam: splitRiverPolylines cuts it into two runs', parts.length === 2);
+      check('v2.37 seam: neither run spans the map', parts.every(q => xs(q) < W2 / 2),
+        parts.map(xs).join(','));
+      // and the reason it matters: carveChannelPath on the UNSPLIT chain sweeps the whole width
+      const bad = carveChannelPath(seam, 3, 1.0, 0.25, W2, 21811);
+      check('v2.37 seam: the unsplit chain DOES sweep the map when carved (the bug, reproduced)',
+        xs(bad.pts) > W2 / 2, xs(bad.pts).toFixed(0));
+      check('v2.37 seam: each split half carves within a sane span',
+        parts.every(q => q.length < 3 || xs(carveChannelPath(q, 3, 1.0, 0.25, W2, 21811).pts) < W2 / 2));
+    }
+
     /* THE regression this version exists to prevent twice over: enforceChannelDescent's drop is per
        POINT, so resampling finer silently steepens every river unless the caller scales it. Carve one
        straight line at two different steps and the channel floor must land in the same place. */
