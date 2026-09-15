@@ -4,6 +4,103 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.39 (DCC line) — the LOD path never calls surfaceColor, so it never had a river
+
+Owner: *"When using LOD tiling the rivers seem to disappear."*
+
+### They did — completely, and the measurement says by how much
+
+River-vs-land blue contrast on land cells, seed 12345 / 512 px / defaults:
+
+| path | contrast | note |
+|---|---|---|
+| off-LOD, normal | **28.27** | the Beer-Lambert raster blend |
+| under LOD | **10.95** | |
+| off-LOD with `_riverNet` nulled | **10.96** | — matches the LOD figure to 0.01 |
+
+That coincidence is the finding: **what survives under LOD is only `carveRiverValleys`' groove in
+the terrain. The water colour is 100% gone.** A second probe put the loss at 81% of the river's
+total visual signal.
+
+### Why: `surfaceColor` is structurally unreachable under LOD
+
+`waterShade` — the function that produces river water colour — has **exactly one call site in the
+whole 34k-line file**, inside `surfaceColor`, gated
+`if(state.showRivers && _riverNet && !(state.viz&&state.viz.riverWays))`.
+
+`_lodBuildTileRGBA` builds the LOD colorizer as
+`biome ? renderBiomeTileRGBA(...) : renderHeightTileRGBA(...)` — and `renderBiomeTileRGBA` calls
+`landColorCore` **directly**, bypassing the `surfaceColor` wrapper where the blend lives. Proven
+rather than argued: colorizing one 128x128 tile with `_riverNet` intact and again with it nulled
+gives **FNV `262842011` both times**. The tile renderer's only river term is
+`buildRiverSDF`, gated on `sdfRivers` (default 0) and a decorative bank tint regardless.
+
+Nothing else compensates. `burnChannels` is gated on `_lodBurnRivers` (default false, `#lodBurnChk`
+unchecked) and in any case only does `tile[i]=Math.max(floor,tile[i]-burn[i])` — it carves the
+heightmap, it paints nothing. `bakePixel` and `renderHeightTileRGBA` are river-blind the same way
+(measured: 0 of 5462 river cells change when the network is nulled).
+
+So `drawLODView`'s vector overlay — added in v0.94 with a comment that says outright *"closes a
+pre-existing LOD gap: the default Biome tile renderer never drew the river network's water color at
+any zoom"* — is the **only** river renderer LOD has.
+
+### And v2.29 switched it off
+
+That overlay was gated `if(state.viz&&state.viz.riverWays && dbg==='off' && biome)`. `riverWays`
+defaulted **true** from v0.94 to v2.28. **v2.29 flipped it to false** — correctly, answering *"the
+only rivers I'm getting are drawn lines, nothing rendered into terrain"*, because off-LOD the flag
+is a genuine EITHER/OR (v1.14: the raster blend and the spline otherwise trace one network as two
+parallel rivers).
+
+**That either/or is a property of the per-pixel path only.** Under LOD there is no raster copy, so
+nothing can double-draw — the flag is not a selector there, just an off switch. Flipping the default
+did not swap LOD's renderer; it removed the only one. Bisected directly: v2.28 ships `riverWays:true`
++ `checked`, v2.29 ships `false` + unchecked, mainline v2.22 is still true.
+
+**Third occurrence of the v2.37 shape** — a gate reused where its justification does not hold.
+**When you change a flag's default, grep every call site that reads it and re-derive whether its
+reason still applies there.**
+
+### The fix is one gate, widened with `||`
+
+    if(((state.viz&&state.viz.riverWays) || state.showRivers) && dbg==='off' && biome){
+
+A strict **superset**: the riverWays-on case still draws exactly as before, so nothing is taken
+away, and `showRivers=false` still means no river (asserted). The body — the lazy
+`buildRiverNetwork`, the `px`/`py`/`inView`/`zk` reprojection, v1.45's uncapped `zk=GW/span` — is
+untouched.
+
+**Do NOT instead default `riverWays` true.** `surfaceColor`'s branch is gated
+`!(state.viz&&state.viz.riverWays)`, so that re-suppresses the off-LOD raster river and reinstates
+the exact report v2.29 was answering. All four independent verifiers said so unprompted.
+
+### A first-cut test that passed on the broken build
+
+The obvious assertion — "river cells read bluer than land under LOD" — **passes on v2.38**. Carved
+valleys plus `landColorCore`'s TWI wetness term already give river cells a contrast of **25.48 at
+z4 and 42.91 at z8** with no water drawn at all, so a `> 14` cutoff was measuring terrain, not the
+fix. Re-keyed to a **delta against the same build's own overlay-suppressed baseline**: that gain is
+**exactly 0.00** on v2.38 and 22.77 / 20.33 here. The mechanism is asserted separately —
+`drawRiverWays` call count, 0 against 5.
+
+### Verification
+
+`tests/perf/probe_lodrivers.js` — 13 assertions, **4 fail on v2.38**. `tests/run.sh` 1180 passed /
+0 failed; `tests/run_um.sh` 852/852; `hash_gen1.js` vs v2.38 **ALL IDENTICAL** in every scenario —
+`drawLODView` is reached only from `renderNow`'s `if(_lodOn)` branch and the battery never enables
+LOD, so the default off-LOD render cannot move.
+
+### Known scope cuts
+
+- **LOD draws a different STYLE from off-LOD**, not a matching one: the cartographic symbol (v1.29's
+  sqrt-z-damped stroke, v2.25's real-width floor) rather than the terrain-blended `waterShade`.
+  Matching them means porting the `_riverNet.intensity`/`depth` blend into `renderBiomeTileRGBA`
+  sampled at world coords — which re-baselines every cached tile and every baked atlas chunk, and
+  needs `_lodRenderKey()` to gain a `state.showRivers` term.
+- **`bakePixel` is still river-blind**, so an exported `map.png` carries no river water either.
+  Same root cause, separate fix, not bundled.
+- Relief-mode LOD tiles (`renderHeightTileRGBA`) are unchanged — the overlay is gated on `biome`.
+
 ## v2.38 (DCC line) — a long operation that says nothing reads as a broken one
 
 Owner: *"Auto populate doesn't seem to work"*, then, on being shown it does: *"Yeah it's long"*.
