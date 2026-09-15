@@ -101,6 +101,39 @@ crests on each sheet's flank, which is what broke the collision acceptance test 
 pairs 3 cells apart) to `beltSpacing*0.80`, preserving v0.144's own period:sigma ratio and staying
 incommensurate with the stack.
 
+### Owner report after v2.36 shipped: structured orogeny freezes on a phone
+
+Root-caused by timing the real path (`currentBoundaryGraph` -> `buildOrogenyField`) on the owner's
+exact world — World extent, seed 21811, resW 1024, mapWidthKm 20000 — across all three builds:
+
+| build | `buildOrogenyField` | longest polyline |
+|---|---|---|
+| v2.34 | 6 307 ms | 81 pts |
+| **v2.35** | **93 885 ms** | **524 290 pts — the `W*H` safety cap, +2** |
+| v2.36 | 1 878 ms | 288 pts |
+
+**v2.35 is the freeze, and it is the same skipped-cell defect described above.** A walk spun to the
+cap and produced a half-million-point polyline, which the orogeny pass then stamped along its whole
+length: 94 seconds on a desktop, minutes on a phone. The cap prevented a true hang and nothing more.
+v2.36's fix already resolves it — the cap is now never reached.
+
+### A belt that vanishes is not scale-invariance: `OROGEN_BELT_MIN_CELLS`
+
+The same report exposed a SECOND regression, introduced by this version's own width scaling. At
+mapWidthKm 20000 (19.53 km/cell) `orogenyWidthScaleK` is 0.0625, which put the belt at **2.14 cells**
+— structured orogeny rendered essentially nothing at world extent, against 34.2 cells before the
+scaling existed. Preserving real km is right in principle and useless below about one cell.
+
+`orogenBeltHalfWidth` gains a FLOOR of 8 cells alongside its cap, so the belt is grid-limited rather
+than km-limited once an extent is large enough: scale invariance holds down to ~5 000 km and then
+clamps — the same one-sided shape `terrainDetailK` uses. At the owner's extent the belt is now 8
+cells (156 km real). Cost is unaffected: 1 878 -> 2 006 ms, still 3x faster than v2.34.
+
+**Stated plainly**: 8 cells is the width at which the belt is still a belt. The SHEET STACK inside it
+needs roughly 35 cells of spacing to resolve, so at world extent the belt is honestly a single ridge
+again — the structure this version adds is not available at 19.53 km/cell, and no constant fixes
+that.
+
 ### Verification
 
 `tests/run.sh` 1175 passed / 0 failed. `tests/run_um.sh` 852/852 (block 4 untouched). New

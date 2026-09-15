@@ -90,7 +90,7 @@ const MEASURE = async (p,seed,mapWidthKm)=>p.evaluate(async(a)=>{
     /* Scale invariance can only be asserted where the cost cap is not binding. At a 400 km extent a
        250 km belt is 62% of the map, so the cap clips it -- which is the honest picture of a small
        window onto a real orogen, not a failure. */
-    const free=out.filter(r=>r.capFrac<0.2999);
+    const free=out.filter(r=>r.capFrac<0.2999 && r.halfBeltCells>8.0001);   // neither the cap nor the floor binding
     const km=free.map(r=>r.halfBeltKm), cells=free.map(r=>r.halfBeltCells);
     const spread=Math.max(...km)/Math.max(1e-9,Math.min(...km));
     check('uncapped belt half-width in real km is scale-invariant (spread < 1.02x)',

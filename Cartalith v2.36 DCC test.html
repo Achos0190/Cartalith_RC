@@ -3353,8 +3353,18 @@ function orogenyWidthScaleK(mapWidthKm){
    RAD^2. At the cap the belt simply covers the map, which is the honest picture of a small window
    onto a real orogen. */
 const OROGEN_BELT_MAX_FRAC=0.30;
+/* A FLOOR as well as a cap, and the floor is not cosmetic. Preserving real km is right in principle
+   and useless below about one cell: at mapWidthKm=20000 (19.53 km/cell) widthK is 0.0625, which puts
+   the belt at 2.14 cells and makes structured orogeny render essentially nothing — measured on a
+   1024-wide world, against 34.2 cells before the scaling existed. Below the floor the belt is
+   grid-limited rather than km-limited, so scale invariance holds down to ~5000 km of extent and then
+   clamps, the same one-sided shape terrainDetailK uses. 8 cells is the width at which the belt is
+   still a belt; the SHEET STACK inside it needs far more (~35 cells of spacing) and is honestly not
+   resolvable at world extent — see probe_orogeny.js. */
+const OROGEN_BELT_MIN_CELLS=8;
 function orogenBeltHalfWidth(blurR, widthK, W, H){
-  return Math.min(blurR*1.9*(widthK>0?widthK:1), OROGEN_BELT_MAX_FRAC*Math.min(W,H));
+  const cap=OROGEN_BELT_MAX_FRAC*Math.min(W,H);
+  return Math.min(cap, Math.max(Math.min(OROGEN_BELT_MIN_CELLS,cap), blurR*1.9*(widthK>0?widthK:1)));
 }
 function computeWarp(){ if(computeWarpPrep()) fillWarpRows(warpX,warpY,GW,0,GH,0,warpParams()); }   // sync full range
 async function computeWarpPool(){ if(computeWarpPrep()){ const r=await GENPOOL.run('warp',GW,GH,warpParams(),{}); warpX.set(r.warpX); warpY.set(r.warpY); } }   // worker pool splits the same fill by rows

@@ -1104,6 +1104,13 @@ belt profile. `hash_gen1.js` vs v2.34 ALL IDENTICAL; verification is `tests/perf
   (340→984, 432→1599, 899→3607), because a longer chain's majority vote also RECLASSIFIES
   fragments. The type mix moved, and that is not separately verified. Aspect reaches ~1.9:1 /
   3.5:1 / 2.7:1 against the belt's ~83 km span — against ~7:1 for the Himalaya.
+- **v2.35 WAS A PHONE FREEZE, and v2.36 fixes it**: the spinning walk reached the `W*H` cap and
+  built a 524 290-point polyline that orogeny then stamped along — `buildOrogenyField` measured
+  **93 885 ms** on v2.35 against 6 307 on v2.34 and 1 878 on v2.36, at World/1024/20000 km.
+- **A belt that vanishes is not scale-invariance.** `orogenyWidthScaleK` put the belt at 2.14 cells
+  at mapWidthKm 20000 — structured orogeny rendering nothing at world extent. `OROGEN_BELT_MIN_CELLS`
+  (8) floors it, so invariance holds to ~5000 km then clamps. **The sheet stack still needs ~35 cells
+  of spacing, so at world extent the belt is honestly one ridge again.**
 - **Still open**: belt WIDTH is `blurR` in grid cells and never reads `mapWidthKm`, so it does not
   scale with map extent — the v1.60 / v2.05 / v2.07 defect shape, in the one subsystem those passes
   never reached.
