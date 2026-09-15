@@ -4,6 +4,96 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.35 (DCC line) — a mountain margin was being cut at staircases, not at triple junctions
+
+Owner: *"I look at for example the Himalayas and this is a formidable mountain range. Not simply
+one line of mountains. How can we achieve such an effect?"* — then, on the options I put up,
+*"go after margin length next."* This is that step. It is not the belt profile; it is the reason
+the belt had nothing long to sit on.
+
+### The measurement that redirected the fix
+
+The owner's own suggestion offered two routes: stitch nearly-collinear collision fragments, or add
+along-strike hysteresis to the boundary classifier. **The hysteresis half is refuted by the code.**
+`currentBoundaryGraph` tags each polyline with its dominant `boundaryType` by majority vote AFTER
+`traceBoundaries` has returned the chains, so type can never split a chain — hysteresis would
+change which chains are *called* collision, not how long any of them is.
+
+Stitching was measured before being built. Greedy best-collinear pairing at shared endpoints
+(dot < −0.5) roughly doubles the longest collision margin — 89 → 148 km (seed 12345), 91 → 192
+(31337), 58 → 120 (4242). Real, but against the belt's ~83 km span that is only ~2.3:1 against the
+Himalaya's ~7:1, so it was not worth shipping as the answer.
+
+What that measurement exposed was the actual defect: **1040 junction nodes on a 14-plate world.**
+A planar 14-plate graph has ~2n−4 ≈ 24 triple junctions. Mean collision chain was 6.4 km — four
+cells. That is not topology, it is the detector.
+
+### Root cause
+
+`thinMask` is Zhang-Suen, which yields an **8-connected** skeleton. `traceBoundaries` then set
+`deg` to the raw count of 8-neighbours and cut the chain wherever `deg !== 2`. An ordinary diagonal
+staircase gives an interior cell 3 or 4 neighbours, so `isNode` fired along straight line segments.
+
+The topologically correct test is the **crossing number** — the number of 0→1 transitions around
+the ring, i.e. the number of distinct neighbour GROUPS: endpoint 1, interior 2, junction ≥3. On the
+staircase cell the ring reads `[0,0,0,1,1,0,1,1]`: raw count 4 (falsely a node), crossing number 2
+(correctly a line interior). **`thinMask` already computes exactly this quantity as its own `A`,
+one function above, and `traceBoundaries` never used it.**
+
+### The walk has to change with the predicate
+
+Under the crossing number an interior cell can still carry 4 neighbours in 2 groups, so
+`nbrs[0]` can step BACK into the group just left and the walk ping-pongs forever without reaching
+a node. The step now prefers a neighbour that is **not 8-adjacent to the previous cell**,
+orthogonal first among the survivors, with a `W*H` safety cap. This cost two hung probes before it
+was diagnosed — a walk that spins looks exactly like a slow one until you check that CPU is idle.
+
+### Measured
+
+| seed | junctions, raw count | junctions, crossing number | of the raw ones, at a real plate triple point | chains | longest collision margin |
+|---|---|---|---|---|---|
+| 12345 | 1040 | **23** | 77 | 1079 → 200 | 88.9 → **161.0 km** |
+| 31337 | 1046 | **28** | 113 | 1071 → 238 | 91.5 → **288.0 km** |
+| 4242 | 972 | **16** | 78 | 995 → 217 | 57.7 → **226.4 km** |
+
+**92% of the junctions were staircase artefacts**, and the corrected count independently lands on
+the order a planar plate graph really has. It beats stitching on every seed, and the two would
+still compose.
+
+### Stated rather than banked
+
+Total collision km rises much further than the longest margin does (340 → 984, 432 → 1599,
+899 → 3607). That is **not** pure gain: the type tag is a majority vote over a whole chain, so
+merging fragments also RECLASSIFIES some of them. The type mix changes, not only the lengths, and
+that has not been separately verified.
+
+Aspect is now ~1.9:1 / 3.5:1 / 2.7:1 against the belt's ~83 km span, against ~1:1 before and ~7:1
+for the Himalaya. Real progress, not the whole distance.
+
+### Bit-identity
+
+`traceBoundaries` reaches terrain ONLY through `buildOrogenyField`, which `generate()` calls solely
+under `state.tect.tectonicGraph` (default `false`); its only other consumers are the `btype` debug
+overlay's two draw sites. So the default render is untouched — `hash_gen1.js` vs v2.34 ALL
+IDENTICAL, verified rather than assumed.
+
+### Tests
+
+`tests/run.sh` 1175 passed / 0 failed. `tests/run_um.sh` unchanged (block 4 untouched). New
+`tests/perf/probe_margins.js` — 21 assertions across three seeds, **4 of which fail on v2.34**,
+driving the shipped `currentBoundaryGraph()` rather than a reimplementation. Two of its assertions
+guard the new walk specifically: every polyline stays 8-connected (max step 1) and no walk reaches
+the safety cap.
+
+### Known scope cuts
+
+The belt PROFILE is untouched — this version lengthens margins, it does not widen or structure the
+range across strike. Stitching is not implemented (the predicate fix beat it on every seed; it
+remains available and would compose). The orogenic belt's width is still expressed in grid cells
+via `blurR` and never reads `mapWidthKm`, so it does not scale with map extent — the same defect
+shape `terrainDetailK` / `riverCoarseEase` / `lodDetailFreqK` / `riverWidthScaleK` each fixed in
+their own subsystem, still open here.
+
 ## v2.34 (DCC line) — the land surface is a SPEED, and it comes from the Planner's own table
 
 Step two of the routing work the owner asked for: *"Routes should always offer a quicker transport

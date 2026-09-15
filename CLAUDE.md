@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.34 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
+| `Cartalith v2.35 DCC test.html` | **The DCC shell line's current head, not a mainline version.** A collision margin was being cut at STAIRCASES, not at triple junctions. `thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED; `traceBoundaries` set `deg` to the raw 8-neighbour count, and a plain diagonal staircase gives an interior cell 3-4 neighbours — so `isNode` fired along straight segments. Measured **1040 "junctions" on a 14-plate world, only 77 of them at a real plate triple point**, against a planar graph's own ~2n−4 ≈ 24. The predicate is the **crossing number** now (0→1 transitions around the ring = distinct neighbour groups), which `thinMask` already computes as its own `A`. Longest collision margin **88.9 → 161.0 / 91.5 → 288.0 / 57.7 → 226.4 km**; junctions 1040 → 23. The walk changed with it — see the section below. `hash_gen1.js` vs v2.34 ALL IDENTICAL. Verify with `tests/perf/probe_margins.js "Cartalith v2.35 DCC test.html"` (21 assertions; 4 fail on v2.34). |
+| `Cartalith v2.34 DCC test.html` | Previous DCC-line file. The land SURFACE multiplier is a SPEED from **`JP_TERRAIN.land`** — the Journey Planner's own travel-speeds.md-grounded table — read through `buildCartTerrain()`'s classification, the exact classifier `_jpDeriveStages` runs. It replaces v1.95's `_civBiomeFriction`, which measurement condemned: it charged **Open Plains 1.418 and Rocky Terrain 1.373**, inverted on the map's largest distinction, with a spread of only 1.10–1.45 against this table's 2.11–2.37. **This is the half with the leverage** — Planner hours −3.8% to −21.0% across seeds and modes, with path km and cumulative climb falling too. `hash_gen1.js` vs v2.33 ALL IDENTICAL. Verify with `tests/perf/probe_landsurface.js "Cartalith v2.34 DCC test.html"` (19 assertions). |
 | `Cartalith v2.33 DCC test.html` | Previous DCC-line file. Land routing costs TIME: `_civTravelHours` is the one land model (in hours/cell on level ground), replacing three that disagreed — the Way tool, village tracks and the sea-lane MST's land branch had been routing on slope alone. Slope moved to `roadDijkstra`'s `edgeCost` hook as a bidirectional Tobler curve on signed rise/run. **It does not make routes quicker** (+0.1% land / +0.4% mixed, same pairs) and the changelog explains why in measured terms: p50 grade is 1.20%, where Tobler is ×1.001. Step one of two — see below. |
 | `Cartalith v2.32 DCC test.html` | Previous DCC-line file. `gaussBlur` no longer routes through `GPU.blurArr`: the two are the same box-blur algorithm, but the CPU one carries a running sum (O(N), radius-free) where the shader scans the kernel (O(N·pr)) and then pays a synchronous `readPixels` — measured **2.1x–21.7x slower at every size and radius**, and `readPixels` was 24.2% of a 1024px `generate()`. **generate() 5919 → 3894 ms at 1024px (−34%)**; flexure 599 → 49 ms. A quantified re-baseline (float32 noise between two implementations of one algorithm; worst cell moves ~1.6 m at default peakM) — the headless suite is bit-identical because it has no WebGL2. Verify with `tests/perf/probe_blur.js "Cartalith v2.32 DCC test.html"` (7 assertions; 2 fail on v2.31). |
 | `Cartalith v2.31 DCC test.html` | Previous DCC-line file. `#domainRail` moved inside `#dockWrap`: on a phone the four WORLD/CIVIL/CARTO/EXPLORE buttons are the sticky head of the hamburger drawer instead of a 44px band above the map (which the map gets back — 550px→594px at 390×760), while desktop geometry is unchanged because the bands are arranged by CSS `order`, not DOM order. Markup + CSS only; `hash_gen1.js` vs v2.30 ALL IDENTICAL. Verify with `tests/perf/probe_domainrail.js "Cartalith v2.31 DCC test.html" "Cartalith v2.30 DCC test.html"` (23 assertions; 6 fail on v2.30). |
@@ -1042,6 +1043,38 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### A margin was cut at staircases, not at triple junctions (v2.35, DCC-line file only)
+
+Owner: the Himalaya *"is a formidable mountain range. Not simply one line of mountains"*, then
+*"go after margin length next."* This lengthens the margins a belt sits on; it does NOT touch the
+belt profile. `hash_gen1.js` vs v2.34 ALL IDENTICAL; verification is `tests/perf/probe_margins.js`
+(21 assertions, 4 of which fail on v2.34).
+
+- **`thinMask` is Zhang-Suen, so the skeleton is 8-CONNECTED, and a raw 8-neighbour count is not a
+  branch count.** A diagonal staircase gives an interior cell 3-4 neighbours in only 2 groups, so
+  the old `deg !== 2` test cut chains along straight segments. The correct test is the **crossing
+  number** — 0→1 transitions around the ring — which `thinMask` already computes as its own `A`,
+  one function above. Ring `[0,0,0,1,1,0,1,1]`: raw 4, crossing 2.
+- **Check a detector's output against what the topology can actually contain.** 1040 junctions on a
+  14-plate world, where a planar graph has ~2n−4 ≈ 24 — and only 77 of the 1040 sat at a real plate
+  triple point. That ratio is what condemned the predicate, not the rendered result.
+- **The WALK must change with the predicate.** Under the crossing number an interior cell can still
+  have 4 neighbours in 2 groups, so `nbrs[0]` can step back into the group just left and spin
+  forever. Prefer a neighbour NOT 8-adjacent to the previous cell, orthogonal first, with a `W*H`
+  cap. **A spinning walk looks exactly like a slow one** — two probes hung before idle CPU gave it
+  away. The probe asserts both invariants directly: max step 1, and no walk reaching the cap.
+- **The owner's own other option is refuted by the code, and saying so is part of the answer.**
+  `currentBoundaryGraph` assigns type by majority vote AFTER tracing, so along-strike hysteresis in
+  the classifier can never split a chain. Stitching nearly-collinear fragments was measured first
+  (89→148 / 91→192 / 58→120 km) and beaten by the predicate fix on every seed; it still composes.
+- **Stated, not banked**: total collision km rises far more than the longest margin does
+  (340→984, 432→1599, 899→3607), because a longer chain's majority vote also RECLASSIFIES
+  fragments. The type mix moved, and that is not separately verified. Aspect reaches ~1.9:1 /
+  3.5:1 / 2.7:1 against the belt's ~83 km span — against ~7:1 for the Himalaya.
+- **Still open**: belt WIDTH is `blurR` in grid cells and never reads `mapWidthKm`, so it does not
+  scale with map extent — the v1.60 / v2.05 / v2.07 defect shape, in the one subsystem those passes
+  never reached.
 
 ### The land surface is a SPEED, from the Planner's own table (v2.34, DCC-line file only)
 
@@ -4444,6 +4477,7 @@ node tests/perf/probe_cogmodal.js A.html   # v2.28 cog window: dvh, no centre-cl
 node tests/perf/probe_blur.js A.html       # v2.32 gaussBlur: the CPU path is the fast one (needs a real browser — the headless suite has no WebGL2)
 node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer head on a phone, unchanged on desktop
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
+node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_carve.js A.html      # v2.29/v2.30 river carve: ways default off, incision strength, network cost, trench-vs-drainage coverage
 node tests/perf/smoke_gen1.js A.html        # Playwright UI-chrome smoke (524 assertions: onboarding/layers/presets/phase + per-version regressions)
 ```
