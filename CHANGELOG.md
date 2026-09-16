@@ -31,6 +31,14 @@ The interior figure is the tell: bilinear has **no curvature there at all** (the
 the same measurement reads 7e-17, i.e. float noise), so every bit of shape in the reconstructed
 surface was concentrated into one-pixel creases on a grid.
 
+Side by side: `docs/images/lod_v246_vs_v247.png` — same world, same camera, same pyramid level
+(z=6, ~96 px per coarse cell). Its top row switches the procedural detail off, so the screen shows
+purely the upsampled coarse surface and the facet grid is unmistakable. **Its bottom row is the
+caveat worth keeping**: at the default `detailAmp` the procedural grain dominates what the eye
+reads, so the geometry fix lands as a pervasive small change (94.8% of pixels, mean 5.9/255, max 80)
+rather than an obvious one — and the difference is larger at moderate zoom than at extreme zoom
+(at z=8, one cell filling the frame, it falls to mean 1.2/255, max 9).
+
 **`sampleC1` is Catmull-Rom, which is INTERPOLATING** — it reproduces the coarse field exactly at
 coarse nodes (asserted: max |Δ| = 0). So this reconstructs the same surface more faithfully rather
 than replacing it, which is what makes it legal under v2.40's rule. It can overshoot the local cell
