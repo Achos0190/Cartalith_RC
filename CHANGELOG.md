@@ -4,6 +4,94 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.49 (DCC line) — a river's width is its discharge again, and real-km scaling stops giving up at 12 800 km
+
+Owner, on a 40 000 km world: rivers read as uniform lines at every zoom. **Two clamps, stacked**, and
+neither is an LOD problem — no amount of tile refinement can recover width information the generator
+never produced.
+
+`tests/run.sh` 0 failed (1195, +3); `tests/run_um.sh` 852/852; `hash_gen1.js` vs v2.48
+**ALL IDENTICAL** at the app default; `tests/perf/probe_riverwidth.js` 11 assertions, **4 fail on
+v2.48**.
+
+### (1) The real-km family quietly stopped being real-km-aware
+
+`riverWidthScaleK` shared `1/TERRAIN_DETAIL_MAX_K` as its lower bound, so it saturated at
+**mapWidthKm = 12 800**. Measured:
+
+| mapWidthKm | wants | got |
+|---|---|---|
+| 6 400 | 0.1250 | 0.1250 |
+| 12 800 | 0.0625 | 0.0625 |
+| **20 000** | 0.0400 | **0.0625** |
+| **40 000** | 0.0200 | **0.0625** |
+
+An Earth-sized map — this one is 1:1 with Earth's 40 075 km circumference — sat **3.1× beyond the
+point where the function stops responding to real km**, and nothing in the code or the changelog said
+so. **The shared cap is asymmetric in its harm**: on the small-map side it correctly stops a river
+being exaggerated into a band of cells; on the large-map side it holds the channel too WIDE, which is
+the opposite of bounding. `RIVER_WIDTH_MIN_K` is its own constant now, per the family's own stated
+convention that a retune of one sibling must not silently retune the others.
+
+**The floor cannot be zero, and that is the whole reason one exists.** Both stamp loops that consume
+this width divide by it — `buildRiverNetwork`'s `t = 1 - d/halfW` and `enforceChannelDescent`'s
+`t = d/halfW` — so `halfW = 0` yields `0/0` and a NaN that poisons the field. The new floor binds only
+past ~102 400 km, beyond any world this app can express.
+
+### (2) Every river on the planet was exactly one width
+
+`buildRiverNetwork` floors `halfW` at 0.5 cells. With `widthK` stuck at 0.0625, the **largest** value
+the formula can produce — order 6, maximum discharge, maximum `slopeFac` — is **0.3656**. So every
+channel of every order clamped, and `halfw[]` was uniformly 0.5: a **39.06 km band** for the trunk and
+the trickle alike, about four times the Amazon, on every stream in the world.
+
+Measured before and after, same world:
+
+| Strahler order | v2.48 | v2.49 |
+|---|---|---|
+| 1 (17 057 pts) | 39.06 km | **0.079 km** |
+| 2 (7 474) | 39.06 km | **0.158 km** |
+| 3 (702) | 39.06 km | **0.251 km** |
+| 4 (13) | 39.06 km | **0.265 km** |
+| widest single point | 39.06 km | **1.62 km** |
+
+### Why this is safe: the floor is dead weight on the raster
+
+This is what makes it a renderer fix rather than a re-baseline. `r = Math.ceil(halfW)` is **1 for any
+`halfW` in (0,1)**, so the only distances in reach are 0, 1 and √2; only `d = 0` passes the
+`d > halfW` test; and there `t = 1` regardless of `halfW`. Verified by reproducing the loop at
+halfW 0.04 / 0.12 / 0.366 / 0.5 / 0.9 — **one cell, t = 1, every time**. `intensity`, `depth` and
+`omax` cannot tell the two values apart.
+
+So the stamp keeps the floored value and `halfw[]` carries the true width to the only things that
+read it: `drawRiverWays`' v2.25 symbol-to-true-width crossover and `riverFieldTile`'s v2.40 zoom
+resolution — **the two mechanisms built to do exactly what the owner asked for, both of which were
+receiving a constant.**
+
+### Scope of the re-baseline, measured not assumed
+
+`hash_gen1.js` is **ALL IDENTICAL**, because the battery runs at the 800 km default where
+`riverWidthScaleK` returns 1 either way. So **(2) is bit-identical everywhere** and **(1) changes only
+worlds above 12 800 km** — where the function had already stopped serving them.
+
+Above that ceiling `field` does move, and the mechanism is worth recording because a first reading of
+this change got it wrong: the carve's own `halfW` stays sub-cell and its stamp is therefore identical,
+**but v2.30's `carveChannelPath` takes `halfW` and sets its RESAMPLE STEP from it**
+(`step = min(0.5, halfW*0.5)`), which changes the point count and hence
+`{drop: CHANNEL_DROP_PER_CELL*CARVE_GRADIENT_K*path.step}`. A width parameter that also sets a
+sampling rate is not a width parameter only.
+
+### Observed, not changed
+
+`slopeFac = 1/(1+5·|∇|·W)` dominates the final width — on this world it suppresses it by roughly 11×,
+which is why the trunk lands at 1.6 km rather than an Amazon's 5 km. That is physically the right
+direction (mountain streams are narrow, lowland rivers wide) and there is no evidence it is
+mis-calibrated, so it is left alone rather than tuned to make one number look better.
+
+**`orogenyWidthScaleK` shares the same saturating cap** and was not touched here — it is a different
+subsystem with its own calibration (v2.36), and bundling it into a river fix would be exactly the
+silent-retune this version's own constant split exists to prevent.
+
 ## v2.48 (DCC line) — the plate-age distance transform was an octagon
 
 Owner, on a 40 000 km world at deep LOD zoom: **"still unnatural geometric shapes."** It is **not an

@@ -4267,7 +4267,19 @@ if (typeof carveRiverValleys === 'function') {
     check('riverWidthScaleK===1 at the app default mapWidthKm (800) — bit-identical there', riverWidthScaleK(800) === 1);
     check('riverWidthScaleK grows below the default (a fixed real width is a bigger fraction of a smaller map)', riverWidthScaleK(400) > 1 && riverWidthScaleK(100) > riverWidthScaleK(400));
     check('riverWidthScaleK shrinks above the default (unlike terrainDetailK/riverCoarseEase, width eases BOTH ways)', riverWidthScaleK(6400) < 1);
-    check('riverWidthScaleK is capped both ways at TERRAIN_DETAIL_MAX_K', riverWidthScaleK(1e-6) === TERRAIN_DETAIL_MAX_K && riverWidthScaleK(1e9) === 1 / TERRAIN_DETAIL_MAX_K);
+    /* v2.49 replaces v2.07's symmetric cap. The UPPER cap is right and stays: a small map must not
+       exaggerate a river into a band of cells. The LOWER one was asserting the defect — sharing
+       1/TERRAIN_DETAIL_MAX_K made the function stop responding to real km at 12 800 km, so an
+       Earth-sized map got a channel three times wider than its own model asked for. The floor cannot
+       be zero, and that is why one exists at all: both stamp loops that consume this divide by halfW.
+       Gated on the constant so tests/run.sh stays green on older targets; the must-FAIL evidence is
+       in tests/perf/probe_riverwidth.js. */
+    check('riverWidthScaleK is capped ABOVE at TERRAIN_DETAIL_MAX_K (a small map must not exaggerate a river)', riverWidthScaleK(1e-6) === TERRAIN_DETAIL_MAX_K);
+    if (typeof RIVER_WIDTH_MIN_K === 'number') {
+      check('v2.49: width keeps responding to real km past 12 800 km', Math.abs(riverWidthScaleK(40000) - 800 / 40000) < 1e-12);
+      check('v2.49: ...and still has a positive floor, or halfW=0 makes t a NaN', riverWidthScaleK(1e9) === RIVER_WIDTH_MIN_K && RIVER_WIDTH_MIN_K > 0);
+      check('v2.49: the floor binds only past ~100 000 km — beyond any world this app expresses', riverWidthScaleK(40000) > RIVER_WIDTH_MIN_K && riverWidthScaleK(2e5) === RIVER_WIDTH_MIN_K);
+    }
     check('riverWidthScaleK is identical for any tiny-enough mapWidthKm once the cap saturates (1/5/10km all read the same)', riverWidthScaleK(1) === riverWidthScaleK(5) && riverWidthScaleK(5) === riverWidthScaleK(10));
 
     // buildRiverNetwork: the SAME synthetic discharge pattern, only state.mapWidthKm differs — the
