@@ -4,6 +4,93 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.44 (DCC line) — the other four world-construction paths
+
+v2.43 fixed "Extract as new world" and its own note claimed there were three construction paths.
+**There are five** `allocate()` sites: `generate()`, `loadZip()`, `loadImage()`, the region extract and
+`resSeg`/`extentSeg`. This version audits the rest, by measurement.
+
+`tests/run.sh` 0 failed (1180); `hash_gen1.js` vs v2.43 **ALL IDENTICAL**; `tests/perf/probe_worldreset.js`
+21 assertions, **17 fail on v2.43**.
+
+### loadImage() — the same bug, reachable while finalized
+
+`#loadBtn` and `#file` carry no `[data-genlock]`, so Import heightmap works on a finalized world. The
+path reset nothing at all. Measured, importing into a finalized world:
+
+```
+finalized  true      locked 153/153     Layers 8 of 34
+places 1   ways 1    journeys 1         territory, province
+paint 167 936 long against a 163 840-cell world
+undo 2     atlas key stale              flowSum 0
+```
+
+An imported heightmap is a different planet. It may keep none of that.
+
+### One reset, not a copy per call site
+
+Three paths had each grown a partial version and each was missing a different subset.
+`resetNewWorldState({clearCiv})` is the single definition. `generate()` deliberately keeps its own
+inline copy — it is the reference implementation, it runs on the hottest path, and it must **not** call
+`setFinalized(false)`, since its own finalized guard returns before that point by design.
+
+### A resolution change moved everything into the corner, and deleted the roads
+
+Coordinates are in GRID units and nothing rescaled them. Measured on a real 47-settlement world at
+512 → 1024:
+
+| | before | after (v2.43) |
+|---|---|---|
+| settlement, as fraction across the map | 0.688, 0.354 | **0.344, 0.177** |
+| label | 0.25, 0.25 | **0.125, 0.125** |
+| icon | 0.75, 0.50 | **0.375, 0.25** |
+| roads | 90 | **0** |
+
+Owner chose rescale over clearing. The handlers snapshot the vector content before the change, scale
+it **per axis** — an extent switch also changes the aspect (region 1.56:1 vs world 2:1), so a single
+factor would be wrong — and restore it after `generate()` resolves. The remap is exact here, unlike
+the region extract where a crop makes it ambiguous.
+
+Per-cell **rasters** (territory, timeline history, paint) do not survive and are not resampled; that is
+pre-existing (`generate()` drops them) and one button recovers it. Stated rather than left to be found.
+
+### A comment claiming a guard the code has never had
+
+The civ-layer `generate()` wrapper opened with `// Only clear if _imported flag is false (fresh
+procedural world)` and then cleared `civWays`/`civJourneys`/`civTerritory`/`civTimeline`
+**unconditionally** — there is no `if`. That is why a resolution change deleted every road while
+keeping every settlement: an inconsistent half-clear nobody had reason to examine, because the comment
+said otherwise. The v2.37 lesson, again. The clear itself is left alone — for a genuine reseed, roads
+crossing the new geography would be wrong — and the resolution handlers snapshot around it.
+`civProvince` joins it, being derived from the `civTerritory` that line clears.
+
+### Two corrections to this audit's own first reading
+
+- **`loadZip()` is correct and a first pass said otherwise.** The audit showed settlements surviving a
+  load; that was a **poisoned fixture** — `generate()` deliberately keeps settlements, so the "clean"
+  export had already captured the ghost. Re-measured in isolation across four dirty-state variants:
+  places 0, ways 0, every time. What genuinely survives is the sculpt DRAFT stack and `_setupSkipped`
+  — session globals living outside `state`, which no `state` reset or `Object.assign` can reach. Both
+  now cleared; `_setupSkipped` matters because v2.15's contract is "gate hidden ⟺ a world exists", so
+  leaving it true suppresses the `beforeunload` guard and autosave on a world that does exist.
+- **A synthetic fixture hid the worst finding.** Hand-injecting `civWays` and re-reading it after
+  `generate()` showed ways surviving. Building a real world through `_civIterativeAutoWorld` showed
+  all 81 destroyed — the injected array bypassed the block-2 sync that does the destroying. Measure
+  with real data before believing an audit.
+
+### Also fixed
+
+The v2.43 extract left `paintBiome`/`paintTerrain` at the OLD grid size (**167 936 against a 671 744-cell
+world**, so every read past the old length is undefined) and kept the sculpt draft and region marquee;
+the shared reset covers all three. `generate()` clears the stale region marquee (v2.11: a mark belongs
+to the project that made it).
+
+### Known scope cuts
+
+Territory and timeline rasters are not resampled on a resolution change (above). The civ wrapper's
+unconditional clear is documented, not changed — whether a reseed should keep roads is a separate
+design question. `bakeVisibleTiles()`/`bakeAllTiles()` keep the v1.61 per-tile-isolation gap.
+
 ## v2.43 (DCC line) — a new world must not inherit the old world's state
 
 Owner, on a region exported as a new map: *"I can't modify terrain or change generation settings nor do
