@@ -4,6 +4,137 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.40 (DCC line) — refinement adds resolution; it does not invent
+
+Owner, after v2.39 put a stroked line under Tiled LOD: *"I want actual rivers in either mode. This also
+means that the width of a river 'increases' the more we zoom"*, then *"when you zoom in on an object it
+appears bigger right. So a river goes from a line to an actual carved feature as you zoom in from a
+global map down to a scale of meters"*, and the rule that decided the design: **"refining the LOD doesn't
+mean we're making something new, we're adding resolution."**
+
+`hash_gen1.js` vs v2.39 **ALL IDENTICAL** in every scenario — the default per-pixel render path is
+untouched. `tests/run.sh` 0 failed. Verification is `tests/perf/probe_rivertile.js` (21 assertions).
+
+### What was actually wrong
+
+v2.39 established that `renderBiomeTileRGBA` never consults `_riverNet` — `_lodBuildTileRGBA` selects it,
+it calls `landColorCore` DIRECTLY, and `waterShade` (the Beer-Lambert blend) has exactly one call site in
+the whole file, inside `surfaceColor`. Proven byte-identical with the network nulled, FNV 262842011 both
+ways. v2.39 answered that by un-gating `drawLODView`'s vector overlay, which draws a cartographic SYMBOL
+over the finished composite. That restored a visible river; it never put water in the terrain, and a
+symbol cannot get more detailed however far you zoom.
+
+### The design, and why it is allowed
+
+The river's sub-cell truth already exists as DATA. `buildRiverNetwork` stamps
+
+    intensity[j] = amp * (1 - dist/halfW)
+    depth[j]     = d01 * (1 - dist/halfW)
+
+which is a linear falloff from the centreline — a signed distance function that merely happened to be
+evaluated on the coarse grid. `traceRiverPolylines` returns that centreline as continuous geometry and
+`halfw` its real half-width, so the same function evaluates at any resolution. `riverFieldTile(bounds,
+W, H, cx, cy)` stamps each segment's AABB into a max-accumulator in TILE PIXELS and returns `s`/`d` on
+exactly the scale the blend expects. The tile is not guessing what the coarse stamp meant; it
+re-evaluates the function the coarse stamp was a low-resolution sample of.
+
+Bilinearly sampling `intensity[]`/`depth[]` would have been the obvious shortcut and is precisely what
+the owner's own `river-lod-brief.md` forbids — *"Never derive rivers from existing raster imagery"* — and
+it gets blurrier at every level rather than sharper. The same distinction separates this from
+`addZoomDetail`, which synthesizes fractal octaves: correct for generic terrain, where no sub-cell truth
+exists, and incapable of producing a river, because a river is globally connected and not self-similar.
+
+Peak values are read off the CENTRELINE CELL, where `dist=0` so `t=1` — there `intensity[i]` IS `amp`
+and `depth[i]` IS `d01`. Nothing is re-derived and there is no second width model to drift from
+`buildRiverNetwork`'s. Eighth occurrence of this file's "two functions answering one question" shape.
+
+### Resolution vs. invention, measured
+
+One fixed world rect, colorized at five tile resolutions:
+
+| tile | channel area | in world units |
+|---|---|---|
+| 64 px | 121 px² | 79.92 cells² |
+| 128 px | 497 px² | 80.78 cells² |
+| 256 px | 1 934 px² | 77.97 cells² |
+| 512 px | 7 690 px² | 77.20 cells² |
+| 1024 px | 30 898 px² | 77.40 cells² |
+
+Pixel area ×255; world-unit area constant. That constancy IS the proof — a synthesizing pass would
+drift. Pixel area also grows FASTER than resolution (4.02× for a 2× step), which is what distinguishes a
+true-width areal feature from a one-pixel thread.
+
+### Width, and the crossover
+
+`halfW` is in GRID CELLS, so the tile converts once by `1/cx` — the tile pixels per coarse cell
+`renderBiomeTileRGBA` already computes, which doubles every pyramid level. Width therefore grows 1:1
+with zoom with no new law. `RIVER_TILE_MIN_PX = 0.55` is the symbol floor beneath the crossover, applied
+as a `max` so true width wins the instant it is wider — v2.25's `max(symbol, real)` relocated into the
+tile, where it can actually resolve.
+
+The crossover consequently lands at a different pyramid level for every river, which is correct and is
+what production cartography does: openstreetmap-carto selects areal water with `WHERE way_area >
+1*!pixel_width!*!pixel_height!`, deriving the switch from the rendering pixel rather than picking a
+zoom, and its shipped symbol ladder (0.7 px at z8 → 12 px at z18) is `k^0.41` against this file's
+`baseW*sqrt(zoom)` = `k^0.50` — the same family, within 20%. The existing law was not retuned.
+
+The floor does NOT bind where you would first test it: at 64 px over a tenth of the map an order-3 trunk
+is already ~2 px wide. That is the crossover working. The floor is tested where it binds — the whole map
+in one coarse tile, where even the widest channel is sub-pixel and the river would otherwise vanish.
+
+### v2.39's `||` reverts, deliberately
+
+v2.39 widened `drawLODView`'s gate to `riverWays || showRivers`, reasoning that the v1.14 double-draw
+hazard was "a property of the OFF-LOD per-pixel path ONLY" because LOD had no raster copy. True then;
+**false the moment the tile draws**. Leaving it would have created the two-parallel-rivers defect under
+LOD for the first time. So `riverFieldTile`'s gate is `surfaceColor`'s own condition character for
+character, `drawLODView` returns to the plain `riverWays` flag, and the two paths now agree in both
+modes — which is what v2.39's own disclosed scope cut ("the two views render rivers in different
+STYLES") asked for.
+
+### The export path, same root cause
+
+`bakePixel` is river-blind for exactly the same reason, so an exported `map.png` had no river water.
+It is per-PIXEL and has no tile bounds, so the field is evaluated once per bake strip / bake tile in
+`bakeSingle`/`bakeTiled` and blended after `bakePixel` returns, rather than growing a second river
+model. Measured end to end through a real `bakeSingle()` → PNG → `getImageData` round trip: river-vs-land
+blue 21.15 with rivers off → 25.86 on.
+
+That control matters. **An absolute contrast threshold passes on a build that draws no river at all** —
+carved valleys plus `landColorCore`'s TWI wetness term already make channel cells 21.15 bluer than the
+land around them. Every river assertion here is keyed to a delta against the same build's own suppressed
+baseline; the v2.39 probe was first written with an absolute threshold and passed on v2.38.
+
+### Also
+
+- **`applyRiverWater(c, s, d)` is the one blend**, shared by `surfaceColor`, `renderBiomeTileRGBA` and
+  both bake loops. The arithmetic is `surfaceColor`'s, unchanged — the hash battery is ALL IDENTICAL
+  across the move.
+- **`riverLakeSkip()`** was lifted verbatim out of `drawRiverWays` (v1.29 + v2.25's sub-cell correction)
+  so the tile pass and the vector overlay share one definition of "this point is in open water".
+- **`_lodRenderKey()` gained a `state.showRivers` term.** It changes a tile's pixels now, and this file
+  has shipped that exact bug before (v1.28, `_assetGen`). Bake output needs no key — bakes are on demand.
+- **Seam-free by construction.** v1.29's rule is that a per-tile pass with a spatial NEIGHBOURHOOD is a
+  seam unless sampled from a world-wide field. This pass has no neighbourhood: a pixel depends only on
+  its own world position and the world-wide polyline set. Asserted — adjacent tiles agree on their
+  shared column to <0.02.
+
+### Known scope cuts
+
+- `renderHeightTileRGBA` (Relief/Height view) is still river-blind. It is an elevation ramp, not a biome
+  view, so water colour there is a separate design question, not the same bug.
+- The channel is still only as sharp as `field` carries it. `carveRiverValleys`' groove is upsampled by
+  `amplifyRegion` and then roughened by `addZoomDetail`. Re-asserting the carve at tile resolution is the
+  brief's LOD6 "banks and valley" rung and is NOT built here. The piece for it already exists and is
+  pointed at the wrong source: `burnChannels` has the right hydraulic width law (`W ∝ Q^0.5`) and the
+  right quadratic cross-section, but reads bilinearly-interpolated coarse `mag` — raster imagery — and
+  its `widthK` is a radius in TILE PIXELS, collapsing from 6.0 coarse cells at z=0 to 0.023 at z=8, the
+  same scale defect fixed in four other subsystems. Re-pointing it at the polyline plus `halfw` converts
+  an existing pass into that rung rather than adding a new one.
+- No river geometry is persisted. `loadZip()` reads back six entries and rebuilds the network from
+  `flowField`, so the brief's "store all generated outputs / map navigation must not rerun hydrology" is
+  unmet. Reproducible, not stored.
+
 ## v2.39 (DCC line) — the LOD path never calls surfaceColor, so it never had a river
 
 Owner: *"When using LOD tiling the rivers seem to disappear."*

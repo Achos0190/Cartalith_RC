@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.39 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Rivers were invisible under Tiled LOD at defaults. **`surfaceColor` — where the Beer-Lambert river blend lives — is structurally unreachable under LOD**: `_lodBuildTileRGBA` selects `renderBiomeTileRGBA`, which calls `landColorCore` DIRECTLY. Proven, not argued — colorizing one tile with `_riverNet` nulled is byte-identical (FNV `262842011` both ways). So `drawLODView`'s vector overlay is the ONLY river renderer LOD has, and it was gated on `state.viz.riverWays` — which **v2.29 flipped to false**, rightly for the off-LOD report it answered, silently removing LOD's only renderer. Measured: river-vs-land blue contrast **28.27 off-LOD against 10.95 under LOD**, that residual matching the main map with the network nulled (10.96) to 0.01 — the water colour was **100% gone**, only `carveRiverValleys`' groove left. Fix is one gate, widened with `||` so it is a strict SUPERSET. `hash_gen1.js` vs v2.38 ALL IDENTICAL (it never sets `_lodOn`). Verify with `tests/perf/probe_lodrivers.js` (13 assertions; 4 fail on v2.38, by exactly 0.00). |
+| `Cartalith v2.40 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The river is drawn INSIDE the tile now. `waterShade` has exactly one call site (`surfaceColor`), which `renderBiomeTileRGBA` cannot reach — so v2.39 gave LOD a stroked cartographic SYMBOL, not water. `riverFieldTile()` re-evaluates `buildRiverNetwork`'s OWN falloff (`intensity = amp*(1-dist/halfW)`, i.e. a signed distance function that merely happened to be sampled on the coarse grid) from the traced centreline at the TILE's resolution, so refinement **resolves** the river rather than inventing it. Measured: one fixed world rect colorized at 64/128/256/512/1024 px yields 121 -> 30 898 px<sup>2</sup> of channel while its area in WORLD units holds at 77-81 cells<sup>2</sup>. Width grows 1:1 with zoom because `halfW` is in GRID CELLS and the tile converts once by `1/cx`; `RIVER_TILE_MIN_PX` is the symbol floor beneath the crossover, applied as a `max`. **v2.39's `||` REVERTS** — its premise ("LOD has no raster copy, so nothing can double-draw") is false the moment the tile draws. `bakePixel` was blind the same way, so an exported `map.png` carries rivers too. `hash_gen1.js` vs v2.39 ALL IDENTICAL. Verify with `tests/perf/probe_rivertile.js` (21 assertions; 6 fail on v2.39, which then hard-errors on the missing function). |
+| `Cartalith v2.39 DCC test.html` | Previous DCC-line file. Rivers were invisible under Tiled LOD at defaults. **`surfaceColor` — where the Beer-Lambert river blend lives — is structurally unreachable under LOD**: `_lodBuildTileRGBA` selects `renderBiomeTileRGBA`, which calls `landColorCore` DIRECTLY. Proven, not argued — colorizing one tile with `_riverNet` nulled is byte-identical (FNV `262842011` both ways). So `drawLODView`'s vector overlay is the ONLY river renderer LOD has, and it was gated on `state.viz.riverWays` — which **v2.29 flipped to false**, rightly for the off-LOD report it answered, silently removing LOD's only renderer. Measured: river-vs-land blue contrast **28.27 off-LOD against 10.95 under LOD**, that residual matching the main map with the network nulled (10.96) to 0.01 — the water colour was **100% gone**, only `carveRiverValleys`' groove left. Fix is one gate, widened with `||` so it is a strict SUPERSET. `hash_gen1.js` vs v2.38 ALL IDENTICAL (it never sets `_lodOn`). Verify with `tests/perf/probe_lodrivers.js` (13 assertions; 4 fail on v2.38, by exactly 0.00). |
 | `Cartalith v2.38 DCC test.html` | Previous DCC-line file. Auto-populate is a synchronous **11.2 s** main-thread pass and it ran as a bare `onclick=()=>_civAutoWorld()` — no overlay, no disabled button, nothing. So the tab froze in silence and the owner reported it as *"auto populate doesn't seem to work"*: it worked, it just never said so. **`withBusy` had ZERO call sites in the whole of block 2**, though block 1 declares it at top level and the civ layer could always reach it. Wrapped at all three long civ buttons. This does NOT make them quicker, and the profile says why a wrap is the honest fix: **`roadDijkstra` is 77% of the time (8 593 ms, 326 full-grid runs)** across four `_civHierarchicalNetwork` rebuilds, and the routing grid is already capped at 384x192 **regardless of world resolution** — so a 4K world costs the same as a 512 one and the driver is settlement count, not the map. `hash_gen1.js` vs v2.37 ALL IDENTICAL. Verify with `tests/perf/probe_civbusy.js` (11 assertions; 5 fail on v2.37). |
 | `Cartalith v2.37 DCC test.html` | Previous DCC-line file. The carve was laying trenches ACROSS THE ANTIMERIDIAN, below sea level, and they rendered as water — the owner's "near horizontal lines". `carveRiverValleys` consumed a raw wrapped receiver chain; v1.29 exempted it *in a comment* because `enforceChannelDescent` "never interpolates", and **v2.30 destroyed that premise** by inserting `carveChannelPath`, which resamples the seam jump into a dense sweep. The descent ladder then bottoms out at `sea−0.06` for the rest of the traverse. Measured: **28 of 11 802 chains carried 22.7% of the entire carve**, pinning 24 830 cells at the floor in 30 horizontal runs of 100+ cells. Fix is ONE line — the third call site of `splitRiverPolylines`. Channel cells **59 481 → 71 654**: the trenches were drowning real rivers. Also fixes `_suGenCommit` computing `GH` before assigning `state.world`. `hash_gen1.js` vs v2.36 ALL IDENTICAL (region mode cannot wrap). Verify with `tests/perf/probe_seamcarve.js` (8 assertions; 3 fail on v2.36). |
 | `Cartalith v2.36 DCC test.html` | Previous DCC-line file. The collision belt is a STACK of thrust sheets, not one Gaussian ridge: ONE shared long-wavelength bend keeps the sheets parallel while each sheet's deviation is a fraction of SPACING, so a sheet can never close the gap to its neighbour. `orogenyWidthScaleK` gives the belt a fixed REAL width (exactly 1 at the 800 km default, so default terrain is unchanged). Also fixes a **v2.35 defect**: the forward-preferring walk skipped same-group cells, so the pure-loop pass retraced chains — 2.86 points per distinct skeleton cell against v2.34's 1.45, traced length 1.75x the boundary-cell count against the suite's own <2x bound, which v2.35 passed partly by luck. Now 1.23x. Himalaya-width anchoring was built, measured (0.57→0.93 of stations) and **REVERTED** — it draws a 550 km belt against a 161 km margin, aspect 0.29. **Aspect is bound by MARGIN LENGTH, not belt width.** `hash_gen1.js` vs v2.35 ALL IDENTICAL. Verify with `tests/perf/probe_orogeny.js` (12 assertions). |
@@ -1047,6 +1048,62 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Refinement adds resolution; it does not invent (v2.40, DCC-line file only)
+
+Owner: *"a river goes from a line to an actual carved feature as you zoom in from a global map down to a
+scale of meters"*, and the binding rule — *"refining the LOD doesn't mean we're making something new,
+we're adding resolution."* `hash_gen1.js` vs v2.39 ALL IDENTICAL; verification is
+`tests/perf/probe_rivertile.js`.
+
+- **The river's sub-cell truth ALREADY EXISTS AS DATA, and that is what makes this legal.**
+  `buildRiverNetwork` stamps `intensity[j] = amp*(1-dist/halfW)` and `depth[j] = d01*(1-dist/halfW)` —
+  a LINEAR FALLOFF FROM THE CENTRELINE, i.e. a signed distance function that merely happened to be
+  evaluated on the coarse grid. `traceRiverPolylines` returns that centreline as continuous geometry and
+  `halfw` its real half-width, so the identical function evaluates at ANY resolution. The tile is not
+  guessing what the coarse stamp meant; it re-evaluates the function the stamp was a low-resolution
+  SAMPLE of. **Bilinearly sampling `intensity[]`/`depth[]` instead is the trap** — it is the "derive
+  rivers from raster imagery" the owner's `river-lod-brief.md` forbids by name, and it gets blurrier at
+  every level, never sharper.
+- **The peak values are read off the CENTRELINE CELL, where dist=0 so t=1** — there `intensity[i]` IS
+  `amp` and `depth[i]` IS `d01`. No formula is duplicated and there is no second width model to drift
+  from `buildRiverNetwork`'s. Eighth occurrence of the "two functions answering one question" shape.
+- **Measure resolution-vs-invention by holding the WORLD rect fixed and varying tile resolution.** One
+  rect at 64/128/256/512/1024 px: channel area 121 -> 30 898 px<sup>2</sup> while its area in world units
+  holds at 79.9 / 80.8 / 78.0 / 77.2 / 77.4 cells<sup>2</sup>. Constant world area IS the proof; a
+  synthesizing pass would drift.
+- **Width grows 1:1 with zoom for free**, because `halfW` is in GRID CELLS and the tile converts once by
+  `1/cx` — the tile pixels per coarse cell `renderBiomeTileRGBA` already computes, which doubles every
+  pyramid level. The symbol-to-true-scale crossover therefore lands at a DIFFERENT level for every
+  river, which is correct: openstreetmap-carto derives the same crossover from the rendering pixel
+  (`WHERE way_area > 1*!pixel_width!*!pixel_height!`) rather than picking a zoom, and its own ladder is
+  `k^0.41` against this file's `baseW*sqrt(zoom)` = `k^0.50` — same family, within 20%. Do not retune it.
+- **`RIVER_TILE_MIN_PX` does not bind where you would first test it.** At 64 px over a tenth of the map
+  an order-3 trunk is already ~2 px wide — that is the crossover working, not the floor. Test the floor
+  where it binds: the whole map in one coarse tile, where even the widest channel is sub-pixel.
+- **v2.39's `||` REVERTS, and that is the point rather than a regression.** Its note said the v1.14
+  double-draw hazard was "a property of the OFF-LOD per-pixel path ONLY" because LOD had no raster copy.
+  True then; **false the moment the tile draws**. So `riverFieldTile`'s gate is `surfaceColor`'s own
+  condition character for character, `drawLODView` goes back to the plain `riverWays` flag, and the two
+  paths finally agree in both modes — which is what v2.39's disclosed scope cut asked for.
+- **Seam-free by construction, not by luck.** v1.29's rule is that a per-tile pass with a spatial
+  NEIGHBOURHOOD is a seam unless sampled from a world-wide field. This pass has NO neighbourhood: a
+  pixel depends only on its own world position and the world-wide polyline set. Asserted directly —
+  adjacent tiles agree on their shared column to <0.02.
+- **`applyRiverWater` is the one blend**, shared by `surfaceColor`, `renderBiomeTileRGBA` and both bake
+  loops. `bakePixel` is per-PIXEL with no tile bounds, so the bake evaluates the field once per strip or
+  tile and blends after it returns, rather than growing a second river model.
+- **An absolute blue-contrast threshold passes on a build that draws no river.** Carved valleys plus
+  `landColorCore`'s TWI wetness term already make channel cells 21.2 bluer than the land around them in
+  a bake with `showRivers` off. Key every river assertion to a DELTA against the same build's own
+  suppressed baseline — the v2.39 lesson, which cost a probe that passed on v2.38.
+- **Disclosed, not fixed**: `renderHeightTileRGBA` (the Relief/Height view) is still river-blind — it is
+  an elevation ramp, not a biome view, so water colour there is a separate design question. The channel
+  is still only as sharp as `field` carries it: `carveRiverValleys`' groove is upsampled by
+  `amplifyRegion` and then roughened by `addZoomDetail`, and re-asserting the carve at tile resolution
+  (re-pointing `burnChannels` off the polyline instead of bilinear coarse `mag`, whose `widthK` is a
+  radius in TILE PIXELS and so collapses from 6.0 coarse cells at z=0 to 0.023 at z=8) is the LOD6
+  "banks and valley" rung, not built here.
 
 ### The LOD path never calls surfaceColor, so it never had a river (v2.39, DCC-line file only)
 
@@ -4626,6 +4683,7 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_rivertile.js A.html  # v2.40 the river must live IN the tile and RESOLVE with zoom (world-unit area constant across 5 tile resolutions)
 node tests/perf/probe_lodrivers.js A.html  # v2.39 rivers must be visible under Tiled LOD at DEFAULTS (delta vs the build's own overlay-suppressed baseline)
 node tests/perf/probe_civbusy.js A.html    # v2.38 the long civ ops must acknowledge the click (they are not made quicker)
 node tests/perf/probe_seamcarve.js A.html [seed] # v2.37 the carve must not trench across the antimeridian (WORLD mode; seed 21811 wraps, 12345 does not)
