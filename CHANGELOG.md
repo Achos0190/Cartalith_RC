@@ -4,6 +4,116 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.41 (DCC line) — rivers reach the sea, and build land where they arrive
+
+Owner: *"it seems no river deltas are generated."* True, and the cause sat two layers above deltas.
+
+`state.hydro={integrate:false,deltas:false}`, both default off (the `state.passes` convention, v2.17),
+so `hash_gen1.js` vs v2.40 is **ALL IDENTICAL** and `tests/run.sh` reports 0 failed. Verification is
+`tests/perf/probe_deltas.js` (18 assertions; v2.40 hard-errors on the missing state block).
+
+### The defect was upstream of deltas
+
+`computeFlow` accumulated on the RAW `field` with no depression filling, so every local pit terminated
+accumulation. Measured at 512px/seed 12345: **66.5% of land drained into an interior pit.** At 1024px
+the single largest channel cell carried flow 14 072 into a pit ~391 m ABOVE sea level; five of the six
+biggest did the same; the largest flow reaching the sea anywhere was 2 355, six times smaller. The
+drainage was 732 separate basins, median 3 channel cells. Max Strahler order 2-3 world-wide, with **not
+one order-3 outlet across five seed/resolution/extent combinations.**
+
+A delta is a trunk-river landform. There were no trunk rivers.
+
+### Integrated drainage
+
+`buildRoutingSurface` is a Barnes priority-flood with an **epsilon tilt**. The tilt is what makes it a
+routing surface rather than a fill: a plain flood leaves a filled basin perfectly flat, and the receiver
+search needs `drop > 0` strictly, so a flat basin terminates accumulation exactly as the pit did. Each
+cell is raised to `max(own height, neighbour + eps)`.
+
+**It never touches `field`.** The terrain keeps its pits; only routing sees them filled — the standard
+hydrological-correction distinction, and what keeps lakes lakes. A river now flows THROUGH a lake to its
+outflow instead of stopping dead in it.
+
+`buildRiverNetwork` needed the same surface. It builds its OWN receiver tree, still on the raw field, so
+filling `computeFlow` alone moved the accumulation and left the TRACED network unchanged — the two
+describe different objects, which is itself a defect. `opts.routeOn` threads one surface through both.
+`slopeF` deliberately keeps the real gradient: it feeds `channelThreshold`, a statement about ground
+steepness rather than about where water goes. Absent ⇒ `rf === fld` ⇒ bit-identical.
+
+**Measure the terminus, not a flow ratio.** A max-flow-reaching-the-sea ratio reads 28.5% before and
+14.4% after — which looks like a regression and is not. In region mode the largest basin often exits via
+a **map edge**, a perfectly legitimate outlet, so that ratio measures the crop rather than the drainage.
+Walking every land cell's receiver chain to its terminus gives the real answer:
+
+| | pit | sea | edge |
+|---|---|---|---|
+| off | 66.5% | 29.6% | 3.9% |
+| on | **0.0%** | 43.4% | 56.6% |
+
+Outlet Strahler order 2 → 3. Land fraction unchanged to 4 decimal places, confirming `field` is untouched.
+
+### Deltas
+
+Two independent reasons the engine could not build one.
+
+`routeSediment`'s sub-sea branch is `dep = min(load, (sea-h)*0.5)` and each cell is visited exactly once,
+so it can close at most half its own depth — **an asymptote at sea level**. Measured with the real carve
+supply: 45 612 sub-sea cells raised, 53 crossed sea level, and all 53 were `recv<0` sinks pooling, not
+progradation. Progradation across sea level: zero cells.
+
+And the only river-mouth process in the engine runs the wrong way. `coastalPass`'s estuary branch
+SUBTRACTS height where a major river meets the coast — 712 of 720 gate-matching cells lowered, mean
+−3.59 m per pass. That builds an estuary, the opposite landform. It is also default-off, so the shipped
+engine had **no** mouth process at all in either direction. Land fraction in a disc around the 40 biggest
+outlets vs ordinary coast: **+0.113 at r=4** — mouths read as marginally *more* land-enclosed than plain
+coastline. The river simply stopped at the shore.
+
+`opts.prograde` is a per-cell allowance: 1 fills to just above sea level, 0.5 reproduces the old
+asymptote. **Omitted ⇒ the exact former arithmetic**, so `depositSediment()`'s button is bit-identical by
+construction (the v1.98 `edgeCost` discipline), asserted directly.
+
+### Calibration, which is the whole difficulty
+
+Sediment is **over-supplied by roughly 60×**. Median water depth just offshore of the biggest mouths is
+13.9 m; the carve removes 1 133.8 units of column. Routing all of it builds ~11 900 km² of new land —
+about 160 Mississippi deltas. Over-correction is the design problem here, not under-correction.
+
+- `DELTA_DELIVERY_RATIO = 0.10` sits inside the literature's 0.05–0.30 basin sediment-delivery band, and
+  `isostaticRebound` already consumes that same eroded column as broad uplift, so routing 100% would
+  double-count regardless.
+- **The wave term must carry a swell floor.** A naive onshore-wind projection gives **63% of mouths zero
+  wave energy** — on a fixed wind field most of a coastline is a lee shore — which would make 63% of
+  mouths river-dominated, the exact over-correction above. Real oceans receive far-field swell
+  regardless of local wind, so `DELTA_WAVE_SWELL_FLOOR` is the physical term, not a fudge.
+- **The pivot comes from the world's own R distribution, never an absolute cutoff** — the fourth time
+  this file has had to do that (v1.25 sea level, v1.31 density, v1.34 food). `R = Qr/Qs,max` (Nienhuis,
+  Ashton & Giosan, *Geology* 43:511, 2015); the pivot is R at the `DELTA_RIVER_SHARE` quantile, so ~10%
+  of mouths land river-dominated whatever the world's absolute discharge scale. That target is Nienhuis
+  et al. (*Nature* 577:514, 2020), which measured ~80% wave-dominated / 10% tide / 10% river over
+  ~11 000 real deltas.
+
+Measured: 177 mouths, 13 river-dominated (7.3%), 135 new land cells = 330 km², 78%+ of it within 14
+cells of a mouth, 7 distributary branches.
+
+### Distributaries
+
+They ride v2.40's single geometry set. Each branch carries per-vertex width from the same
+Leopold-Maddock `W ∝ Q^0.5` split the engine already uses, so a split channel is correctly narrower than
+its trunk, and they enter `riverRenderPolys` — which means **both the tile renderer and the vector
+overlay draw them with no second code path**, because v2.40 collapsed those into one place.
+
+### Known scope cuts
+
+- The branch **count** is driven by R, but the branch **geometry** is a fan over the real deposited lobe,
+  not Edmonds & Slingerland's (2007) depth-over-bar bifurcation — that needs mouth-bar bathymetry this
+  pass does not compute. Stated, not implied.
+- No tide axis, so Galloway's third leg is absent — `computeTideField` is default-off.
+- `coastalPass`'s wrong-direction estuary branch is left alone, as is its own hardcoded `GW*GH*0.001`
+  gate (2.5× the canonical `riverFlowThresh`) — an eighth instance of "two functions answering one
+  question", in the function a future estuary/delta discriminator would have to touch anyway.
+- Nienhuis's R formula and the 80/10/10 split come from secondary summaries; both primary PDFs were
+  blocked by this environment's egress proxy.
+
 ## v2.40 (DCC line) — refinement adds resolution; it does not invent
 
 Owner, after v2.39 put a stroked line under Tiled LOD: *"I want actual rivers in either mode. This also

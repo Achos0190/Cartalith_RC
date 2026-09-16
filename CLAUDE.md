@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.40 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The river is drawn INSIDE the tile now. `waterShade` has exactly one call site (`surfaceColor`), which `renderBiomeTileRGBA` cannot reach — so v2.39 gave LOD a stroked cartographic SYMBOL, not water. `riverFieldTile()` re-evaluates `buildRiverNetwork`'s OWN falloff (`intensity = amp*(1-dist/halfW)`, i.e. a signed distance function that merely happened to be sampled on the coarse grid) from the traced centreline at the TILE's resolution, so refinement **resolves** the river rather than inventing it. Measured: one fixed world rect colorized at 64/128/256/512/1024 px yields 121 -> 30 898 px<sup>2</sup> of channel while its area in WORLD units holds at 77-81 cells<sup>2</sup>. Width grows 1:1 with zoom because `halfW` is in GRID CELLS and the tile converts once by `1/cx`; `RIVER_TILE_MIN_PX` is the symbol floor beneath the crossover, applied as a `max`. **v2.39's `||` REVERTS** — its premise ("LOD has no raster copy, so nothing can double-draw") is false the moment the tile draws. `bakePixel` was blind the same way, so an exported `map.png` carries rivers too. `hash_gen1.js` vs v2.39 ALL IDENTICAL. Verify with `tests/perf/probe_rivertile.js` (21 assertions; 6 fail on v2.39, which then hard-errors on the missing function). |
+| `Cartalith v2.41 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Rivers reach the sea, and build land where they arrive. Two flags in `state.hydro`, **both default off** (the `state.passes` convention), so `hash_gen1.js` vs v2.40 is ALL IDENTICAL. **`computeFlow` accumulated on the RAW `field` with no depression filling, so every local pit terminated accumulation — measured 66.5% of land draining into an interior pit, the biggest channel cell's receiver a pit ~391 m ABOVE sea level, and not one order-3 outlet across five seed/resolution/extent combinations.** `buildRoutingSurface` is a Barnes priority-flood with an EPSILON TILT (a plain fill leaves a flat basin, and the receiver search needs `drop>0` strictly, so a flat terminates exactly as the pit did); it never touches `field`. Threaded through `buildRiverNetwork` too, because that built its OWN receiver tree on the raw field — so the traced network and the accumulation described different objects. Measured **66.5% pit -> 0.0%**, outlet Strahler 2 -> 3. Deltas: `routeSediment`'s sub-sea branch was an ASYMPTOTE (`(sea-h)*0.5`, one visit per cell, so it could never cross into land), and the only mouth process in the engine (`coastalPass`'s estuary branch) SUBTRACTS height. `opts.prograde` is a per-cell allowance set from `R = Qr/Qs,max` (Nienhuis 2015), pivoted on the world's own R distribution so ~10% of mouths land river-dominated (Nienhuis 2020's 80/10/10). Verify with `tests/perf/probe_deltas.js` (18 assertions; v2.40 hard-errors on the missing state block). |
+| `Cartalith v2.40 DCC test.html` | Previous DCC-line file. The river is drawn INSIDE the tile now. `waterShade` has exactly one call site (`surfaceColor`), which `renderBiomeTileRGBA` cannot reach — so v2.39 gave LOD a stroked cartographic SYMBOL, not water. `riverFieldTile()` re-evaluates `buildRiverNetwork`'s OWN falloff (`intensity = amp*(1-dist/halfW)`, i.e. a signed distance function that merely happened to be sampled on the coarse grid) from the traced centreline at the TILE's resolution, so refinement **resolves** the river rather than inventing it. Measured: one fixed world rect colorized at 64/128/256/512/1024 px yields 121 -> 30 898 px<sup>2</sup> of channel while its area in WORLD units holds at 77-81 cells<sup>2</sup>. Width grows 1:1 with zoom because `halfW` is in GRID CELLS and the tile converts once by `1/cx`; `RIVER_TILE_MIN_PX` is the symbol floor beneath the crossover, applied as a `max`. **v2.39's `||` REVERTS** — its premise ("LOD has no raster copy, so nothing can double-draw") is false the moment the tile draws. `bakePixel` was blind the same way, so an exported `map.png` carries rivers too. `hash_gen1.js` vs v2.39 ALL IDENTICAL. Verify with `tests/perf/probe_rivertile.js` (21 assertions; 6 fail on v2.39, which then hard-errors on the missing function). |
 | `Cartalith v2.39 DCC test.html` | Previous DCC-line file. Rivers were invisible under Tiled LOD at defaults. **`surfaceColor` — where the Beer-Lambert river blend lives — is structurally unreachable under LOD**: `_lodBuildTileRGBA` selects `renderBiomeTileRGBA`, which calls `landColorCore` DIRECTLY. Proven, not argued — colorizing one tile with `_riverNet` nulled is byte-identical (FNV `262842011` both ways). So `drawLODView`'s vector overlay is the ONLY river renderer LOD has, and it was gated on `state.viz.riverWays` — which **v2.29 flipped to false**, rightly for the off-LOD report it answered, silently removing LOD's only renderer. Measured: river-vs-land blue contrast **28.27 off-LOD against 10.95 under LOD**, that residual matching the main map with the network nulled (10.96) to 0.01 — the water colour was **100% gone**, only `carveRiverValleys`' groove left. Fix is one gate, widened with `||` so it is a strict SUPERSET. `hash_gen1.js` vs v2.38 ALL IDENTICAL (it never sets `_lodOn`). Verify with `tests/perf/probe_lodrivers.js` (13 assertions; 4 fail on v2.38, by exactly 0.00). |
 | `Cartalith v2.38 DCC test.html` | Previous DCC-line file. Auto-populate is a synchronous **11.2 s** main-thread pass and it ran as a bare `onclick=()=>_civAutoWorld()` — no overlay, no disabled button, nothing. So the tab froze in silence and the owner reported it as *"auto populate doesn't seem to work"*: it worked, it just never said so. **`withBusy` had ZERO call sites in the whole of block 2**, though block 1 declares it at top level and the civ layer could always reach it. Wrapped at all three long civ buttons. This does NOT make them quicker, and the profile says why a wrap is the honest fix: **`roadDijkstra` is 77% of the time (8 593 ms, 326 full-grid runs)** across four `_civHierarchicalNetwork` rebuilds, and the routing grid is already capped at 384x192 **regardless of world resolution** — so a 4K world costs the same as a 512 one and the driver is settlement count, not the map. `hash_gen1.js` vs v2.37 ALL IDENTICAL. Verify with `tests/perf/probe_civbusy.js` (11 assertions; 5 fail on v2.37). |
 | `Cartalith v2.37 DCC test.html` | Previous DCC-line file. The carve was laying trenches ACROSS THE ANTIMERIDIAN, below sea level, and they rendered as water — the owner's "near horizontal lines". `carveRiverValleys` consumed a raw wrapped receiver chain; v1.29 exempted it *in a comment* because `enforceChannelDescent` "never interpolates", and **v2.30 destroyed that premise** by inserting `carveChannelPath`, which resamples the seam jump into a dense sweep. The descent ladder then bottoms out at `sea−0.06` for the rest of the traverse. Measured: **28 of 11 802 chains carried 22.7% of the entire carve**, pinning 24 830 cells at the floor in 30 horizontal runs of 100+ cells. Fix is ONE line — the third call site of `splitRiverPolylines`. Channel cells **59 481 → 71 654**: the trenches were drowning real rivers. Also fixes `_suGenCommit` computing `GH` before assigning `state.world`. `hash_gen1.js` vs v2.36 ALL IDENTICAL (region mode cannot wrap). Verify with `tests/perf/probe_seamcarve.js` (8 assertions; 3 fail on v2.36). |
@@ -1048,6 +1049,70 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Rivers must reach the sea before they can build anything (v2.41, DCC-line file only)
+
+Owner: *"it seems no river deltas are generated."* True — and the cause sat two layers above deltas.
+`state.hydro={integrate,deltas}`, both default off, so `hash_gen1.js` vs v2.40 is ALL IDENTICAL and
+`tests/run.sh` is untouched. Verification is `tests/perf/probe_deltas.js`.
+
+- **`computeFlow` accumulated on the RAW `field` with no depression filling, so every local pit
+  terminated accumulation.** Measured: **66.5% of land drained into an interior pit**; the single
+  largest channel cell's receiver was a pit ~391 m ABOVE sea level; the largest flow reaching the sea
+  was six times smaller than the largest on land; the drainage was 732 separate basins with a median
+  of 3 channel cells. Max Strahler 2-3 world-wide, and **not one order-3 outlet across five
+  seed/resolution/extent combinations.** A delta is a trunk-river landform and there were no trunk
+  rivers — so "no deltas" was a symptom, and the same defect silently distorts everything keyed on
+  river order (placement, water access, navigability, food-shed mode).
+- **A plain priority-flood is not enough — it needs the EPSILON TILT.** Filling leaves a basin
+  perfectly flat, and the receiver search requires `drop > 0` strictly, so a flat basin terminates
+  accumulation exactly as the pit did. Each cell is raised to `max(own, neighbour + eps)`.
+- **It never touches `field`.** The terrain keeps its pits; only routing sees them filled. That is
+  what keeps lakes lakes — `buildWaterBodies` still classifies from the real surface, and a river now
+  flows THROUGH a lake to its outflow instead of stopping dead in it.
+- **`buildRiverNetwork` builds its OWN receiver tree, and it was still on the raw field.** Filling
+  `computeFlow` alone moved accumulation and left the TRACED network unchanged — the two describe
+  different objects, which is itself the defect. `opts.routeOn` threads one surface through both;
+  `slopeF` deliberately keeps the REAL gradient, because it feeds `channelThreshold`, a statement
+  about ground steepness rather than about where water goes. Absent ⇒ `rf===fld` ⇒ bit-identical.
+- **Measure the terminus, not a flow ratio.** A max-flow-reaching-the-sea ratio reads 28.5% before and
+  14.4% after, which looks like a regression and is not: in region mode the largest basin often exits
+  via a **map edge**, a legitimate outlet, so the ratio measures the crop. Walking every land cell's
+  receiver chain to its terminus gives the real answer — **pit 66.5% -> 0.0%**, sea-draining land
+  x1.47, outlet Strahler 2 -> 3.
+- **`routeSediment` could not build land however much sediment it was given.** Its sub-sea branch is
+  `dep = min(load, (sea-h)*0.5)` and each cell is visited exactly once, so it closes at most half its
+  own depth — an asymptote at sea level. Measured with the real carve supply: 45 612 sub-sea cells
+  raised, 53 crossed sea level, **all 53 of them `recv<0` sinks pooling, not progradation**.
+- **And the one river-mouth process in the engine runs the wrong way.** `coastalPass`'s estuary branch
+  SUBTRACTS height at a major river's mouth (712 of 720 gate-matching cells lowered, mean -3.59 m per
+  pass) — that builds a drowned valley, the opposite landform. It is also default-off, so the shipped
+  engine had **no** mouth process in either direction. Land fraction around the 40 biggest outlets vs
+  ordinary coast: +0.113 at r=4. The river just stopped at the shore.
+- **Sediment is over-supplied ~60x, so the design problem is over-correction.** Routing the carve's
+  whole eroded column builds ~11 900 km2 of new land — about 160 Mississippi deltas.
+  `DELTA_DELIVERY_RATIO=0.10` sits inside the literature's 0.05-0.30 basin delivery-ratio band, and
+  `isostaticRebound` already consumes that same column as uplift, so routing all of it would
+  double-count regardless.
+- **The wave term MUST carry a swell floor.** A naive onshore-wind projection gives **63% of mouths
+  zero wave energy** — on a fixed wind field most coastline is a lee shore — which would make 63% of
+  mouths river-dominated, the exact over-correction above. Real oceans get far-field swell regardless
+  of local wind, so the floor is the physical term, not a fudge.
+- **Pivot on the world's own R distribution, never an absolute cutoff** — the fourth time this file
+  has had to (v1.25 sea level, v1.31 density, v1.34 food). The pivot is the R at the
+  `DELTA_RIVER_SHARE` quantile, so ~10% of mouths land river-dominated whatever the world's discharge
+  scale, matching Nienhuis et al. 2020's measured 80/10/10 over ~11 000 real deltas. Measured here:
+  13 of 177 mouths, 330 km2 of new land, 78%+ of it within 14 cells of a mouth.
+- **`opts.prograde` omitted ⇒ the exact former arithmetic**, so `depositSediment()`'s button is
+  bit-identical by construction (the v1.98 `edgeCost` discipline), asserted directly.
+- **Distributaries ride v2.40's single geometry set.** They carry per-vertex width from the same
+  Leopold-Maddock `W ∝ Q^0.5` split the engine already uses, so they enter `riverRenderPolys` and BOTH
+  the tile renderer and the vector overlay draw them with no second code path.
+- **Disclosed, not implied**: the branch COUNT is driven by R, but the branch GEOMETRY is a fan over
+  the real deposited lobe, not Edmonds & Slingerland's depth-over-bar bifurcation — that needs mouth-bar
+  bathymetry this pass does not compute. No tide axis (Galloway's third leg) — `computeTideField` is
+  default-off. `coastalPass`'s wrong-direction estuary branch and its own hardcoded
+  `GW*GH*0.001` gate (2.5x the canonical `riverFlowThresh`) are left alone.
 
 ### Refinement adds resolution; it does not invent (v2.40, DCC-line file only)
 
@@ -4683,6 +4748,7 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_deltas.js A.html     # v2.41 integrated drainage (pit fraction -> 0) + river deltas (the 80/10/10 split, bounded lobes)
 node tests/perf/probe_rivertile.js A.html  # v2.40 the river must live IN the tile and RESOLVE with zoom (world-unit area constant across 5 tile resolutions)
 node tests/perf/probe_lodrivers.js A.html  # v2.39 rivers must be visible under Tiled LOD at DEFAULTS (delta vs the build's own overlay-suppressed baseline)
 node tests/perf/probe_civbusy.js A.html    # v2.38 the long civ ops must acknowledge the click (they are not made quicker)
