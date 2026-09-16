@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.46 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Owner: *"it seems the button for the asset manager has gone."* It had not — v2.24 filed the Asset Library under "program scope" and moved `#assetsHeaderBtn` into the cog's Settings window, so it was in the DOM, correctly wired, and **never visible**: a real click cannot land on it (`page.click` times out with `element is not visible` on v2.45, which is the report exactly). `_carEnterAssetsMode` already relabels that button `← Map`, adds `.on` and sets `aria-pressed` — it was built for a header slot — so hiding it broke the way IN while leaving the way OUT, and v2.24 added `#assetsBackBtn` to stand in for the half it had hidden: **v1.57's one-control-two-surfaces defect**. The toggle moves back to the header, the stand-in is retired, and the now-empty Settings section becomes the button's own `title`. The cog rule is sound and the Library is simply not program scope — it is a MODE you enter, taking the whole stage. Markup + CSS only; `hash_gen1.js` vs v2.45 ALL IDENTICAL. Verify with `tests/perf/probe_assetsbtn.js` (14 assertions; 8 fail on v2.45). |
+| `Cartalith v2.47 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Owner: *"I want the output at whatever zoom to be most natural looking."* Two defects in the one height path every LOD tile takes. (1) `amplifyRegion`/`addZoomDetail` reconstructed the coarse height **bilinearly**, which is exactly linear inside a coarse cell and kinked across every boundary — and all three tile renderers hillshade from finite differences, so the surface was a mesh of flat facets with a crease between each pair. Measured second difference **3040× higher on a boundary than inside a cell**, the interior reading float noise because bilinear has no curvature there at all; `sampleC1` (Catmull-Rom, **interpolating** — exact at coarse nodes, max |Δ| = 0) takes it to **1.51×**. (2) `fbm` is SIX internal octaves at lacunarity 2, so the ladder added content far above the tile's own sampling rate, where it can only alias and re-randomises whenever the grid moves. `detailBandWeight`/`fbmBand` fade an unresolvable octave toward **its own mean** (Quilez, never toward zero, or the terrain sinks): half-pixel shift stability **−52.8%** on a large world (`detailFreq` 16), and **unchanged at the default**, which is correct — nothing there is unrepresentable. `extra=min(6,z−zBase)` is gone, so the level counter no longer changes a world point's height; v0.126's own assertion held the sampling fixed and raised only z, i.e. it asserted the defect. Seams stay **exactly 0**. `hash_gen1.js` vs v2.46 ALL IDENTICAL. Verify with `tests/perf/probe_lodsurface.js` (12 assertions; 7 fail on v2.46). |
+| `Cartalith v2.46 DCC test.html` | Previous DCC-line file. Owner: *"it seems the button for the asset manager has gone."* It had not — v2.24 filed the Asset Library under "program scope" and moved `#assetsHeaderBtn` into the cog's Settings window, so it was in the DOM, correctly wired, and **never visible**: a real click cannot land on it (`page.click` times out with `element is not visible` on v2.45, which is the report exactly). `_carEnterAssetsMode` already relabels that button `← Map`, adds `.on` and sets `aria-pressed` — it was built for a header slot — so hiding it broke the way IN while leaving the way OUT, and v2.24 added `#assetsBackBtn` to stand in for the half it had hidden: **v1.57's one-control-two-surfaces defect**. The toggle moves back to the header, the stand-in is retired, and the now-empty Settings section becomes the button's own `title`. The cog rule is sound and the Library is simply not program scope — it is a MODE you enter, taking the whole stage. Markup + CSS only; `hash_gen1.js` vs v2.45 ALL IDENTICAL. Verify with `tests/perf/probe_assetsbtn.js` (14 assertions; 8 fail on v2.45). |
 | `Cartalith v2.45 DCC test.html` | Previous DCC-line file. v2.44 rescaled a resolution/extent change's vectors and disclosed the per-cell rasters as a known line. Measuring what that line covered found it wider than stated: 512→1024 took painted territory from **96 659 cells to 0**, both timeline years to **0**, the year cursor 100→0, and faction 1's culture/religion/government/ag-tech from `maritime/sunCult/republic/earlyIndustrial` to **`imperial/none/monarchy/traditionalAgrarian`** — because `_civSyncFromState` rebuilds each of those four **from a default whenever its field is missing** and the civ `generate()` wrapper had just emptied `state.civ`. `civFactionNames` survived only because its line has no `else`, and that asymmetry is what kept the rest invisible; **v1.54 makes `factionAgTech` drive `foodSurplusRatio`**, so the change silently reverted that lever (v1.54 measured the gap at 2.66x). The v1.72 BUG-A shape a third time, so the snapshot no longer names a field list — it captures **the whole of `state.civ`**, i.e. `_civSyncToState`'s own output, plus its own `GW`/`GH` so the restore derives the scale itself. `_rescaleCellPairs` resamples the sparse `[cellIndex, factionId, …]` encoding **INVERSELY** (walk the new grid, read the old cell beneath it) — forward leaves a solid border at quarter density when the grid grows — and **nearest-neighbour is the only correct filter**, since interpolating two faction ids invents a third. Measured: territory 96 659→385 804 cells at an unchanged 0.575 of the map, centroid drift 0.0006; region→world holds the FRACTION while the count falls 95 482→74 525. `hash_gen1.js` vs v2.44 ALL IDENTICAL. Verify with `tests/perf/probe_worldreset.js` (35 assertions; 11 fail on v2.44). |
 | `Cartalith v2.44 DCC test.html` | Previous DCC-line file. v2.43 fixed ONE of five world-construction paths. Audited the rest by measurement: there are **five `allocate()` sites** (`generate()`, `loadZip()`, `loadImage()`, the region extract, `resSeg`/`extentSeg`) — v2.43's note saying three was wrong. **`loadImage()` had the identical defect**: importing a heightmap into a finalized world produced a fresh map that arrived locked (153/153 controls, Layers 8 of 34) — and `#loadBtn` carries no `[data-genlock]`, so it is reachable — while keeping the previous world's settlements, roads, journeys, territory, paint, undo stack and atlas association, with `flowSum 0`. **The resolution buttons were worse**: coordinates are in GRID units and nothing rescaled them, so 512→1024 moved a settlement from 68.8% across the map to 34.4%, **and all 90 roads were destroyed** (the civ `generate()` wrapper clears `civWays`/`civJourneys`/`civTerritory` **unconditionally**, under a comment claiming a `_imported` guard **the code has never had** — the v2.37 expired-comment shape). Owner chose RESCALE: the handlers snapshot before, scale per axis, restore after. Also: the reset is now ONE function (`resetNewWorldState`) instead of a copy per site; `loadZip` clears the sculpt draft + `_setupSkipped` (session globals `Object.assign` can never reach); the extract's paint rasters no longer stay at the OLD grid size (**167 936 against a 671 744-cell world**); `generate()` clears the stale `civProvince` and region marquee. `hash_gen1.js` vs v2.43 ALL IDENTICAL. Verify with `tests/perf/probe_worldreset.js` (21 assertions; 17 fail on v2.43). |
 | `Cartalith v2.43 DCC test.html` | Previous DCC-line file. Owner: an extracted region *"can't modify terrain or change generation settings nor do I have the layers available"*. **Three symptoms, one signature — `state.finalized`** — and "Extract as new world" was the one world-construction path that never cleared it, so a brand-new world INHERITED the parent's finalize lock: **152/153 `[data-genlock]` controls disabled, the Layers popover cut to `LAYER_EXPLORE_SUBSET`'s 8 of 34, `_sculptEditorActive()` false, and `generate()` refusing with a bare `console.warn`** nobody can see. The save then carried `finalized:true`, so reopening it was locked too. The claim is also false on its face — finalized means the baked Atlas covers the whole map, and `worldKey()` had just changed (`af077385 -> c6db7d48`), so `exportZip()`'s `skippedFlatBake=!!state.finalized` wrote **a 15.1 MB zip with no `map.png` and no `tiles/`**. Fixed with the two lines `generate()`/`loadZip()` already use on a worldKey change, plus `clearUndoHistory()` (v2.12's rule — GW/GH just changed) and `computeFlow(true)` (the world had **zero hydrology** until the calibrate gate was committed, `flowSum 0 -> 7 454 176`). Second defect: **`_treeRead` refuses a heightmap-less tree (§6.4) and the FLAT reader did not**, so `region_*.zip` — params.json plus tiles, no heightmap — loaded "successfully" and left `field` as `allocate()` zeroed it (**landFrac 0.74 -> 0, no alert**). `hash_gen1.js` vs v2.42 ALL IDENTICAL. Verify with `tests/perf/probe_regionworld.js` (20 assertions; 12 fail on v2.42). |
@@ -1054,6 +1055,53 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### Refinement reconstructs the surface; it does not facet it (v2.47, DCC-line file only)
+
+Owner: *"I want the output at whatever zoom to be most natural looking."* Two defects in the one
+height path every LOD tile takes. `hash_gen1.js` vs v2.46 ALL IDENTICAL (neither function is
+reachable from the default render); verification is `tests/perf/probe_lodsurface.js` (12 assertions,
+7 of which fail on v2.46) plus 5 headless ones.
+
+- **Bilinear is C⁰ and all three tile renderers DIFFERENTIATE it.** `amplifyRegion`/`addZoomDetail`
+  reconstructed the coarse height bilinearly, which is exactly linear inside a coarse cell and kinked
+  across every boundary — so the surface is a mesh of flat facets with a crease between each pair.
+  Measured second difference: **3040× higher on a boundary than inside a cell**, and the interior
+  reads float noise (7e-17 on the raw array) because bilinear has **no curvature there at all**. That
+  is the "blocky when I zoom" report. `sampleC1` (Catmull-Rom) takes it to **1.51×**.
+- **The filter must be INTERPOLATING, or it stops being reconstruction.** Catmull-Rom reproduces the
+  coarse field exactly at coarse nodes (asserted, max |Δ| = 0), which is what makes this legal under
+  v2.40's rule rather than a different surface. It overshoots the local cell range on 1.0% of samples,
+  worst 1.2e-3 (~6 m at the default 5000 m/unit) — bounded, and the existing `[0,1]` clamp still holds.
+- **`fbm` is SIX internal octaves at lacunarity 2**, so its content reaches 32× its nominal frequency
+  and the ladder multiplies that again. Above the tile's sampling rate it can only alias, and aliased
+  noise **re-randomises when the sampling grid moves** — that is a surface that boils as you pan.
+  `detailBandWeight` fades an octave out approaching two tile pixels; measured half-pixel shift
+  stability on a large world (`detailFreq` 16, v2.05's real-km scaling): **−52.8%**.
+- **Fade an unresolvable octave toward ITS OWN MEAN, never toward zero** (Quilez's band-limiting
+  rule). Toward zero leaves a DC shift and the terrain sinks.
+- **The default world measures UNCHANGED and that is the right answer.** At `detailFreq` 1 nothing in
+  the ladder is above the tile's sampling rate, so there is nothing to remove. The band-limit earns
+  its place on large maps only. Do not read that as a weak result and "strengthen" the cutoff.
+- **The level counter is no longer an input.** `extra = min(6, z-zBase)` made one world point a
+  different height at z=3 and z=5 — adding terms, not resolution. v0.126's own assertion held `W`,
+  `H` and `b` fixed and raised only `z`, i.e. **it asserted the defect**; its replacement asserts the
+  contract and fails on v2.46 both ways — at a fixed sampling the level no longer moves the height,
+  and refining the sampling reveals more (on v2.46 a 4×-finer sampling measures **less**, 5.77e-3 →
+  5.70e-3, because unresolvable noise merely re-randomises).
+- **Seams stay EXACTLY 0** — both samplers are pure functions of the world coordinate reading the full
+  `src`, so `refineTile`'s shared-edge coordinate lands on the identical value from either neighbour.
+  A wider stencil does not change that; blending would have.
+- **The tile worker pool stringifies a NAMED LIST**, so a helper reached from `amplifyRegion` but
+  absent from that list is a `ReferenceError` inside the Worker — which v1.61's per-tile isolation
+  turns into a **silently skipped tile**. `tests/run.sh` exports `ENGINE_SRC_PATH` so the suite can
+  check the list by name, and fails loudly if the harness stops providing it. **Add any new
+  refinement helper to that list in the same edit.**
+- **Scope**: `opts.legacyFilter`/`opts.legacyBands` restore the old arithmetic verbatim (that is how
+  the comparisons are measured inside one build). `ridged` keeps the unbanded path — its octave mean
+  is not 0.5, so fading toward 0.5 would bias it, and `lodTileOpts` never sets it. `burnChannels`,
+  `featureDetailPass` and `tileErode` have their own samplers, all opt-in, untouched. This
+  re-baselines **LOD tiles and baked atlas chunks**, never `field`.
 
 ### A control the cog hides is a control a click cannot reach (v2.46, DCC-line file only)
 
@@ -4916,7 +4964,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1175-assertion suite
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1185-assertion suite (exports ENGINE_SRC_PATH for the v2.47 worker-list check)
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -4938,6 +4986,7 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_lodsurface.js A.html # v2.47 LOD height refinement: the C1 crease test, band-limited detail, seams still exactly 0
 node tests/perf/probe_assetsbtn.js A.html  # v2.46 the Asset Library toggle is a visible, one-click header control (asserts a real click LANDS)
 node tests/perf/probe_worldreset.js A.html  # v2.44/v2.45 all five world-construction paths: no inherited state; a resolution change rescales rather than abandons, rasters and faction metadata included
 node tests/perf/probe_regionworld.js A.html # v2.43 Extract-as-new-world must not inherit `finalized`; the flat reader must refuse a heightmap-less archive

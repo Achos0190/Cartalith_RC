@@ -3192,6 +3192,22 @@ if (typeof buildFjordMask === 'function' && typeof carveFjords === 'function') {
   check('carveFjords deterministic', carved.every((v, i) => v === carved2[i]));
 }
 
+/* ---------- v2.47: the tile worker pool must carry the refinement primitives ----------
+   GENPOOL's tile stage rebuilds its kernel by stringifying a named list of functions. amplifyRegion
+   and addZoomDetail now call sampleC1/fbmBand/detailBandWeight, so a name missing from that list is
+   a ReferenceError INSIDE the worker — and v1.61's per-tile isolation turns that into a silently
+   skipped tile, not an error anyone sees. Assert against the source text, since the pool itself
+   needs a browser. */
+if (typeof sampleC1 === 'function') {   /* v2.47+ only — tests/run.sh must stay green on older targets */
+  const ENGINE_SRC = (() => { try { return require('fs').readFileSync(process.env.ENGINE_SRC_PATH, 'utf8'); }
+                              catch (_) { return null; } })();
+  const m = ENGINE_SRC && ENGINE_SRC.match(/const fns=\[([\s\S]*?)\]\.map\(f=>f\.toString\(\)\)/);
+  check('the engine source is readable and its worker function list was found', !!m);
+  const list = m ? m[1] : '';
+  for (const name of ['sampleC1', 'fbmBand', 'detailBandWeight'])
+    check('tile worker pool stringifies ' + name + ' (or the pooled path throws silently)',
+          new RegExp('\\b' + name + '\\b').test(list));
+}
 /* ---------- v0.126: progressive zoom detail (addZoomDetail) + seam feather ---------- */
 if (typeof addZoomDetail === 'function') {
   const W = 40, H = 30, cW = 20, cH = 15, coarse = new Float32Array(cW * cH);
@@ -3205,7 +3221,31 @@ if (typeof addZoomDetail === 'function') {
   const dev = d => { let s = 0; for (let i = 0; i < d.length; i++) s += Math.abs(d[i] - base[i]); return s; };
   const d5 = mkData(); addZoomDetail(d5, W, H, coarse, cW, cH, b, 5, { seed: 7 });
   const d8 = mkData(); addZoomDetail(d8, W, H, coarse, cW, cH, b, 8, { seed: 7 });
-  check('addZoomDetail: deeper zoom adds MORE detail (' + dev(d5).toFixed(2) + ' → ' + dev(d8).toFixed(2) + ')', dev(d8) > dev(d5) && dev(d5) > 0 && d8.every(Number.isFinite));
+  /* v2.47 replaces v0.126's "a bigger z adds more" with the claim that actually means something.
+     The old check held W, H and b FIXED and raised only z, so it asserted that the level COUNTER
+     changes the answer — the same world point at a different height depending on which level asked,
+     which is what v2.47 fixed. Detail is gated on whether this tile's own sampling rate can carry an
+     octave, so at a fixed sampling the level is no longer an input (first check, and it FAILS on
+     v2.46), and refining the sampling of the same world rect is what reveals more (second). */
+  /* Gated on the v2.47 primitives so tests/run.sh stays green against an older target — the
+     must-FAIL evidence for this contract lives in tests/perf/probe_lodsurface.js, which is where
+     v2.32's rule says a "this build is wrong" assertion belongs. */
+  if (typeof sampleC1 === 'function')
+  check('addZoomDetail: at a fixed sampling the level counter does not change the height',
+        d8.every((v, i) => v === d5[i]) && d8.every(Number.isFinite));
+  const fine = (mult) => { const FW = W * mult, FH = H * mult;
+    const d = new Float32Array(FW * FH);
+    for (let oy = 0; oy < FH; oy++) for (let ox = 0; ox < FW; ox++){
+      const cx = b.x + ox / (FW - 1) * b.w, cy = b.y + oy / (FH - 1) * b.h;
+      d[oy * FW + ox] = 0.6 + 0.08 * Math.sin(cx) + 0.06 * Math.cos(cy); }
+    const flat = Float32Array.from(d);
+    addZoomDetail(d, FW, FH, coarse, cW, cH, b, 8, { seed: 7 });
+    let s = 0; for (let i = 0; i < d.length; i++) s += Math.abs(d[i] - flat[i]);
+    return s / d.length; };
+  const c1 = fine(1), c4 = fine(4);
+  if (typeof sampleC1 === 'function')
+  check('addZoomDetail: refining the SAMPLING of one world rect reveals more detail ('
+        + c1.toExponential(2) + ' → ' + c4.toExponential(2) + ')', c4 > c1 && c1 >= 0);
   const d8b = mkData(); addZoomDetail(d8b, W, H, coarse, cW, cH, b, 8, { seed: 7 });
   check('addZoomDetail deterministic', d8.every((v, i) => v === d8b[i]));
   // seam safety at high z: adjacent same-level pyramid tiles still match exactly (detail in shared coarse coords)

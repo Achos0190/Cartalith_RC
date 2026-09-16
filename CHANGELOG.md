@@ -4,6 +4,96 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.47 (DCC line) — refinement reconstructs the surface, it does not facet it
+
+Owner: **"I want the output at whatever zoom to be most natural looking."** Two defects in the one
+height path every LOD tile takes, both measured on v2.46 before anything was written.
+
+`tests/run.sh` 0 failed (1185, +5); `tests/run_um.sh` 852/852; `hash_gen1.js` vs v2.46
+**ALL IDENTICAL** (neither function is reachable from the default render — LOD is opt-in);
+`tests/perf/probe_lodsurface.js` 12 assertions, **7 fail on v2.46**.
+
+### (a) Bilinear is C⁰, and the renderer differentiates it
+
+`amplifyRegion` and `addZoomDetail` reconstructed the coarse height with a bilinear sampler.
+Bilinear is **exactly linear inside a coarse cell** and kinked across every boundary, and all three
+tile renderers hillshade from finite differences — so they read that kink directly. The surface is a
+mesh of flat facets with a crease between each pair, which is what "blocky when I zoom in" is.
+
+Measured on a real coarse field, second difference along a scanline:
+
+| | on a coarse-cell boundary | inside a cell | ratio |
+|---|---|---|---|
+| bilinear | 4.39e-5 | 1.44e-8 | **3040×** |
+| `sampleC1` | 3.43e-6 | 2.28e-6 | **1.51×** |
+
+The interior figure is the tell: bilinear has **no curvature there at all** (the raw-array version of
+the same measurement reads 7e-17, i.e. float noise), so every bit of shape in the reconstructed
+surface was concentrated into one-pixel creases on a grid.
+
+**`sampleC1` is Catmull-Rom, which is INTERPOLATING** — it reproduces the coarse field exactly at
+coarse nodes (asserted: max |Δ| = 0). So this reconstructs the same surface more faithfully rather
+than replacing it, which is what makes it legal under v2.40's rule. It can overshoot the local cell
+range: measured over 28 224 sample points, **1.0% do, worst 1.2e-3 height units** — about 6 m at the
+default 5000 m/unit, small beside the detail term's own 0.12 amplitude, and the existing `[0,1]`
+clamp still bounds it.
+
+### (b) Do not add what the tile cannot represent
+
+`fbm` is **six internal octaves at lacunarity 2**, so its content reaches 32× its nominal frequency,
+and `addZoomDetail`'s ladder multiplies that again. Content above the tile's own sampling rate cannot
+be terrain — it can only alias, and aliased noise re-randomises whenever the sampling grid moves,
+which is what makes a surface *boil* as you pan rather than sit still.
+
+`detailBandWeight` fades an octave out as its wavelength approaches two tile pixels. `fbmBand` fades
+each octave toward **its own mean**, not toward zero — Quilez's band-limiting rule; fading to zero
+leaves a DC shift and the terrain sinks.
+
+Half-pixel shift stability (lower is better — how much the tile changes for half a pixel of pan):
+
+| | v2.46 | v2.47 | |
+|---|---|---|---|
+| large world, `detailFreq` 16 (v2.05's real-km scaling) | 5.76e-4 | 2.72e-4 | **−52.8%** |
+| default world, `detailFreq` 1 | 9.42e-5 | 9.42e-5 | unchanged |
+
+**The default world is unchanged and that is the correct result, not a weak one**: at `detailFreq` 1
+nothing in the ladder is above the tile's sampling rate, so there is nothing to remove. The
+band-limit earns its place on large maps, where `lodDetailFreqK` raises the frequency and the old
+path turned it straight into static.
+
+### The level counter is no longer an input
+
+`extra = min(6, z - zBase)` made the same world point a different height at z=3 and z=5 — adding
+terms, not adding resolution — and added them whether or not the tile could carry them. The octave
+count is fixed now and each octave is gated on resolvability, so detail emerges on zoom **because it
+becomes resolvable**. That is the same argument v2.40 made for the river.
+
+This replaced v0.126's own assertion, which held `W`, `H` and `b` fixed and raised only `z` — i.e. it
+asserted the defect. Its replacement asserts the real contract, and **both halves fail on v2.46**: at
+a fixed sampling the level no longer changes the height, and refining the sampling of one world rect
+reveals more (on v2.46 sampling 4× finer measures **less** detail, 5.77e-3 → 5.70e-3, because
+unresolvable noise merely re-randomises).
+
+### Two things that had to stay exactly true
+
+- **Seams are still exactly 0.** Both samplers are pure functions of the world coordinate reading the
+  full `src`, so `refineTile`'s shared-edge coordinate lands on the identical value from either
+  neighbour — by construction, not by blending. Asserted at z=4 and z=6, both axes: `0.0e+0`.
+- **The worker pool stringifies a NAMED LIST of functions.** `sampleC1`/`fbmBand`/`detailBandWeight`
+  are reached from `amplifyRegion`, so a name missing from that list is a `ReferenceError` inside the
+  Worker — and v1.61's per-tile isolation turns that into a **silently skipped tile**, not an error
+  anyone sees. `tests/run.sh` now exports the extracted engine source (`ENGINE_SRC_PATH`) so the
+  suite can check the list by name, and fails loudly if the harness ever stops providing it.
+
+### Scope, stated
+
+`opts.legacyFilter` and `opts.legacyBands` restore the previous arithmetic verbatim, which is how the
+comparison above is measured inside one build. `ridged` detail keeps the unbanded path — its octave
+mean is not 0.5, so fading toward 0.5 would bias it, and `lodTileOpts` never sets `opts.ridged`.
+`burnChannels`, `featureDetailPass` and `tileErode` have their own samplers and are untouched; all
+three are opt-in. This is a re-baseline of **LOD tiles and baked atlas chunks**, not of `field` — any
+saved atlas is stale against it.
+
 ## v2.46 (DCC line) — the Asset Library button was in the cog, where a click cannot reach it
 
 Owner: **"it seems the button for the asset manager has gone."** It had not. v2.24 filed the Asset
