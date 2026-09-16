@@ -4,6 +4,38 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.46 (DCC line) — the Asset Library button was in the cog, where a click cannot reach it
+
+Owner: **"it seems the button for the asset manager has gone."** It had not. v2.24 filed the Asset
+Library under "program scope" and moved `#assetsHeaderBtn` into the cog's Settings window — so it
+was in the DOM, correctly wired, and **never visible**: a real click cannot land on it at all
+(Playwright times out against v2.45 with `element is not visible`, which is the report exactly).
+
+Markup and CSS only. `tests/run.sh` 0 failed (1180); `hash_gen1.js` vs v2.45 **ALL IDENTICAL**;
+verification is `tests/perf/probe_assetsbtn.js` (14 assertions, **8 fail on v2.45**).
+
+### One toggle had been split into two half-controls
+
+`_carEnterAssetsMode` already relabels this button `← Map`, adds `.on` and sets `aria-pressed` — it
+was designed as a header toggle and that design is intact. Burying it in the cog broke the way IN
+while leaving the way OUT, so v2.24 added a second button, `#assetsBackBtn`, CSS-gated on
+`body.assets-mode`, to stand in for the half it had hidden. That is **v1.57's one-control-two-surfaces
+defect**: the toggle moves back to the header and the stand-in is retired, so the way in and the way
+out are one button again.
+
+### The Library is the one entry on that list that is a workspace, not a preference
+
+v2.24's rule — *"the cog owns program scope; File owns document scope"* — is sound, and the rest of
+what it moved (GPU, Tiled LOD, Atlas cache, Region export, autosave, 3D view, theme, the
+generation-parameter dump) really are settings. The Asset Library is a **mode you enter**: it takes
+the whole stage, hides the docks and the rail, and replaces the map. A thing you *go to* does not
+belong behind a cog, and nothing else in the app is reached that way.
+
+The now-empty Settings section is removed rather than left as a pointer, and its text becomes the
+button's own `title`. The settings-modal close listener stays (Assets mode takes the whole stage, so
+the cog must not be left open over it) with its comment corrected — it is no longer "launched from"
+that window.
+
 ## v2.45 (DCC line) — the rasters move with the grid too
 
 v2.44 rescaled a resolution/extent change's vectors and disclosed the per-cell rasters as a known
