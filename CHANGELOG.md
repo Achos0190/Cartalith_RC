@@ -4,6 +4,92 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.43 (DCC line) — a new world must not inherit the old world's state
+
+Owner, on a region exported as a new map: *"I can't modify terrain or change generation settings nor do
+I have the layers available."*
+
+Three symptoms, one cause. `tests/run.sh` reports 0 failed (1180 assertions); `hash_gen1.js` vs v2.42 is
+**ALL IDENTICAL**. Verification is `tests/perf/probe_regionworld.js` — 20 assertions, **12 of which fail
+on v2.42**.
+
+### The signature, not the feature
+
+Nothing in the region path sets `state.finalized`, and `setFinalized(true)` has exactly one caller — the
+"Bake ALL levels & finalize world" button. But toggling that flag on an ordinary world reproduces the
+report exactly:
+
+| | normal | `finalized:true` |
+|---|---|---|
+| `[data-genlock]` disabled | 1/153 | **153/153** |
+| Layers popover entries | 34 | **8** (`LAYER_EXPLORE_SUBSET`) |
+| `_sculptEditorActive()` | — | false |
+| `generate()` | runs | `console.warn('generate() blocked: world is finalized')`, silent at the UI |
+
+That is all three reported symptoms. So the question was never "what does region export break" but
+"where did this world get a finalize lock" — and the answer is that it did not get one, it **inherited**
+one.
+
+### Extract as new world was the one path that never cleared it
+
+`generate()` and `loadZip()` both reset world-scoped state. "Extract as new world" is the third
+world-construction site and reset none of it. Measured, extracting from a finalized parent:
+
+```
+parent  finalized=true   GW=512   worldKey af077385   layers 8   locked 153/153
+new     finalized=true   GW=1024  worldKey c6db7d48   layers 8   locked 152/153   flowSum 0
+```
+
+A brand-new world, locked, with no hydrology.
+
+**And a false `finalized` is a claim, not just a lock.** It means "the baked Atlas covers the whole map
+at every level" — but `worldKey()` had just changed, so the parent's atlas covered none of this world.
+`exportZip()` believed it anyway: `skippedFlatBake = !!state.finalized` produced a **15.1 MB zip with no
+`map.png` and no `tiles/`**. The user's save had no picture in it, on a premise that was false the
+moment the world changed.
+
+Four lines, all of them ones this file already uses elsewhere:
+
+- `setFinalized(false)` — a new world is not the old world's frozen atlas.
+- the `worldKey`/atlas-reset block `generate()` and `loadZip()` already share.
+- `clearUndoHistory()` — v2.12's rule; GW/GH just changed, and `field.set()` across that either throws
+  (shrinking) or silently writes the old world into the new one's top-left corner (growing).
+- `computeFlow(true)` — the world had **zero** hydrology until the calibrate gate was committed, yet
+  the handler calls `renderNow()`, so it was presenting a finished world with no rivers and every
+  flow-derived layer empty. `inferTectonics()`'s own v0.70 tail ends `refreshClimate();
+  enforceRiverChannels(); computeFlow(true)` for exactly this reason on the import path. 0 → 7 454 176.
+
+`state.mapWidthKm` moved above that flow pass: `riverFlowThresh()` divides by
+`riverCoarseEase(state.mapWidthKm)` (v1.101), so computing flow while it still held the parent's 800 km
+would size the channel-initiation threshold for the wrong world.
+
+### The flat project reader accepted an archive with no terrain
+
+`_treeRead` has refused a heightmap-less tree since v2.11 — `rasters/heightmap.f32 is missing or the
+wrong length — refusing the archive`, per `SAVEFILE_COMPAT.md` §6.4, and §6.1 makes the heightmap one of
+the **two** entries a conforming archive MUST carry. The flat path had no such check. So a
+`params.json` with no raster loaded "successfully":
+
+```
+before   landFrac 0.74
+after    landFrac 0.00      alert: (none)
+```
+
+An entirely sub-sea-level world, every control still live, nothing said. The confusable archive is this
+app's own: Region export writes `region_<seed>_<n>x<n>_<px>.zip` as params.json plus tiles — by design
+not a project, and nothing stopped you handing it to Load project.
+
+**Ninth occurrence of two readers answering one question with only one of them checking.** The guard is
+the tree reader's own rule applied to the flat path, thrown *before* the state reset so `loadZip`'s
+promise that "whatever was on screen is untouched" survives a refusal — asserted by comparing the field
+sum across one.
+
+### Known scope cuts
+
+The confirm dialog still says "Replace the current world" without mentioning that a finalized parent's
+atlas does not follow; the calibrate gate remains the intended next step rather than being skippable;
+and `bakeVisibleTiles()`/`bakeAllTiles()` keep the v1.61 per-tile-isolation gap, untouched here.
+
 ## v2.42 (DCC line) — the Seasons checkbox opens the blend it enables
 
 Owner: *"make the seasons checkbox turn on the season slider too."* One `if`. The interesting part is
