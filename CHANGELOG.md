@@ -4,6 +4,62 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.42 (DCC line) — the Seasons checkbox opens the blend it enables
+
+Owner: *"make the seasons checkbox turn on the season slider too."* One `if`. The interesting part is
+that this is the **other half of v1.52's link**, and it went unnoticed for ninety versions.
+
+`hash_gen1.js` vs v2.41 is **ALL IDENTICAL**; `tests/run.sh` reports 0 failed (1180 assertions).
+Verification is `tests/perf/probe_seasonlink.js` — 16 assertions, **7 of which fail on v2.41**.
+
+### The same defect, in the other direction
+
+v1.52 fixed the Season (render) slider: it did nothing at shipped defaults because `_seasonK` gates on
+BOTH `state.mode==='biome'` AND `state.climate.seasons`, and that second prerequisite is a checkbox on a
+different tab, defaulting off. The remedy was to make the slider turn its own prerequisite on.
+
+The checkbox had the mirror-image problem and nobody looked. `computeSeasons()` writes only
+`tempJulField`, `tempJanField`, `rainJulField`, `rainJanField` and `koppenField`, and restores the annual
+`rainField` afterwards — v0.93's explicit "the default annual path is untouched" guarantee. So ticking
+"Seasons & Köppen climate" ran the heaviest climate pass in the file and then drew a map identical to the
+one already on screen. The box allocated the data; only the slider could show it.
+
+It surfaced from an unrelated question — a sweep of `state.planet` measured the seasons flag as producing
+numerically identical fields, which is correct behaviour for the annual path and reads as a dead control
+at the UI.
+
+### Proven against the build's own baseline, not a threshold
+
+Render annual → **A**. Tick the box → **B**. Force `state.viz.season = 0` and re-render → **C**.
+
+| | v2.41 | v2.42 |
+|---|---|---|
+| A — annual, seasons off | `3576384877` | `3576384877` |
+| C — annual, seasons **on** | `3576384877` | `3576384877` |
+| B — the ticked render | `3576384877` | `3105258300` |
+
+`A === C` is the defect: computing the seasonal fields changes nothing on screen by itself. `B === A` on
+v2.41 is the control being inert. `B !== A` on v2.42 is the fix. An absolute "the map changed" threshold
+would have passed on the broken build — the v2.39 lesson, applied again.
+
+### It reuses v1.52's rules rather than inventing new ones
+
+- **Only ever ON.** Unticking does not reset the slider. The blend goes inert, `_seasonSliderNote()`
+  reports that in words, and re-ticking restores the user's own value instead of the default.
+- **Only from `annual`.** An existing Jan 40% blend survives a tick untouched.
+- **`SEASON_LINK_DEFAULT = 1.0`** — full July, deliberately. A half-strength blend on a temperate world
+  can still read as "nothing happened", which is precisely the complaint v1.52 answered. It is a render
+  blend, so one drag undoes it.
+- **The map-view half of the gate is NOT forced.** Switching the user's chosen View out from under them
+  is a bigger claim than revealing a render option, and `_seasonSliderNote()` already names that
+  prerequisite. The probe asserts `state.mode` is untouched by the tick.
+
+### Known scope cuts
+
+`SEASON_LINK_DEFAULT` is a reasoned default (most legible), not a calibrated one. The link is one-way per
+control by construction — neither side can ever turn the other off — so there is no state in which the two
+surfaces disagree, but there is also no "restore annual" affordance beyond dragging the slider back.
+
 ## v2.41 (DCC line) — rivers reach the sea, and build land where they arrive
 
 Owner: *"it seems no river deltas are generated."* True, and the cause sat two layers above deltas.
