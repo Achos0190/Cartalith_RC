@@ -3192,6 +3192,55 @@ if (typeof buildFjordMask === 'function' && typeof carveFjords === 'function') {
   check('carveFjords deterministic', carved.every((v, i) => v === carved2[i]));
 }
 
+/* ---------- v2.48: the plate-age distance transform must be EXACT and wrap-aware ----------
+   It was a 3x3 chamfer, whose error is directional: 0% at 0/45/90 degrees and +8.15% between, so its
+   level sets are octagons. That field becomes ageField, which the height formula spends as the NOISE
+   AMPLITUDE (rug = exp(-age*(1+ageInf*6))), so the terrain grew straight-edged facets that could only
+   run at 0/45/90/135. Gated on the function's presence so tests/run.sh stays green on older targets;
+   the must-FAIL evidence lives in tests/perf/probe_platedt.js. */
+if (typeof euclideanDist === 'function') {
+  const W = 65, H = 65, mask = new Uint8Array(W * H);
+  mask[32 * W + 32] = 1;
+  const d = euclideanDist(mask, W, H, false);
+  let worst = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+    worst = Math.max(worst, Math.abs(d[y * W + x] - Math.hypot(x - 32, y - 32)));
+  check('euclideanDist is EXACT against hypot for a single source (max Δ ' + worst.toExponential(1) + ')', worst < 1e-4);
+
+  /* isotropy is the property the chamfer lacked — equal radius in every direction */
+  const R = 24; let mn = Infinity, mx = -Infinity;
+  for (let a = 0; a < 360; a += 3) {
+    const x = Math.round(32 + R * Math.cos(a * Math.PI / 180)), y = Math.round(32 + R * Math.sin(a * Math.PI / 180));
+    const got = d[y * W + x], exact = Math.hypot(x - 32, y - 32);
+    const rel = got / exact; if (rel < mn) mn = rel; if (rel > mx) mx = rel;
+  }
+  check('euclideanDist is ISOTROPIC — no direction is favoured (spread ' + (100 * (mx - mn)).toFixed(3) + '%)', (mx - mn) < 1e-6);
+
+  /* exact against brute force with several scattered sources, which is the real use */
+  const W2 = 48, H2 = 33, m2 = new Uint8Array(W2 * H2);
+  const src = [[3, 4], [40, 7], [20, 28], [45, 30]];
+  for (const [x, y] of src) m2[y * W2 + x] = 1;
+  const d2 = euclideanDist(m2, W2, H2, false);
+  let w2 = 0;
+  for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) {
+    let best = Infinity; for (const [sx, sy] of src) best = Math.min(best, Math.hypot(x - sx, y - sy));
+    w2 = Math.max(w2, Math.abs(d2[y * W2 + x] - best));
+  }
+  check('euclideanDist matches brute force with several sources (max Δ ' + w2.toExponential(1) + ')', w2 < 1e-4);
+
+  /* wrapX: a world map wraps, so the far edge is near. Region mode must NOT wrap. */
+  const W3 = 64, H3 = 8, m3 = new Uint8Array(W3 * H3);
+  for (let y = 0; y < H3; y++) m3[y * W3 + 2] = 1;
+  const flat = euclideanDist(m3, W3, H3, false), wrapped = euclideanDist(m3, W3, H3, true);
+  check('euclideanDist wrapX=false keeps the seam far (' + flat[4 * W3 + W3 - 1].toFixed(0) + ')', Math.abs(flat[4 * W3 + W3 - 1] - (W3 - 3)) < 1e-4);
+  check('euclideanDist wrapX=true takes the short way round (' + wrapped[4 * W3 + W3 - 1].toFixed(0) + ')', Math.abs(wrapped[4 * W3 + W3 - 1] - 3) < 1e-4);
+  check('euclideanDist: a cell ON a source is 0 under both', flat[4 * W3 + 2] === 0 && wrapped[4 * W3 + 2] === 0);
+
+  /* an empty mask must not produce NaN — every consumer divides by the max */
+  const e = euclideanDist(new Uint8Array(16 * 16), 16, 16, false);
+  check('euclideanDist with no sources stays finite and flags unreachable', e.every(v => Number.isFinite(v) && v > 1e8));
+}
+
 /* ---------- v2.47: the tile worker pool must carry the refinement primitives ----------
    GENPOOL's tile stage rebuilds its kernel by stringifying a named list of functions. amplifyRegion
    and addZoomDetail now call sampleC1/fbmBand/detailBandWeight, so a name missing from that list is

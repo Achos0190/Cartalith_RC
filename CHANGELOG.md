@@ -4,6 +4,91 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.48 (DCC line) — the plate-age distance transform was an octagon
+
+Owner, on a 40 000 km world at deep LOD zoom: **"still unnatural geometric shapes."** It is **not an
+LOD defect** — v2.47's C¹ reconstruction cannot touch it, because the straight edges are already in
+the coarse `field`. Measured there first: long perfectly-collinear coastline runs existed, and they
+occurred **only** in the four directions V, H, and both diagonals, never between them. That is the
+signature of a chamfer distance transform.
+
+**This re-baselines every world generated from a seed** (owner's explicit choice). `hash_gen1.js` vs
+v2.47 diverges on `field`/`temp`/`rain`/`flow`/`rgba` in all five scenarios. Saved `.zip` projects
+are unaffected — they carry `heightmap.f32`, so an existing project reopens as the world it was; only
+regenerating from a seed differs. `tests/run.sh` 0 failed (1192, +7); `tests/run_um.sh` 852/852;
+`tests/perf/probe_platedt.js` 8 assertions, **5 fail on v2.47**.
+
+### The error was directional, and the terrain spent it as roughness
+
+`distanceToBoundary()` was a two-pass 3×3 chamfer with weights (1, 1.4142). Measured against true
+Euclidean from a single source cell:
+
+| angle | 0° | 22.5° | 45° | 67.5° | 90° |
+|---|---|---|---|---|---|
+| error | **0.00%** | **+8.15%** | **0.00%** | **+8.15%** | **0.00%** |
+
+Zero at the chamfer's own four directions, worst between them — so its level sets are **octagons with
+flat facets**, not circles. Rendered as banded iso-contours from four point sources, they are
+unmistakable (`docs/images/plate_dt_octagons.png`).
+
+That field is `ageField`, and the height formula spends it as the **noise amplitude**:
+`rug = exp(-age*(1+ageInf*6))`, then `B*N*(0.25+0.75*rug)`. So terrain ROUGHNESS inherited octagonal
+contours and the world grew flat-shaded facets whose edges can only run at 0/45/90/135°. It also
+feeds `resistanceField`, so the same octagons steered erosion.
+
+**Why it shouted on that world and is invisible at the defaults.** Sea level landed at 0.7455, so
+`metersPerUnit = peakM/(1-seaLevel) = 34 770` against the default's 5 000 — every height difference,
+this artefact included, magnified about sevenfold — and at 40 000 km one facet spanning 20 cells is
+**780 km of dead-straight terrain**. The defect was always present; that world's parameters made it
+legible.
+
+### Second defect, same function: no X wrap
+
+In world mode the map wraps, but both chamfer passes stopped at the array edge, so the seam column
+believed it was maximally far from every plate boundary — measured **251 against a true 5**. That one
+column held **63 of the world's 173** straight coastline cells. Region mode must NOT wrap (a region
+has real edges) and still doesn't; the probe asserts both.
+
+### Exact, not merely better
+
+`euclideanDist` is Felzenszwalb & Huttenlocher (2012) — separable, O(n), the same cost class as the
+chamfer, and **exact**, so there is no residual anisotropy left to tune. Anisotropy **8.15% → 0.00%**;
+asserted exact against brute force. `wrapX` runs the row pass over a tripled row and keeps the middle
+third, which is correct because the nearest source in a wrapped row is never more than W away.
+
+`_EDT_INF = 1e18` is squared, and `sqrt(1e18) = 1e9` — which preserves this function's old
+"unreachable" sentinel exactly, so both callers' `dRaw[i] < 1e8` max-finding still works unchanged.
+
+### Measured on the reported world
+
+| | v2.47 | v2.48 |
+|---|---|---|
+| straight coastline cells (run ≥ 8) | 173 of 6857 (2.52%) | 122 of 6960 (**1.75%**) |
+| longest interior straight run | 37 cells (1 444 km) | **19** |
+| straight cells in the seam column | 63 | **18** |
+| straight cells near a plate boundary (r=4) | 9.8% vs 8.0% for ordinary coast | **15.6% vs 7.8%** |
+
+The last row is the one worth reading. Before, straightness was **uncorrelated** with plate
+boundaries — it was the transform's artefact, scattered anywhere. After, what remains is **twice
+as likely** to sit on a real plate boundary, which is the geologically correct place for a straight
+coast: rift margins genuinely are straight.
+
+### Cost, and what is left
+
+The exact transform is ~2× the chamfer at 4K (320 → 660 ms) and runs **once per `generate()`**,
+against a generate measured in seconds — negligible, and stated rather than hidden.
+
+**Not fixed, and worth knowing**: `chamferDist()` (a separate function) and the civ layer's
+`_civCoastDistField`/`_civOceanDistField` are also chamfer transforms with the same 8% anisotropy.
+They feed coast-distance tests and settlement placement, not terrain height, so the artefact is not
+rendered — but the same octagons are in them. Left alone deliberately rather than bundled into a
+terrain fix.
+
+**A reproducibility gap found along the way**: `generationInfoText()`'s dump omits `state.passes`
+(v2.17's erosion passes), so the owner's paste could not reproduce their world exactly — mine came
+out at −25 074 m against their −25 921 m. The button promises "for reproducing this exact world";
+that block belongs in it.
+
 ## v2.47 (DCC line) — refinement reconstructs the surface, it does not facet it
 
 Owner: **"I want the output at whatever zoom to be most natural looking."** Two defects in the one
