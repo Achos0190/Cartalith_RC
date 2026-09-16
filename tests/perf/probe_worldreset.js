@@ -119,6 +119,112 @@ function png(w,h){const raw=Buffer.alloc((w*3+1)*h);
   ck('resolution change: the label stays put', same(rs.before.l[0],rs.after.l[0])&&same(rs.before.l[1],rs.after.l[1]), JSON.stringify(rs.before.l)+' -> '+JSON.stringify(rs.after.l));
   ck('resolution change: the icon stays put', same(rs.before.i[0],rs.after.i[0])&&same(rs.before.i[1],rs.after.i[1]), JSON.stringify(rs.before.i)+' -> '+JSON.stringify(rs.after.i));
 
+  /* ---------- 6. a resolution/extent change carries the per-cell RASTERS too (v2.45) ----------
+     v2.44 rescaled the vectors and let the rasters go, calling it recoverable from "Recalculate
+     Territories". Measured, it was wider than that: 96 659 cells of painted territory and BOTH
+     timeline years went to zero, and every faction's culture/religion/government/ag-tech silently
+     reverted to its default — ag-tech drives foodSurplusRatio since v1.54, so that one moves the
+     model, not just the label. */
+  const rr=await pg.evaluate(async()=>{
+    await window.__fresh(); _civIterativeAutoWorld(2); _civAutoPolity();
+    civFactionCulture[1]='maritime'; civFactionReligion[1]='sunCult';
+    civFactionGovernment[1]='republic'; civFactionAgTech[1]='earlyIndustrial';
+    civAddYear(100); civAddYear(300); civGotoYear(100); _civSyncToState();
+    window.confirm=()=>true;
+    const st=()=>{ const t=civTerritory; let n=0,sx=0,sy=0;
+      if(t) for(let i=0;i<t.length;i++) if(t[i]){ n++; sx+=(i%GW)/GW; sy+=Math.floor(i/GW)/GH; }
+      const tl=civTimeline.map(s=>{ const d=s.territory||s.data||[]; let m=0,c=0;
+        for(let k=0;k<d.length;k+=2){ c++; if(d[k]>m)m=d[k]; }
+        return {year:s.year, cells:c, frac:+(c/(GW*GH)).toFixed(4), maxIdx:m, inRange:m<GW*GH,
+                p0:(s.places&&s.places[0])?[+(s.places[0].x/GW).toFixed(3),+(s.places[0].y/GH).toFixed(3)]:null}; });
+      return {GW, cells:GW*GH, terr:n, frac:+(n/(GW*GH)).toFixed(4),
+              cx:n?+(sx/n).toFixed(4):null, cy:n?+(sy/n).toFixed(4):null, tl,
+              meta:[civFactionCulture[1],civFactionReligion[1],civFactionGovernment[1],civFactionAgTech[1]].join('/'),
+              year:civYear}; };
+    const before=st();
+    const btn=document.querySelector('#resSeg button[data-w="1024"]'); btn.disabled=false; btn.click();
+    await new Promise(r=>setTimeout(r,20000));
+    return {before, after:st()};
+  });
+  ck('raster fixture: the world really has painted territory and two timeline years',
+     rr.before.terr>0 && rr.before.tl.length===2, 'cells='+rr.before.terr+' years='+rr.before.tl.length);
+  ck('resolution change: painted territory survives', rr.after.terr>0, rr.before.terr+' -> '+rr.after.terr);
+  ck('resolution change: territory covers the same share of the map',
+     Math.abs(rr.after.frac-rr.before.frac)<0.01, rr.before.frac+' -> '+rr.after.frac);
+  ck('resolution change: territory is in the same PLACE, not merely the same size',
+     rr.after.cx!=null && Math.abs(rr.after.cx-rr.before.cx)<0.01 && Math.abs(rr.after.cy-rr.before.cy)<0.01,
+     JSON.stringify([rr.before.cx,rr.before.cy])+' -> '+JSON.stringify([rr.after.cx,rr.after.cy]));
+  /* A copied index list would still be in range on a LARGER grid, so range alone proves nothing —
+     the indices must have grown with the grid. Both are asserted. */
+  ck('resolution change: territory indices are re-keyed to the new grid, not copied',
+     rr.after.tl.length===rr.before.tl.length && rr.after.tl.every(e=>e.inRange)
+       && rr.after.tl.every((e,i)=>e.maxIdx>rr.before.tl[i].maxIdx),
+     JSON.stringify(rr.before.tl.map(e=>e.maxIdx))+' -> '+JSON.stringify(rr.after.tl.map(e=>e.maxIdx))+' of '+rr.after.cells);
+  ck('resolution change: every timeline year survives with its own raster',
+     rr.after.tl.length===rr.before.tl.length && rr.after.tl.every(e=>e.cells>0)
+       && rr.after.tl.every((e,i)=>Math.abs(e.frac-rr.before.tl[i].frac)<0.01),
+     JSON.stringify(rr.before.tl.map(e=>e.year+':'+e.cells))+' -> '+JSON.stringify(rr.after.tl.map(e=>e.year+':'+e.cells)));
+  ck('resolution change: a timeline year\'s own settlements stay in the same place',
+     rr.after.tl.length===rr.before.tl.length && rr.after.tl.every((e,i)=>e.p0 && rr.before.tl[i].p0
+       && Math.abs(e.p0[0]-rr.before.tl[i].p0[0])<0.01 && Math.abs(e.p0[1]-rr.before.tl[i].p0[1])<0.01),
+     JSON.stringify(rr.before.tl[0]&&rr.before.tl[0].p0)+' -> '+JSON.stringify(rr.after.tl[0]&&rr.after.tl[0].p0));
+  ck('resolution change: faction culture/religion/government/ag-tech are not reset to defaults',
+     rr.after.meta===rr.before.meta, rr.before.meta+' -> '+rr.after.meta);
+  ck('resolution change: the timeline year cursor survives', rr.after.year===rr.before.year,
+     rr.before.year+' -> '+rr.after.year);
+
+  /* A journey's planned rest days are keyed by _jpStopKey, which embeds the settlement's GRID
+     coordinates — so rescaling the settlement detaches every layover from its stop. The stop is
+     still on the route and the day count is still stored; only the join is gone, which is why it
+     reads as nothing at all rather than as an error. */
+  const lv=await pg.evaluate(async()=>{
+    await window.__fresh(); _civIterativeAutoWorld(2);
+    const w=civWays.find(x=>!x.sea&&x.pts&&x.pts.length>8);
+    if(!w) return {err:'no land way long enough'};
+    const pts=w.pts.map(q=>Array.isArray(q)?[q[0],q[1]]:[q.x,q.y]);
+    const jn={name:'TESTRUN',pts,km:100,layovers:{}}; civJourneys.push(jn);
+    const stops=_civPassedSettlements(pts); if(!stops.length) return {err:'no stops on this way'};
+    jn.layovers[_jpStopKey(stops[0])]=3; _civSyncToState();
+    const probe=()=>{ const j=civJourneys.find(x=>x.name==='TESTRUN'); if(!j) return {gone:true};
+      const keys=_civPassedSettlements(j.pts).map(s=>_jpStopKey(s));
+      const matched=Object.keys(j.layovers||{}).filter(k=>keys.includes(k));
+      return {stops:keys.length, stored:Object.keys(j.layovers||{}).length,
+              matched:matched.length, days:matched.map(k=>j.layovers[k])}; };
+    const before=probe(); window.confirm=()=>true;
+    const btn=document.querySelector('#resSeg button[data-w="1024"]'); btn.disabled=false; btn.click();
+    await new Promise(r=>setTimeout(r,20000));
+    return {before, after:probe()};
+  });
+  ck('layover fixture: a journey really has a rest day attached to a passed settlement',
+     !lv.err && lv.before && lv.before.matched===1 && lv.before.days[0]===3, lv.err||JSON.stringify(lv.before));
+  ck('resolution change: a journey\'s planned rest days stay attached to their stop',
+     !lv.err && lv.after && lv.after.stops>0 && lv.after.matched===lv.before.matched
+       && String(lv.after.days)===String(lv.before.days),
+     lv.err||('stops='+(lv.after&&lv.after.stops)+' stored='+(lv.after&&lv.after.stored)
+              +' matched='+(lv.after&&lv.after.matched)+' days='+(lv.after&&lv.after.days)));
+
+  /* An extent switch also changes the ASPECT, so the cell COUNT must move and the map FRACTION
+     must not — that is what makes per-axis scaling the right treatment rather than one factor. */
+  const rx=await pg.evaluate(async()=>{
+    await window.__fresh(); _civIterativeAutoWorld(2); _civAutoPolity(); _civSyncToState();
+    window.confirm=()=>true;
+    const st=()=>{ const t=civTerritory; let n=0,sx=0,sy=0;
+      if(t) for(let i=0;i<t.length;i++) if(t[i]){ n++; sx+=(i%GW)/GW; sy+=Math.floor(i/GW)/GH; }
+      return {GH, cells:GW*GH, terr:n, frac:+(n/(GW*GH)).toFixed(4),
+              cx:n?+(sx/n).toFixed(4):null, cy:n?+(sy/n).toFixed(4):null}; };
+    const before=st();
+    const btn=document.querySelector('#extentSeg button[data-world="1"]'); btn.disabled=false; btn.click();
+    await new Promise(r=>setTimeout(r,20000));
+    return {before, after:st()};
+  });
+  ck('extent change: the aspect really changed', rx.after.GH!==rx.before.GH, rx.before.GH+' -> '+rx.after.GH);
+  ck('extent change: territory keeps its share of the map across the aspect change',
+     rx.after.terr>0 && Math.abs(rx.after.frac-rx.before.frac)<0.01,
+     rx.before.frac+' ('+rx.before.terr+' cells) -> '+rx.after.frac+' ('+rx.after.terr+' cells)');
+  ck('extent change: territory keeps its fractional position on both axes',
+     rx.after.cx!=null && Math.abs(rx.after.cx-rx.before.cx)<0.01 && Math.abs(rx.after.cy-rx.before.cy)<0.01,
+     JSON.stringify([rx.before.cx,rx.before.cy])+' -> '+JSON.stringify([rx.after.cx,rx.after.cy]));
+
   /* ---------- 5. generate() ---------- */
   const gn=await pg.evaluate(async()=>{ await window.__fresh(); window.__dirty(); state.finalized=false; applyFinalizedUI();
     await generate(); return window.__leaks(); });

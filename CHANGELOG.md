@@ -4,6 +4,102 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.45 (DCC line) — the rasters move with the grid too
+
+v2.44 rescaled a resolution/extent change's vectors and disclosed the per-cell rasters as a known
+line: *"per-cell RASTERS (territory, timeline history, paint) do not and are recovered from
+'Recalculate Territories'."* Owner: **"Now fix the territory and timeline rasters too."** Measuring
+what the disclosure covered found it was wider than stated.
+
+`tests/run.sh` 0 failed (1180); `hash_gen1.js` vs v2.44 **ALL IDENTICAL**;
+`tests/perf/probe_worldreset.js` 35 assertions, **11 of them fail on v2.44**.
+
+### Measured on v2.44, 512 -> 1024 on a real 47-settlement world
+
+| | before | after |
+|---|---|---|
+| painted territory | 96 659 cells (57.6% of the map) | **0** |
+| timeline years | 2, each with its own raster | **0** |
+| faction 1 culture / religion / government / ag-tech | maritime / sunCult / republic / earlyIndustrial | **imperial / none / monarchy / traditionalAgrarian** |
+| timeline year cursor | 100 | **0** |
+
+The faction row is the one that was not disclosed at all, and it is not cosmetic. `_civSyncFromState`
+rebuilds culture, religion, government and ag-tech **from a default whenever its field is missing**,
+and the civ layer's `generate()` wrapper had just emptied `state.civ` — so the four fell back
+silently. `civFactionNames` survived only because its own line is `if(c.factionNames&&...)` with no
+`else`, which is exactly the asymmetry that made the rest invisible. v1.54 makes `factionAgTech`
+drive `foodSurplusRatio`, so a resolution change quietly moved an Early Industrial faction back to
+Traditional Agrarian — and v1.54's own measurement of that gap is 2.66x on a settlement's food shed.
+
+### An explicit field list drops what it does not name — v1.72 BUG-A, third time
+
+v2.44's `worldContentSnapshot()` listed `places`/`labels`/`icons`/`ways`/`journeys`. Everything the
+table above lost is something that list did not mention. The fix is not to lengthen the list: it now
+captures **the whole of `state.civ`**, which is `_civSyncToState`'s own output — the same serializer
+`exportZip` trusts — so a field it gains later rides along for free. The snapshot also carries its
+own `GW`/`GH`, and `restoreWorldContentScaled(snap)` derives the scale factors from them instead of
+being handed `(sx, sy)` by each call site; a restore can no longer be given the wrong scale.
+
+### Resample INVERSELY, or a solid border comes back as a stipple
+
+Territory and every timeline entry's history are sparse `[cellIndex, factionId, ...]` pairs, so each
+index is a statement about the grid that produced it. `_rescaleCellPairs` walks the **new** grid and
+reads the old cell beneath each new one. The forward direction is the trap: at 512 -> 1024 one old
+cell becomes four new ones and a forward map fills one of them, so a solid faction border would come
+back at quarter density.
+
+**Nearest-neighbour is the only correct filter here.** A faction id is a label, not a quantity —
+interpolating between two of them invents a third faction along every border.
+
+A timeline entry is a whole frozen world, not just a raster: its own `places` and `ways` carry grid
+coordinates too, and `_civYearDiff` compares them by `tid` across years, so an entry left at the old
+scale would draw its ghosts in the wrong place. Those are rescaled with the same `_rescalePt` the
+live vectors use.
+
+### Measured on v2.45
+
+| | 512 -> 1024 | 1024 -> 512 | region -> world (aspect 1.56:1 -> 2:1) |
+|---|---|---|---|
+| territory cells | 96 659 -> 385 804 | 348 889 -> 87 262 | 96 659 -> 75 462 |
+| share of the map | 0.5756 -> 0.5752 | 0.5202 -> 0.5196 | 0.5756 -> 0.5757 |
+| centroid drift | 0.0006 | 0.0009 | 0.0004 |
+| timeline years | 2 -> 2, re-keyed | 1 -> 1, re-keyed | — |
+
+The extent row is the one that shows why the scale is applied **per axis**: the grid itself shrinks
+from 167 936 cells to 131 072, so the territory's cell COUNT must fall while its map FRACTION must
+not. Fraction is the invariant that survives a projection change; count is not.
+
+**Range alone does not prove a remap.** A copied index list is still in range on a larger grid, so
+the probe asserts both that every index is in range AND that the maximum grew with the grid
+(167 618 -> 670 085 of 670 720).
+
+### Two more things a rescale moves, found by re-reading the diff rather than by a report
+
+Both are the same shape as the rest — data keyed to the grid — and both were latent on v2.44 only
+because the timeline was destroyed outright there, so nothing could draw from it.
+
+- **`_jpStopKey` embeds the settlement's grid coordinates** (`name|kind|x.toFixed(1),y.toFixed(1)`)
+  and a journey's planned rest days (`jn.layovers`) are keyed by it. Rescaling the settlement
+  therefore detaches every layover from its stop. Measured on v2.44: after 512 -> 1024 the stop is
+  still on the route and the 3 rest days are still stored, and **nothing joins them** — it reads as
+  no layover rather than as an error. The keys are remapped with **the same function that made
+  them**, read either side of each place's own rescale; a second copy of that string format here
+  would be one more pair of functions answering one question.
+- **The year-diff cache holds references to the timeline entries the restore replaces.** It is keyed
+  on `civYear` alone, which is restored to the same value, so it does not self-invalidate — and
+  `drawCivLayer` reads `prevEntry.places[].x` / `prevEntry.ways[].pts` to draw the ghost overlay.
+  `_civSyncFromState` now invalidates it, which fixes the same shape on the `loadZip` path: a project
+  loaded at the same year as the last one could draw the previous project's ghosts.
+
+### Still not carried, and why
+
+The Cartography paint rasters (`paintBiome`/`paintSplat`/`paintTerrain`). `generate()` has dropped
+these since v0.146 under a deliberate decision — a hand-painted terrain override does not survive a
+terrain rebuild — and a resolution change really does rebuild the terrain. Territory is political
+rather than terrain-derived, which is why it is treated differently. `civProvince` is not carried
+either: it is pure-derived from territory and `state.places` (`_civSyncFromState` nulls it on every
+load for that reason), so it regenerates from the restored territory on demand.
+
 ## v2.44 (DCC line) — the other four world-construction paths
 
 v2.43 fixed "Extract as new world" and its own note claimed there were three construction paths.
