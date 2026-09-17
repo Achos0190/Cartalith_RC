@@ -17,6 +17,11 @@ The proposal is a **local contrast stretch**: at deep zoom, map the colour ramp'
 *visible* height range instead of the world's, so a tile spanning a few metres uses the whole ramp
 rather than a sliver of it.
 
+**Follow-up (same day):** *"Then this would also allow for a finer pixel density in the heightmap."*
+It does — and that turns out to be the stronger half of the idea, because the heightmap's **stored**
+precision has a hard floor the colour analysis never reaches. That is §6, and §6.1 shows the two
+cannot be scheduled apart.
+
 That is a real and correctly-identified defect. In `renderBiomeTileRGBA` the height term is
 
 ```js
@@ -52,7 +57,10 @@ cell in the same world:
 A steep tile at z=8 still spans **half the world's height range** and renders **18 991** distinct
 colours with no help at all. Deep zoom is not the variable. **Flatness is.**
 
-## 3. There are TWO causes, and the proposal addresses the second
+## 3. There are THREE floors, and the proposal addresses the second
+
+*(Two were found from the original question; the third — the atlas's height encoding — came out of
+the owner's follow-up and is §6. It is the one that turns out to gate the others.)*
 
 ### 3.1 The data is flat because the gate makes it flat
 
@@ -151,9 +159,59 @@ So the proposal treats the cause that matters *less*. Worse, fixing contrast alo
 3.8 m of nearly-smooth Catmull-Rom interpolation across the full ramp — magnifying the **upsampling
 surface** by 315×. Smooth billowing blobs instead of a flat plate is not obviously an improvement.
 
-**Order the work: data first, contrast second.**
+**Order the work: data first (§7A), storage with or before contrast (§7C), contrast last (§7B).**
+See §6.1 — C is not optional if B ships.
 
-## 6. Cost
+## 6. A third floor: the atlas stores height on a GLOBAL ladder
+
+*(Added after the owner's follow-up: "then this would also allow for a finer pixel density in the
+heightmap." It does, and this is the strongest form of the argument.)*
+
+`packHeight16` is `q = Math.round(v * 65535)` over the **global** `[0,1]`, and `bakeVisibleTiles`
+stores that `rg16` beside the PNG, so a baked chunk's height returns through `unpackHeight16`. The
+step is therefore fixed at **`metersPerUnit / 65535` = 0.1052 m**, however little a tile spans.
+
+Measured against a real `atlasEncodeChunk` → `atlasDecodeChunk` round trip, centre scanline:
+
+| site | z | span (m) | height levels raw → baked | longest flat run raw → baked |
+|---|---|---|---|---|
+| **plain** | 6 | 23.4 | 505 → **113** | 1 → **16 px** |
+| **plain** | 7 | 5.9 | 461 → **33** | 2 → **47 px** |
+| **plain** | 8 | 3.8 | 461 → **27** | 3 → **116 px** |
+| steep | 8 | 2148.5 | 512 → 481 | 1 → 2 px |
+
+**Baking a lowland tile at z=8 destroys 94% of its height levels and turns 3-pixel variation into
+116-pixel terraces.** The steep tile loses essentially nothing. Flatness, once again — and this
+happens at exactly the levels the report names, because the bake depth picker reaches LOD 6.
+
+Per-chunk scale+offset — the ordinary quantised-mesh trick — costs the same 16 bits:
+
+| | step |
+|---|---|
+| 16 bits over the global range | **0.1052 m** |
+| 16 bits over this tile's own 3.8 m | **5.82e-5 m** |
+| | **≈1800× finer, for zero extra storage** |
+
+### 6.1 Which makes the two rebases ONE change, not two
+
+The terracing is invisible today because the colour ramp is coarser than the quantisation — §4's
+2 colours cannot show 27 height levels. Fix the contrast and it stops being masked. Measured, with
+the ramp rebased to the tile's own range:
+
+| | distinct colours / row | longest identical run |
+|---|---|---|
+| raw float32 tile | **233** | **9 px** |
+| after the atlas bake | **27** | **116 px** |
+
+**So a contrast fix applied to baked tiles trades a flat plate for a 116-pixel staircase**, and
+banding is more objectionable than flatness. The height encoding must be rebased **with, or before,**
+the colour — they are not independent options to schedule separately.
+
+Note also what this does *not* touch: the interactive `_lodCache` holds `pyramidTile`'s Float32
+output directly, so an **unbaked** deep zoom never sees this floor. It appears only once a region is
+baked, which is worth knowing when reproducing the report.
+
+## 7. Cost
 
 ### A. Floor the relief gate — small, and the one worth doing first
 
@@ -195,12 +253,29 @@ sampled per pixel.**
   §4 upside preserved.
 - **Estimate: two to three days.**
 
-### C. Do not do
+### C. Per-chunk height scale+offset — small, and it gates B
 
-**Per-tile min/max normalisation**, in any form — 142.4/255 seams, and it re-baselines nothing
-usefully that B does not do without them.
+Store `min`/`span` per atlas chunk and quantise `(v-min)/span` instead of `v`. Touches
+`packHeight16` / `unpackHeight16` / `atlasEncodeChunk` / `atlasDecodeChunk` and the chunk record,
+which gains two floats.
 
-## 7. Stated, not established
+- **Not backward compatible**: existing baked chunks carry no `min`/`span`. Either version the
+  record and treat a missing pair as global (cheap, keeps old atlases readable) or invalidate —
+  `worldKey()` already clears the atlas on a world change, so the blast radius is one flag.
+- `buildTileManifest` already carries a *"height encoding"* field, so the manifest has somewhere to
+  say which scheme a tile uses rather than having it inferred.
+- **Verify:** the §6 table — levels raw vs baked should converge, and the longest flat run stay at
+  1–3 px on a plain.
+- **Estimate: half a day.** And it must ship no later than B, per §6.1.
+
+### D. Do not do
+
+**Per-tile min/max normalisation of the COLOUR ramp**, in any form — 142.4/255 seams, and it
+re-baselines nothing usefully that B does not do without them. Note the asymmetry: per-chunk
+normalisation of the stored HEIGHT (C) is fine, because the chunk carries its own `min`/`span` and
+the decoder reverses it exactly — the value is restored, not re-mapped, so no seam can arise.
+
+## 8. Stated, not established
 
 - **Which view the report came from.** The Height/Relief view measures 1 colour; Biome measures 32.
   The fix ordering above is right either way, but if the owner is in Biome view then A is worth
