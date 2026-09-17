@@ -3147,6 +3147,33 @@ invariants + working rules) and `CHANGELOG.md` (per-version history).
 
 ## Next / open
 
+- **OPEN, deliberate scope cut from v2.34: `buildCartTerrain()` can never emit `'Forest Path'`**, so
+  `_jpDeriveStages` reports flat wooded country as `"Open Plains"` (0.95 — *faster* than Hills) and
+  the Journey Planner's own stage terrain never says "forest". A branch adding it to the cascade was
+  built, measured (it would move 3.5 / 3.4 / 15.9% of land at seeds 12345 / 31337 / 4242) and then
+  **reverted**: `'Forest Path'` is also in `JP_WHEEL_BLOCKED`, so emitting it would hard-block every
+  cart and wagon journey crossing woodland. That set was written to make that claim about a
+  hand-painted NARROW CUT PATH, not about ordinary flat forest — the key is overloaded. Closing this
+  means deciding, as a Journey-Planner question, whether `JP_WHEEL_BLOCKED` should keep `'Forest
+  Path'` once the class also means "wooded ground"; it was not bundled into a routing fix. The
+  ROUTER already prices forest from `JP_TERRAIN.land`'s own `Forest Path` entry (see
+  `_civSurfaceSpeed`), so until this is settled the router knows one thing the Planner does not — a
+  narrow, disclosed asymmetry. **The headless suite's v0.102 `CTerrain: no human-made surfaces
+  auto-generated` assertion is what surfaced it**, and it still guards the reverted state.
+- **OPEN, inherited untouched by v2.34: `buildCartTerrain`'s own calibration.** Its cascade puts
+  Rocky Terrain on 34–50% of land and Hills on 27–32% at the sampled seeds, on a bare `sn>2.5` /
+  `sn>1.0` slope cut. v2.34 made the router read that classification, so any retune now moves road
+  geometry AND Planner stage terrain together — which is the point (one source of truth), but it
+  means a retune is its own pass with its own A/B, not a drive-by.
+- **OPEN, disclosed in v2.32, not fixed: two `tests/test_tail.js` assertions decide on an unpinned
+  ambient seed** — `world seam avg delta < 0.12` and v2.25's `SST anomaly has warm + cold cells`.
+  Both generate on whatever seed several hundred earlier assertions happened to leave behind, and
+  the seam one was seen red once (0.1671) without reproducing. v2.25's own prescription — an
+  aggregate over PINNED seeds — applies to both, as one deliberate pass. **Do not loosen either
+  threshold.** Related: `tests/run.sh`'s assertion TOTAL is not constant (1175 / 1175 / 1174 across
+  three clean runs, zero failures), so at least one `check()` is reached conditionally; quote the
+  suite as "0 failed", not as a count, until that is tracked down.
+
 - **OPEN, considered not done: `tests/perf/smoke_gen1.js`'s full run (700+ assertions) crashes the
   headless Chromium page near its own end in this session's execution environment.** Found while
   verifying v1.100. Reproduced identically against a completely unmodified `Cartalith Gen1

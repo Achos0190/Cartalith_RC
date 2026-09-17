@@ -28,4 +28,7 @@ node --check "$OUT/elev.js"
 echo "== syntax OK"
 
 cat tests/stub_head.js "$OUT/elev.js" tests/test_tail.js > "$OUT/run.js"
-timeout 300 node "$OUT/run.js"
+# v2.47: the tail needs the engine SOURCE (not just its behaviour) to check the worker pool's
+# stringified-function list — a name missing there is a ReferenceError inside a Worker, which
+# v1.61's per-tile isolation turns into a silently skipped tile.
+ENGINE_SRC_PATH="$OUT/elev.js" timeout 300 node "$OUT/run.js"

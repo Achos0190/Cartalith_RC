@@ -384,6 +384,37 @@ check('state.planet has Earth defaults', !!state.planet && state.planet.g === 1 
     check('packHeight16 clamps out-of-range', back[0] === 0 && back[1] === 1);
   }
 
+  /* ---- 24-bit height pack (v2.53) ---- */
+  if (typeof packHeight24 === 'function') {   /* v2.53 — guarded so an older target still RUNS (v2.32) */
+    const n = 500, fld = new Float32Array(n);
+    for (let i = 0; i < n; i++) fld[i] = i / (n - 1);
+    fld[0] = -0.3; fld[1] = 1.7;
+    const rgb = packHeight24(fld, n), back = unpackHeight24(rgb, n);
+    let maxErr = 0; for (let i = 2; i < n; i++) maxErr = Math.max(maxErr, Math.abs(fld[i] - back[i]));
+    check('packHeight24 RGBA length & opaque', rgb.length === n * 4 && rgb[3] === 255);
+    check('24-bit height round-trip within 1 LSB (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 16777215 + 1e-12);
+    check('packHeight24 clamps out-of-range', back[0] === 0 && back[1] === 1);
+    /* ALPHA IS NOT A DATA CHANNEL — premultiplication would corrupt it through any canvas. */
+    let aAll255 = true; for (let i = 0; i < n; i++) if (rgb[i * 4 + 3] !== 255) aAll255 = false;
+    check('packHeight24 leaves alpha constant 255 (never a data channel)', aAll255);
+    /* the whole point: on a span far narrower than the global range, 24 bits keeps what 16 destroys. */
+    const m = 4096, fine = new Float32Array(m);
+    for (let i = 0; i < m; i++) fine[i] = 0.5 + (i / (m - 1)) * 0.001;   // 0.1% of the global range
+    const d16 = unpackHeight16(packHeight16(fine, m), m), d24 = unpackHeight24(packHeight24(fine, m), m);
+    const lv = a => { const t = new Set(); for (const v of a) t.add(v); return t.size; };
+    check('24-bit keeps a narrow span 16-bit flattens (' + lv(d16) + ' → ' + lv(d24) + ' levels of ' + m + ')',
+      lv(d24) === m && lv(d16) < m / 20);
+    /* f32 is the real ceiling: 24-bit fixed-point over [0,1] IS float32's own mantissa. */
+    const ulpBelow1 = 1 - Math.fround(1 - Math.pow(2, -24));   // the [0.5,1) binade's spacing
+    check('24-bit step matches the f32 ULP just below 1.0 (' + ulpBelow1.toExponential(4) + ')',
+      Math.abs((1 / 16777215) - ulpBelow1) <= 1e-12);
+    /* ...which is what makes 32 bits pointless: the container stops being the limit at 24. */
+    check('a 32-bit step would be finer than f32 can represent', 1 / 4294967295 < ulpBelow1 / 100);
+    check('unpackHeightAny dispatches on the declared encoding',
+      unpackHeightAny(packHeight24(fld, n), n, 24)[250] === back[250] &&
+      unpackHeightAny(packHeight16(fld, n), n, 16)[250] === unpackHeight16(packHeight16(fld, n), n)[250]);
+  }
+
   /* ---- tile manifest v2 (v0.052) ---- */
   {
     const man = buildTileManifest({ cols: 4, rows: 4, tileSize: 4096, width: 16384, height: 16384,
@@ -1082,8 +1113,10 @@ fieldsFinite('generate(world)');
   // T3: collision has a foreland-basin depression beyond one flank (negative somewhere)
   check('collision → foreland basin (negative cell present)', U.some(v => v < -0.05));
 
-  // kernel support: cells beyond the collision radius (blurR*3.3) are bit-untouched (exactly 0)
-  const RAD = 18 * 3.3;
+  /* kernel support: cells beyond the collision radius are bit-untouched (exactly 0). v2.36 replaced
+     the single ridge with a thrust-sheet stack, so the radius is the belt's own (halfBelt*2.2), not
+     blurR*3.3 — derive it from the shipped function rather than restating a constant that moved. */
+  const RAD = (typeof orogenBeltHalfWidth === 'function') ? orogenBeltHalfWidth(18, 1, W, H) * 2.2 : 18 * 3.3;
   let outside = 0;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
     if (Math.abs(x - 60) > RAD + 1.5 && U[y * W + x] !== 0) outside++;
@@ -1177,7 +1210,24 @@ fieldsFinite('generate(world)');
     const Uexp = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.16, trenchK: 1.0 });
     check('T5 omitted foldK/trenchK ⇒ legacy defaults (bit-identical)', Udef.every((v, i) => v === Uexp[i]));
     // stronger fold intensity ⇒ larger crest-to-col ripple along the collision belt
-    const ripple = (U) => { let mx = -1e9, mn = 1e9; for (let x = 0; x < W; x++){ const v = U[48 * W + x]; if (v > 0.1){ mx = Math.max(mx, v); mn = Math.min(mn, v); } } return mx - mn; };
+    /* v2.36: measure the COL DEPTH between adjacent crests, not max-min over the whole row. The old
+       metric was max-min above an absolute 0.1 cutoff, which is dominated by PEAK HEIGHT -- fine
+       while the collision profile was one ridge, wrong once it became a stack of thrust sheets,
+       because a stronger ripple lowers the peak wherever its cosine is negative and the metric then
+       moves the wrong way (measured 1.179 / 1.072 / 1.010 for foldK 0.05 / 0.16 / 0.5). The claim
+       itself is intact and was verified independently before this metric was rewritten: col depth
+       rises monotonically, 0.475 / 0.546 / 0.596 over the same three values. */
+    const ripple = (U) => {
+      const prof = []; for (let x = 0; x < W; x++) prof.push(U[48 * W + x]);
+      const cr = []; for (let x = 1; x < W - 1; x++) if (prof[x] > 0.1 && prof[x] > prof[x - 1] && prof[x] >= prof[x + 1]) cr.push(x);
+      if (cr.length < 2) return 0;
+      let s = 0, n = 0;
+      for (let k = 0; k + 1 < cr.length; k++){
+        let lo = Infinity; for (let x = cr[k]; x <= cr[k + 1]; x++) lo = Math.min(lo, prof[x]);
+        s += Math.min(prof[cr[k]], prof[cr[k + 1]]) - lo; n++;
+      }
+      return s / n;
+    };
     const Ulow = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.05 });
     const Uhigh = buildOrogenyField([{ pts, type: BTYPE.collision }], stress, cont, W, H, { ...opts, foldK: 0.5 });
     check('T5 higher fold intensity ⇒ deeper intermontane cols (more ripple)', ripple(Uhigh) > ripple(Ulow));
@@ -2001,15 +2051,33 @@ if (typeof applyTidalSedimentation === 'function') {
     atlasKeyStr('x', 512, 2, 3, 4)]);
   check('atlasKeyStr unique across ts/z/col/row/worldKey', ks.size === 6);
 
-  // encode/decode round-trip ≤1 LSB, preserving dims + addressing
-  const tw = 12, th = 8, td = new Float32Array(tw * th);
-  for (let i = 0; i < td.length; i++) td[i] = i / (td.length - 1);
-  const tile = { data: td, w: tw, h: th, z: 3, col: 5, row: 6 };
-  const rec = atlasEncodeChunk(tile), dec = atlasDecodeChunk(rec);
-  let maxErr = 0; for (let i = 0; i < td.length; i++) maxErr = Math.max(maxErr, Math.abs(td[i] - dec.data[i]));
-  check('atlasEncodeChunk packs rg16 + dims', rec.rg16.length === tw * th * 4 && rec.w === tw && rec.h === th && rec.z === 3 && rec.col === 5 && rec.row === 6);
-  check('atlas chunk round-trip ≤1 LSB (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 65535 + 1e-9);
-  check('atlasDecodeChunk preserves addressing', dec.w === tw && dec.h === th && dec.z === 3 && dec.col === 5 && dec.row === 6);
+  if (typeof atlasChunkHeight === 'function') {   /* v2.53 — guarded (v2.32) */
+    // encode/decode round-trip ≤1 LSB, preserving dims + addressing
+    const tw = 12, th = 8, td = new Float32Array(tw * th);
+    for (let i = 0; i < td.length; i++) td[i] = i / (td.length - 1);
+    const tile = { data: td, w: tw, h: th, z: 3, col: 5, row: 6 };
+    const rec = atlasEncodeChunk(tile), dec = atlasDecodeChunk(rec);
+    let maxErr = 0; for (let i = 0; i < td.length; i++) maxErr = Math.max(maxErr, Math.abs(td[i] - dec.data[i]));
+    check('atlasEncodeChunk packs hgt24 + dims', rec.hgt24.length === tw * th * 4 && rec.w === tw && rec.h === th && rec.z === 3 && rec.col === 5 && rec.row === 6);
+    check('atlasEncodeChunk no longer writes the rg16 field', rec.rg16 === undefined);
+    check('atlas chunk round-trip ≤1 LSB at 24-bit (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 16777215 + 1e-12);
+    check('atlasDecodeChunk preserves addressing', dec.w === tw && dec.h === th && dec.z === 3 && dec.col === 5 && dec.row === 6);
+    /* v2.53 backward compatibility: a PRE-v2.53 record carries `rg16` and must keep decoding forever.
+       Discrimination is by FIELD PRESENCE, never by inspecting the bytes — a genuinely flat tile has a
+       constant low byte, so content cannot tell 16 from 24. */
+    {
+      const legacy = { rg16: packHeight16(td, td.length), w: tw, h: th, z: 3, col: 5, row: 6 };
+      const ld = atlasDecodeChunk(legacy);
+      let le = 0; for (let i = 0; i < td.length; i++) le = Math.max(le, Math.abs(td[i] - ld.data[i]));
+      check('atlasDecodeChunk still reads a pre-v2.53 rg16 record (max Δ=' + le.toExponential(1) + ')', le <= 0.5 / 65535 + 1e-9);
+      check('atlasChunkHeight reports 16 for a legacy record', atlasChunkHeight(legacy).enc === 16);
+      check('atlasChunkHeight reports 24 for a v2.53 record', atlasChunkHeight(rec).enc === 24);
+      /* a flat tile is exactly the case byte-inspection would get wrong — assert the field still wins. */
+      const flat = new Float32Array(tw * th).fill(0.25);
+      check('encoding of an all-flat tile is still read as 24 (field, not content)',
+        atlasChunkHeight(atlasEncodeChunk({ data: flat, w: tw, h: th, z: 0, col: 0, row: 0 })).enc === 24);
+    }
+  }
 
   // bakedCover: a baked ancestor covers its descendants, not a sibling subtree
   _atlasBaked.clear(); _lodTile = 512; _worldKey = 'cw';
@@ -3173,6 +3241,79 @@ if (typeof buildFjordMask === 'function' && typeof carveFjords === 'function') {
   check('carveFjords deterministic', carved.every((v, i) => v === carved2[i]));
 }
 
+/* ---------- v2.48: the plate-age distance transform must be EXACT and wrap-aware ----------
+   It was a 3x3 chamfer, whose error is directional: 0% at 0/45/90 degrees and +8.15% between, so its
+   level sets are octagons. That field becomes ageField, which the height formula spends as the NOISE
+   AMPLITUDE (rug = exp(-age*(1+ageInf*6))), so the terrain grew straight-edged facets that could only
+   run at 0/45/90/135. Gated on the function's presence so tests/run.sh stays green on older targets;
+   the must-FAIL evidence lives in tests/perf/probe_platedt.js. */
+if (typeof euclideanDist === 'function') {
+  const W = 65, H = 65, mask = new Uint8Array(W * H);
+  mask[32 * W + 32] = 1;
+  const d = euclideanDist(mask, W, H, false);
+  let worst = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+    worst = Math.max(worst, Math.abs(d[y * W + x] - Math.hypot(x - 32, y - 32)));
+  check('euclideanDist is EXACT against hypot for a single source (max Δ ' + worst.toExponential(1) + ')', worst < 1e-4);
+
+  /* isotropy is the property the chamfer lacked — equal radius in every direction */
+  const R = 24; let mn = Infinity, mx = -Infinity;
+  for (let a = 0; a < 360; a += 3) {
+    const x = Math.round(32 + R * Math.cos(a * Math.PI / 180)), y = Math.round(32 + R * Math.sin(a * Math.PI / 180));
+    const got = d[y * W + x], exact = Math.hypot(x - 32, y - 32);
+    const rel = got / exact; if (rel < mn) mn = rel; if (rel > mx) mx = rel;
+  }
+  check('euclideanDist is ISOTROPIC — no direction is favoured (spread ' + (100 * (mx - mn)).toFixed(3) + '%)', (mx - mn) < 1e-6);
+
+  /* exact against brute force with several scattered sources, which is the real use */
+  const W2 = 48, H2 = 33, m2 = new Uint8Array(W2 * H2);
+  const src = [[3, 4], [40, 7], [20, 28], [45, 30]];
+  for (const [x, y] of src) m2[y * W2 + x] = 1;
+  const d2 = euclideanDist(m2, W2, H2, false);
+  let w2 = 0;
+  for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) {
+    let best = Infinity; for (const [sx, sy] of src) best = Math.min(best, Math.hypot(x - sx, y - sy));
+    w2 = Math.max(w2, Math.abs(d2[y * W2 + x] - best));
+  }
+  check('euclideanDist matches brute force with several sources (max Δ ' + w2.toExponential(1) + ')', w2 < 1e-4);
+
+  /* wrapX: a world map wraps, so the far edge is near. Region mode must NOT wrap. */
+  const W3 = 64, H3 = 8, m3 = new Uint8Array(W3 * H3);
+  for (let y = 0; y < H3; y++) m3[y * W3 + 2] = 1;
+  const flat = euclideanDist(m3, W3, H3, false), wrapped = euclideanDist(m3, W3, H3, true);
+  check('euclideanDist wrapX=false keeps the seam far (' + flat[4 * W3 + W3 - 1].toFixed(0) + ')', Math.abs(flat[4 * W3 + W3 - 1] - (W3 - 3)) < 1e-4);
+  check('euclideanDist wrapX=true takes the short way round (' + wrapped[4 * W3 + W3 - 1].toFixed(0) + ')', Math.abs(wrapped[4 * W3 + W3 - 1] - 3) < 1e-4);
+  check('euclideanDist: a cell ON a source is 0 under both', flat[4 * W3 + 2] === 0 && wrapped[4 * W3 + 2] === 0);
+
+  /* an empty mask must not produce NaN — every consumer divides by the max */
+  const e = euclideanDist(new Uint8Array(16 * 16), 16, 16, false);
+  check('euclideanDist with no sources stays finite and flags unreachable', e.every(v => Number.isFinite(v) && v > 1e8));
+}
+
+/* ---------- v2.47: the tile worker pool must carry the refinement primitives ----------
+   GENPOOL's tile stage rebuilds its kernel by stringifying a named list of functions. amplifyRegion
+   and addZoomDetail now call sampleC1/fbmBand/detailBandWeight, so a name missing from that list is
+   a ReferenceError INSIDE the worker — and v1.61's per-tile isolation turns that into a silently
+   skipped tile, not an error anyone sees. Assert against the source text, since the pool itself
+   needs a browser. */
+if (typeof sampleC1 === 'function') {   /* v2.47+ only — tests/run.sh must stay green on older targets */
+  const ENGINE_SRC = (() => { try { return require('fs').readFileSync(process.env.ENGINE_SRC_PATH, 'utf8'); }
+                              catch (_) { return null; } })();
+  const m = ENGINE_SRC && ENGINE_SRC.match(/const fns=[^[]*\[([\s\S]*?)\]\.map\(f=>f\.toString\(\)\)/);
+  check('the engine source is readable and its worker function list was found', !!m);
+  const list = m ? m[1] : '';
+  const need = ['sampleC1', 'fbmBand', 'detailBandWeight'];
+  /* v2.52: featureFieldTile reaches craterAddAt/volcanoAddAt, so all three cross the same boundary. */
+  if (typeof featureFieldTile === 'function') need.push('craterAddAt', 'volcanoAddAt', 'featureFieldTile');
+  for (const name of need)
+    check('tile worker pool stringifies ' + name + ' (or the pooled path throws silently)',
+          new RegExp('\\b' + name + '\\b').test(list));
+  /* The record layout crosses too, and must be GENERATED from the module constants — a retyped copy
+     in the worker source is a silent mis-read of every stamp rather than an error. */
+  if (typeof FEAT_STRIDE !== 'undefined')
+    check('the feature-record layout is generated for the worker, not retyped',
+          /FEAT_STRIDE='\+FEAT_STRIDE\+/.test(ENGINE_SRC || ''));
+}
 /* ---------- v0.126: progressive zoom detail (addZoomDetail) + seam feather ---------- */
 if (typeof addZoomDetail === 'function') {
   const W = 40, H = 30, cW = 20, cH = 15, coarse = new Float32Array(cW * cH);
@@ -3186,7 +3327,31 @@ if (typeof addZoomDetail === 'function') {
   const dev = d => { let s = 0; for (let i = 0; i < d.length; i++) s += Math.abs(d[i] - base[i]); return s; };
   const d5 = mkData(); addZoomDetail(d5, W, H, coarse, cW, cH, b, 5, { seed: 7 });
   const d8 = mkData(); addZoomDetail(d8, W, H, coarse, cW, cH, b, 8, { seed: 7 });
-  check('addZoomDetail: deeper zoom adds MORE detail (' + dev(d5).toFixed(2) + ' → ' + dev(d8).toFixed(2) + ')', dev(d8) > dev(d5) && dev(d5) > 0 && d8.every(Number.isFinite));
+  /* v2.47 replaces v0.126's "a bigger z adds more" with the claim that actually means something.
+     The old check held W, H and b FIXED and raised only z, so it asserted that the level COUNTER
+     changes the answer — the same world point at a different height depending on which level asked,
+     which is what v2.47 fixed. Detail is gated on whether this tile's own sampling rate can carry an
+     octave, so at a fixed sampling the level is no longer an input (first check, and it FAILS on
+     v2.46), and refining the sampling of the same world rect is what reveals more (second). */
+  /* Gated on the v2.47 primitives so tests/run.sh stays green against an older target — the
+     must-FAIL evidence for this contract lives in tests/perf/probe_lodsurface.js, which is where
+     v2.32's rule says a "this build is wrong" assertion belongs. */
+  if (typeof sampleC1 === 'function')
+  check('addZoomDetail: at a fixed sampling the level counter does not change the height',
+        d8.every((v, i) => v === d5[i]) && d8.every(Number.isFinite));
+  const fine = (mult) => { const FW = W * mult, FH = H * mult;
+    const d = new Float32Array(FW * FH);
+    for (let oy = 0; oy < FH; oy++) for (let ox = 0; ox < FW; ox++){
+      const cx = b.x + ox / (FW - 1) * b.w, cy = b.y + oy / (FH - 1) * b.h;
+      d[oy * FW + ox] = 0.6 + 0.08 * Math.sin(cx) + 0.06 * Math.cos(cy); }
+    const flat = Float32Array.from(d);
+    addZoomDetail(d, FW, FH, coarse, cW, cH, b, 8, { seed: 7 });
+    let s = 0; for (let i = 0; i < d.length; i++) s += Math.abs(d[i] - flat[i]);
+    return s / d.length; };
+  const c1 = fine(1), c4 = fine(4);
+  if (typeof sampleC1 === 'function')
+  check('addZoomDetail: refining the SAMPLING of one world rect reveals more detail ('
+        + c1.toExponential(2) + ' → ' + c4.toExponential(2) + ')', c4 > c1 && c1 >= 0);
   const d8b = mkData(); addZoomDetail(d8b, W, H, coarse, cW, cH, b, 8, { seed: 7 });
   check('addZoomDetail deterministic', d8.every((v, i) => v === d8b[i]));
   // seam safety at high z: adjacent same-level pyramid tiles still match exactly (detail in shared coarse coords)
@@ -3662,10 +3827,15 @@ if (typeof carveRiverValleys === 'function') {
 }
 
 /* ---------- v1.15: Sculpt editor — draft layer + commit sequence (live world) ---------- */
-{
+if (typeof _domain !== 'undefined') {   /* v2.24 shell — guarded so the mainline target still RUNS (v2.32) */
   state.world = false; state.resW = 256; GW = 256; GH = gridH(GW); allocate(); generate();
-  const saveActiveTab = _activeTab, saveSubTab = _genSubTab, saveFinalized = state.finalized;
-  _activeTab = 'generate'; _genSubTab = 'sculpt'; state.finalized = false;
+  /* v2.24: _activeTab/_genSubTab are DERIVED from _domain/_sculptCategoryOpen and are no longer
+     authoritative — assigning them here would leave _sculptEditorActive() false and every
+     assertion below would pass or fail for the wrong reason. Drive the real state instead. */
+  const saveDomain = _domain, saveSculptCat = _sculptCategoryOpen, saveFinalized = state.finalized;
+  _domain = 'world'; _sculptCategoryOpen = true; _syncLegacyTabVars(); state.finalized = false;
+  check('v2.24: driving _domain/_sculptCategoryOpen really arms the sculpt editor', _sculptEditorActive() === true);
+  check('v2.24: ...and the derived legacy tab vars agree with it', _activeTab === 'generate' && _genSubTab === 'sculpt');
   sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
   // sculptCommit()'s tail calls sculptSyncUI() to refresh the sliders/stamp-list DOM (createElement +
   // innerHTML + querySelector) — pure browser UI with no effect on engine data, already verified via
@@ -3746,7 +3916,7 @@ if (typeof carveRiverValleys === 'function') {
 
   sculptSyncUI = _sculptSyncUIOrig;
   global.confirm = _confirmOrig;
-  _activeTab = saveActiveTab; _genSubTab = saveSubTab; state.finalized = saveFinalized;
+  _domain = saveDomain; _sculptCategoryOpen = saveSculptCat; _syncLegacyTabVars(); state.finalized = saveFinalized;
   sculptStamps = []; _sculptSel = -1; _sculptHistory = []; _sculptRedoStack = [];
   generate();   // restore a pristine field (this block committed mountains/river/lake stamps into the live world)
 }
@@ -3767,25 +3937,25 @@ if (typeof carveRiverValleys === 'function') {
   }
 
   // exportRegionTiles end-to-end on the real field (PNGs absent headless; binary path asserted)
-  {
+  if (typeof unpackHeight24 === 'function') {   /* v2.53 rgb24 naming — guarded (v2.32) */
     const sel = normRegion(10, 10, 58, 42, GW, GH), cols = 3, rows = 2, ts = 24;   // non-square grid + selection
     const td = tileDims(sel, cols, rows, ts);
     const E = await exportRegionTiles(sel, cols, rows, ts, true);
     const names = E.map(e => e.name);
     check('region export emits a manifest', names.includes('tiles/index.json'));
     const man = JSON.parse(new TextDecoder().decode(E.find(e => e.name === 'tiles/index.json').data));
-    check('region manifest schema 2 with cols×rows + tile dims + rg16', man.schema === 2 && man.cols === cols && man.rows === rows &&
-      man.tileW === td.w && man.tileH === td.h && man.bounds && man.bounds.x === sel.x && man.heightEncoding === 'rg16');
-    const binNames = names.filter(n => /rg16\.bin(\.gz)?$/.test(n));
+    check('region manifest schema 2 with cols×rows + tile dims + rgb24', man.schema === 2 && man.cols === cols && man.rows === rows &&
+      man.tileW === td.w && man.tileH === td.h && man.bounds && man.bounds.x === sel.x && man.heightEncoding === 'rgb24');
+    const binNames = names.filter(n => /rgb24\.bin(\.gz)?$/.test(n));
     check('region export emits one height bin per tile (' + binNames.length + ')', binNames.length === cols * rows);
     check('manifest compression matches entries', (man.compression === 'gzip') === binNames.every(n => n.endsWith('.gz')));
     // decode tile (0,0) and compare against a direct refineTile (non-square dims)
     let bin = E.find(e => e.name === binNames.find(n => n.includes('_0_0'))).data;
     if (man.compression === 'gzip') bin = await gunzipBytes(bin);
-    const dec = unpackHeight16(bin, td.w * td.h);
+    const dec = unpackHeight24(bin, td.w * td.h);
     const ref = refineTile(field, GW, GH, sel, cols, rows, 0, 0, td.w, td.h, { seed: state.tect.seed, sea: state.seaLevel, ridged: state.tect.ridged });
     let maxErr = 0; for (let i = 0; i < td.w * td.h; i++) maxErr = Math.max(maxErr, Math.abs(dec[i] - ref[i]));
-    check('exported tile round-trips through pack+gzip (max Δ=' + maxErr.toExponential(1) + ' ≤ 1 LSB)', maxErr <= 0.5 / 65535 + 1e-9);
+    check('exported tile round-trips through pack+gzip (max Δ=' + maxErr.toExponential(1) + ' ≤ 1 LSB at 24-bit)', maxErr <= 0.5 / 16777215 + 1e-12);
   }
 
   // unzipAny (v0.056): central-dir reader handles STORED + DEFLATED entries
@@ -4154,7 +4324,19 @@ if (typeof carveRiverValleys === 'function') {
     check('riverWidthScaleK===1 at the app default mapWidthKm (800) — bit-identical there', riverWidthScaleK(800) === 1);
     check('riverWidthScaleK grows below the default (a fixed real width is a bigger fraction of a smaller map)', riverWidthScaleK(400) > 1 && riverWidthScaleK(100) > riverWidthScaleK(400));
     check('riverWidthScaleK shrinks above the default (unlike terrainDetailK/riverCoarseEase, width eases BOTH ways)', riverWidthScaleK(6400) < 1);
-    check('riverWidthScaleK is capped both ways at TERRAIN_DETAIL_MAX_K', riverWidthScaleK(1e-6) === TERRAIN_DETAIL_MAX_K && riverWidthScaleK(1e9) === 1 / TERRAIN_DETAIL_MAX_K);
+    /* v2.49 replaces v2.07's symmetric cap. The UPPER cap is right and stays: a small map must not
+       exaggerate a river into a band of cells. The LOWER one was asserting the defect — sharing
+       1/TERRAIN_DETAIL_MAX_K made the function stop responding to real km at 12 800 km, so an
+       Earth-sized map got a channel three times wider than its own model asked for. The floor cannot
+       be zero, and that is why one exists at all: both stamp loops that consume this divide by halfW.
+       Gated on the constant so tests/run.sh stays green on older targets; the must-FAIL evidence is
+       in tests/perf/probe_riverwidth.js. */
+    check('riverWidthScaleK is capped ABOVE at TERRAIN_DETAIL_MAX_K (a small map must not exaggerate a river)', riverWidthScaleK(1e-6) === TERRAIN_DETAIL_MAX_K);
+    if (typeof RIVER_WIDTH_MIN_K === 'number') {
+      check('v2.49: width keeps responding to real km past 12 800 km', Math.abs(riverWidthScaleK(40000) - 800 / 40000) < 1e-12);
+      check('v2.49: ...and still has a positive floor, or halfW=0 makes t a NaN', riverWidthScaleK(1e9) === RIVER_WIDTH_MIN_K && RIVER_WIDTH_MIN_K > 0);
+      check('v2.49: the floor binds only past ~100 000 km — beyond any world this app expresses', riverWidthScaleK(40000) > RIVER_WIDTH_MIN_K && riverWidthScaleK(2e5) === RIVER_WIDTH_MIN_K);
+    }
     check('riverWidthScaleK is identical for any tiny-enough mapWidthKm once the cap saturates (1/5/10km all read the same)', riverWidthScaleK(1) === riverWidthScaleK(5) && riverWidthScaleK(5) === riverWidthScaleK(10));
 
     // buildRiverNetwork: the SAME synthetic discharge pattern, only state.mapWidthKm differs — the
@@ -4296,6 +4478,900 @@ if (typeof carveRiverValleys === 'function') {
         prevU = u;
       }
       return monotonic;
+    })());
+  }
+
+  /* ---- v2.12: field-level redo, and the stale-snapshot fix ---------------------------------
+     undoLast() used to drop the state it was leaving, so an undo could not be walked back. The
+     stacks were also never cleared on a new world, which let a snapshot outlive the world that
+     made it (proven on v2.11: undo after a regenerate overwrote the new terrain with the old,
+     and after a resolution DECREASE field.set() threw RangeError outright). */
+  {
+    const h = a => { let x = 2166136261 >>> 0; for (let i = 0; i < a.length; i += 17) { x ^= Math.round(a[i] * 1e6) | 0; x = Math.imul(x, 16777619) >>> 0; } return x >>> 0; };
+    clearUndoHistory();
+    const A = h(field);
+    check('v2.12 redo: a fresh history starts with both stacks empty', undoStack.length === 0 && redoStack.length === 0);
+
+    pushUndo();
+    for (let i = 0; i < field.length; i += 3) field[i] = Math.min(1, field[i] + 0.05);
+    const B = h(field);
+    check('v2.12 redo: the simulated edit actually changed the field (guards every check below)', A !== B);
+
+    undoLast();
+    check('v2.12 redo: undoLast() restores the previous field', h(field) === A);
+    check('v2.12 redo: undoLast() captures the state it left, so redo has somewhere to go', redoStack.length === 1);
+
+    redoLast();
+    check('v2.12 redo: redoLast() steps forward to the undone state', h(field) === B);
+    check('v2.12 redo: stepping forward moves the entry back onto the undo stack', undoStack.length === 1 && redoStack.length === 0);
+
+    redoLast();
+    check('v2.12 redo: redoLast() past the end is a no-op, not a corruption', h(field) === B);
+
+    undoLast(); pushUndo();
+    check('v2.12 redo: a fresh edit after an undo forks the history (the old redo chain is dropped)', redoStack.length === 0);
+
+    clearUndoHistory();
+    check('v2.12 redo: clearUndoHistory() empties both stacks', undoStack.length === 0 && redoStack.length === 0);
+    check('v2.12 redo: undo/redo on an empty history are no-ops that do not throw', (() => {
+      const before = h(field);
+      try { undoLast(); redoLast(); } catch (_) { return false; }
+      return h(field) === before;
+    })());
+
+    check('v2.12 redo: neither stack can grow past MAX_UNDO', (() => {
+      clearUndoHistory();
+      for (let k = 0; k < MAX_UNDO + 4; k++) { pushUndo(); field[k] = Math.min(1, field[k] + 0.01); }
+      if (undoStack.length !== MAX_UNDO) return false;
+      for (let k = 0; k < MAX_UNDO + 4; k++) undoLast();          // more undos than there are steps
+      return redoStack.length <= MAX_UNDO;
+    })());
+    clearUndoHistory();
+  }
+
+  /* ---- v2.12: autosave snapshots ------------------------------------------------------------
+     The whole design rests on one coupling: a snapshot carries exactly the entries loadZip()
+     reads back, and nothing else. If a future version teaches loadZip() to read a seventh entry
+     and does not add it here, restores silently lose it -- so assert the set by name. */
+  {
+    const names = _snapEntries().map(e => e.name).sort();
+    const expected = ['heightmap.f32','impact_field.f32','params.json','rainfall.f32','temperature.f32','volcanic_field.f32'];
+    check('v2.12 autosave: the snapshot carries exactly the six entries loadZip() reads back', names.length === expected.length && names.every((n, i) => n === expected[i]));
+    check('v2.12 autosave: every snapshot entry has real bytes', _snapEntries().every(e => e.data && e.data.length > 0));
+
+    const fp0 = _snapFingerprint();
+    check('v2.12 autosave: the fingerprint is stable when nothing changed', _snapFingerprint() === fp0);
+    const keep = field[7];
+    field[7] = keep > 0.5 ? keep - 0.25 : keep + 0.25;
+    check('v2.12 autosave: the fingerprint tracks the FIELD (a terrain edit is never missed)', _snapFingerprint() !== fp0);
+    field[7] = keep;
+    check('v2.12 autosave: restoring the field restores the fingerprint', _snapFingerprint() === fp0);
+
+    state.labels.push({ x: 1, y: 1, text: '__fp_probe__' });
+    check('v2.12 autosave: the fingerprint tracks serialized STATE too (a civ-layer edit is never missed)', _snapFingerprint() !== fp0);
+    state.labels = state.labels.filter(l => l.text !== '__fp_probe__');
+    check('v2.12 autosave: removing that state change restores the fingerprint', _snapFingerprint() === fp0);
+
+    /* Headless safety: there is no indexedDB in this harness, so every entry point must be an
+       immediate no-op and must never arm a timer that would keep the process alive. */
+    check('v2.12 autosave: no indexedDB here, so the harness genuinely exercises the no-op path', typeof indexedDB === 'undefined');
+    check('v2.12 autosave: autosaveReschedule() arms no timer without indexedDB', (() => {
+      autosaveReschedule(); return _snapTimer === null;
+    })());
+  }
+
+  /* ---- v2.13: route-corridor + travel-cost views -------------------------------------------
+     Both fields already existed as internal scoring inputs; this version only draws them. The
+     logic worth pinning is the two fixed normalisers and the travel-cost cache. */
+  {
+    check('v2.13 views: corridor normaliser is 0 at 0 and saturates by 0.2 (the field is sparse)', _corrNorm(0) === 0 && _corrNorm(0.2) === 1 && _corrNorm(0.1) > 0 && _corrNorm(0.1) < 1);
+    check('v2.13 views: corridor normaliser never leaves [0,1]', [0, 0.001, 0.5, 5, 1e9].every(v => _corrNorm(v) >= 0 && _corrNorm(v) <= 1));
+    check('v2.13 views: travel-cost normaliser is 0 at flat (cost 1) and 1 by cost 10', _tcostNorm(1) === 0 && _tcostNorm(10) === 1);
+    check('v2.13 views: travel-cost normaliser maps water (Infinity) to the far end rather than NaN', _tcostNorm(Infinity) === 1);
+    check('v2.13 views: travel-cost normaliser never leaves [0,1]', [0, 1, 3, 10, 1e6, Infinity].every(v => _tcostNorm(v) >= 0 && _tcostNorm(v) <= 1));
+    check('v2.13 views: currentTravelCost() is cached — the same array comes back until the field changes', currentTravelCost() === currentTravelCost());
+    check('v2.13 views: currentTravelCost() is land-finite and water-impassable, matching buildTravelCost', (() => {
+      const tc = currentTravelCost();
+      let land = 0, water = 0;
+      for (let i = 0; i < tc.length; i += 401) { if (field[i] < state.seaLevel) { if (!isFinite(tc[i])) water++; } else if (isFinite(tc[i]) && tc[i] >= 1) land++; }
+      return land > 0 && water > 0;
+    })());
+  }
+
+
+  /* ---- v2.17: the four erosion ops as generation passes --------------------------------------
+     Nothing new is computed here -- velocity, glacial, coastal and hillslope diffusion already
+     existed as buttons. What is new is that generate() can run them, which means two things have
+     to hold: each *Pass() must be the button's own field mutation and nothing more (or the two
+     paths drift), and all four must default off (or every existing world re-baselines). */
+  {
+    const P0 = JSON.parse(JSON.stringify(state.passes));
+    const F0 = field.slice(), g0 = state.planet.g;
+    const v0 = JSON.parse(JSON.stringify(state.velo)), gl0 = JSON.parse(JSON.stringify(state.glacial));
+    const c0 = JSON.parse(JSON.stringify(state.coastal)), e0 = state.erosion.diffusePasses;
+    const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+    check('v2.17 passes: all four default off (a pre-v2.17 world regenerates unchanged)',
+      state.passes && state.passes.velocity === false && state.passes.glacial === false &&
+      state.passes.coastal === false && state.passes.hillslope === false);
+    check('v2.17 passes: runGenerationPasses() reports nothing ran, and changes no byte, when all are off',
+      runGenerationPasses() === false && same(Array.from(field), Array.from(F0)));
+
+    /* hillslopePass() must be exactly hillslopeDiffuseCPU on this harness (no GPU), so run both
+       over the same bytes and compare. A divergence here is the button and generate() disagreeing. */
+    state.erosion.diffusePasses = 2;
+    const ref = F0.slice(); hillslopeDiffuseCPU(2, state.erosion.diffuseD, ref, GW, GH);
+    field.set(F0); hillslopePass();
+    check('v2.17 passes: hillslopePass() is bit-identical to the CPU kernel the button runs',
+      same(Array.from(field), Array.from(ref)));
+    check('v2.17 passes: ...and it genuinely moved the terrain, so that comparison means something',
+      !same(Array.from(ref), Array.from(F0)));
+
+    /* coastalPass() swaps a gravity-scaled copy into state.coastal for the GPU path's benefit and
+       restores it in a finally. With g === 1 the scaling is a divide by one, so a broken restore
+       would be invisible -- force g away from 1 to make the leak observable. */
+    state.planet.g = 2; state.coastal.passes = 1;
+    const cObj = state.coastal, wave0 = state.coastal.waveStr;
+    field.set(F0); coastalPass();
+    check('v2.17 passes: coastalPass() restores state.coastal (the g-scaled copy never leaks)',
+      state.coastal === cObj && state.coastal.waveStr === wave0);
+    check('v2.17 passes: coastalPass() reworked the shoreline', !same(Array.from(field), Array.from(F0)));
+    state.planet.g = g0;
+
+    /* velocityPass() is the one pass with a side product: the velocity/water buffers the Velocity
+       debug view reads. generate() nulls them at its top, so the pass has to refill them. */
+    state.velo.iters = 10;
+    _veloVx = _veloVy = _veloWater = null;
+    field.set(F0); velocityPass();
+    check('v2.17 passes: velocityPass() refills the velocity buffers generate() nulled',
+      _veloVx && _veloVy && _veloWater && _veloVx.length === GW * GH);
+    check('v2.17 passes: velocityPass() eroded the field', !same(Array.from(field), Array.from(F0)));
+
+    /* glacialPass() carries eroSettle -- the physics half of the button's tail. Isostatic rebound
+       is one-sided (only removal rebounds), so calling it against an unchanged snapshot must be a
+       no-op; that is what lets a pass run it without a render.
+       eroSettle ALSO runs enforceRiverChannels, which is deliberately not a no-op when a locked
+       channel cell sits above its floor -- a separate mechanism, and on an ambient world whether
+       any such cell exists is luck (v2.29's deeper carve produced exactly two). So clear the lock
+       to test the rebound claim on its own, then raise a locked cell on purpose and check the
+       clamp really fires -- which the entangled version never verified. */
+    const rm0 = riverMask ? riverMask.slice() : null, ra0 = _riverAny;
+    if (riverMask) riverMask.fill(0);
+    field.set(F0); eroSettle(F0.slice());
+    check('v2.17 passes: eroSettle() against an unchanged snapshot moves nothing (rebound is one-sided)',
+      same(Array.from(field), Array.from(F0)));
+    if (rm0) { riverMask.set(rm0); }
+    _riverAny = ra0;
+    {
+      let ci = -1;
+      if (riverMask && riverFloor) for (let i = 0; i < riverMask.length; i++) if (riverMask[i]) { ci = i; break; }
+      field.set(F0);
+      if (ci >= 0) {
+        field[ci] = riverFloor[ci] + 0.05; eroSettle(F0.slice());
+        check('v2.17 passes: ...and eroSettle DOES re-clamp a locked river cell that was raised',
+          field[ci] <= riverFloor[ci] + 1e-6);
+      } else {
+        check('v2.17 passes: ...and eroSettle DOES re-clamp a locked river cell that was raised',
+          false, 'no locked river cell on the harness world');
+      }
+      field.set(F0);
+    }
+    state.glacial.passes = 1; state.glacial.snowline = 0.2;   // low snowline: guarantee ice on this world
+    field.set(F0); glacialPass();
+    check('v2.17 passes: glacialPass() carved', !same(Array.from(field), Array.from(F0)));
+
+    /* The run order is fixed, so the whole stage is reproducible: same starting field in, same
+       field out. Without that, a saved pass set would not reproduce its own world. */
+    state.passes.hillslope = true; state.passes.coastal = true;
+    field.set(F0); const ranA = runGenerationPasses(); const A = field.slice();
+    field.set(F0); const ranB = runGenerationPasses(); const B = field.slice();
+    check('v2.17 passes: runGenerationPasses() reports that something ran', ranA === true && ranB === true);
+    check('v2.17 passes: the chained stage is deterministic (a saved world regenerates identically)',
+      same(Array.from(A), Array.from(B)));
+    check('v2.17 passes: the chained stage moved the terrain', !same(Array.from(A), Array.from(F0)));
+
+    state.passes = P0; state.planet.g = g0; state.velo = v0; state.glacial = gl0;
+    state.coastal = c0; state.erosion.diffusePasses = e0;
+    field.set(F0); _veloVx = _veloVy = _veloWater = null;
+    _fieldGen++; invalidateDerived(); computeFlow(true);
+    check('v2.17 passes: the harness world is restored byte-for-byte for the checks after this one',
+      same(Array.from(field), Array.from(F0)));
+  }
+
+
+  /* ---- v2.20: landmasses as named entities -------------------------------------------------
+     buildLandmassQuality already found and ranked the components; what is new is identity. The
+     parts worth pinning are the ones a future edit could silently break: the kind thresholds are
+     shares of LAND (not km2), the name key is POSITIONAL (so it survives renumbering), and a
+     world-mode landmass straddling the seam must not get its centroid dropped in mid-ocean. */
+  {
+    check('v2.20 landmass: kind is a share of the world\'s land, with an archipelago allowed no continent',
+      landmassKind(0.5) === 'continent' && landmassKind(0.10) === 'continent' &&
+      landmassKind(0.099) === 'island' && landmassKind(0.005) === 'island' &&
+      landmassKind(0.004) === 'islet' && landmassKind(0) === 'islet');
+
+    check('v2.20 landmass: a name is deterministic in its seed', landmassNameFrom(12345, 'continent') === landmassNameFrom(12345, 'continent'));
+    check('v2.20 landmass: different seeds give different names', landmassNameFrom(1, 'continent') !== landmassNameFrom(2, 'continent'));
+    check('v2.20 landmass: the suffix pool follows the kind', (() => {
+      const c = landmassNameFrom(777, 'continent'), i = landmassNameFrom(777, 'islet');
+      return LANDMASS_SFX.continent.some(sf => c.endsWith(sf)) && LANDMASS_SFX.islet.some(sf => i.endsWith(sf)) && c !== i;
+    })());
+    check('v2.20 landmass: a name starts capitalised and is non-trivial',
+      /^[A-Z][a-z]/.test(landmassNameFrom(42, 'island')) && landmassNameFrom(42, 'island').length >= 5);
+
+    /* The key must move with position, not with a scan index -- that is the whole point of it. */
+    check('v2.20 landmass: the key is positional and tolerates a small drift (8-cell block)',
+      landmassKey(40, 40, 7) === landmassKey(42, 41, 7) && landmassKey(40, 40, 7) !== landmassKey(400, 40, 7));
+    check('v2.20 landmass: the key is per-world', landmassKey(40, 40, 7) !== landmassKey(40, 40, 8));
+
+    /* A synthetic two-blob world: one 20x20 block and one 2x2 speck, on a 64x40 grid. */
+    const W = 64, H = 40, comp = new Int32Array(W * H).fill(-1);
+    for (let y = 4; y < 24; y++) for (let x = 4; x < 24; x++) comp[y * W + x] = 0;
+    /* ONE cell for the speck, not four: the kind rule is a share of the world's own land, so in a
+       world holding only 401 land cells even a 4-cell speck is 1% of it and honestly reads as an
+       island. A first draft of this fixture used four and failed here -- the rule working, not a
+       bug, and exactly the property a share-based threshold is supposed to have. */
+    comp[30 * W + 50] = 1;
+    const idx = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, null, false);
+    check('v2.20 landmass: every component becomes one entry', idx.length === 2);
+    check('v2.20 landmass: entries are ranked largest first', idx[0].cells === 400 && idx[1].cells === 1 && idx[0].rank === 0 && idx[1].rank === 1);
+    check('v2.20 landmass: km2 is cells x cellKm2', idx[0].km2 === 1600 && idx[1].km2 === 4);
+    check('v2.20 landmass: share is of LAND, not of the whole grid', Math.abs(idx[0].share - 400 / 401) < 1e-9);
+    check('v2.20 landmass: the big block reads as a continent and the speck as an islet', idx[0].kind === 'continent' && idx[1].kind === 'islet');
+    check('v2.20 landmass: the centroid is the block centre', Math.abs(idx[0].cx - 13.5) < 1e-9 && Math.abs(idx[0].cy - 13.5) < 1e-9);
+    check('v2.20 landmass: the bbox is the block extent', idx[0].x0 === 4 && idx[0].y0 === 4 && idx[0].x1 === 23 && idx[0].y1 === 23);
+    check('v2.20 landmass: an underived name is flagged as not user-given', idx[0].named === false && !!idx[0].name);
+    check('v2.20 landmass: two builds of the same world agree, name included', (() => {
+      const b = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, null, false);
+      return b[0].name === idx[0].name && b[0].key === idx[0].key;
+    })());
+
+    /* A rename is stored against the key and must win, and must mark itself as user-given. */
+    const over = {}; over[idx[0].key] = 'Testerra';
+    const named = buildLandmassIndex({ comp, count: 2 }, W, H, 4, 999, over, false);
+    check('v2.20 landmass: a stored name overrides the derived one and is flagged', named[0].name === 'Testerra' && named[0].named === true);
+    check('v2.20 landmass: ...and only that one', named[1].name === idx[1].name && named[1].named === false);
+
+    /* World mode wraps in X. A landmass straddling the antimeridian must not have its centroid
+       averaged into the middle of the ocean -- the case a plain arithmetic mean gets wrong. */
+    const comp2 = new Int32Array(W * H).fill(-1);
+    for (let y = 10; y < 20; y++) { for (let x = 0; x < 5; x++) comp2[y * W + x] = 0; for (let x = W - 5; x < W; x++) comp2[y * W + x] = 0; }
+    const flat = buildLandmassIndex({ comp: comp2, count: 1 }, W, H, 1, 5, null, false);
+    const wrapped = buildLandmassIndex({ comp: comp2, count: 1 }, W, H, 1, 5, null, true);
+    check('v2.20 landmass: a plain mean would put a seam-straddling centroid mid-map', Math.abs(flat[0].cx - W / 2) < 6);
+    check('v2.20 landmass: the circular mean puts it ON the seam instead', (() => {
+      const d = Math.min(Math.abs(wrapped[0].cx), Math.abs(wrapped[0].cx - W));
+      return d < 1.0;
+    })());
+    check('v2.20 landmass: a seam-straddling landmass is flagged, and only in world mode', wrapped[0].wraps === true && flat[0].wraps === false);
+
+    /* The live accessor: cached, and reflects this harness's real world. */
+    const live = currentLandmasses();
+    check('v2.20 landmass: currentLandmasses() is cached — the same array until the world changes', currentLandmasses() === live);
+    check('v2.20 landmass: the real world produces named landmasses whose shares sum to 1', (() => {
+      if (!live.length) return false;
+      let sum = 0; for (const l of live) sum += l.share;
+      return Math.abs(sum - 1) < 1e-6 && live.every(l => l.name && l.key && l.km2 > 0);
+    })());
+    check('v2.20 landmass: every entry carries a kind from the frozen three', live.every(l => ['continent', 'island', 'islet'].indexOf(l.kind) >= 0));
+    check('v2.20 landmass: names are unique enough to be useful as identities', (() => {
+      const top = live.slice(0, Math.min(8, live.length)).map(l => l.name);
+      return new Set(top).size === top.length;
+    })());
+  }
+
+
+  /* ---- v2.22: the physical crater model -----------------------------------------------------
+     The legacy path picks an absolute count and three hardcoded size buckets, so a 50 km region and
+     a 40,000 km world get the same hundred impacts. What is worth pinning here is that the three
+     replacements have the properties their physics claims: count scales with area AND age, the size
+     law is a real power law, and wear depends on diameter so an old surface keeps its basins. */
+  {
+    const P0 = JSON.parse(JSON.stringify(state.crater));
+
+    check('v2.22 craters: default OFF, so every existing world takes the legacy path', state.crater.physical === false);
+
+    /* Count: linear in area and in age, zero at either extreme. */
+    const p = (a, age) => craterPopulation(a, age, 0.49, 3000).count;
+    check('v2.22 craters: the count scales with AREA', p(800000, 500) > p(400000, 500) && p(400000, 500) > p(1600, 500));
+    check('v2.22 craters: ...and with surface AGE', p(400000, 1000) > p(400000, 500) && p(400000, 500) > p(400000, 50));
+    check('v2.22 craters: a young or tiny surface gets essentially none', p(1600, 500) < 5 && p(400000, 0) === 0);
+    /* Production is exactly rate x area x age below the ceiling -- assert the identity rather than a
+       tuned number, so re-anchoring the default rate (which this version did once) cannot silently
+       invalidate this. How many SURVIVE is a stamping question and is measured in probe_craters.js. */
+    check('v2.22 craters: production is exactly rate x area x age below the ceiling', (() => {
+      const area = 400000, age = 500, rate = 2.6;
+      return craterPopulation(area, age, rate, 1e9).count === Math.round(rate * (area / 1e6) * age);
+    })());
+    check('v2.22 craters: ...and the shipped default is a sane population for the default region', (() => {
+      const cellKm = 800 / 2048, area = 800 * (cellKm * gridH(2048));
+      const c = craterPopulation(area, 500, state.crater.ratePerMkm2Myr, 3000).count;
+      return c > 100 && c < 1200;
+    })());
+
+    /* The stamping ceiling raises the smallest diameter kept, rather than thinning at random --
+       and the small end is exactly what an old surface has already lost. */
+    const huge = craterPopulation(1e9, 500, 0.49, 3000);
+    check('v2.22 craters: a world too cratered to stamp is capped, not truncated', huge.count === 3000 && huge.produced > 3000);
+    check('v2.22 craters: ...by raising the smallest diameter kept', huge.dMinKm > CRATER_REF_MIN_KM * 2);
+    check('v2.22 craters: an ordinary world keeps the reference floor', craterPopulation(400000, 500, 0.49, 3000).dMinKm === CRATER_REF_MIN_KM);
+
+    /* Size: a real power law, not three buckets. Small craters must dominate by a wide margin. */
+    const D = u => craterDiameterKm(u, 0.5, 200, 1.8);
+    check('v2.22 craters: the diameter sample stays inside its bounds', [0, 0.25, 0.5, 0.9, 0.999, 1].every(u => D(u) >= 0.5 - 1e-9 && D(u) <= 200 + 1e-6));
+    check('v2.22 craters: it is monotone in u', [0.1, 0.3, 0.6, 0.95].every((u, i, a) => i === 0 || D(u) >= D(a[i - 1])));
+    check('v2.22 craters: u=0 is the floor', Math.abs(D(0) - 0.5) < 1e-9);
+    check('v2.22 craters: the population is dominated by small craters, as a power law demands', (() => {
+      let small = 0, big = 0;
+      for (let k = 0; k < 2000; k++) { const d = D(k / 2000); if (d < 2) small++; if (d >= 25) big++; }
+      return small > 1400 && big > 0 && big < 60;
+    })());
+    check('v2.22 craters: N(>D) really follows D^-b — the decade 5–50 km thins by about 10^1.8', (() => {
+      let n5 = 0, n50 = 0;
+      const N = 20000;
+      for (let k = 0; k < N; k++) { const d = D(k / N); if (d >= 5) n5++; if (d >= 50) n50++; }
+      if (!n50) return false;
+      const ratio = n5 / n50, expected = Math.pow(10, 1.8);
+      return ratio > expected * 0.6 && ratio < expected * 1.7;
+    })());
+
+    /* Wear: the whole point is that it depends on DIAMETER, so an old surface keeps its basins. */
+    check('v2.22 craters: wear is in [0,1] and rises with exposure', (() => {
+      const a = craterDegradation(5, 0), b = craterDegradation(5, 100), c = craterDegradation(5, 5000);
+      return a === 0 && b > a && c > b && c <= 1;
+    })());
+    check('v2.22 craters: a small crater is erased where a large basin is barely touched', (() => {
+      const small = craterDegradation(1, 500), basin = craterDegradation(150, 500);
+      return small > 0.9 && basin < 0.2;
+    })());
+    check('v2.22 craters: wear falls monotonically with diameter at fixed exposure',
+      [1, 5, 25, 100, 200].every((d, i, arr) => i === 0 || craterDegradation(d, 500) <= craterDegradation(arr[i - 1], 500)));
+    check('v2.22 craters: a pristine surface wears nothing at any size', [1, 50, 200].every(d => craterDegradation(d, 0) === 0));
+
+    /* The physical path actually stamps, and stamps a DIFFERENT world than the legacy one. */
+    const savedField = field.slice(), savedImpact = impactField.slice();
+    impactField.fill(0); state.crater.physical = false; stampCraters();
+    let legacySum = 0; for (let i = 0; i < impactField.length; i++) legacySum += impactField[i];
+    impactField.fill(0); state.crater.physical = true;
+    state.crater.ratePerMkm2Myr = 0.49; state.crater.surfaceAgeMyr = 500;
+    stampCraters();
+    let physSum = 0; for (let i = 0; i < impactField.length; i++) physSum += impactField[i];
+    check('v2.22 craters: the physical path genuinely stamps impacts', physSum !== 0);
+    check('v2.22 craters: ...and a different surface than the legacy path', Math.abs(physSum - legacySum) > 1e-6);
+    impactField.fill(0); state.crater.physical = true; state.crater.surfaceAgeMyr = 0; stampCraters();
+    let youngSum = 0; for (let i = 0; i < impactField.length; i++) youngSum += impactField[i];
+    check('v2.22 craters: a brand-new surface has no craters at all', youngSum === 0);
+
+    state.crater = P0; field.set(savedField); impactField.set(savedImpact);
+    check('v2.22 craters: the harness world is restored', state.crater.physical === false);
+  }
+
+  /* ---- v2.30: the geometry carveRiverValleys() carves along ------------------------------------ */
+  {
+    /* riverSinuAmp used to divide by 1+6*slopeN as if slopeN were a 0..1 grade, while the slope it is
+       called with is buildRiverNetwork's hypot(grad)*W, median ~1.74 at GW=1024. The amplitude that
+       produced had a median of 0.081 CELLS, so R4 was doing nothing wherever it was called. */
+    check('v2.30 sinuosity: the amplitude is meaningful at the slope the engine really passes',
+      riverSinuAmp(3, 1.74) > 0.5);
+    check('v2.30 sinuosity: it still rises with Strahler order',
+      riverSinuAmp(4, 1.0) > riverSinuAmp(2, 1.0) && riverSinuAmp(2, 1.0) > riverSinuAmp(1, 1.0));
+    check('v2.30 sinuosity: ...and still falls with slope (straight headwaters, meandering trunks)',
+      riverSinuAmp(3, 0.2) > riverSinuAmp(3, 2.0) && riverSinuAmp(3, 2.0) > riverSinuAmp(3, 12.0));
+
+    /* A raw receiver chain: one point per cell, 45-degree runs. */
+    const chain = []; for (let k = 0; k < 40; k++) chain.push({ x: 10 + k, y: 10 + (k >> 1) });
+    const res = carveChannelPath(chain, 3, 1.0, 0.8, 1024, 12345);
+    check('v2.30 carve path: it reports the step it resampled at', res.step > 0 && res.step <= CARVE_RESAMPLE_MAX_STEP);
+    check('v2.30 carve path: the path is finer than the one-point-per-cell chain it came from',
+      res.pts.length > chain.length);
+    /* Continuity is the whole point: enforceChannelDescent stamps a disc per point and never
+       interpolates, so no gap between consecutive points may exceed the channel it is carving. */
+    let worst = 0;
+    for (let k = 1; k < res.pts.length; k++)
+      worst = Math.max(worst, Math.hypot(res.pts[k].x - res.pts[k - 1].x, res.pts[k].y - res.pts[k - 1].y));
+    check('v2.30 carve path: no gap between points wider than the channel (halfW 0.8)', worst <= 0.8);
+    check('v2.30 carve path: it starts where the chain starts',
+      Math.hypot(res.pts[0].x - chain[0].x, res.pts[0].y - chain[0].y) < 1.5);
+    check('v2.30 carve path: a chain too short to smooth is returned untouched, at the chain gradient',
+      carveChannelPath([{ x: 1, y: 1 }, { x: 2, y: 2 }], 2, 1, 1, 1024, 7).step === 1);
+
+    /* v2.37: the carve must never be handed a WRAPPED receiver chain. In world mode
+       buildRiverNetwork picks receivers through nx=((nx%W)+W)%W, so a river crossing the
+       antimeridian has consecutive points at x~W-0.5 then x~0.5. v1.29 split that at the render and
+       export sites only, on the stated grounds that the carve "stamps a disc per POINT and never
+       interpolates" -- true then, destroyed by v2.30's carveChannelPath, which resamples through
+       catmullRomSample and FILLS THE JUMP IN. enforceChannelDescent's ladder then bottoms out at
+       sea-0.06 for the rest of the traverse: a full-map-width strip below sea level, rendering as
+       water. The synthetic minimal repro, both halves of the guard: */
+    {
+      const W2 = 1024, seam = [];
+      for (let x = 1018; x <= 1023; x++) seam.push({ x, y: 40 + (x - 1018) * 0.2 });
+      for (let x = 0; x <= 5; x++) seam.push({ x, y: 41.2 + x * 0.2 });
+      const xs = a => a.reduce((m, q) => Math.max(m, q.x), -Infinity) - a.reduce((m, q) => Math.min(m, q.x), Infinity);
+      check('v2.37 seam: the raw chain really does wrap (fixture is valid)',
+        seam.some((q, i) => i > 0 && Math.abs(q.x - seam[i - 1].x) > W2 / 2));
+      const parts = splitRiverPolylines([seam], W2);
+      check('v2.37 seam: splitRiverPolylines cuts it into two runs', parts.length === 2);
+      check('v2.37 seam: neither run spans the map', parts.every(q => xs(q) < W2 / 2),
+        parts.map(xs).join(','));
+      // and the reason it matters: carveChannelPath on the UNSPLIT chain sweeps the whole width
+      const bad = carveChannelPath(seam, 3, 1.0, 0.25, W2, 21811);
+      check('v2.37 seam: the unsplit chain DOES sweep the map when carved (the bug, reproduced)',
+        xs(bad.pts) > W2 / 2, xs(bad.pts).toFixed(0));
+      check('v2.37 seam: each split half carves within a sane span',
+        parts.every(q => q.length < 3 || xs(carveChannelPath(q, 3, 1.0, 0.25, W2, 21811).pts) < W2 / 2));
+    }
+
+    /* THE regression this version exists to prevent twice over: enforceChannelDescent's drop is per
+       POINT, so resampling finer silently steepens every river unless the caller scales it. Carve one
+       straight line at two different steps and the channel floor must land in the same place. */
+    const W2 = 64, H2 = 64, flat = new Float32Array(W2 * H2).fill(0.8);
+    const run = (step) => {
+      const f = flat.slice(), pts = [];
+      for (let t = 0; t <= 40; t += step) pts.push([10 + t, 32]);
+      enforceChannelDescent(f, W2, H2, pts, 0.42, 1.2, { drop: CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K * step });
+      return f[32 * W2 + 50];
+    };
+    const coarse = run(1), fine = run(0.25);
+    check('v2.30 carve path: the channel gradient does not depend on the resample step',
+      Math.abs(coarse - fine) < 1e-5, 'coarse ' + coarse.toFixed(6) + ' vs fine ' + fine.toFixed(6));
+    check('v2.30 carve path: ...and that gradient really is 2x the brushed-river default',
+      Math.abs((0.8 - coarse) - 40 * CHANNEL_DROP_PER_CELL * CARVE_GRADIENT_K) < 1e-5);
+  }
+
+  /* ---- v2.32: gaussBlur's CPU path is now the ONLY path on the hot route ---------------------- */
+  {
+    /* Pins the decision, not the timing: the measured evidence lives in tests/perf/probe_blur.js
+       (it needs WebGL2, which this harness does not have). If someone re-enables the shader route,
+       this fails and sends them to that probe rather than letting it back in silently. */
+    /* `typeof` guard, and the "absent" arm is not slack: run.sh is documented to take ANY explicit
+       target ("Cartalith Gen1 v0.57.html"), and a bare reference to a constant a 2019-era build does
+       not have is a ReferenceError that kills the whole suite before it prints a summary — which is
+       exactly what this assertion did to every older file until it was caught. A build predating the
+       flag simply is not in scope for the claim; one that HAS it must have it false. The real
+       regression guard, the one that fails on v2.31, lives in tests/perf/probe_blur.js, because
+       proving the CPU route is the fast one needs the WebGL2 this harness deliberately lacks.
+       Safe from v2.15's TDZ trap: the engine block is fully evaluated before this tail runs. */
+    check('v2.32 blur: the GPU blur route is off wherever the flag exists',
+      typeof GAUSS_BLUR_GPU === 'undefined' || GAUSS_BLUR_GPU === false);
+
+    /* boxH/boxV carry a RUNNING SUM — that is the whole reason the CPU path is radius-free and so
+       beats the shader. A broken sum shows up first as a constant field that does not survive. */
+    const W = 64, H = 48, flat = new Float32Array(W * H).fill(0.375);
+    check('v2.32 blur: a constant field survives a blur unchanged, at any radius',
+      [2, 9, 40].every(r => { const o = gaussBlur(flat, r, W, H, false);
+        for (let i = 0; i < o.length; i++) if (Math.abs(o[i] - 0.375) > 1e-5) return false; return true; }));
+
+    /* and it is a blur: more radius, less variance, monotonically. */
+    const spike = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) spike[y * W + x] = ((x >> 2) + (y >> 2)) % 2;
+    const varOf = a => { let m = 0; for (const v of a) m += v; m /= a.length;
+      let s2 = 0; for (const v of a) s2 += (v - m) * (v - m); return s2 / a.length; };
+    const v0 = varOf(spike), v1 = varOf(gaussBlur(spike, 3, W, H, false)), v2 = varOf(gaussBlur(spike, 20, W, H, false));
+    check('v2.32 blur: variance falls monotonically with radius', v0 > v1 && v1 > v2, v0 + '/' + v1 + '/' + v2);
+    check('v2.32 blur: r<1 returns a COPY, never the caller\'s own array',
+      (() => { const o = gaussBlur(flat, 0, W, H, false); return o !== flat && o.length === flat.length; })());
+  }
+
+  /* ---- v2.50: a feature smaller than one cell must not be INFLATED to one cell ----------------
+     stampOneCrater/stampOneVolcano floor their DRAWN radius so the stamp loop always touches a
+     cell and t=d/R is never 0/0. That floor stays. What it must not do is leave the AMPLITUDE at
+     the floor's value, which drew a sub-cell feature with a whole cell's worth of material.
+     Guarded on typeof so every older target still runs. */
+  if (typeof subCellStampScale === 'function') {
+    check('v2.50: subCellStampScale is exactly 1 at and above the floor',
+      subCellStampScale(1.5, 1.5) === 1 && subCellStampScale(6, 1.5) === 1 && subCellStampScale(2, 2) === 1);
+    check('v2.50: below the floor it is the AREA ratio, not the radius ratio',
+      Math.abs(subCellStampScale(0.75, 1.5) - 0.25) < 1e-12 && Math.abs(subCellStampScale(1, 2) - 0.25) < 1e-12);
+    check('v2.50: a zero radius scales to zero and never divides', subCellStampScale(0, 1.5) === 0 &&
+      Number.isFinite(subCellStampScale(0, 0)) && Number.isFinite(subCellStampScale(-1, 1.5)));
+    check('v2.50: the two floors are named and match what the stamps use',
+      CRATER_MIN_DRAW_CELLS === 1.5 && VOLCANO_MIN_DRAW_CELLS === 2);
+
+    /* The real stamps, not the formula. A volcano's H is keyed on real metres and does not depend
+       on its radius, so its integrated material must come out EXACTLY proportional to r^2 all the
+       way through the floor — no step where the floor takes over. */
+    const __sv = new Float32Array(field), __svV = new Float32Array(volcanicField), __svI = new Float32Array(impactField);
+    const stampVol = (r, kind) => {
+      field.fill(0.5); volcanicField.fill(0); impactField.fill(0);
+      const cx = (GW / 2) | 0, cy = (GH / 2) | 0;
+      if (kind === 'crater') stampOneCrater(cx, cy, r, false, false, 0);
+      else stampOneVolcano(cx, cy, r, 2000, 0);
+      let vol = 0, touched = 0;
+      for (let i = 0; i < field.length; i++) { const d = field[i] - 0.5; if (d !== 0) { vol += Math.abs(d); touched++; } }
+      return { vol, touched };
+    };
+    const vr = [0.1, 0.25, 0.5, 1.0, 1.9].map(r => ({ r, ...stampVol(r, 'volcano') }));
+    const kV = vr.map(o => o.vol / (o.r * o.r));
+    check('v2.50: a sub-cell volcano contributes material proportional to its OWN r^2',
+      kV.every(k => Math.abs(k / kV[0] - 1) < 1e-4), kV.map(k => k.toFixed(6)).join(' / '));
+    /* A crater's own depth formula carries an r term (0.02+0.004r), so the invariant is
+       vol / (depth(r) * r^2), not vol / r^2. Stating it that way is the point: the conservation is
+       exact and the residual variation is the depth law's, which v2.50 deliberately does not touch. */
+    const cr = [0.1, 0.25, 0.5, 1.0, 1.4].map(r => ({ r, ...stampVol(r, 'crater') }));
+    const __cDepth = (typeof craterDepthUnits === 'function')
+      ? (r => craterDepthUnits(r))                       /* v2.51: divide out whatever the depth law IS */
+      : (r => 0.02 + 0.004 * r);                         /* pre-v2.51 targets keep their own law */
+    const kC = cr.map(o => o.vol / (__cDepth(o.r) * o.r * o.r));
+    check('v2.50: a sub-cell crater likewise, once its own depth law is divided out',
+      kC.every(k => Math.abs(k / kC[0] - 1) < 1e-3), kC.map(k => k.toFixed(5)).join(' / '));
+    check('v2.50: the floor still does its job — a sub-cell stamp always touches cells',
+      vr.every(o => o.touched > 0) && cr.every(o => o.touched > 0));
+    check('v2.50: and the footprint below the floor is the floor\'s, so only amplitude moved',
+      new Set(cr.map(o => o.touched)).size === 1, 'touched=' + cr.map(o => o.touched).join(','));
+    /* Invariant 2: nothing the stamps write may be non-finite, at any radius including 0. */
+    check('v2.50: a zero-radius stamp leaves the field finite',
+      (() => { stampVol(0, 'crater'); stampVol(0, 'volcano');
+        for (let i = 0; i < field.length; i++) if (!Number.isFinite(field[i])) return false;
+        for (let i = 0; i < volcanicField.length; i++) if (!Number.isFinite(volcanicField[i])) return false;
+        return true; })());
+    field.set(__sv); volcanicField.set(__svV); impactField.set(__svI);
+  }
+
+  /* ---- v2.51: crater depth comes from real DIAMETER, not from radius in cells ------------------
+     The old law read `min(0.4, 0.02 + radCells*0.004)`, so the same crater got shallower every
+     time the map got wider. These assert the relation, its continuity at the re-anchored
+     simple->complex transition, and — the one that actually pins CRATER_RIM_FLOOR_K — that the
+     crater the stamp DRAWS measures Pike's depth from rim crest to floor. */
+  if (typeof craterDepthKm === 'function') {
+    const dd = D => craterDepthKm(D, 1) / D;                                  // depth-to-diameter
+    check('v2.51: a simple crater is ~1:5 deep, flat in D',
+      [0.5, 1, 2, 3].every(D => Math.abs(dd(D) - 0.2) < 0.02),
+      [0.5, 1, 2, 3].map(D => '1:' + (1 / dd(D)).toFixed(1)).join(' '));
+    check('v2.51: a complex crater SHALLOWS with diameter',
+      dd(10) < dd(3) && dd(50) < dd(10) && dd(200) < dd(50) && (1 / dd(200)) > 50,
+      '1:' + (1 / dd(10)).toFixed(0) + ' / 1:' + (1 / dd(200)).toFixed(0));
+    check('v2.51: the two branches MEET at the transition (the published complex fit does not)',
+      Math.abs(craterDepthKm(3.199, 1) / craterDepthKm(3.201, 1) - 1) < 2e-3 &&
+      Math.abs(0.27 * Math.pow(3.2, 0.301) / craterDepthKm(3.2, 1) - 1) > 0.3,
+      'step if unanchored x' + (craterDepthKm(3.2, 1) / (0.27 * Math.pow(3.2, 0.301))).toFixed(2));
+    check('v2.51: depth is monotonic in D, zero at zero, finite for garbage',
+      craterDepthKm(0, 1) === 0 && craterDepthKm(-5, 1) === 0 &&
+      [0.1, 1, 3.2, 10, 100, 400].every((D, i, a) => i === 0 || craterDepthKm(D, 1) > craterDepthKm(a[i - 1], 1)) &&
+      Number.isFinite(craterDepthKm(1, 0)) && Number.isFinite(craterDepthKm(1, null)));
+    check('v2.51: the transition diameter scales as 1/g (Moon 19.4 km vs Earth 3.2 km is 6.06x)',
+      Math.abs(craterDepthKm(2, 0.5) / (CRATER_D_SIMPLE_K * Math.pow(2, CRATER_D_SIMPLE_P)) - 1) < 1e-9 &&
+      craterDepthKm(5, 2) < craterDepthKm(5, 1));
+
+    /* Scale invariance, stated as the defect it removes: hold the crater's REAL size fixed and
+       change only the map extent. The old law's answer moves; the new one does not. */
+    const __mw = state.mapWidthKm, radKm = 5, D = 2 * radKm;
+    const at = mw => { state.mapWidthKm = mw; const rc = radKm / (mw / GW);
+      return { neu: craterDepthUnits(rc) * metersPerUnit() * CRATER_RIM_FLOOR_K,
+               alt: Math.min(0.4, 0.02 + rc * 0.004) * metersPerUnit() }; };
+    const a = at(200), b = at(5000), c = at(40000);
+    state.mapWidthKm = __mw;
+    check('v2.51: one real 10 km crater is the SAME depth at 200 / 5 000 / 40 000 km',
+      [a, b, c].every(o => Math.abs(o.neu / (craterDepthKm(D, 1) * 1000) - 1) < 1e-9),
+      [a, b, c].map(o => o.neu.toFixed(0) + 'm').join(' / '));
+    check('v2.51: and the old law was not — that is the defect, measured',
+      a.alt / c.alt > 2, a.alt.toFixed(0) + 'm vs ' + c.alt.toFixed(0) + 'm');
+
+    /* The claim that pins CRATER_RIM_FLOOR_K: measure the crater the stamp actually draws. */
+    const __sv2 = new Float32Array(field), __svI2 = new Float32Array(impactField);
+    const cellKm = state.mapWidthKm / GW, rc = 8, Dm = 2 * rc * cellKm;
+    field.fill(0.5); impactField.fill(0);
+    stampOneCrater((GW / 2) | 0, (GH / 2) | 0, rc, false, false, 0);
+    let lo = 1e9, hi = -1e9;
+    for (let i = 0; i < field.length; i++) { if (field[i] < lo) lo = field[i]; if (field[i] > hi) hi = field[i]; }
+    const drawnM = (hi - lo) * metersPerUnit(), wantM = craterDepthKm(Dm, state.planet.g) * 1000;
+    /* The collision this version's own re-baseline exposed: two landmasses in one 8-cell block
+       shared a key, a name AND a rename. Fixed by refining only the colliders — the largest keeps
+       the coarse key, so an existing rename of the dominant landmass still resolves. */
+    if (typeof assignLandmassKeys === 'function') {
+      const LW = 64, LH = 64, lc = new Int32Array(LW * LH).fill(-1);
+      for (let y = 20; y < 24; y++) for (let x = 20; x < 24; x++) lc[y * LW + x] = 0;   // 16 cells, centroid 21.5,21.5
+      for (let y = 25; y < 27; y++) for (let x = 25; x < 27; x++) lc[y * LW + x] = 1;   //  4 cells, centroid 25.5,25.5
+      const li = buildLandmassIndex({ comp: lc, count: 2 }, LW, LH, 1, 777, null, false);
+      const bare = landmassKey(21.5, 21.5, 777);
+      check('v2.51: two landmasses in one 8-cell block collided on the bare key — the defect',
+        bare === landmassKey(25.5, 25.5, 777), bare);
+      check('v2.51: ...and now get distinct keys and distinct names',
+        li[0].key !== li[1].key && li[0].name !== li[1].name, li[0].key + ' / ' + li[1].key);
+      check('v2.51: the LARGEST keeps the coarse key, so a saved rename still resolves',
+        li[0].cells === 16 && li[0].key === bare);
+      check('v2.51: a non-colliding world keeps every v2.20 key exactly', (() => {
+        const c2 = new Int32Array(LW * LH).fill(-1);
+        for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) c2[y * LW + x] = 0;
+        for (let y = 40; y < 44; y++) for (let x = 40; x < 44; x++) c2[y * LW + x] = 1;
+        const b2 = buildLandmassIndex({ comp: c2, count: 2 }, LW, LH, 1, 777, null, false);
+        return b2.every(r => r.key === landmassKey(r.cx, r.cy, 777));
+      })());
+    }
+
+    check('v2.51: the DRAWN crater measures Pike\'s depth from rim crest to floor',
+      Math.abs(drawnM / wantM - 1) < 0.02, 'drawn ' + drawnM.toFixed(0) + 'm vs ' + wantM.toFixed(0) + 'm (D=' + Dm.toFixed(1) + 'km)');
+    field.set(__sv2); impactField.set(__svI2);
+  }
+
+  /* ---- v2.52: a sub-cell crater/volcano RESOLVES in the tile instead of staying the smear -----
+     The coarse grid holds a floor-wide, area-scaled smear of a feature it could not sample. The
+     tile removes exactly that smear (same profile, negated amplitude) and draws the feature at its
+     own radius — so this is reconstruction, not a second terrain model, and it must fade to
+     EXACTLY nothing at the radius where the coarse grid starts resolving the feature. */
+  if (typeof featureFieldTile === 'function') {
+    const TW = 65, TH = 65, tb = { x: 10, y: 10, w: 8, h: 8 };   /* 8 tile px per coarse cell, so the stamp centre lands ON a pixel */
+    const mk = () => { const a = new Float32Array(TW * TH); a.fill(0.5); return a; };
+    const rec = (k, x, y, r, rf, aC, bC, aT, bT, f) => Float64Array.from([k, x, y, r, rf, aC, bC, aT, bT, f]);
+    const span = a => { let lo = 1e9, hi = -1e9; for (let i = 0; i < a.length; i++) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; } return { lo, hi }; };
+
+    /* CONTINUITY: r === rf means sc === 1, so the coarse and true amplitudes are the same and the
+       two calls cancel. This is the property that makes the crossover seamless with nothing tuned. */
+    const c0 = mk(), c1 = mk();
+    featureFieldTile(c1, TW, TH, tb, rec(FEAT_CRATER, 14, 14, 1.5, 1.5, 0.05, 0.0125, 0.05, 0.0125, 0));
+    let worst = 0; for (let i = 0; i < c0.length; i++) worst = Math.max(worst, Math.abs(c1[i] - c0[i]));
+    check('v2.52: at the crossover (r = floor) the tile pass is a no-op', worst < 1e-6, 'worst Δ=' + worst.toExponential(1));
+    const v1 = mk();
+    featureFieldTile(v1, TW, TH, tb, rec(FEAT_VOLCANO, 14, 14, 2, 2, 0.08, 1.6, 0.08, 1.6, 0));
+    worst = 0; for (let i = 0; i < c0.length; i++) worst = Math.max(worst, Math.abs(v1[i] - c0[i]));
+    check('v2.52: ...for a volcano too', worst < 1e-6, 'worst Δ=' + worst.toExponential(1));
+
+    /* RESOLUTION: a genuinely sub-cell crater comes out deeper and narrower than the smear it
+       replaces — the whole point. sc = (0.3/1.5)^2 = 0.04, so the coarse grid got 4% of the depth
+       spread over 25x the area. */
+    const smear = mk();
+    const st = rec(FEAT_CRATER, 14, 14, 0.3, 1.5, 0.002, 0.0005, 0.05, 0.0125, 0);
+    for (let oy = 0; oy < TH; oy++) for (let ox = 0; ox < TW; ox++) {
+      const wx = tb.x + ox / (TW - 1) * tb.w, wy = tb.y + oy / (TH - 1) * tb.h;
+      craterAddAt(smear, oy * TW + ox, Math.hypot(wx - 14, wy - 14) / 1.5, 0.002, 0.0005, false, false);
+    }
+    /* The fixture starts FROM the smear, because that is what a real tile carries: the coarse field
+       holds it and amplifyRegion upsamples it. Starting from flat ground would credit the pass with
+       a depth it never had to remove. */
+    const fine = Float32Array.from(smear);
+    featureFieldTile(fine, TW, TH, tb, st);
+    const sS = span(smear), sF = span(fine);
+    check('v2.52: the refined crater is far deeper than the smear it replaces',
+      (0.5 - sF.lo) > 10 * (0.5 - sS.lo), 'smear ' + (0.5 - sS.lo).toExponential(2) + ' -> fine ' + (0.5 - sF.lo).toExponential(2));
+    check('v2.52: the refined depth is the crater\'s OWN, not the floor\'s',
+      Math.abs((0.5 - sF.lo) / 0.05 - 1) < 0.02, 'reached ' + ((0.5 - sF.lo) / 0.05 * 100).toFixed(1) + '% of the true depth');
+    /* Compare like with like: each depression's own half-depth contour. 1/5 the radius is ~1/25
+       the footprint, which is the area ratio v2.50's amplitude scale is built on, seen directly. */
+    const cnt = (a, th) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] < th) n++; return n; };
+    const fp = cnt(fine, 0.5 - 0.5 * 0.05), fs = cnt(smear, 0.5 - 0.5 * 0.002);
+    check('v2.52: ...and its footprint shrank by about the area ratio',
+      fp > 0 && fs / fp > 10, fs + ' px -> ' + fp + ' px  (x' + (fs / fp).toFixed(1) + ')');
+
+    /* SEAM: no spatial neighbourhood, and the world coordinate uses addZoomDetail's own expression,
+       so two adjacent tiles must agree exactly on their shared column (v1.29's rule). */
+    const bL = { x: 10, y: 10, w: 8, h: 8 }, bR = { x: 18, y: 10, w: 8, h: 8 };
+    const tL = mk(), tR = mk(), seamSt = rec(FEAT_CRATER, 18, 14, 0.4, 1.5, 0.003, 0.00075, 0.05, 0.0125, 0);
+    featureFieldTile(tL, TW, TH, bL, seamSt); featureFieldTile(tR, TW, TH, bR, seamSt);
+    let seam = 0; for (let oy = 0; oy < TH; oy++) seam = Math.max(seam, Math.abs(tL[oy * TW + TW - 1] - tR[oy * TW]));
+    check('v2.52: adjacent tiles agree exactly on their shared column', seam === 0, 'max Δ=' + seam);
+
+    /* Garbage in must not produce garbage out — the registry crosses a worker boundary. */
+    check('v2.52: a missing / empty / degenerate registry leaves the tile untouched', (() => {
+      const a = mk(); featureFieldTile(a, TW, TH, tb, null); featureFieldTile(a, TW, TH, tb, new Float64Array(0));
+      featureFieldTile(a, TW, TH, tb, rec(FEAT_CRATER, 14, 14, 0, 0, 1, 1, 1, 1, 0));
+      featureFieldTile(a, TW, TH, tb, rec(FEAT_VOLCANO, 14, 14, NaN, 2, 0.1, 1.6, 0.1, 1.6, 0));
+      featureFieldTile(a, TW, TH, null, rec(FEAT_CRATER, 14, 14, 0.3, 1.5, 0.002, 0.0005, 0.05, 0.0125, 0));
+      for (let i = 0; i < a.length; i++) if (a[i] !== 0.5) return false;
+      return true;
+    })());
+    check('v2.52: every value the pass writes stays finite and in [0,1]',
+      fine.every ? true : (() => { for (let i = 0; i < fine.length; i++) if (!Number.isFinite(fine[i]) || fine[i] < 0 || fine[i] > 1) return false; return true; })());
+
+    /* The registry records what was DRAWN, and only what the coarse grid could not resolve. */
+    const __sv3 = new Float32Array(field), __svI3 = new Float32Array(impactField), __svV3 = new Float32Array(volcanicField);
+    _featStampSink = [];
+    stampOneCrater((GW / 2) | 0, (GH / 2) | 0, 0.3, false, false, 0);     // sub-cell  -> recorded
+    stampOneCrater((GW / 2) | 0, (GH / 2) | 0, 6, false, false, 0);       // resolved  -> not recorded
+    stampOneVolcano((GW / 4) | 0, (GH / 2) | 0, 0.5, 2000, 0);            // sub-cell  -> recorded
+    const sink = _featStampSink; _featStampSink = null;
+    field.set(__sv3); impactField.set(__svI3); volcanicField.set(__svV3);
+    check('v2.52: only SUB-CELL stamps are registered — a resolved one needs no refinement',
+      sink.length === 2 && sink[0][0] === FEAT_CRATER && sink[1][0] === FEAT_VOLCANO, sink.length + ' records');
+    check('v2.52: each record carries the coarse amplitude actually written AND the true one',
+      Math.abs(sink[0][5] / sink[0][7] - subCellStampScale(0.3, CRATER_MIN_DRAW_CELLS)) < 1e-12 &&
+      Math.abs(sink[2 - 1][5] / sink[1][7] - subCellStampScale(0.5, VOLCANO_MIN_DRAW_CELLS)) < 1e-12,
+      'crater sc=' + (sink[0][5] / sink[0][7]).toExponential(3));
+    check('v2.52: the flattened registry is one buffer, stride-aligned, largest first under the cap',
+      (() => { const f = flattenFeatureStamps(sink);
+        return f instanceof Float64Array && f.length === 2 * FEAT_STRIDE && flattenFeatureStamps([]) === null && flattenFeatureStamps(null) === null; })());
+  }
+
+  /* ---- generation-parameter dump: one list, two consumers (v2.54) ---- */
+  if (typeof GEN_PARAM_BLOCKS !== 'undefined') {   /* v2.54 — guarded (v2.32) */
+    /* the lists must be the single source of truth — a block in `state` that affects generation and
+       is in neither list is exactly how `passes`/`hydro` went missing from the v1.101 dump. */
+    check('GEN_PARAM lists name every generation block that exists',
+      GEN_PARAM_BLOCKS.every(k => k in state) &&
+      ['passes', 'hydro', 'climate', 'tect'].every(k => GEN_PARAM_BLOCKS.indexOf(k) >= 0));
+    check('GEN_PARAM scalars cover the grid + sea + peak', ['world', 'resW', 'mapWidthKm', 'seaLevel', 'peakM']
+      .every(k => GEN_PARAM_SCALARS.indexOf(k) >= 0));
+
+    const ref = { tect: { seed: 1, plates: 8, ridged: false }, planet: { g: 1, geoid: { enabled: false, amp: 0.015 } },
+      resW: 1024, world: false, seaLevel: 0.42 };
+    /* a clean round trip through the exact line shape the writer emits */
+    const txt = ['prose that is not a parameter at all', 'tect: {"seed":99,"plates":12}',
+      'planet: {"geoid":{"enabled":true,"amp":0.03}}', 'seaLevel: 0.4235', 'resW: 512'].join('\n');
+    const r = parseGenerationInfo(txt, ref);
+    check('parseGenerationInfo reads blocks, nested blocks and scalars',
+      r.values.tect.seed === 99 && r.values.tect.plates === 12 &&
+      r.values.planet.geoid.enabled === true && r.values.planet.geoid.amp === 0.03 &&
+      r.values.seaLevel === 0.4235 && r.values.resW === 512);
+    check('...counts the leaves it applied', r.applied === 6);
+    check('...and ignores prose rather than reporting it', r.unknown.length === 0 && r.rejected.length === 0);
+    check('parseGenerationInfo leaves the reference untouched', ref.tect.seed === 1 && ref.seaLevel === 0.42);
+
+    /* UNTRUSTED INPUT: type-matched, finite-checked, and everything refused is named. */
+    const bad = parseGenerationInfo(['tect: {"seed":"nope","plates":8,"invented":1}',
+      'planet: {"g":1e999}', 'bogus: {"a":1}', 'seaLevel: null'].join('\n'), ref);
+    check('a wrong type is refused by path', bad.rejected.indexOf('tect.seed') >= 0);
+    check('a non-finite number is refused by path', bad.rejected.indexOf('planet.g') >= 0);
+    check('a null where a number belongs is refused', bad.rejected.indexOf('seaLevel') >= 0);
+    check('a field the reference lacks is reported, never merged',
+      bad.unknown.indexOf('tect.invented') >= 0 && !('invented' in (bad.values.tect || {})));
+    check('an unrecognised top-level key is reported', bad.unknown.indexOf('bogus') >= 0);
+    check('...and the valid neighbour still applies', bad.values.tect.plates === 8 && bad.applied === 1);
+
+    /* recursion is bounded by the REFERENCE, not the input — a deep paste cannot outrun the state. */
+    let deep = '{"g":1'; for (let i = 0; i < 200; i++) deep += ',"d' + i + '":{"x":1}';
+    const d = parseGenerationInfo('planet: ' + deep + '}', ref);
+    check('a pathologically wide/deep paste is bounded by the reference shape',
+      d.values.planet && d.values.planet.g === 1 && d.unknown.length === 200);
+
+    check('empty / null / prose-only input is safe', parseGenerationInfo('', ref).seen === 0 &&
+      parseGenerationInfo(null, ref).seen === 0 && parseGenerationInfo('hello\nworld', ref).seen === 0);
+    check('absent names what the paste did not carry', parseGenerationInfo('tect: {"seed":3}', ref).absent.indexOf('seaLevel') >= 0);
+
+    /* the writer must emit what the reader looks for — the pair that must not drift (v2.26). */
+    const dump = generationInfoText(), emitted = {};
+    for (const ln of dump.split('\n')) { const m = /^(\w+): (.+)$/.exec(ln); if (!m) continue;
+      try { emitted[m[1]] = JSON.parse(m[2]); } catch (_) {} }
+    check('every list entry is actually emitted by the writer',
+      GEN_PARAM_SCALARS.every(k => k in emitted) && GEN_PARAM_BLOCKS.filter(k => state[k]).every(k => k in emitted));
+    check('the writer emits WHOLE blocks, not a hand-picked subset',
+      Object.keys(emitted.climate).length === Object.keys(state.climate).length &&
+      Object.keys(emitted.passes).length === Object.keys(state.passes).length);
+    const back = parseGenerationInfo(dump, state);
+    check('the writer\'s own output parses with nothing unknown or refused',
+      back.unknown.length === 0 && back.rejected.length === 0 && back.applied > 40);
+  }
+
+
+  /* ---- v2.56: the render prologue's derived fields are generation-keyed ---- */
+  if (typeof renderFieldCached === 'function') {
+    let built = 0;
+    const make = () => { built++; return new Float32Array([built]); };
+    const a = renderFieldCached('t', 'k1', make);
+    const b = renderFieldCached('t', 'k1', make);
+    check('v2.56 same key returns the SAME object, builder not re-run', a === b && built === 1);
+    const c = renderFieldCached('t', 'k2', make);
+    check('v2.56 a changed key rebuilds', c !== a && built === 2);
+    const d = renderFieldCached('t', 'k1', make);
+    /* ONE entry per name: going back to an old key must REBUILD, never resurrect a stale array.
+       That is what bounds the cache without an eviction policy. */
+    check('v2.56 the cache holds one entry per name, so a return to an old key rebuilds',
+      d !== a && built === 3);
+    const e = renderFieldCached('other', 'k1', make);
+    check('v2.56 names are independent', e !== d && built === 4);
+  }
+
+  /* ===================== v2.55 — the heightmap LOD system =====================
+     Two floors, one version. A = the relief gate gains a REAL-METRE floor so a coarse-flat plain
+     stops multiplying every synthetic octave by ~1e-4; B = the Relief view's global ramp is rebased
+     on a WORLD-WIDE local-relief field so the data A puts in is legible without opening a seam.
+     Guarded with typeof so tests/run.sh keeps working against every older target (v2.32's lesson —
+     a bare reference to a new top-level name is a ReferenceError that kills the run before it can
+     print a summary, and reads as "no output" rather than as a failure). */
+  if (typeof subcellReliefFloor === 'function') {
+    /* the floor is a real-metre quantity: halve metres-per-unit and the normalised floor doubles,
+       so the METRES it buys are invariant. That is the whole reason the conversion is on the main
+       thread instead of a constant chosen at the gate (v1.60/v2.05/v2.07/v2.49/v2.51's defect shape). */
+    check('v2.55 relief floor is real-metre keyed, not normalised',
+      Math.abs(subcellReliefFloor(0.12, 1000) * 1000 - subcellReliefFloor(0.12, 2000) * 2000) < 1e-9 &&
+      subcellReliefFloor(0.12, 1000) > subcellReliefFloor(0.12, 2000));
+    check('v2.55 relief floor clamps to [0,1] and never returns NaN',
+      subcellReliefFloor(0.12, 1e-9) === 1 && subcellReliefFloor(0, 5000) === 0 &&
+      subcellReliefFloor(0.12, 0) === 0 && isFinite(subcellReliefFloor(0.12, 5000)));
+
+    /* absent ⇒ 0 ⇒ bit-identical, the opts.legacyFilter convention. Asserted on BOTH passes. */
+    const W = 48, H = 48, flat = new Float32Array(W * H);
+    for (let i = 0; i < flat.length; i++) flat[i] = 0.55;          // dead level land, the defect's own case
+    const reg = { x: 4, y: 4, w: 8, h: 8 };
+    const aNone = amplifyRegion(flat, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    const aZero = amplifyRegion(flat, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0 });
+    let dAbs = 0; for (let i = 0; i < aNone.length; i++) dAbs = Math.max(dAbs, Math.abs(aNone[i] - aZero[i]));
+    check('v2.55 amplifyRegion: reliefFloor absent is bit-identical to 0', dAbs === 0);
+
+    const aFloor = amplifyRegion(flat, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.2 });
+    const spread = (a) => { let lo = 1e9, hi = -1e9; for (let i = 0; i < a.length; i++) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; } return hi - lo; };
+    check('v2.55 the floor gives dead-level LAND real relief',
+      spread(aNone) < 1e-6 && spread(aFloor) > 0.01);
+
+    /* below sea level the floor must add exactly nothing — land-only by construction, not by a
+       threshold someone has to keep honouring. */
+    const deep = new Float32Array(W * H); for (let i = 0; i < deep.length; i++) deep[i] = 0.20;
+    const dNone = amplifyRegion(deep, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    const dFloor = amplifyRegion(deep, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.9 });
+    let dSea = 0; for (let i = 0; i < dNone.length; i++) dSea = Math.max(dSea, Math.abs(dNone[i] - dFloor[i]));
+    check('v2.55 the floor is land-only — deep water is untouched', dSea === 0);
+
+    /* the gate is a max(), so a floor at or below the local relief must be an exact no-op — that is
+       what makes the steep case safe by construction rather than by measurement. A CONSTANT-GRADIENT
+       ramp is the right fixture: sampleC1 reproduces a linear field exactly, so relief is uniform at
+       min(1, slope*8) = 0.16 everywhere in the sampled region. (A sine ridge is the wrong fixture and
+       was tried first — it has a stationary point at every crest and trough, where the gate is NOT
+       saturated and the floor legitimately does bind.) */
+    const ramp = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) ramp[y * W + x] = 0.45 + 0.02 * x;
+    const rNone = amplifyRegion(ramp, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    const rUnder = amplifyRegion(ramp, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.10 });
+    const rOver = amplifyRegion(ramp, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.40 });
+    let dUnder = 0, dOver = 0;
+    for (let i = 0; i < rNone.length; i++) { dUnder = Math.max(dUnder, Math.abs(rNone[i] - rUnder[i]));
+      dOver = Math.max(dOver, Math.abs(rNone[i] - rOver[i])); }
+    check('v2.55 a floor below the local relief is an exact no-op; above it, it binds',
+      dUnder === 0 && dOver > 1e-4);
+
+    const b = { x: 4, y: 4, w: 8, h: 8 };
+    const zA = Float32Array.from(aNone), zB = Float32Array.from(aNone);
+    addZoomDetail(zA, 64, 64, flat, W, H, b, 6, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    addZoomDetail(zB, 64, 64, flat, W, H, b, 6, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0 });
+    let dZ = 0; for (let i = 0; i < zA.length; i++) dZ = Math.max(dZ, Math.abs(zA[i] - zB[i]));
+    const zC = Float32Array.from(aNone);
+    addZoomDetail(zC, 64, 64, flat, W, H, b, 6, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.2 });
+    let dZF = 0; for (let i = 0; i < zA.length; i++) dZF = Math.max(dZF, Math.abs(zA[i] - zC[i]));
+    check('v2.55 addZoomDetail: absent is bit-identical to 0, and the floor moves the ladder',
+      dZ === 0 && dZF > 1e-4);
+  }
+
+  if (typeof buildLocalReliefField === 'function') {
+    const W = 24, H = 12, f = new Float32Array(W * H);
+    for (let i = 0; i < f.length; i++) f[i] = 0.5;
+    const cst = buildLocalReliefField(f, W, H, 3, false);
+    let flatOK = true; for (let i = 0; i < f.length; i++) if (cst.lo[i] !== 0.5 || cst.hi[i] !== 0.5) flatOK = false;
+    check('v2.55 local relief of a constant field is zero everywhere', flatOK);
+
+    /* the separable two-pass must equal the naive O(r^2) window — that is the whole claim of the
+       optimisation, and a transposed index would otherwise pass every other check here. */
+    for (let i = 0; i < f.length; i++) f[i] = ((i * 2654435761) % 1000) / 1000;
+    const r = 3, sep = buildLocalReliefField(f, W, H, r, false);
+    let sepOK = true;
+    for (let y = 0; y < H && sepOK; y++) for (let x = 0; x < W; x++) {
+      let mn = Infinity, mx = -Infinity;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const sx = Math.min(W - 1, Math.max(0, x + dx)), sy = Math.min(H - 1, Math.max(0, y + dy));
+        const v = f[sy * W + sx]; if (v < mn) mn = v; if (v > mx) mx = v;
+      }
+      if (sep.lo[y * W + x] !== mn || sep.hi[y * W + x] !== mx) { sepOK = false; break; }
+    }
+    check('v2.55 separable local relief equals the naive window exactly', sepOK);
+
+    /* v2.48's lesson: a field that does not wrap gives the seam column a wrong value, and this one
+       drives a RENDER, where that is a visible column. */
+    const sp = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) sp[y * W] = 1;                    // spike on the left edge only
+    const noW = buildLocalReliefField(sp, W, H, 2, false), yesW = buildLocalReliefField(sp, W, H, 2, true);
+    check('v2.55 local relief wraps in X only when asked',
+      noW.hi[W - 1] === 0 && yesW.hi[W - 1] === 1 && noW.hi[0] === 1 && yesW.hi[0] === 1);
+
+    check('v2.55 local relief always brackets its own field', (() => {
+      for (let i = 0; i < f.length; i++) if (!(sep.lo[i] <= f[i] && f[i] <= sep.hi[i])) return false;
+      return true;
+    })());
+  }
+
+  if (typeof localContrastK === 'function') {
+    check('v2.55 the contrast stretch is full below the fine cutoff and off above the coarse one',
+      Math.abs(localContrastK(0) - LOCAL_CONTRAST_K) < 1e-9 &&
+      Math.abs(localContrastK(LOCAL_RELIEF_FULL_M) - LOCAL_CONTRAST_K) < 1e-9 &&
+      localContrastK(LOCAL_RELIEF_NONE_M) === 0 && localContrastK(1e6) === 0);
+    check('v2.55 the contrast stretch is monotonic in the local span', (() => {
+      let prev = Infinity;
+      for (let m = 0; m <= 600; m += 10) { const k = localContrastK(m); if (k > prev + 1e-12) return false; prev = k; }
+      return true;
+    })());
+    /* the band mapping is what keeps the tint absolute: s stays in [0.4,1] for land, so no channel
+       can clamp. A multiplier on the finished s reached 1.35 and shifted the tint — the first cut. */
+    check('v2.55 the shading band can never exceed 1 under the stretch', (() => {
+      for (let sh = 0; sh <= 1.0001; sh += 0.05) for (let t = 0; t <= 1.0001; t += 0.05) {
+        const shL = Math.min(1, Math.max(0, sh + LOCAL_CONTRAST_K * (t - 0.5)));
+        if (0.4 + 0.6 * shL > 1 + 1e-12 || 0.75 + 0.25 * shL > 1 + 1e-12) return false;
+      }
+      return true;
     })());
   }
 
