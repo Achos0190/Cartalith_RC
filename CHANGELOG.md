@@ -4,6 +4,90 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.55 (DCC line) — the deep-zoom plain stops being flat: two floors, neither of them storage
+
+Owner: *"Okay improve the current 24bit one with the new heightmap LOD system"*, then
+*"(with this I mean implementing C and D)"* — rungs C and D of the four-rung ladder
+`docs/research/deep-zoom-contrast.md` had already measured. `hash_gen1.js` vs v2.54 **ALL
+IDENTICAL** in every scenario; verification is `tests/perf/probe_reliefloor.js` (19 assertions,
+which hard-error on v2.54) plus 14 headless.
+
+- **v2.53 recovered the DATA and changed nothing on screen, exactly as its own note said, because
+  storage was the third floor and not the first.** Measured on one real LOD-7 plain tile (512x328,
+  6.25 km across, 6897 m/unit): the relief gate removed **100.0%** of every synthetic octave, and
+  the Height view's global ramp painted the whole tile **one colour across 512 px**. Fixing either
+  alone still leaves a plate — which is why both ship together.
+- **A: the relief gate's floor is a REAL-METRE quantity, converted once.** `amplifyRegion` /
+  `addZoomDetail` taper detail by `min(1, hypot(gx,gy)*8)`, ~1e-4 on a coarse-flat cell, so
+  refinement added nothing. `SUBCELL_RELIEF_M = 3.0` m is what an ordinary land surface carries
+  below one coarse cell, and `subcellReliefFloor(detailAmp, metersPerUnit())` converts it.
+  **Keying it on cells or on normalised height would be the v1.60 / v2.05 / v2.07 / v2.49 / v2.51
+  defect a sixth time** — the measured `reliefFloor` is 7.250e-3 here and is not a portable number.
+  Applied INSIDE the `max`, above the underwater fade, so it is land-only by construction rather
+  than by a second test.
+- **It crosses the worker boundary as a SCALAR, and that is deliberate.** `opts.reliefFloor` adds
+  no name to the pool's stringified function list, where a miss is a `ReferenceError` that v1.61's
+  isolation turns into a **silently skipped tile** (v2.47 / v2.52 both paid for this).
+  `poolExtrasFree` names five opt-in extras and no scalar, so pool eligibility is unaffected —
+  asserted.
+- **Measured (A)**: plain span **5.92 m -> 10.58 m**, distinct heights **12 524 -> 18 638**, worst
+  pixel 3.20 m. Steep tile span unchanged at 2160.2 m with the worst pixel at **0.056% of its own
+  span**; deep ocean **0 m**; coldest flat land +2.98 m, driest flat land +2.82 m. The floor binds
+  where the coarse grid resolves nothing and is inert where it does.
+- **B: the Height view's ramp is rebased on LOCAL relief, and the field is WORLD-WIDE.** A per-tile
+  min/max ramp was built, measured and **rejected** — 142.4/255 at every tile boundary, v1.29's
+  rule exactly (§7D "Do not do"). `buildLocalReliefField` is a separable two-pass min/max over a
+  radius in coarse cells, cached on `[GW,GH,_fieldGen,state.world,radius]`, wrapping in X only in
+  world mode. The contrast factor at a shared column differs by **exactly 0**.
+- **The stretch MUST be additive in shading space, and the multiplicative form was a real defect
+  that shipped first and was caught by its own probe.** `s *= 1 + k*(t-0.5)` reaches `s = 1.35` and
+  `c[ch]*s` then CLAMPS in the `Uint8ClampedArray` — **a hue shift, not a brightness one**, because
+  the channels clamp at different points, i.e. the exact absolute-meaning breakage §4.2 warns
+  about. `shL = clamp01(sh + k*(t-0.5))` bounds `s` to the band's own `[0.4,1]` so no channel can
+  clamp. The assertion that caught it measures a real render: *no channel exceeds its own unshaded
+  `hypso` value*. **Its first replacement was ill-conditioned** — a single-channel ratio at low
+  brightness is dominated by 8-bit rounding of two independent renders (failed at 1.875/255 with
+  nothing wrong) — so the residual is a least-squares scalar fit instead, measured 1.155/255.
+- **The tint stays ABSOLUTE.** `hypso(v)` still reads true elevation, so a colour still means an
+  elevation. `localContrastK` fades the effect out between 40 m and 400 m of local relief, so an
+  already-expressive tile is untouched: the steep control measures **k = 0.000** and is
+  byte-identical on every rung.
+- **Deliberately NOT given to the Biome view, and that is an audit result rather than a scope cut.**
+  All ~10 consumers of `r` there were classified: `materialWeights`' rock `smoothstep(0.7,0.95,r)`
+  and mangrove `smoothstep(0.08,0,r)`, `rockCol`'s `r>0.82` scree, `landColorCore`'s geology
+  `smoothstep(0.5,0.8,r)`, the strata `sin(r*90)`/`sin(r*160)` bands and three `r>0` land guards
+  are ABSOLUTE; `grassCol`'s `d = 1 - r*0.16` is the only continuous consumer. Rebasing there puts
+  rock on a lowland plain. Biome gets part A's benefit through hillshade instead — measured, the
+  plain's longest same-colour run 35 px -> 20 px with no colour change.
+- **Measured (B)**: plain Height view **6 -> 133 colours, longest run 22 -> 6 px**; the full ladder
+  from bare 16-bit (1 colour / 512 px) to A+B (133 / 6 px). `docs/images/lod7_contrast_compare.png`
+  was regenerated against the shipped code — until now its C and D rungs were simulations, and D's
+  simulation used the multiplicative form, so the published figure described arithmetic the build
+  does not use. **Regenerating retired a disclosure rather than confirming one**: the simulated
+  steep control had reported a real −3.7% colour debit (433 -> 417); the shipped code measures
+  433 / 5 px, identical to A, because `localContrastK` is 0 there and the additive form cannot clamp.
+- **A deliberate re-baseline of LOD tiles AND baked atlas chunks** — never `field`, which is why
+  the hash battery is ALL IDENTICAL (it also never enables tiled LOD). A stale IndexedDB atlas keeps
+  decoding but holds the old pixels and wants a re-bake. The flat `map.png` bake reads the coarse
+  field per pixel through `bakePixel` and is unchanged.
+- **Both halves are measured against their own off-state INSIDE one build**, never against an
+  absolute threshold (v2.39/v2.42's rule): part A by omitting `opts.reliefFloor`, part B by
+  reassigning the shipped `localContrastK` to `()=>0`. `bounds` omitted still means v2.54's exact
+  arithmetic, so the function stays bit-identical off the LOD path by construction.
+- **Two probe assertions failed first and both were mine, not the app's**: "the steep tile is
+  essentially untouched" judged against an absolute metre bound, when a steep tile holds valley
+  floors and benches where the floor legitimately binds (rewritten against the tile's own span);
+  and "the plain stops being one flat colour" compared part B against a baseline that already
+  carried part A (split into B-alone and A+B).
+- **Suite debt found and fixed while checking the v2.32 rule**: `tests/run.sh` threw outright on
+  v2.52 and earlier because v2.53's and v2.54's own assertions name `packHeight24`, `atlasChunkHeight`
+  and `GEN_PARAM_BLOCKS` unguarded — *"it reads as 'no output', not as a failure"*. All four regions
+  (including v2.24's `_domain`) are `typeof`-guarded now. v2.52 runs again; **the mainline
+  `Cartalith Gen1 v2.22.html` still throws** on `carveChannelPath` and a long tail of DCC-only names
+  behind it, i.e. a bare `tests/run.sh` — whose default target is v2.22 — has been broken since the
+  fork. Disclosed, not fixed: closing it is a fork-wide decision (guard ~20 blocks, losing coverage
+  on the mainline file, or re-point the default), not a rendering version's call.
+
 ## v2.54 (DCC line) — the parameter dump reads back in, and finally carries what it promises
 
 Owner: *"we have a text output for all current settings (mainly troubleshooting), can we do the same

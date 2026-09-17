@@ -59,6 +59,9 @@ colours with no help at all. Deep zoom is not the variable. **Flatness is.**
 
 ## 3. There are THREE floors, and the proposal addresses the second
 
+*(All three are now built: the second in v2.55 part A, the third in v2.53, the display floor in
+v2.55 part B. This section is kept as the diagnosis that identified them.)*
+
 *(Two were found from the original question; the third — the atlas's height encoding — came out of
 the owner's follow-up and is §6. It is the one that turns out to gate the others.)*
 
@@ -172,35 +175,38 @@ region, 800 km, 1024 px. **Four rungs, one tile**, each removing one floor:
 |---|---|
 | **A** | 16-bit — what a baked chunk held before v2.53 |
 | **B** | 24-bit — **v2.53, shipped** (§7C) |
-| **C** | + relief gate floored at 0.006 (§7A, proposed) |
-| **D** | + Height-view contrast rebase (§7B, proposed) |
+| **C** | + relief-gate floor — **v2.55 part A, shipped** (§7A) |
+| **D** | + Height-view contrast rebase — **v2.55 part B, shipped** (§7B) |
 
-**The storage axis is not simulated.** A and B round-trip the tile through the file's own
-`packHeight16`/`unpackHeight16` and `packHeight24`/`unpackHeight24` — literally what `atlasPut`
-writes and `atlasGet` returns. Only the relief gate is patched, and it is patched to read a runtime
-global so `__RELIEF_FLOOR=0` reproduces the shipped build exactly; that is what makes A and B
-controls rather than a second implementation. Reproduce with:
+**EVERY RUNG IS NOW SHIPPED CODE, and that changed the numbers.** Until v2.55 this figure's C and D
+were simulations: the relief gate was patched to read a runtime global, and D was a local copy of
+`renderHeightTileRGBA` with a **multiplicative** luminance stretch. Both are gone. The generator now
+drives the real build — A/B pass `opts.reliefFloor:0` (the pre-v2.55 arithmetic exactly), C/D pass
+the real `lodTileOpts()`, and A–C reassign the shipped `localContrastK` to `()=>0`, which is a real
+switch-off rather than a second implementation. The storage axis was never simulated: A and B
+round-trip through the file's own `packHeight16`/`packHeight24`, literally what `atlasPut` writes and
+`atlasGet` returns. Reproduce with:
 
 ```
-node tests/perf/probe_lod7compare.js "Cartalith v2.54 DCC test.html" out.png
+node tests/perf/probe_lod7compare.js "Cartalith v2.55 DCC test.html" docs/images/lod7_contrast_compare.png
 ```
 
-**LOWLAND PLAIN** — 12 524 distinct source heights over **5.92 m** of relief (17 246 over 9.52 m
+**LOWLAND PLAIN** — 12 524 distinct source heights over **5.92 m** of relief (18 638 over 10.58 m
 once the gate is floored). Storage step 0.1052 m → **4.111e-4 m**, 256× finer.
 
 | | A 16-bit | B 24-bit | C + relief floor | D + contrast |
 |---|---|---|---|---|
-| source heights kept | **58** of 12 524 | **12 524** of 12 524 | 17 246 of 17 246 | 17 246 of 17 246 |
-| Biome — colours / longest identical run | 101 / **35 px** | 102 / **35 px** | 99 / **20 px** | 99 / 20 px |
-| Height — colours / longest identical run | **1 / 512 px** | **1 / 512 px** | 5 / 23 px | **104 / 5 px** |
+| source heights kept | **58** of 12 524 | **12 524** of 12 524 | 18 638 of 18 638 | 18 638 of 18 638 |
+| Biome — colours / longest identical run | 101 / **35 px** | 102 / **35 px** | 113 / **20 px** | 113 / 20 px |
+| Height — colours / longest identical run | **1 / 512 px** | **1 / 512 px** | 6 / 22 px | **133 / 6 px** |
 
 **STEEP CONTROL** — 165 111 distinct source heights over 2160.21 m, the same ladder:
 
 | | A 16-bit | B 24-bit | C + relief floor | D + contrast |
 |---|---|---|---|---|
-| source heights kept | 19 310 | 163 325 | 163 322 | 163 322 |
+| source heights kept | 19 310 | 163 325 | 163 327 | 163 327 |
 | Biome — colours / run | 441 / 7 px | 434 / 7 px | 434 / 7 px | 434 / 7 px |
-| Height — colours / run | 433 / 5 px | 433 / 5 px | 433 / 5 px | 417 / 5 px |
+| Height — colours / run | 433 / 5 px | 433 / 5 px | 433 / 5 px | **433 / 5 px** |
 
 Read it as four claims:
 
@@ -212,21 +218,24 @@ Read it as four claims:
    threw away), but it must not be reported as having addressed the report. §7C's own closing line
    says this in words; this is the picture of it.
 2. **C is where the plain stops being a plate.** Flooring the relief gate is the only rung that adds
-   amplitude rather than fidelity — 5.92 m → 9.52 m — and the Height run collapses 512 px → 23 px.
+   amplitude rather than fidelity — 5.92 m → 10.58 m — and the Height run collapses 512 px → 22 px.
    It is also the only rung the **Biome** view feels (35 px → 20 px), because that colour comes from
    `materialWeights`/`landColorCore` reading the gradient, not from the hypsometric ramp.
-3. **D is Height-view only, and it keeps the tint honest.** 5 → 104 colours. The hypsometric colour
-   still comes from the TRUE elevation (rAbs) and only luminance is stretched locally (rLocal), so a
+3. **D is Height-view only, and it keeps the tint honest.** 6 → 133 colours. The hypsometric colour
+   still comes from the TRUE elevation and only the shading is rebased on local relief, so a
    floodplain still reads as a floodplain. A naive full-ramp rebase was rendered first and put
    **snow and scree on a floodplain at true r=0.41** — §4.2's threshold breakage, photographed. In
-   the Biome row D is byte-identical to C, for the §6.1 reason: the rebase cannot be simulated there
-   without touching `landColorCore`.
-4. **The steep control holds, with one measured cost.** A→B is a real fidelity gain there too
-   (19 310 → 163 325 levels) with no visible change, and the relief floor is inert (163 325 →
-   163 322, three levels, because the gate only binds where the gradient is near zero and almost
-   nothing on that tile is). The one debit is D: Height colours 433 → **417** (−3.7%), the luminance
-   stretch saturating at the extremes of a tile already spanning 2160 m. Small, real, disclosed —
-   `LOCAL_K` is a tunable and 0.7 was not calibrated against the steep case.
+   the Biome row D is byte-identical to C, deliberately: §4.2's audit found all but one consumer of
+   `r` there is an ABSOLUTE threshold, so rebasing it would move rock onto a lowland plain.
+4. **The steep control is now untouched on every rung, and the earlier debit is gone.** A→B is a
+   real fidelity gain there too (19 310 → 163 325 levels) with no visible change; the relief floor is
+   inert (163 325 → 163 327, two levels, because the gate only binds where the gradient is near zero
+   and almost nothing on that tile is); and D measures **433 / 5 px, identical to A**. The simulated
+   version of this figure reported a real −3.7% colour debit there (433 → 417) from the
+   multiplicative stretch saturating at the extremes. **Both halves of that debit were defects of the
+   simulation, not of the idea**: `localContrastK` fades to exactly 0 on a tile spanning 2160 m, and
+   the shipped additive-in-shading-space form cannot clamp a channel at all. Measuring the shipped
+   code rather than a stand-in is what retired the disclosure.
 
 ## 6. A third floor: the atlas stores height on a GLOBAL ladder
 
@@ -279,7 +288,7 @@ baked, which is worth knowing when reproducing the report.
 
 ## 7. Cost
 
-### A. Floor the relief gate — small, and the one worth doing first
+### A. Floor the relief gate — small, and the one worth doing first ✅ BUILT (v2.55)
 
 Give land above sea level a non-zero minimum roughness instead of gating purely on coarse gradient.
 One expression in two functions (`amplifyRegion`, `addZoomDetail`) plus a named constant.
@@ -293,7 +302,7 @@ One expression in two functions (`amplifyRegion`, `addZoomDetail`) plus a named 
 - **Verify:** the probe in §3.1 — gated vs ungated octave amplitude, plus seam Δ unchanged at 0.
 - **Estimate: half a day.**
 
-### B. Seam-safe local contrast — medium-large, and only after A
+### B. Seam-safe local contrast — medium-large, and only after A ✅ BUILT (v2.55)
 
 Not per-tile min/max. The seam-free shape is the one this file already uses three times
 (`sharedSeaFields` v1.29, `riverFieldTile` v2.40, the v2.52 stamp registry): **a world-wide field,

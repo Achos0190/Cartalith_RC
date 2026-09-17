@@ -1,49 +1,46 @@
 #!/usr/bin/env node
 /* One LOD-7 tile, four rungs: what the deep-zoom plain looks like as each floor is removed.
- *   node tests/perf/probe_lod7compare.js "Cartalith v2.54 DCC test.html" out.png [floor]
+ *   node tests/perf/probe_lod7compare.js "Cartalith v2.55 DCC test.html" out.png
  *
  * A FIGURE GENERATOR, not an assertion probe — it renders docs/images/lod7_contrast_compare.png
  * for docs/research/deep-zoom-contrast.md. It exits 0 regardless; read the numbers and the image.
  *
- *   A  16-bit   what a baked chunk held before v2.53 (§7C, the storage floor)
- *   B  24-bit   v2.53, SHIPPED
- *   C  + relief floor   §7A, proposed — amplifyRegion/addZoomDetail's gate gets a minimum
- *   D  + local contrast §7B, proposed — Height view only, rAbs tint / rLocal luminance
+ *   A  16-bit   what a baked chunk held before v2.53 (the storage floor)
+ *   B  24-bit   v2.53
+ *   C  + relief floor    v2.55 part A — amplifyRegion/addZoomDetail's gate gains a real-metre minimum
+ *   D  + local contrast  v2.55 part B — renderHeightTileRGBA rebases the ramp on local relief
  *
- * The storage axis is NOT reimplemented here: A and B round-trip the tile through the file's own
- * packHeight16/unpackHeight16 and packHeight24/unpackHeight24, which is literally what atlasPut
- * stores and atlasGet returns. Only the relief floor needs a patch, and buildSwitchable() makes it
- * a runtime global so __RELIEF_FLOOR=0 reproduces the shipped build exactly — that is what makes A
- * and B controls rather than a second implementation. Both gate sites must be hit (amplifyRegion
- * AND addZoomDetail); if a future version reshapes the gate this throws rather than patching one. */
+ * EVERY RUNG IS THE SHIPPED CODE. Nothing here is reimplemented or patched into the source — that
+ * is the whole difference from the pre-v2.55 version of this file, whose C and D were simulations
+ * and whose D used a multiplicative form the shipped build does NOT use (it clamps in the
+ * Uint8ClampedArray and shifts hue; v2.55 stretches additively in shading space instead).
+ *   A/B  pyramidTile with opts.reliefFloor forced to 0   (the pre-v2.55 arithmetic, exactly)
+ *   C/D  pyramidTile with the real lodTileOpts()          (carries subcellReliefFloor)
+ *   A-C  localContrastK swapped to ()=>0                  (a real switch-off, not a copy)
+ *   D    the real localContrastK
+ * The storage axis likewise round-trips through the file's own packHeight16/24, which is literally
+ * what atlasPut stores and atlasGet returns. */
 const path=require('path'), fs=require('fs'), os=require('os');
 
-function buildSwitchable(src){
-  let s=fs.readFileSync(src,'utf8');
-  const GATE=/Math\.min\(1,\s*Math\.hypot\(gx,gy\)\*8\)/g;
-  const hits=s.match(GATE);
-  if(!hits || hits.length!==2) throw new Error('relief gate: expected 2 sites, found '+(hits?hits.length:0));
-  s=s.replace(GATE,"Math.max((typeof __RELIEF_FLOOR!=='undefined'?__RELIEF_FLOOR:0), $&)");
-  const i=s.indexOf('<script>');
-  if(i<0) throw new Error('no <script> block found');
-  s=s.slice(0,i+8)+'var __RELIEF_FLOOR=0;\n'+s.slice(i+8);
-  const dst=path.join(os.tmpdir(),'lod7cmp_switchable.html');
-  fs.writeFileSync(dst,s);
-  return dst;
-}
 const {chromium}=require(process.env.PLAYWRIGHT_DIR||'/opt/node22/lib/node_modules/playwright');
-const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006);
+const FILE=process.argv[2], OUT=process.argv[3];
 (async()=>{
   const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium',args:['--no-sandbox']});
   const pg=await b.newPage({viewport:{width:1400,height:900}});
   pg.on('pageerror',e=>console.log('PAGEERROR '+e.message));
-  await pg.goto('file://'+buildSwitchable(path.resolve(FILE)));
+  await pg.goto('file://'+path.resolve(FILE));
   await pg.waitForFunction(()=>typeof generate==='function',{timeout:120000});
 
-  const res=await pg.evaluate(async(FLOOR)=>{
+  const res=await pg.evaluate(async()=>{
     state.world=false; state.resW=1024; state.mapWidthKm=800; state.tect.seed=12345;
-    __RELIEF_FLOOR=0; await generate();
+    await generate();
     const sea=state.seaLevel, denom=1-sea, mpu=metersPerUnit(), z=7, TS=512;
+    /* fail loudly on a build that does not ship both halves, rather than quietly drawing a
+       four-rung ladder whose last two rungs are the first two. */
+    if(typeof subcellReliefFloor!=='function' || typeof localContrastK!=='function')
+      throw new Error('this figure needs v2.55+ (subcellReliefFloor / localContrastK)');
+    const FLOOR=lodTileOpts().reliefFloor;
+    if(!(FLOOR>0)) throw new Error('lodTileOpts() carries no reliefFloor');
 
     /* the plain is picked FLAT and mid-elevation (true r 0.15..0.55) so the global ramp is
        genuinely the thing hiding it, not an out-of-range height. */
@@ -57,35 +54,13 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
     const rng=a=>{let lo=1e9,hi=-1e9;for(let i=0;i<a.length;i++){if(a[i]<lo)lo=a[i];if(a[i]>hi)hi=a[i];}return[lo,hi];};
     const levels=a=>{const s=new Set(); for(let i=0;i<a.length;i++) s.add(a[i]); return s.size;};
 
-    /* renderHeightTileRGBA, with the colour value and the SHADING value taken from different
-       arrays — the rAbs / rLocal split, simulated exactly rather than approximated. */
-    const heightRGBA=(shadeArr,colArr,W,H,bounds)=>{
-      const out=new Uint8ClampedArray(W*H*4), az=state.sunAz*Math.PI/180, alt=40*Math.PI/180;
-      const lx=Math.cos(alt)*Math.sin(az), ly=-Math.cos(alt)*Math.cos(az), lz=Math.sin(alt);
-      const ex=tileShadeExag(bounds,W);
-      for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-        const i=y*W+x, ro=y*W;
-        const L=edgeL(shadeArr,W,x,ro),R=edgeR(shadeArr,W,x,ro),U=edgeU(shadeArr,W,H,x,y),D=edgeD(shadeArr,W,H,x,y);
-        let nx=-(R-L)*ex, ny=-(D-U)*ex, nz=1; const il=1/Math.hypot(nx,ny,nz); nx*=il;ny*=il;nz*=il;
-        const sh=Math.max(0,nx*lx+ny*ly+nz*lz);
-        const c=hypso(colArr[i]), s=shadeArr[i]<state.seaLevel?0.75+0.25*sh:0.4+0.6*sh, p=i*4;
-        out[p]=c[0]*s; out[p+1]=c[1]*s; out[p+2]=c[2]*s; out[p+3]=255; }
-      return out; };
-    const LOCAL_K=0.7;
-    const heightRGBAlocal=(arr,W,H,bounds)=>{
-      const out=new Uint8ClampedArray(W*H*4), az=state.sunAz*Math.PI/180, alt=40*Math.PI/180;
-      const lx=Math.cos(alt)*Math.sin(az), ly=-Math.cos(alt)*Math.cos(az), lz=Math.sin(alt);
-      const ex=tileShadeExag(bounds,W); const[lo,hi]=rng(arr), sp=(hi-lo)||1e-9;
-      for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-        const i=y*W+x, ro=y*W;
-        const L=edgeL(arr,W,x,ro),R=edgeR(arr,W,x,ro),U=edgeU(arr,W,H,x,y),D=edgeD(arr,W,H,x,y);
-        let nx=-(R-L)*ex, ny=-(D-U)*ex, nz=1; const il=1/Math.hypot(nx,ny,nz); nx*=il;ny*=il;nz*=il;
-        const sh=Math.max(0,nx*lx+ny*ly+nz*lz);
-        const c=hypso(arr[i]);                                   // rAbs: tint from TRUE elevation
-        const rLocal=(arr[i]-lo)/sp;                             // rLocal: continuous shading only
-        const s=(arr[i]<state.seaLevel?0.75+0.25*sh:0.4+0.6*sh)*(1+LOCAL_K*(rLocal-0.5));
-        const p=i*4; out[p]=c[0]*s; out[p+1]=c[1]*s; out[p+2]=c[2]*s; out[p+3]=255; }
-      return out; };
+    /* the SHIPPED renderer, both ways. `localContrastK` is reassigned to ()=>0 for rungs A-C:
+       a real switch-off of part B inside one build, never a second copy of the formula. */
+    const _lck=localContrastK;
+    const heightShipped=(arr,W,H,bounds,local)=>{
+      localContrastK = local ? _lck : (()=>0);
+      try { return renderHeightTileRGBA(arr,W,H,bounds); } finally { localContrastK=_lck; }
+    };
     const stat=(rgba,W,H)=>{const k=p=>(rgba[p]<<16)|(rgba[p+1]<<8)|rgba[p+2];
       const mid=(H>>1)*W*4; const s=new Set([k(mid)]); let run=1,mx=0;
       for(let x=1;x<W;x++){const p=mid+x*4; if(k(p)===k(p-4))run++; else{if(run>mx)mx=run;run=1;} s.add(k(p));}
@@ -101,9 +76,8 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
       const row=Math.min(dims.rows-1,Math.floor(((fi/GW)|0)/((GH-1)/dims.rows)));
       const bb=pyramidTileBounds(GW,GH,z,col,row);
 
-      __RELIEF_FLOOR=0;      const t0=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
-      __RELIEF_FLOOR=FLOOR;  const tF=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
-      __RELIEF_FLOOR=0;
+      const t0=pyramidTile(field,GW,GH,z,col,row,TS,Object.assign(lodTileOpts(),{reliefFloor:0}));
+      const tF=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
       const TW=t0.w, TH=t0.h, N=TW*TH;
 
       /* the REAL shipped storage round trip — what atlasPut writes and atlasGet reads back */
@@ -123,7 +97,7 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
         step16M:mpu/65535, step24M:mpu/16777215, rungs:[] };
       for(const r of rungs){
         const bio=renderBiomeTileRGBA(r.h,TW,TH,bb);
-        const hgt=r.loc?heightRGBAlocal(r.h,TW,TH,bb):heightRGBA(r.h,r.h,TW,TH,bb);
+        const hgt=heightShipped(r.h,TW,TH,bb,r.loc);
         out.rungs.push({ id:r.id, levels:levels(r.h),
           biome:{png:toPNG(bio,TW,TH),...stat(bio,TW,TH)},
           height:{png:toPNG(hgt,TW,TH),...stat(hgt,TW,TH)} });
@@ -131,7 +105,7 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
       panels[key]=out;
     }
     return {panels, z, TS, floor:FLOOR, mpu, tw:panels.plain.tw, th:panels.plain.th};
-  },FLOOR);
+  });
 
   /* ---- composite: 4 columns x 3 rows ---- */
   const TW=res.tw, TH=res.th, GAP=10, M=20, HEAD=74, RH=50;

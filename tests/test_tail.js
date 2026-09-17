@@ -385,7 +385,7 @@ check('state.planet has Earth defaults', !!state.planet && state.planet.g === 1 
   }
 
   /* ---- 24-bit height pack (v2.53) ---- */
-  {
+  if (typeof packHeight24 === 'function') {   /* v2.53 — guarded so an older target still RUNS (v2.32) */
     const n = 500, fld = new Float32Array(n);
     for (let i = 0; i < n; i++) fld[i] = i / (n - 1);
     fld[0] = -0.3; fld[1] = 1.7;
@@ -2051,30 +2051,32 @@ if (typeof applyTidalSedimentation === 'function') {
     atlasKeyStr('x', 512, 2, 3, 4)]);
   check('atlasKeyStr unique across ts/z/col/row/worldKey', ks.size === 6);
 
-  // encode/decode round-trip ≤1 LSB, preserving dims + addressing
-  const tw = 12, th = 8, td = new Float32Array(tw * th);
-  for (let i = 0; i < td.length; i++) td[i] = i / (td.length - 1);
-  const tile = { data: td, w: tw, h: th, z: 3, col: 5, row: 6 };
-  const rec = atlasEncodeChunk(tile), dec = atlasDecodeChunk(rec);
-  let maxErr = 0; for (let i = 0; i < td.length; i++) maxErr = Math.max(maxErr, Math.abs(td[i] - dec.data[i]));
-  check('atlasEncodeChunk packs hgt24 + dims', rec.hgt24.length === tw * th * 4 && rec.w === tw && rec.h === th && rec.z === 3 && rec.col === 5 && rec.row === 6);
-  check('atlasEncodeChunk no longer writes the rg16 field', rec.rg16 === undefined);
-  check('atlas chunk round-trip ≤1 LSB at 24-bit (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 16777215 + 1e-12);
-  check('atlasDecodeChunk preserves addressing', dec.w === tw && dec.h === th && dec.z === 3 && dec.col === 5 && dec.row === 6);
-  /* v2.53 backward compatibility: a PRE-v2.53 record carries `rg16` and must keep decoding forever.
-     Discrimination is by FIELD PRESENCE, never by inspecting the bytes — a genuinely flat tile has a
-     constant low byte, so content cannot tell 16 from 24. */
-  {
-    const legacy = { rg16: packHeight16(td, td.length), w: tw, h: th, z: 3, col: 5, row: 6 };
-    const ld = atlasDecodeChunk(legacy);
-    let le = 0; for (let i = 0; i < td.length; i++) le = Math.max(le, Math.abs(td[i] - ld.data[i]));
-    check('atlasDecodeChunk still reads a pre-v2.53 rg16 record (max Δ=' + le.toExponential(1) + ')', le <= 0.5 / 65535 + 1e-9);
-    check('atlasChunkHeight reports 16 for a legacy record', atlasChunkHeight(legacy).enc === 16);
-    check('atlasChunkHeight reports 24 for a v2.53 record', atlasChunkHeight(rec).enc === 24);
-    /* a flat tile is exactly the case byte-inspection would get wrong — assert the field still wins. */
-    const flat = new Float32Array(tw * th).fill(0.25);
-    check('encoding of an all-flat tile is still read as 24 (field, not content)',
-      atlasChunkHeight(atlasEncodeChunk({ data: flat, w: tw, h: th, z: 0, col: 0, row: 0 })).enc === 24);
+  if (typeof atlasChunkHeight === 'function') {   /* v2.53 — guarded (v2.32) */
+    // encode/decode round-trip ≤1 LSB, preserving dims + addressing
+    const tw = 12, th = 8, td = new Float32Array(tw * th);
+    for (let i = 0; i < td.length; i++) td[i] = i / (td.length - 1);
+    const tile = { data: td, w: tw, h: th, z: 3, col: 5, row: 6 };
+    const rec = atlasEncodeChunk(tile), dec = atlasDecodeChunk(rec);
+    let maxErr = 0; for (let i = 0; i < td.length; i++) maxErr = Math.max(maxErr, Math.abs(td[i] - dec.data[i]));
+    check('atlasEncodeChunk packs hgt24 + dims', rec.hgt24.length === tw * th * 4 && rec.w === tw && rec.h === th && rec.z === 3 && rec.col === 5 && rec.row === 6);
+    check('atlasEncodeChunk no longer writes the rg16 field', rec.rg16 === undefined);
+    check('atlas chunk round-trip ≤1 LSB at 24-bit (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 16777215 + 1e-12);
+    check('atlasDecodeChunk preserves addressing', dec.w === tw && dec.h === th && dec.z === 3 && dec.col === 5 && dec.row === 6);
+    /* v2.53 backward compatibility: a PRE-v2.53 record carries `rg16` and must keep decoding forever.
+       Discrimination is by FIELD PRESENCE, never by inspecting the bytes — a genuinely flat tile has a
+       constant low byte, so content cannot tell 16 from 24. */
+    {
+      const legacy = { rg16: packHeight16(td, td.length), w: tw, h: th, z: 3, col: 5, row: 6 };
+      const ld = atlasDecodeChunk(legacy);
+      let le = 0; for (let i = 0; i < td.length; i++) le = Math.max(le, Math.abs(td[i] - ld.data[i]));
+      check('atlasDecodeChunk still reads a pre-v2.53 rg16 record (max Δ=' + le.toExponential(1) + ')', le <= 0.5 / 65535 + 1e-9);
+      check('atlasChunkHeight reports 16 for a legacy record', atlasChunkHeight(legacy).enc === 16);
+      check('atlasChunkHeight reports 24 for a v2.53 record', atlasChunkHeight(rec).enc === 24);
+      /* a flat tile is exactly the case byte-inspection would get wrong — assert the field still wins. */
+      const flat = new Float32Array(tw * th).fill(0.25);
+      check('encoding of an all-flat tile is still read as 24 (field, not content)',
+        atlasChunkHeight(atlasEncodeChunk({ data: flat, w: tw, h: th, z: 0, col: 0, row: 0 })).enc === 24);
+    }
   }
 
   // bakedCover: a baked ancestor covers its descendants, not a sibling subtree
@@ -3825,7 +3827,7 @@ if (typeof carveRiverValleys === 'function') {
 }
 
 /* ---------- v1.15: Sculpt editor — draft layer + commit sequence (live world) ---------- */
-{
+if (typeof _domain !== 'undefined') {   /* v2.24 shell — guarded so the mainline target still RUNS (v2.32) */
   state.world = false; state.resW = 256; GW = 256; GH = gridH(GW); allocate(); generate();
   /* v2.24: _activeTab/_genSubTab are DERIVED from _domain/_sculptCategoryOpen and are no longer
      authoritative — assigning them here would leave _sculptEditorActive() false and every
@@ -3935,7 +3937,7 @@ if (typeof carveRiverValleys === 'function') {
   }
 
   // exportRegionTiles end-to-end on the real field (PNGs absent headless; binary path asserted)
-  {
+  if (typeof unpackHeight24 === 'function') {   /* v2.53 rgb24 naming — guarded (v2.32) */
     const sel = normRegion(10, 10, 58, 42, GW, GH), cols = 3, rows = 2, ts = 24;   // non-square grid + selection
     const td = tileDims(sel, cols, rows, ts);
     const E = await exportRegionTiles(sel, cols, rows, ts, true);
@@ -5170,7 +5172,7 @@ if (typeof carveRiverValleys === 'function') {
   }
 
   /* ---- generation-parameter dump: one list, two consumers (v2.54) ---- */
-  {
+  if (typeof GEN_PARAM_BLOCKS !== 'undefined') {   /* v2.54 — guarded (v2.32) */
     /* the lists must be the single source of truth — a block in `state` that affects generation and
        is in neither list is exactly how `passes`/`hydro` went missing from the v1.101 dump. */
     check('GEN_PARAM lists name every generation block that exists',
@@ -5226,6 +5228,133 @@ if (typeof carveRiverValleys === 'function') {
     const back = parseGenerationInfo(dump, state);
     check('the writer\'s own output parses with nothing unknown or refused',
       back.unknown.length === 0 && back.rejected.length === 0 && back.applied > 40);
+  }
+
+
+  /* ===================== v2.55 — the heightmap LOD system =====================
+     Two floors, one version. A = the relief gate gains a REAL-METRE floor so a coarse-flat plain
+     stops multiplying every synthetic octave by ~1e-4; B = the Relief view's global ramp is rebased
+     on a WORLD-WIDE local-relief field so the data A puts in is legible without opening a seam.
+     Guarded with typeof so tests/run.sh keeps working against every older target (v2.32's lesson —
+     a bare reference to a new top-level name is a ReferenceError that kills the run before it can
+     print a summary, and reads as "no output" rather than as a failure). */
+  if (typeof subcellReliefFloor === 'function') {
+    /* the floor is a real-metre quantity: halve metres-per-unit and the normalised floor doubles,
+       so the METRES it buys are invariant. That is the whole reason the conversion is on the main
+       thread instead of a constant chosen at the gate (v1.60/v2.05/v2.07/v2.49/v2.51's defect shape). */
+    check('v2.55 relief floor is real-metre keyed, not normalised',
+      Math.abs(subcellReliefFloor(0.12, 1000) * 1000 - subcellReliefFloor(0.12, 2000) * 2000) < 1e-9 &&
+      subcellReliefFloor(0.12, 1000) > subcellReliefFloor(0.12, 2000));
+    check('v2.55 relief floor clamps to [0,1] and never returns NaN',
+      subcellReliefFloor(0.12, 1e-9) === 1 && subcellReliefFloor(0, 5000) === 0 &&
+      subcellReliefFloor(0.12, 0) === 0 && isFinite(subcellReliefFloor(0.12, 5000)));
+
+    /* absent ⇒ 0 ⇒ bit-identical, the opts.legacyFilter convention. Asserted on BOTH passes. */
+    const W = 48, H = 48, flat = new Float32Array(W * H);
+    for (let i = 0; i < flat.length; i++) flat[i] = 0.55;          // dead level land, the defect's own case
+    const reg = { x: 4, y: 4, w: 8, h: 8 };
+    const aNone = amplifyRegion(flat, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    const aZero = amplifyRegion(flat, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0 });
+    let dAbs = 0; for (let i = 0; i < aNone.length; i++) dAbs = Math.max(dAbs, Math.abs(aNone[i] - aZero[i]));
+    check('v2.55 amplifyRegion: reliefFloor absent is bit-identical to 0', dAbs === 0);
+
+    const aFloor = amplifyRegion(flat, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.2 });
+    const spread = (a) => { let lo = 1e9, hi = -1e9; for (let i = 0; i < a.length; i++) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; } return hi - lo; };
+    check('v2.55 the floor gives dead-level LAND real relief',
+      spread(aNone) < 1e-6 && spread(aFloor) > 0.01);
+
+    /* below sea level the floor must add exactly nothing — land-only by construction, not by a
+       threshold someone has to keep honouring. */
+    const deep = new Float32Array(W * H); for (let i = 0; i < deep.length; i++) deep[i] = 0.20;
+    const dNone = amplifyRegion(deep, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    const dFloor = amplifyRegion(deep, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.9 });
+    let dSea = 0; for (let i = 0; i < dNone.length; i++) dSea = Math.max(dSea, Math.abs(dNone[i] - dFloor[i]));
+    check('v2.55 the floor is land-only — deep water is untouched', dSea === 0);
+
+    /* the gate is a max(), so a floor at or below the local relief must be an exact no-op — that is
+       what makes the steep case safe by construction rather than by measurement. A CONSTANT-GRADIENT
+       ramp is the right fixture: sampleC1 reproduces a linear field exactly, so relief is uniform at
+       min(1, slope*8) = 0.16 everywhere in the sampled region. (A sine ridge is the wrong fixture and
+       was tried first — it has a stationary point at every crest and trough, where the gate is NOT
+       saturated and the floor legitimately does bind.) */
+    const ramp = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) ramp[y * W + x] = 0.45 + 0.02 * x;
+    const rNone = amplifyRegion(ramp, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    const rUnder = amplifyRegion(ramp, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.10 });
+    const rOver = amplifyRegion(ramp, W, H, reg, 64, 64, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.40 });
+    let dUnder = 0, dOver = 0;
+    for (let i = 0; i < rNone.length; i++) { dUnder = Math.max(dUnder, Math.abs(rNone[i] - rUnder[i]));
+      dOver = Math.max(dOver, Math.abs(rNone[i] - rOver[i])); }
+    check('v2.55 a floor below the local relief is an exact no-op; above it, it binds',
+      dUnder === 0 && dOver > 1e-4);
+
+    const b = { x: 4, y: 4, w: 8, h: 8 };
+    const zA = Float32Array.from(aNone), zB = Float32Array.from(aNone);
+    addZoomDetail(zA, 64, 64, flat, W, H, b, 6, { seed: 5, sea: 0.42, detailAmp: 0.12 });
+    addZoomDetail(zB, 64, 64, flat, W, H, b, 6, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0 });
+    let dZ = 0; for (let i = 0; i < zA.length; i++) dZ = Math.max(dZ, Math.abs(zA[i] - zB[i]));
+    const zC = Float32Array.from(aNone);
+    addZoomDetail(zC, 64, 64, flat, W, H, b, 6, { seed: 5, sea: 0.42, detailAmp: 0.12, reliefFloor: 0.2 });
+    let dZF = 0; for (let i = 0; i < zA.length; i++) dZF = Math.max(dZF, Math.abs(zA[i] - zC[i]));
+    check('v2.55 addZoomDetail: absent is bit-identical to 0, and the floor moves the ladder',
+      dZ === 0 && dZF > 1e-4);
+  }
+
+  if (typeof buildLocalReliefField === 'function') {
+    const W = 24, H = 12, f = new Float32Array(W * H);
+    for (let i = 0; i < f.length; i++) f[i] = 0.5;
+    const cst = buildLocalReliefField(f, W, H, 3, false);
+    let flatOK = true; for (let i = 0; i < f.length; i++) if (cst.lo[i] !== 0.5 || cst.hi[i] !== 0.5) flatOK = false;
+    check('v2.55 local relief of a constant field is zero everywhere', flatOK);
+
+    /* the separable two-pass must equal the naive O(r^2) window — that is the whole claim of the
+       optimisation, and a transposed index would otherwise pass every other check here. */
+    for (let i = 0; i < f.length; i++) f[i] = ((i * 2654435761) % 1000) / 1000;
+    const r = 3, sep = buildLocalReliefField(f, W, H, r, false);
+    let sepOK = true;
+    for (let y = 0; y < H && sepOK; y++) for (let x = 0; x < W; x++) {
+      let mn = Infinity, mx = -Infinity;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const sx = Math.min(W - 1, Math.max(0, x + dx)), sy = Math.min(H - 1, Math.max(0, y + dy));
+        const v = f[sy * W + sx]; if (v < mn) mn = v; if (v > mx) mx = v;
+      }
+      if (sep.lo[y * W + x] !== mn || sep.hi[y * W + x] !== mx) { sepOK = false; break; }
+    }
+    check('v2.55 separable local relief equals the naive window exactly', sepOK);
+
+    /* v2.48's lesson: a field that does not wrap gives the seam column a wrong value, and this one
+       drives a RENDER, where that is a visible column. */
+    const sp = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) sp[y * W] = 1;                    // spike on the left edge only
+    const noW = buildLocalReliefField(sp, W, H, 2, false), yesW = buildLocalReliefField(sp, W, H, 2, true);
+    check('v2.55 local relief wraps in X only when asked',
+      noW.hi[W - 1] === 0 && yesW.hi[W - 1] === 1 && noW.hi[0] === 1 && yesW.hi[0] === 1);
+
+    check('v2.55 local relief always brackets its own field', (() => {
+      for (let i = 0; i < f.length; i++) if (!(sep.lo[i] <= f[i] && f[i] <= sep.hi[i])) return false;
+      return true;
+    })());
+  }
+
+  if (typeof localContrastK === 'function') {
+    check('v2.55 the contrast stretch is full below the fine cutoff and off above the coarse one',
+      Math.abs(localContrastK(0) - LOCAL_CONTRAST_K) < 1e-9 &&
+      Math.abs(localContrastK(LOCAL_RELIEF_FULL_M) - LOCAL_CONTRAST_K) < 1e-9 &&
+      localContrastK(LOCAL_RELIEF_NONE_M) === 0 && localContrastK(1e6) === 0);
+    check('v2.55 the contrast stretch is monotonic in the local span', (() => {
+      let prev = Infinity;
+      for (let m = 0; m <= 600; m += 10) { const k = localContrastK(m); if (k > prev + 1e-12) return false; prev = k; }
+      return true;
+    })());
+    /* the band mapping is what keeps the tint absolute: s stays in [0.4,1] for land, so no channel
+       can clamp. A multiplier on the finished s reached 1.35 and shifted the tint — the first cut. */
+    check('v2.55 the shading band can never exceed 1 under the stretch', (() => {
+      for (let sh = 0; sh <= 1.0001; sh += 0.05) for (let t = 0; t <= 1.0001; t += 0.05) {
+        const shL = Math.min(1, Math.max(0, sh + LOCAL_CONTRAST_K * (t - 0.5)));
+        if (0.4 + 0.6 * shL > 1 + 1e-12 || 0.75 + 0.25 * shL > 1 + 1e-12) return false;
+      }
+      return true;
+    })());
   }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
