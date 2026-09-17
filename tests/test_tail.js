@@ -5231,6 +5231,24 @@ if (typeof _domain !== 'undefined') {   /* v2.24 shell — guarded so the mainli
   }
 
 
+  /* ---- v2.56: the render prologue's derived fields are generation-keyed ---- */
+  if (typeof renderFieldCached === 'function') {
+    let built = 0;
+    const make = () => { built++; return new Float32Array([built]); };
+    const a = renderFieldCached('t', 'k1', make);
+    const b = renderFieldCached('t', 'k1', make);
+    check('v2.56 same key returns the SAME object, builder not re-run', a === b && built === 1);
+    const c = renderFieldCached('t', 'k2', make);
+    check('v2.56 a changed key rebuilds', c !== a && built === 2);
+    const d = renderFieldCached('t', 'k1', make);
+    /* ONE entry per name: going back to an old key must REBUILD, never resurrect a stale array.
+       That is what bounds the cache without an eviction policy. */
+    check('v2.56 the cache holds one entry per name, so a return to an old key rebuilds',
+      d !== a && built === 3);
+    const e = renderFieldCached('other', 'k1', make);
+    check('v2.56 names are independent', e !== d && built === 4);
+  }
+
   /* ===================== v2.55 — the heightmap LOD system =====================
      Two floors, one version. A = the relief gate gains a REAL-METRE floor so a coarse-flat plain
      stops multiplying every synthetic octave by ~1e-4; B = the Relief view's global ramp is rebased

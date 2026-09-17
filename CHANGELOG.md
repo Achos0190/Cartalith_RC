@@ -4,6 +4,60 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.56 (DCC line) — eight full-grid fields rebuilt on every render, keyed on nothing
+
+Owner: *"check the code using the ponytail skill and see if we can speedup rendering time"*. One
+fix, found by profiling rather than reading. `hash_gen1.js` vs v2.55 **ALL IDENTICAL** (including
+the `ao` and `waves` scenarios, which are exactly the ones that exercise the newly-cached fields);
+verification is `tests/perf/probe_renderfields.js` (22 assertions, which hard-error on v2.55) plus
+4 headless.
+
+- **The code had already confessed, in a comment nobody had costed.** Sitting above the block since
+  v0.6: *"R1/R2/R5/SDF fields below have no generation-keyed cache of their own (unlike
+  `_seaHCache`) — they unconditionally rebuild every render call whenever their slider is on."*
+  True, and never measured. Measured now, at 1024px with those sliders on: **one render spent
+  9407 ms rebuilding them against 1219 ms of actual pixels** — `buildCoastSDF` 3123 ms,
+  `buildRiverSDF` 3078 ms, `buildSVFField` 1886 ms, `buildBiomeBoundaryDist` 1679 ms,
+  `buildSunShadowField` 322 ms, `buildAOField` 157 ms, `buildCrestField` 52 ms,
+  `computeCoastDistance` 44 ms. **Nothing any of them reads had changed.**
+- **Which means dragging one of those sliders cost ~12 s PER DRAG STEP**, since each step is a full
+  `renderNow()`. Same for a pan, a zoom, or any civ edit that misses the bake cache. **11 720 ms ->
+  1 444 ms per render, 8.1x**, prologue 9407 -> 0.
+- **The fix is the cache pattern that already sat four lines above them.** `_seaHCache` is keyed on
+  `_fieldGen`, `_seaShadeCache` on `state.sunAz+'|'+state.exag`. `renderFieldCached(name,key,build)`
+  is six lines and generalises it; the eight call sites each gained one wrapper. No new mechanism
+  was invented and no builder was touched.
+- **EVERY INPUT MUST BE IN THE KEY, and the key is assembled at the CALL SITE, not in the helper.**
+  That is the property that makes a stale render hard to introduce later: a builder that gains a
+  parameter has to name it right where it is passed. `_fieldGen` covers field, flow **and** geoid
+  (the geoid setter's own `_fieldGen++` exists for precisely this reason) plus `GW`/`GH`; `_climGen`
+  covers the climate the biome raster derives from; everything else — a slider value, `sunAz`,
+  `seaLevel`, and **which array `effFld` resolved to** — is named explicitly.
+- **One entry per name, so the cache is bounded by the name list and needs no eviction policy.**
+  Returning to a previously-used key therefore REBUILDS rather than resurrecting a stale array —
+  asserted, because the alternative (a growing map) is an unbounded cache wearing a helper's
+  clothes.
+- **A cache that never invalidates passes a "nothing rebuilt" test perfectly, which is why the
+  probe asserts the EXACT rebuild set per input**, not merely that something was reused. Measured:
+  `state.viz.ao` -> `{ao}`; `state.sunAz` -> `{shadow}`; `state.seaLevel` -> `{coastD,coastSDF,crest}`;
+  `_climGen` -> `{biomeBD}`; **`_fieldGen` -> all eight**, which is the contract rather than a
+  stampede — every one of them is derived from the field. Under-invalidation is a stale render and
+  over-invalidation is the bug this version fixes, so both fail.
+- **The first cut did not run**: `_rfKeyBase` is a `const` inside `renderNow`, so a top-level helper
+  cannot close over it (`ReferenceError`). Fixed by passing the whole key in — which is the better
+  shape anyway, per the bullet above.
+- **One probe assertion failed first and it was mine, not the app's** (third time this session): "a
+  key change does not rebuild everything else wholesale" flagged the `computeFlow` probe at 7
+  collateral rebuilds. A `_fieldGen` bump SHOULD rebuild all eight. Replaced with the exact-set
+  assertion, which is strictly stronger.
+- **Nothing else in the render path is worth touching, and that is a measured statement.** At
+  defaults the prologue is **0.1 ms** (all eight sliders are off) and the per-pixel colour loop is
+  **94% of the render**; with the sliders on it is now 97%. v1.87 and v1.92 each profiled that loop
+  and found no redundant computation — the remaining lever is a LUT approximation, which trades the
+  fidelity the owner has twice asked to keep. `carveRivers` (1717 ms) is real `streamPowerKernel`
+  work per v2.32. **The interactive path through the civ bake cache was already ~1 ms/call** and is
+  unchanged.
+
 ## v2.55 (DCC line) — the deep-zoom plain stops being flat: two floors, neither of them storage
 
 Owner: *"Okay improve the current 24bit one with the new heightmap LOD system"*, then
