@@ -4,6 +4,64 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.54 (DCC line) — the parameter dump reads back in, and finally carries what it promises
+
+Owner: *"we have a text output for all current settings (mainly troubleshooting), can we do the same
+for import, eg give text values as expect roughly the same map, manual sculpting and such
+modifications excluded ofcourse."* The import could not be built honestly without fixing the export
+first. `hash_gen1.js` vs v2.53 **ALL IDENTICAL**; verification is `tests/perf/probe_geninfo.js`
+(21 assertions) plus 18 headless.
+
+- **The dump's own caption said "for reproducing this exact world" and it was false in three ways.**
+  Measured against the live state rather than eyeballed — **27 generation-affecting values** were
+  missing or unreadable: the **`passes`** block (v2.17's four erosion passes) and **`hydro`**
+  (v2.41's drainage integration + deltas) entirely; **16 of `climate`'s 22 fields**, because the
+  line hand-picked six; and **five scalars** (`world`, `resW`, `mapWidthKm`, `seaLevel`, `peakM`)
+  that existed only in the human prose line, where `seaLevel` was printed as a rounded whole percent
+  — 0.4235 came back as 0.42, which moves the coastline. **v2.48 spotted `passes` alone.**
+- **The fix is ONE list with TWO consumers**, not a longer hand-list. `GEN_PARAM_BLOCKS` /
+  `GEN_PARAM_SCALARS` are emitted by `generationInfoText()` and consumed by `parseGenerationInfo()`,
+  so a block added later cannot land in one and not the other. **v1.72 BUG-A / v2.45's shape, and
+  the whole reason this drifted**: an explicit field list drops what it does not name.
+- **`parseGenerationInfo(text, ref)` is PURE and takes its reference state as an argument**, so the
+  suite drives it with a synthetic state rather than the live one (v1.30's contract).
+- **A paste is UNTRUSTED INPUT** (v1.27's boundary rule). Every value is type-matched against the
+  reference and every number finite-checked — **a NaN reaching `state.tect.plates` would not throw,
+  it would quietly produce a broken world.** A key the reference lacks is dropped and **reported by
+  path**, never merged: a setting that appears accepted and does nothing is indistinguishable from a
+  broken one. The confirm dialog names the counts before anything is applied.
+- **Recursion is bounded by the REFERENCE, not the input.** `genParamMerge` descends only where the
+  reference itself holds an object, so a pathologically nested paste cannot drive it deeper than the
+  real state goes — asserted with a 200-key synthetic blob.
+- **Ordering follows `#resSeg`/`#extentSeg` exactly.** The extent is assigned BEFORE `GH` is
+  computed, because `gridH()` reads the module global `state.world` (**v2.37**). When the grid is
+  unchanged this is exactly a Generate press; when it CHANGES it takes the snapshot/rescale path, or
+  it would reproduce the v2.44 defect, since every coordinate is in GRID units.
+- **`deriveFromWorldStructure()` is deliberately NOT called.** Invariant 5 forbids it outside the
+  checkbox/archetype handlers, and calling it here would **overwrite the imported `tect` block with
+  a re-derivation of it** — the dump carries the derived values already.
+- **One control, one surface** (v1.57): the existing read-only dump textarea becomes editable and
+  gains **⤓ Apply pasted settings** beside Copy, rather than growing a second paste box. It carries
+  `data-genlock`, so a finalized world refuses it like every other generation control.
+- **Verified by rebuilding, not by inspection.** World A is built with every dropped field moved off
+  its default; its dump is copied; a different world B is built; then the **real `#genInfoApplyBtn`
+  handler** is driven (with `withBusy` intercepted for its promise, never reimplemented) and the
+  field comes back **bit-identical to A**. The control is what makes it evidence: the same round trip
+  through a **v2.53-shaped dump** (the new keys stripped, `climate` cut back to its six) **fails to
+  reproduce A** — so the omissions demonstrably mattered.
+- **A real click is asserted to LAND** (v2.46), not just a DOM query to pass. That check failed
+  first and was diagnosed rather than assumed: `elementFromPoint` at the button's centre returned
+  `#obGenerate` — the setup gate (`#onboard`, z-index 90) sits above the Settings modal (74) and the
+  probe had generated through `evaluate()`, which never clears it. The app's own flow cannot reach
+  the cog while the gate is up, so it is the harness's gap, not a layering defect.
+- **Old dumps still import** for the keys they carry — the line shape is unchanged, so a v1.101–v2.53
+  paste applies its blocks and the report's `absent` list names exactly what it could not set.
+  `climate.tilt` (a key the old dump synthesised, which is really `planet.axialTiltDeg`) is correctly
+  reported unknown, and the real value arrives from the `planet` block beside it.
+- **Scope, per the owner's own boundary**: generation parameters only. Sculpt stamps, paint,
+  settlements, ways, labels and icons are not in the lists and never will be — that is what
+  `exportZip()` is for, and the panel hint says so.
+
 ## v2.53 (DCC line) — the stored height word widens to 24 bits, using a byte already allocated
 
 Owner, on the deep-zoom research: *"And we can't move to 32bit for example?"*, then *"let's mutate

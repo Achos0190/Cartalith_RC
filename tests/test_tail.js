@@ -5169,6 +5169,65 @@ if (typeof carveRiverValleys === 'function') {
         return f instanceof Float64Array && f.length === 2 * FEAT_STRIDE && flattenFeatureStamps([]) === null && flattenFeatureStamps(null) === null; })());
   }
 
+  /* ---- generation-parameter dump: one list, two consumers (v2.54) ---- */
+  {
+    /* the lists must be the single source of truth — a block in `state` that affects generation and
+       is in neither list is exactly how `passes`/`hydro` went missing from the v1.101 dump. */
+    check('GEN_PARAM lists name every generation block that exists',
+      GEN_PARAM_BLOCKS.every(k => k in state) &&
+      ['passes', 'hydro', 'climate', 'tect'].every(k => GEN_PARAM_BLOCKS.indexOf(k) >= 0));
+    check('GEN_PARAM scalars cover the grid + sea + peak', ['world', 'resW', 'mapWidthKm', 'seaLevel', 'peakM']
+      .every(k => GEN_PARAM_SCALARS.indexOf(k) >= 0));
+
+    const ref = { tect: { seed: 1, plates: 8, ridged: false }, planet: { g: 1, geoid: { enabled: false, amp: 0.015 } },
+      resW: 1024, world: false, seaLevel: 0.42 };
+    /* a clean round trip through the exact line shape the writer emits */
+    const txt = ['prose that is not a parameter at all', 'tect: {"seed":99,"plates":12}',
+      'planet: {"geoid":{"enabled":true,"amp":0.03}}', 'seaLevel: 0.4235', 'resW: 512'].join('\n');
+    const r = parseGenerationInfo(txt, ref);
+    check('parseGenerationInfo reads blocks, nested blocks and scalars',
+      r.values.tect.seed === 99 && r.values.tect.plates === 12 &&
+      r.values.planet.geoid.enabled === true && r.values.planet.geoid.amp === 0.03 &&
+      r.values.seaLevel === 0.4235 && r.values.resW === 512);
+    check('...counts the leaves it applied', r.applied === 6);
+    check('...and ignores prose rather than reporting it', r.unknown.length === 0 && r.rejected.length === 0);
+    check('parseGenerationInfo leaves the reference untouched', ref.tect.seed === 1 && ref.seaLevel === 0.42);
+
+    /* UNTRUSTED INPUT: type-matched, finite-checked, and everything refused is named. */
+    const bad = parseGenerationInfo(['tect: {"seed":"nope","plates":8,"invented":1}',
+      'planet: {"g":1e999}', 'bogus: {"a":1}', 'seaLevel: null'].join('\n'), ref);
+    check('a wrong type is refused by path', bad.rejected.indexOf('tect.seed') >= 0);
+    check('a non-finite number is refused by path', bad.rejected.indexOf('planet.g') >= 0);
+    check('a null where a number belongs is refused', bad.rejected.indexOf('seaLevel') >= 0);
+    check('a field the reference lacks is reported, never merged',
+      bad.unknown.indexOf('tect.invented') >= 0 && !('invented' in (bad.values.tect || {})));
+    check('an unrecognised top-level key is reported', bad.unknown.indexOf('bogus') >= 0);
+    check('...and the valid neighbour still applies', bad.values.tect.plates === 8 && bad.applied === 1);
+
+    /* recursion is bounded by the REFERENCE, not the input — a deep paste cannot outrun the state. */
+    let deep = '{"g":1'; for (let i = 0; i < 200; i++) deep += ',"d' + i + '":{"x":1}';
+    const d = parseGenerationInfo('planet: ' + deep + '}', ref);
+    check('a pathologically wide/deep paste is bounded by the reference shape',
+      d.values.planet && d.values.planet.g === 1 && d.unknown.length === 200);
+
+    check('empty / null / prose-only input is safe', parseGenerationInfo('', ref).seen === 0 &&
+      parseGenerationInfo(null, ref).seen === 0 && parseGenerationInfo('hello\nworld', ref).seen === 0);
+    check('absent names what the paste did not carry', parseGenerationInfo('tect: {"seed":3}', ref).absent.indexOf('seaLevel') >= 0);
+
+    /* the writer must emit what the reader looks for — the pair that must not drift (v2.26). */
+    const dump = generationInfoText(), emitted = {};
+    for (const ln of dump.split('\n')) { const m = /^(\w+): (.+)$/.exec(ln); if (!m) continue;
+      try { emitted[m[1]] = JSON.parse(m[2]); } catch (_) {} }
+    check('every list entry is actually emitted by the writer',
+      GEN_PARAM_SCALARS.every(k => k in emitted) && GEN_PARAM_BLOCKS.filter(k => state[k]).every(k => k in emitted));
+    check('the writer emits WHOLE blocks, not a hand-picked subset',
+      Object.keys(emitted.climate).length === Object.keys(state.climate).length &&
+      Object.keys(emitted.passes).length === Object.keys(state.passes).length);
+    const back = parseGenerationInfo(dump, state);
+    check('the writer\'s own output parses with nothing unknown or refused',
+      back.unknown.length === 0 && back.rejected.length === 0 && back.applied > 40);
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();
