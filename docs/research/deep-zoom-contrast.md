@@ -160,7 +160,8 @@ So the proposal treats the cause that matters *less*. Worse, fixing contrast alo
 surface** by 315×. Smooth billowing blobs instead of a flat plate is not obviously an improvement.
 
 **Order the work: data first (§7A), storage with or before contrast (§7C), contrast last (§7B).**
-See §6.1 — C is not optional if B ships.
+See §6.1 — the storage floor must be lifted no later than B. **§7C now does that with
+one already-allocated byte**, which is why it is the cheapest item on this list, not a gating one.
 
 ### 5.1 The figure
 
@@ -286,20 +287,46 @@ sampled per pixel.**
   §4 upside preserved.
 - **Estimate: two to three days.**
 
-### C. Per-chunk height scale+offset — small, and it gates B
+### C. Widen the stored word to 24 bits — one byte that is already allocated
 
-Store `min`/`span` per atlas chunk and quantise `(v-min)/span` instead of `v`. Touches
-`packHeight16` / `unpackHeight16` / `atlasEncodeChunk` / `atlasDecodeChunk` and the chunk record,
-which gains two floats.
+**Superseded the per-chunk scale+offset design.** Owner asked "and we can't move to 32bit for
+example?", which turned out to be the better question. Measured on the same plain tile as §5.1
+(5.92 m span, 167 936 px, **12 524 distinct source heights**):
 
-- **Not backward compatible**: existing baked chunks carry no `min`/`span`. Either version the
-  record and treat a missing pair as global (cheap, keeps old atlases readable) or invalidate —
-  `worldKey()` already clears the atlas on a world change, so the blast radius is one flag.
-- `buildTileManifest` already carries a *"height encoding"* field, so the manifest has somewhere to
-  say which scheme a tile uses rather than having it inferred.
-- **Verify:** the §6 table — levels raw vs baked should converge, and the longest flat run stay at
-  1–3 px on a plain.
-- **Estimate: half a day.** And it must ship no later than B, per §6.1.
+| encoding | step | distinct levels that survive |
+|---|---|---|
+| 16-bit over the global range (shipped) | 0.1052 m | **58** |
+| 24-bit over the global range | 4.111e-4 m | **12 524 — all of them** |
+| 32-bit over the global range | 2.4e-6 m | **12 524 — not one more** |
+| 16-bit over the chunk's own range | 9.03e-5 m | 12 524 |
+
+**The 32nd bit encodes information `field` never had.** `field` is a `Float32Array`, f32 carries a
+24-bit mantissa, and the measured f32 ULP at the top of that tile is **4.110665157e-4 m** against
+24-bit fixed-point's **4.110665402e-4 m** — equal to seven figures. That is not a coincidence; it is
+the same 24 bits. Above 24, the container stops being the limit and the source becomes it.
+
+**And the byte is already there, already written, already stored.** `packHeight16` emits
+`out[i*4+2]=0; out[i*4+3]=255;` — four bytes per pixel, two carrying height, one a constant zero.
+`atlasEncodeChunk` hands that `Uint8Array` straight to IndexedDB by structured clone, so **there is
+no PNG and no compression in the height path** (the PNG stored beside it is the biome visual). A
+baked 1024² chunk already spends 4.19 MB and wastes half of it. Using byte 2 costs **nothing**.
+
+- **Use B, not A.** Byte 3 is equally free here and equally unused, but alpha is the channel that
+  breaks the moment anything routes this through a canvas — `putImageData`/`toDataURL` premultiply.
+  24 bits is sufficient and keeps that hazard permanently off the table.
+- **This removes C's coupling to B.** The per-chunk scale+offset existed only to work around a word
+  too narrow for the range it spans. Widen the word and the per-chunk `min`/`span` pair, the record
+  version negotiation, and §6.1's "C is not optional if B ships" all dissolve. **Prefer this.**
+- **Three format surfaces, and the name goes wrong.** `atlasEncodeChunk`/`atlasDecodeChunk` is
+  internal and `rec.ver` is already stamped, so old chunks can branch on it or simply re-bake. The
+  other two are published: `exportRegionTiles` writes `tiles/refined_{r}_{c}_rg16.bin`, and
+  `loadZip` reads `heightmap_rg16.bin`. `buildTileManifest` already carries a *"height encoding"*
+  field, which is the hook for declaring the scheme rather than inferring it — but `rg16` stops
+  being an accurate name, and it appears in `SAVEFILE_COMPAT.md`. The save entry is a *fallback*
+  beside the full-precision `.f32`, so leaving that one at 16 bits is defensible.
+- **Verify:** the table above, regenerated after the change — baked levels must equal raw levels,
+  and the longest flat run on a plain must stay at 1–3 px.
+- **Estimate: half a day for the atlas; the format naming is the part to decide, not the code.**
 
 ### D. Do not do
 
