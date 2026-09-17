@@ -384,6 +384,37 @@ check('state.planet has Earth defaults', !!state.planet && state.planet.g === 1 
     check('packHeight16 clamps out-of-range', back[0] === 0 && back[1] === 1);
   }
 
+  /* ---- 24-bit height pack (v2.53) ---- */
+  {
+    const n = 500, fld = new Float32Array(n);
+    for (let i = 0; i < n; i++) fld[i] = i / (n - 1);
+    fld[0] = -0.3; fld[1] = 1.7;
+    const rgb = packHeight24(fld, n), back = unpackHeight24(rgb, n);
+    let maxErr = 0; for (let i = 2; i < n; i++) maxErr = Math.max(maxErr, Math.abs(fld[i] - back[i]));
+    check('packHeight24 RGBA length & opaque', rgb.length === n * 4 && rgb[3] === 255);
+    check('24-bit height round-trip within 1 LSB (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 16777215 + 1e-12);
+    check('packHeight24 clamps out-of-range', back[0] === 0 && back[1] === 1);
+    /* ALPHA IS NOT A DATA CHANNEL — premultiplication would corrupt it through any canvas. */
+    let aAll255 = true; for (let i = 0; i < n; i++) if (rgb[i * 4 + 3] !== 255) aAll255 = false;
+    check('packHeight24 leaves alpha constant 255 (never a data channel)', aAll255);
+    /* the whole point: on a span far narrower than the global range, 24 bits keeps what 16 destroys. */
+    const m = 4096, fine = new Float32Array(m);
+    for (let i = 0; i < m; i++) fine[i] = 0.5 + (i / (m - 1)) * 0.001;   // 0.1% of the global range
+    const d16 = unpackHeight16(packHeight16(fine, m), m), d24 = unpackHeight24(packHeight24(fine, m), m);
+    const lv = a => { const t = new Set(); for (const v of a) t.add(v); return t.size; };
+    check('24-bit keeps a narrow span 16-bit flattens (' + lv(d16) + ' → ' + lv(d24) + ' levels of ' + m + ')',
+      lv(d24) === m && lv(d16) < m / 20);
+    /* f32 is the real ceiling: 24-bit fixed-point over [0,1] IS float32's own mantissa. */
+    const ulpBelow1 = 1 - Math.fround(1 - Math.pow(2, -24));   // the [0.5,1) binade's spacing
+    check('24-bit step matches the f32 ULP just below 1.0 (' + ulpBelow1.toExponential(4) + ')',
+      Math.abs((1 / 16777215) - ulpBelow1) <= 1e-12);
+    /* ...which is what makes 32 bits pointless: the container stops being the limit at 24. */
+    check('a 32-bit step would be finer than f32 can represent', 1 / 4294967295 < ulpBelow1 / 100);
+    check('unpackHeightAny dispatches on the declared encoding',
+      unpackHeightAny(packHeight24(fld, n), n, 24)[250] === back[250] &&
+      unpackHeightAny(packHeight16(fld, n), n, 16)[250] === unpackHeight16(packHeight16(fld, n), n)[250]);
+  }
+
   /* ---- tile manifest v2 (v0.052) ---- */
   {
     const man = buildTileManifest({ cols: 4, rows: 4, tileSize: 4096, width: 16384, height: 16384,
@@ -2026,9 +2057,25 @@ if (typeof applyTidalSedimentation === 'function') {
   const tile = { data: td, w: tw, h: th, z: 3, col: 5, row: 6 };
   const rec = atlasEncodeChunk(tile), dec = atlasDecodeChunk(rec);
   let maxErr = 0; for (let i = 0; i < td.length; i++) maxErr = Math.max(maxErr, Math.abs(td[i] - dec.data[i]));
-  check('atlasEncodeChunk packs rg16 + dims', rec.rg16.length === tw * th * 4 && rec.w === tw && rec.h === th && rec.z === 3 && rec.col === 5 && rec.row === 6);
-  check('atlas chunk round-trip ≤1 LSB (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 65535 + 1e-9);
+  check('atlasEncodeChunk packs hgt24 + dims', rec.hgt24.length === tw * th * 4 && rec.w === tw && rec.h === th && rec.z === 3 && rec.col === 5 && rec.row === 6);
+  check('atlasEncodeChunk no longer writes the rg16 field', rec.rg16 === undefined);
+  check('atlas chunk round-trip ≤1 LSB at 24-bit (max Δ=' + maxErr.toExponential(1) + ')', maxErr <= 0.5 / 16777215 + 1e-12);
   check('atlasDecodeChunk preserves addressing', dec.w === tw && dec.h === th && dec.z === 3 && dec.col === 5 && dec.row === 6);
+  /* v2.53 backward compatibility: a PRE-v2.53 record carries `rg16` and must keep decoding forever.
+     Discrimination is by FIELD PRESENCE, never by inspecting the bytes — a genuinely flat tile has a
+     constant low byte, so content cannot tell 16 from 24. */
+  {
+    const legacy = { rg16: packHeight16(td, td.length), w: tw, h: th, z: 3, col: 5, row: 6 };
+    const ld = atlasDecodeChunk(legacy);
+    let le = 0; for (let i = 0; i < td.length; i++) le = Math.max(le, Math.abs(td[i] - ld.data[i]));
+    check('atlasDecodeChunk still reads a pre-v2.53 rg16 record (max Δ=' + le.toExponential(1) + ')', le <= 0.5 / 65535 + 1e-9);
+    check('atlasChunkHeight reports 16 for a legacy record', atlasChunkHeight(legacy).enc === 16);
+    check('atlasChunkHeight reports 24 for a v2.53 record', atlasChunkHeight(rec).enc === 24);
+    /* a flat tile is exactly the case byte-inspection would get wrong — assert the field still wins. */
+    const flat = new Float32Array(tw * th).fill(0.25);
+    check('encoding of an all-flat tile is still read as 24 (field, not content)',
+      atlasChunkHeight(atlasEncodeChunk({ data: flat, w: tw, h: th, z: 0, col: 0, row: 0 })).enc === 24);
+  }
 
   // bakedCover: a baked ancestor covers its descendants, not a sibling subtree
   _atlasBaked.clear(); _lodTile = 512; _worldKey = 'cw';
@@ -3895,18 +3942,18 @@ if (typeof carveRiverValleys === 'function') {
     const names = E.map(e => e.name);
     check('region export emits a manifest', names.includes('tiles/index.json'));
     const man = JSON.parse(new TextDecoder().decode(E.find(e => e.name === 'tiles/index.json').data));
-    check('region manifest schema 2 with cols×rows + tile dims + rg16', man.schema === 2 && man.cols === cols && man.rows === rows &&
-      man.tileW === td.w && man.tileH === td.h && man.bounds && man.bounds.x === sel.x && man.heightEncoding === 'rg16');
-    const binNames = names.filter(n => /rg16\.bin(\.gz)?$/.test(n));
+    check('region manifest schema 2 with cols×rows + tile dims + rgb24', man.schema === 2 && man.cols === cols && man.rows === rows &&
+      man.tileW === td.w && man.tileH === td.h && man.bounds && man.bounds.x === sel.x && man.heightEncoding === 'rgb24');
+    const binNames = names.filter(n => /rgb24\.bin(\.gz)?$/.test(n));
     check('region export emits one height bin per tile (' + binNames.length + ')', binNames.length === cols * rows);
     check('manifest compression matches entries', (man.compression === 'gzip') === binNames.every(n => n.endsWith('.gz')));
     // decode tile (0,0) and compare against a direct refineTile (non-square dims)
     let bin = E.find(e => e.name === binNames.find(n => n.includes('_0_0'))).data;
     if (man.compression === 'gzip') bin = await gunzipBytes(bin);
-    const dec = unpackHeight16(bin, td.w * td.h);
+    const dec = unpackHeight24(bin, td.w * td.h);
     const ref = refineTile(field, GW, GH, sel, cols, rows, 0, 0, td.w, td.h, { seed: state.tect.seed, sea: state.seaLevel, ridged: state.tect.ridged });
     let maxErr = 0; for (let i = 0; i < td.w * td.h; i++) maxErr = Math.max(maxErr, Math.abs(dec[i] - ref[i]));
-    check('exported tile round-trips through pack+gzip (max Δ=' + maxErr.toExponential(1) + ' ≤ 1 LSB)', maxErr <= 0.5 / 65535 + 1e-9);
+    check('exported tile round-trips through pack+gzip (max Δ=' + maxErr.toExponential(1) + ' ≤ 1 LSB at 24-bit)', maxErr <= 0.5 / 16777215 + 1e-12);
   }
 
   // unzipAny (v0.056): central-dir reader handles STORED + DEFLATED entries

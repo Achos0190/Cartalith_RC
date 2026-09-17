@@ -287,7 +287,7 @@ sampled per pixel.**
   §4 upside preserved.
 - **Estimate: two to three days.**
 
-### C. Widen the stored word to 24 bits — one byte that is already allocated
+### C. Widen the stored word to 24 bits — one byte that is already allocated ✅ BUILT (v2.53)
 
 **Superseded the per-chunk scale+offset design.** Owner asked "and we can't move to 32bit for
 example?", which turned out to be the better question. Measured on the same plain tile as §5.1
@@ -327,6 +327,10 @@ baked 1024² chunk already spends 4.19 MB and wastes half of it. Using byte 2 co
 - **Verify:** the table above, regenerated after the change — baked levels must equal raw levels,
   and the longest flat run on a plain must stay at 1–3 px.
 - **Estimate: half a day for the atlas; the format naming is the part to decide, not the code.**
+- **Shipped in v2.53.** Verified through the real `atlasPut`/`atlasGet` path, not a reimplementation:
+  the plain tile's 12 524 distinct heights now all survive a bake (58 on v2.52), max error 0 on that
+  tile. `tests/perf/probe_hgt24.js`, 10 assertions, 2 of which fail on v2.52. The save fallback
+  `heightmap_rg16.bin` was deliberately left at 16-bit. See `CHANGELOG.md` v2.53.
 
 ### D. Do not do
 

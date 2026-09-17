@@ -4,6 +4,65 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.53 (DCC line) — the stored height word widens to 24 bits, using a byte already allocated
+
+Owner, on the deep-zoom research: *"And we can't move to 32bit for example?"*, then *"let's mutate
+to 24bits."* The better question — it superseded the per-chunk scale+offset design that research had
+recommended, and made the fix free. `hash_gen1.js` vs v2.52 **ALL IDENTICAL** (nothing here is
+reachable from `generate()`/`renderNow()`). Verification is `tests/perf/probe_hgt24.js` (10
+assertions, 2 of which fail immediately on v2.52) plus 11 headless.
+
+- **The byte was already allocated, already written and already stored.** `packHeight16` emitted
+  `out[i*4+2]=0; out[i*4+3]=255;` — four bytes per pixel, two carrying height, one a constant zero —
+  and `atlasEncodeChunk` hands that `Uint8Array` straight to IndexedDB by structured clone. **There
+  is no PNG and no compression anywhere in the height path**; the PNG stored beside it is the biome
+  visual. A baked 1024² chunk already spent 4.19 MB and threw half of it away.
+- **Measured on a real LOD-7 plain tile** (5.92 m span, 167 936 px, **12 524 distinct source
+  heights**): 16-bit over the global range recovers **58**; 24-bit recovers **all 12 524**; 32-bit
+  recovers **12 524 — not one more**. Through the real `atlasPut`/`atlasGet` round trip, not a
+  reimplementation, with max error **0** on that tile.
+- **24 is where the container stops being the limit and the source becomes it.** `field` is a
+  `Float32Array` and f32 carries a 24-bit mantissa; the measured f32 ULP at the top of that tile is
+  **4.110665157e-4 m** against 24-bit fixed-point's **4.110665402e-4 m** — equal to seven figures,
+  because they are the same 24 bits. A 32-bit word would encode bits `field` never had. (The
+  bit-exactness above is specific to this elevation band: in the `[0.5,1)` binade f32's own spacing
+  and the 24-bit grid coincide. Lower down f32 is finer and the round trip is within an LSB, not
+  exact. **The distinct-level count is the robust claim, not the zero.**)
+- **Alpha is deliberately NOT used.** Byte 3 is equally free and equally unused here, but it is the
+  channel premultiplication corrupts the moment a payload routes through a canvas
+  (`putImageData`/`toDataURL`). 24 bits is sufficient, so that hazard stays permanently off the
+  table rather than becoming a comment someone has to keep honouring.
+- **Encoding is decided by FIELD PRESENCE, never inferred from the bytes.** A pre-v2.53 record
+  carries `rg16`; a v2.53 record carries `hgt24`; `atlasChunkHeight(rec)` is the one place that
+  decides. **Byte-inspection would have been wrong on exactly the tiles this fix is for** — a
+  genuinely flat tile has a constant low byte, so content cannot discriminate 16 from 24. The suite
+  and the probe both assert the all-flat case explicitly.
+- **Old atlases keep working; nothing is invalidated.** A bake is expensive (5461 tiles at depth 6),
+  so the compatibility branch is one ternary rather than a forced re-bake. `packHeight16` /
+  `unpackHeight16` **stay** — they are the reader for every existing chunk and for any legacy
+  `heightmap_rg16.bin`, and a reader/writer pair must not be half-deleted (v2.26).
+- **Five surfaces, and the `rg16` name was the real cost.** The atlas encode/decode, the two bake
+  `atlasPut` sites, the atlas-ZIP export/import (which copies the payload opaquely, so
+  `buildAtlasManifest` gained a per-chunk `enc` — absent ⇒ 16, so a pre-v2.53 archive still
+  imports), and `exportRegionTiles`, whose file is now `tiles/refined_{r}_{c}_rgb24.bin` with
+  `heightEncoding:'rgb24'`. **A downstream reader that honours the manifest field keeps working and
+  one that ignored it now fails loudly on the filename rather than silently misreading.**
+- **The save fallback is deliberately left at 16-bit.** `loadZip` reads `heightmap_rg16.bin` as a
+  *portable fallback beside the full-precision `heightmap.f32`* and this app never writes it (§15.2
+  forbids it in a tree). Widening it would break external tools for no gain the `.f32` does not
+  already provide.
+- **This retires the per-chunk scale+offset work**, and `docs/research/deep-zoom-contrast.md` §6.1
+  was corrected in place rather than left claiming a coupling that no longer exists. The per-chunk
+  `min`/`span` pair existed only to work around a word too narrow for its range.
+- **Two of the new assertions failed first and both were mine, not the app's**: a level-count bound
+  that could not be met because 24 bits saturates at the number of distinct *inputs*, and an f32-ULP
+  probe that measured the binade *above* 1.0 (spacing 2^-23) instead of the one below it (2^-24) —
+  a factor of two, and the one the 24-bit grid actually matches.
+- **Still not fixed by this, and it must not be read as if it were**: the plain still carries only
+  5.92 m of relief (the §3.1 gate) and the Height view still paints it one colour (the §3.2 global
+  ramp). Widening the word stops storage destroying data; it does not create data or make it
+  visible.
+
 ## v2.52 (DCC line) — a sub-cell crater RESOLVES in the tile, it does not stay the smear
 
 Owner: *"Move forward with the tile refinement."* The thing v2.50 was the prerequisite for.

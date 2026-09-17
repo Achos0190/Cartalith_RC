@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.52 DCC test.html` | **The DCC shell line's current head, not a mainline version.** A sub-cell crater RESOLVES in the tile instead of staying the floor's smear — the thing v2.50 was the prerequisite for. Legal under v2.40's rule because the sub-cell truth is DATA: a crater is a continuous profile in `t=d/R` the coarse grid merely SAMPLED, and below the draw floor v2.50 established exactly what it holds instead — the profile at `R=floor` with the amplitude scaled by `(r/floor)^2`. **The correctness question is double-counting**, so the tile REMOVES that smear (the same call, negated amplitude) before drawing the crater at its own radius. **As `r -> floor`, `sc -> 1` and the two calls cancel**, so the pass fades to exactly nothing where the coarse grid starts resolving the feature — no blend, nothing to tune. `craterAddAt`/`volcanoAddAt` are ONE profile, called by the stamp too, and they WRITE term by term because `arr[i]+=a; arr[i]+=b` is not `arr[i]+=(a+b)` — a helper returning a value would have re-baselined `field`. Measured v2.40's way (fixed world rect, `tileSize` 64->1024): **3 -> 702 changed px while the area in WORLD units holds at 11.20/11.09/10.97/10.99 cells²**, peak Δ converging 1.4e-2 -> 8.3e-2. **The tile worker pool stringifies a NAMED LIST**, so all three functions AND the record layout (generated from the constants, never retyped) had to cross it or v1.61's isolation turns a `ReferenceError` into a silently skipped tile. Registry is a flat `Float64Array`, 117 records at 40 000 km and **3 at the app default** (worst tile Δ 3.1e-3). Seam Δ **0.00e+0**. `hash_gen1.js` vs v2.51 ALL IDENTICAL. Verify with `tests/perf/probe_cratertile.js` (16 assertions; 2 fail on v2.51). |
+| `Cartalith v2.53 DCC test.html` | **The DCC shell line's current head, not a mainline version.** The stored height word widens to 24 bits, using a byte that was already allocated, already written and already stored. `packHeight16` emitted `out[i*4+2]=0; out[i*4+3]=255;` — four bytes per pixel, two carrying height, one a constant zero — and `atlasEncodeChunk` hands that `Uint8Array` straight to IndexedDB by structured clone, so **there is no PNG and no compression in the height path** (the PNG beside it is the biome visual). A baked 1024² chunk already spent 4.19 MB and threw half away. Measured on a real LOD-7 plain tile (5.92 m span, 167 936 px, **12 524 distinct source heights**): 16-bit global recovers **58**, 24-bit recovers **all 12 524**, 32-bit recovers **12 524 — not one more**, because `field` is a `Float32Array` and f32 carries a 24-bit mantissa (measured ULP 4.110665157e-4 m vs the 24-bit step's 4.110665402e-4 m — seven figures, the same 24 bits). **Alpha is deliberately NOT a data channel** — equally free here, but premultiplication corrupts it through any canvas. **Encoding is decided by FIELD PRESENCE (`hgt24` vs `rg16`), never inferred from the bytes**: a genuinely flat tile has a constant low byte, so content cannot discriminate, and that is exactly the tile this fix is for. Old atlases keep decoding (one ternary, no forced re-bake — a depth-6 bake is 5461 tiles). Five surfaces moved; `exportRegionTiles` now writes `tiles/refined_{r}_{c}_rgb24.bin` with `heightEncoding:'rgb24'`, and the atlas-ZIP manifest gained a per-chunk `enc` (absent ⇒ 16). The save fallback `heightmap_rg16.bin` stays 16-bit on purpose — it sits beside the full-precision `.f32`. **This retires the per-chunk scale+offset design** the research had recommended. `hash_gen1.js` vs v2.52 ALL IDENTICAL. Verify with `tests/perf/probe_hgt24.js` (10 assertions; 2 fail on v2.52). |
+| `Cartalith v2.52 DCC test.html` | Previous DCC-line file. A sub-cell crater RESOLVES in the tile instead of staying the floor's smear — the thing v2.50 was the prerequisite for. Legal under v2.40's rule because the sub-cell truth is DATA: a crater is a continuous profile in `t=d/R` the coarse grid merely SAMPLED, and below the draw floor v2.50 established exactly what it holds instead — the profile at `R=floor` with the amplitude scaled by `(r/floor)^2`. **The correctness question is double-counting**, so the tile REMOVES that smear (the same call, negated amplitude) before drawing the crater at its own radius. **As `r -> floor`, `sc -> 1` and the two calls cancel**, so the pass fades to exactly nothing where the coarse grid starts resolving the feature — no blend, nothing to tune. `craterAddAt`/`volcanoAddAt` are ONE profile, called by the stamp too, and they WRITE term by term because `arr[i]+=a; arr[i]+=b` is not `arr[i]+=(a+b)` — a helper returning a value would have re-baselined `field`. Measured v2.40's way (fixed world rect, `tileSize` 64->1024): **3 -> 702 changed px while the area in WORLD units holds at 11.20/11.09/10.97/10.99 cells²**, peak Δ converging 1.4e-2 -> 8.3e-2. **The tile worker pool stringifies a NAMED LIST**, so all three functions AND the record layout (generated from the constants, never retyped) had to cross it or v1.61's isolation turns a `ReferenceError` into a silently skipped tile. Registry is a flat `Float64Array`, 117 records at 40 000 km and **3 at the app default** (worst tile Δ 3.1e-3). Seam Δ **0.00e+0**. `hash_gen1.js` vs v2.51 ALL IDENTICAL. Verify with `tests/perf/probe_cratertile.js` (16 assertions; 2 fail on v2.51). |
 | `Cartalith v2.51 DCC test.html` | Previous DCC-line file. A crater's depth belongs to its DIAMETER, not to the grid. The old law was `depth=min(0.4,0.02+radCells*0.004)` — normalised height keyed on radius in CELLS — so one 10 km crater measured **1550 m at 200 km, 491 m at 800 km, 194 m at 5 000 km, 145 m at 40 000 km**: the v1.60/v2.05/v2.07/v2.49 real-km defect in the depth law, the one place v2.50 deliberately did not follow it. Replaced by **Pike 1977** — simple `d=0.196 D^1.010` (a flat **1:5**), complex shallowing as `D^0.301` (**1:11** at 10 km, **1:91** at 200 km). The published complex branch does NOT meet the simple one (383 m vs 635 m at the transition, a **1.66x step**), so it keeps its exponent and is re-anchored on the simple branch's own value — continuity asserted at 634.3/634.6 m. The transition diameter scales as **1/g** (Melosh 1989; Moon 19.4 km vs Earth 3.2 km is 6.06x against g's 6.05x), so the one free parameter is fixed by a checkable relation. **Pike's `d` is rim crest to floor and this stamp draws `1.25*depth` crest-to-floor**, so `CRATER_RIM_FLOOR_K` divides that out and the assertion measures a REAL stamp (D 3.1 km -> 613 m drawn against 620 m wanted; D 31.3 km -> 1260/1260). **A deliberate re-baseline** — mean crater depth at the app default moves **194 m -> 558 m (x2.87)**; `hash_gen1.js` vs v2.50 diverges everywhere, and **with craters+volcanoes OFF on both sides it is ALL IDENTICAL**. The moved coastline then caught an older bug: **`landmassKey` gave two landmasses in one 8-cell block the same key, name and RENAME entry** (measured: two islets, 68 km² and 20 km², both `lm:8,19,777`) — colliders now refine to a finer block while the largest keeps the coarse key, so saved renames still resolve. Verify with `tests/perf/probe_craterdepth.js` (15 assertions; 3 fail on v2.50). |
 | `Cartalith v2.50 DCC test.html` | Previous DCC-line file. **A floor that INFLATES is not a bound.** `stampOneCrater`'s `R=Math.max(1.5,radCells)` and `stampOneVolcano`'s `R=Math.max(2,radCells)` widen the FOOTPRINT and leave the AMPLITUDE alone, so a feature smaller than one cell is drawn at the floor's full depth/height — and **v1.60's comment, still sitting above `clampFeatureRadiusCells`, claims those floors "handle the world-scale vanishing-to-sub-pixel case"** (the v2.37 expired-comment shape, third occurrence). Measured at 40 000 km/1024px: **98/100 craters floored**, a 6 km crater drawn 58.6 km wide removing **381.5x** its own material, **96.9% of the crater depth the engine wrote was the floor's**; volcanoes **99.8%** floored, p50 drawn **78.1 km against a true 8 km at FULL real height** (height is keyed on `heightM`, so nothing damped it). Monotonic in cell size: depth kept x0.999 / x0.282 / x0.031 at 800 / 5 000 / 40 000 km. **The floor stays** — `t=d/R` makes `R=0` a `0/0` — and the AMPLITUDE is scaled by the AREA ratio `(r/floor)^2`, which conserves the integrated material **exactly**: both profiles integrate to amplitude x R^2, measured on the real stamps as volcano `vol/r^2` = 0.267774/0.267782/0.267783/0.267783 and crater `vol/(depth(r)*r^2)` = 1.44015/1.44080/1.44082/1.44081. `impactField`/`volcanicField` are area-weighted too, or the fix is half-done. **A deliberate re-baseline** — `hash_gen1.js` vs v2.49 diverges everywhere because the battery runs at 512px (43/100 floored) — but **craters+volcanoes OFF on both sides is ALL IDENTICAL**, and at the app's own default the whole crater depth budget moves **0.13%**. Verify with `tests/perf/probe_craterscale.js` (15 assertions; 2 fail on v2.49). |
 | `Cartalith v2.49 DCC test.html` | Previous DCC-line file. Owner, on a 40 000 km world: rivers read as uniform lines. **Two clamps, stacked**, neither an LOD problem. (1) `riverWidthScaleK` shared `1/TERRAIN_DETAIL_MAX_K` as its lower bound, so the real-km family **stopped responding to real km at mapWidthKm 12 800** — an Earth-sized map wanted 0.02 and got 0.0625, sitting 3.1× past the ceiling with nothing saying so. The shared cap is **asymmetric in its harm**: small maps it correctly stops exaggerating, large maps it holds too WIDE. (2) `halfW` floors at 0.5 cells, and the largest value the formula can produce at that `widthK` is **0.3656** — so every channel of every order clamped and `halfw[]` was uniformly 0.5: a **39.06 km band for the trunk and the trickle alike**, four times the Amazon. Now 0.079/0.158/0.251/0.265 km by Strahler order. Safe because the floor is **dead weight on the raster** — `r=ceil(halfW)=1` for any halfW in (0,1), so only `d=0` passes and `t=1` regardless (verified at 0.04/0.12/0.366/0.5/0.9: one cell, t=1, every time) — so the stamp keeps the floor and `halfw[]` carries the true width to `drawRiverWays`' v2.25 crossover and `riverFieldTile`'s v2.40 zoom resolution, **both built for this and both receiving a constant**. `hash_gen1.js` ALL IDENTICAL at the default; above 12 800 km `field` moves, via v2.30's `carveChannelPath` deriving its RESAMPLE STEP from `halfW`. Verify with `tests/perf/probe_riverwidth.js` (11 assertions; 4 fail on v2.48). |
@@ -47,7 +48,7 @@ threads; `file://` must degrade gracefully, never break).
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1231-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1244-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -59,7 +60,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1231 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1244 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1060,6 +1061,50 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### The height word widens to 24 bits (v2.53, DCC-line file only)
+
+Owner: *"And we can't move to 32bit for example?"*, then *"let's mutate to 24bits."* The better
+question — it superseded the per-chunk scale+offset design the research had recommended, and made
+the fix free. `hash_gen1.js` vs v2.52 **ALL IDENTICAL**; verification is `tests/perf/probe_hgt24.js`
+(10 assertions, 2 of which fail on v2.52) plus 11 headless.
+
+- **The byte was already there.** `packHeight16` wrote `out[i*4+2]=0; out[i*4+3]=255;` and
+  `atlasEncodeChunk` hands the `Uint8Array` straight to IndexedDB by structured clone — **no PNG, no
+  compression anywhere in the height path** (the PNG beside it is the biome visual). Every baked
+  1024² chunk already spent 4.19 MB and wasted half. **Check what a format already allocates before
+  costing a widening.**
+- **24 is where the container stops being the limit and the SOURCE becomes it.** `field` is a
+  `Float32Array`; f32 carries a 24-bit mantissa. Measured on one real LOD-7 plain tile (12 524
+  distinct source heights): 16-bit recovers **58**, 24-bit **all 12 524**, 32-bit **12 524 — not one
+  more**. f32 ULP 4.110665157e-4 m against the 24-bit step's 4.110665402e-4 m: seven figures, the
+  same 24 bits. **Do not widen past the precision the source actually carries.**
+- **Alpha is deliberately NOT a data channel.** Byte 3 is equally free and equally unused, and it is
+  the one premultiplication corrupts through `putImageData`/`toDataURL`. 24 bits is sufficient, so
+  the hazard stays off the table instead of becoming a comment someone must keep honouring.
+- **Encoding is decided by FIELD PRESENCE (`hgt24` vs `rg16`), never inferred from the bytes.**
+  `atlasChunkHeight(rec)` is the one place that decides. Byte-inspection would have been wrong on
+  exactly the tiles this fix exists for — **a genuinely flat tile has a constant low byte**, so
+  content cannot discriminate 16 from 24. Both the suite and the probe assert the all-flat case.
+- **Old atlases keep decoding; nothing is invalidated.** A depth-6 bake is 5461 tiles, so
+  compatibility is one ternary rather than a forced re-bake. `packHeight16`/`unpackHeight16` **stay**
+  — they read every existing chunk and any legacy `heightmap_rg16.bin`, and a reader/writer pair must
+  not be half-deleted (v2.26).
+- **Five surfaces, and the `rg16` NAME was the real cost.** Encode/decode, the two bake `atlasPut`
+  sites, the atlas-ZIP round trip (which copies the payload opaquely, so `buildAtlasManifest` gained
+  a per-chunk `enc` — absent ⇒ 16, so a pre-v2.53 archive still imports), and `exportRegionTiles`,
+  now `tiles/refined_{r}_{c}_rgb24.bin` with `heightEncoding:'rgb24'`. A downstream reader honouring
+  that manifest field keeps working; one ignoring it **fails loudly on the filename** instead of
+  silently misreading.
+- **The save fallback stays 16-bit on purpose.** `heightmap_rg16.bin` is a portable fallback beside
+  the full-precision `heightmap.f32`, and this app never writes it (§15.2 forbids it in a tree).
+- **Both new assertions that failed first were mine, not the app's**: a level-count bound 24 bits
+  cannot meet because it saturates at the number of distinct *inputs*, and an f32-ULP probe that
+  measured the binade **above** 1.0 (spacing 2^-23) rather than the one below (2^-24) — a factor of
+  two, and the one the 24-bit grid matches.
+- **Does NOT fix the other two floors, and must not be read as if it did**: the plain still carries
+  5.92 m of relief (the gate) and still paints one colour in the Height view (the global ramp).
+  Storage stops destroying data; it does not create data or make it visible.
 
 ### A sub-cell crater resolves IN the tile (v2.52, DCC-line file only)
 
@@ -5202,7 +5247,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1231-assertion suite (exports ENGINE_SRC_PATH for the v2.47 worker-list check)
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1244-assertion suite (exports ENGINE_SRC_PATH for the v2.47 worker-list check)
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -5224,6 +5269,9 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_hgt24.js A.html [B.html] # v2.53 the baked atlas must lose NO distinct height (real atlasPut/atlasGet; B.html is the lossy control)
+node tests/perf/probe_heightbits.js A.html # v2.53 how many bits the height word needs: 24 and 32 recover the same levels, because f32's mantissa is 24 bits
+node tests/perf/probe_lod7compare.js A.html out.png # deep-zoom contrast figure: current vs proposed at LOD 7 (figure generator, not assertions)
 node tests/perf/probe_cratertile.js A.html # v2.52 a sub-cell crater resolves IN the tile (world-unit area constant across 5 tile resolutions)
 node tests/perf/probe_craterdepth.js A.html # v2.51 crater depth from real DIAMETER (Pike 1977), scale-invariant across map extent
 node tests/perf/probe_craterscale.js A.html # v2.50 a sub-cell crater/volcano must not be inflated to the grid (area-ratio amplitude, volume conserved)
