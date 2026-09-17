@@ -3250,12 +3250,20 @@ if (typeof euclideanDist === 'function') {
 if (typeof sampleC1 === 'function') {   /* v2.47+ only — tests/run.sh must stay green on older targets */
   const ENGINE_SRC = (() => { try { return require('fs').readFileSync(process.env.ENGINE_SRC_PATH, 'utf8'); }
                               catch (_) { return null; } })();
-  const m = ENGINE_SRC && ENGINE_SRC.match(/const fns=\[([\s\S]*?)\]\.map\(f=>f\.toString\(\)\)/);
+  const m = ENGINE_SRC && ENGINE_SRC.match(/const fns=[^[]*\[([\s\S]*?)\]\.map\(f=>f\.toString\(\)\)/);
   check('the engine source is readable and its worker function list was found', !!m);
   const list = m ? m[1] : '';
-  for (const name of ['sampleC1', 'fbmBand', 'detailBandWeight'])
+  const need = ['sampleC1', 'fbmBand', 'detailBandWeight'];
+  /* v2.52: featureFieldTile reaches craterAddAt/volcanoAddAt, so all three cross the same boundary. */
+  if (typeof featureFieldTile === 'function') need.push('craterAddAt', 'volcanoAddAt', 'featureFieldTile');
+  for (const name of need)
     check('tile worker pool stringifies ' + name + ' (or the pooled path throws silently)',
           new RegExp('\\b' + name + '\\b').test(list));
+  /* The record layout crosses too, and must be GENERATED from the module constants — a retyped copy
+     in the worker source is a silent mis-read of every stamp rather than an error. */
+  if (typeof FEAT_STRIDE !== 'undefined')
+    check('the feature-record layout is generated for the worker, not retyped',
+          /FEAT_STRIDE='\+FEAT_STRIDE\+/.test(ENGINE_SRC || ''));
 }
 /* ---------- v0.126: progressive zoom detail (addZoomDetail) + seam feather ---------- */
 if (typeof addZoomDetail === 'function') {
@@ -4932,7 +4940,10 @@ if (typeof carveRiverValleys === 'function') {
        vol / (depth(r) * r^2), not vol / r^2. Stating it that way is the point: the conservation is
        exact and the residual variation is the depth law's, which v2.50 deliberately does not touch. */
     const cr = [0.1, 0.25, 0.5, 1.0, 1.4].map(r => ({ r, ...stampVol(r, 'crater') }));
-    const kC = cr.map(o => o.vol / ((0.02 + 0.004 * o.r) * o.r * o.r));
+    const __cDepth = (typeof craterDepthUnits === 'function')
+      ? (r => craterDepthUnits(r))                       /* v2.51: divide out whatever the depth law IS */
+      : (r => 0.02 + 0.004 * r);                         /* pre-v2.51 targets keep their own law */
+    const kC = cr.map(o => o.vol / (__cDepth(o.r) * o.r * o.r));
     check('v2.50: a sub-cell crater likewise, once its own depth law is divided out',
       kC.every(k => Math.abs(k / kC[0] - 1) < 1e-3), kC.map(k => k.toFixed(5)).join(' / '));
     check('v2.50: the floor still does its job — a sub-cell stamp always touches cells',
@@ -4946,6 +4957,169 @@ if (typeof carveRiverValleys === 'function') {
         for (let i = 0; i < volcanicField.length; i++) if (!Number.isFinite(volcanicField[i])) return false;
         return true; })());
     field.set(__sv); volcanicField.set(__svV); impactField.set(__svI);
+  }
+
+  /* ---- v2.51: crater depth comes from real DIAMETER, not from radius in cells ------------------
+     The old law read `min(0.4, 0.02 + radCells*0.004)`, so the same crater got shallower every
+     time the map got wider. These assert the relation, its continuity at the re-anchored
+     simple->complex transition, and — the one that actually pins CRATER_RIM_FLOOR_K — that the
+     crater the stamp DRAWS measures Pike's depth from rim crest to floor. */
+  if (typeof craterDepthKm === 'function') {
+    const dd = D => craterDepthKm(D, 1) / D;                                  // depth-to-diameter
+    check('v2.51: a simple crater is ~1:5 deep, flat in D',
+      [0.5, 1, 2, 3].every(D => Math.abs(dd(D) - 0.2) < 0.02),
+      [0.5, 1, 2, 3].map(D => '1:' + (1 / dd(D)).toFixed(1)).join(' '));
+    check('v2.51: a complex crater SHALLOWS with diameter',
+      dd(10) < dd(3) && dd(50) < dd(10) && dd(200) < dd(50) && (1 / dd(200)) > 50,
+      '1:' + (1 / dd(10)).toFixed(0) + ' / 1:' + (1 / dd(200)).toFixed(0));
+    check('v2.51: the two branches MEET at the transition (the published complex fit does not)',
+      Math.abs(craterDepthKm(3.199, 1) / craterDepthKm(3.201, 1) - 1) < 2e-3 &&
+      Math.abs(0.27 * Math.pow(3.2, 0.301) / craterDepthKm(3.2, 1) - 1) > 0.3,
+      'step if unanchored x' + (craterDepthKm(3.2, 1) / (0.27 * Math.pow(3.2, 0.301))).toFixed(2));
+    check('v2.51: depth is monotonic in D, zero at zero, finite for garbage',
+      craterDepthKm(0, 1) === 0 && craterDepthKm(-5, 1) === 0 &&
+      [0.1, 1, 3.2, 10, 100, 400].every((D, i, a) => i === 0 || craterDepthKm(D, 1) > craterDepthKm(a[i - 1], 1)) &&
+      Number.isFinite(craterDepthKm(1, 0)) && Number.isFinite(craterDepthKm(1, null)));
+    check('v2.51: the transition diameter scales as 1/g (Moon 19.4 km vs Earth 3.2 km is 6.06x)',
+      Math.abs(craterDepthKm(2, 0.5) / (CRATER_D_SIMPLE_K * Math.pow(2, CRATER_D_SIMPLE_P)) - 1) < 1e-9 &&
+      craterDepthKm(5, 2) < craterDepthKm(5, 1));
+
+    /* Scale invariance, stated as the defect it removes: hold the crater's REAL size fixed and
+       change only the map extent. The old law's answer moves; the new one does not. */
+    const __mw = state.mapWidthKm, radKm = 5, D = 2 * radKm;
+    const at = mw => { state.mapWidthKm = mw; const rc = radKm / (mw / GW);
+      return { neu: craterDepthUnits(rc) * metersPerUnit() * CRATER_RIM_FLOOR_K,
+               alt: Math.min(0.4, 0.02 + rc * 0.004) * metersPerUnit() }; };
+    const a = at(200), b = at(5000), c = at(40000);
+    state.mapWidthKm = __mw;
+    check('v2.51: one real 10 km crater is the SAME depth at 200 / 5 000 / 40 000 km',
+      [a, b, c].every(o => Math.abs(o.neu / (craterDepthKm(D, 1) * 1000) - 1) < 1e-9),
+      [a, b, c].map(o => o.neu.toFixed(0) + 'm').join(' / '));
+    check('v2.51: and the old law was not — that is the defect, measured',
+      a.alt / c.alt > 2, a.alt.toFixed(0) + 'm vs ' + c.alt.toFixed(0) + 'm');
+
+    /* The claim that pins CRATER_RIM_FLOOR_K: measure the crater the stamp actually draws. */
+    const __sv2 = new Float32Array(field), __svI2 = new Float32Array(impactField);
+    const cellKm = state.mapWidthKm / GW, rc = 8, Dm = 2 * rc * cellKm;
+    field.fill(0.5); impactField.fill(0);
+    stampOneCrater((GW / 2) | 0, (GH / 2) | 0, rc, false, false, 0);
+    let lo = 1e9, hi = -1e9;
+    for (let i = 0; i < field.length; i++) { if (field[i] < lo) lo = field[i]; if (field[i] > hi) hi = field[i]; }
+    const drawnM = (hi - lo) * metersPerUnit(), wantM = craterDepthKm(Dm, state.planet.g) * 1000;
+    /* The collision this version's own re-baseline exposed: two landmasses in one 8-cell block
+       shared a key, a name AND a rename. Fixed by refining only the colliders — the largest keeps
+       the coarse key, so an existing rename of the dominant landmass still resolves. */
+    if (typeof assignLandmassKeys === 'function') {
+      const LW = 64, LH = 64, lc = new Int32Array(LW * LH).fill(-1);
+      for (let y = 20; y < 24; y++) for (let x = 20; x < 24; x++) lc[y * LW + x] = 0;   // 16 cells, centroid 21.5,21.5
+      for (let y = 25; y < 27; y++) for (let x = 25; x < 27; x++) lc[y * LW + x] = 1;   //  4 cells, centroid 25.5,25.5
+      const li = buildLandmassIndex({ comp: lc, count: 2 }, LW, LH, 1, 777, null, false);
+      const bare = landmassKey(21.5, 21.5, 777);
+      check('v2.51: two landmasses in one 8-cell block collided on the bare key — the defect',
+        bare === landmassKey(25.5, 25.5, 777), bare);
+      check('v2.51: ...and now get distinct keys and distinct names',
+        li[0].key !== li[1].key && li[0].name !== li[1].name, li[0].key + ' / ' + li[1].key);
+      check('v2.51: the LARGEST keeps the coarse key, so a saved rename still resolves',
+        li[0].cells === 16 && li[0].key === bare);
+      check('v2.51: a non-colliding world keeps every v2.20 key exactly', (() => {
+        const c2 = new Int32Array(LW * LH).fill(-1);
+        for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) c2[y * LW + x] = 0;
+        for (let y = 40; y < 44; y++) for (let x = 40; x < 44; x++) c2[y * LW + x] = 1;
+        const b2 = buildLandmassIndex({ comp: c2, count: 2 }, LW, LH, 1, 777, null, false);
+        return b2.every(r => r.key === landmassKey(r.cx, r.cy, 777));
+      })());
+    }
+
+    check('v2.51: the DRAWN crater measures Pike\'s depth from rim crest to floor',
+      Math.abs(drawnM / wantM - 1) < 0.02, 'drawn ' + drawnM.toFixed(0) + 'm vs ' + wantM.toFixed(0) + 'm (D=' + Dm.toFixed(1) + 'km)');
+    field.set(__sv2); impactField.set(__svI2);
+  }
+
+  /* ---- v2.52: a sub-cell crater/volcano RESOLVES in the tile instead of staying the smear -----
+     The coarse grid holds a floor-wide, area-scaled smear of a feature it could not sample. The
+     tile removes exactly that smear (same profile, negated amplitude) and draws the feature at its
+     own radius — so this is reconstruction, not a second terrain model, and it must fade to
+     EXACTLY nothing at the radius where the coarse grid starts resolving the feature. */
+  if (typeof featureFieldTile === 'function') {
+    const TW = 65, TH = 65, tb = { x: 10, y: 10, w: 8, h: 8 };   /* 8 tile px per coarse cell, so the stamp centre lands ON a pixel */
+    const mk = () => { const a = new Float32Array(TW * TH); a.fill(0.5); return a; };
+    const rec = (k, x, y, r, rf, aC, bC, aT, bT, f) => Float64Array.from([k, x, y, r, rf, aC, bC, aT, bT, f]);
+    const span = a => { let lo = 1e9, hi = -1e9; for (let i = 0; i < a.length; i++) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; } return { lo, hi }; };
+
+    /* CONTINUITY: r === rf means sc === 1, so the coarse and true amplitudes are the same and the
+       two calls cancel. This is the property that makes the crossover seamless with nothing tuned. */
+    const c0 = mk(), c1 = mk();
+    featureFieldTile(c1, TW, TH, tb, rec(FEAT_CRATER, 14, 14, 1.5, 1.5, 0.05, 0.0125, 0.05, 0.0125, 0));
+    let worst = 0; for (let i = 0; i < c0.length; i++) worst = Math.max(worst, Math.abs(c1[i] - c0[i]));
+    check('v2.52: at the crossover (r = floor) the tile pass is a no-op', worst < 1e-6, 'worst Δ=' + worst.toExponential(1));
+    const v1 = mk();
+    featureFieldTile(v1, TW, TH, tb, rec(FEAT_VOLCANO, 14, 14, 2, 2, 0.08, 1.6, 0.08, 1.6, 0));
+    worst = 0; for (let i = 0; i < c0.length; i++) worst = Math.max(worst, Math.abs(v1[i] - c0[i]));
+    check('v2.52: ...for a volcano too', worst < 1e-6, 'worst Δ=' + worst.toExponential(1));
+
+    /* RESOLUTION: a genuinely sub-cell crater comes out deeper and narrower than the smear it
+       replaces — the whole point. sc = (0.3/1.5)^2 = 0.04, so the coarse grid got 4% of the depth
+       spread over 25x the area. */
+    const smear = mk();
+    const st = rec(FEAT_CRATER, 14, 14, 0.3, 1.5, 0.002, 0.0005, 0.05, 0.0125, 0);
+    for (let oy = 0; oy < TH; oy++) for (let ox = 0; ox < TW; ox++) {
+      const wx = tb.x + ox / (TW - 1) * tb.w, wy = tb.y + oy / (TH - 1) * tb.h;
+      craterAddAt(smear, oy * TW + ox, Math.hypot(wx - 14, wy - 14) / 1.5, 0.002, 0.0005, false, false);
+    }
+    /* The fixture starts FROM the smear, because that is what a real tile carries: the coarse field
+       holds it and amplifyRegion upsamples it. Starting from flat ground would credit the pass with
+       a depth it never had to remove. */
+    const fine = Float32Array.from(smear);
+    featureFieldTile(fine, TW, TH, tb, st);
+    const sS = span(smear), sF = span(fine);
+    check('v2.52: the refined crater is far deeper than the smear it replaces',
+      (0.5 - sF.lo) > 10 * (0.5 - sS.lo), 'smear ' + (0.5 - sS.lo).toExponential(2) + ' -> fine ' + (0.5 - sF.lo).toExponential(2));
+    check('v2.52: the refined depth is the crater\'s OWN, not the floor\'s',
+      Math.abs((0.5 - sF.lo) / 0.05 - 1) < 0.02, 'reached ' + ((0.5 - sF.lo) / 0.05 * 100).toFixed(1) + '% of the true depth');
+    /* Compare like with like: each depression's own half-depth contour. 1/5 the radius is ~1/25
+       the footprint, which is the area ratio v2.50's amplitude scale is built on, seen directly. */
+    const cnt = (a, th) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] < th) n++; return n; };
+    const fp = cnt(fine, 0.5 - 0.5 * 0.05), fs = cnt(smear, 0.5 - 0.5 * 0.002);
+    check('v2.52: ...and its footprint shrank by about the area ratio',
+      fp > 0 && fs / fp > 10, fs + ' px -> ' + fp + ' px  (x' + (fs / fp).toFixed(1) + ')');
+
+    /* SEAM: no spatial neighbourhood, and the world coordinate uses addZoomDetail's own expression,
+       so two adjacent tiles must agree exactly on their shared column (v1.29's rule). */
+    const bL = { x: 10, y: 10, w: 8, h: 8 }, bR = { x: 18, y: 10, w: 8, h: 8 };
+    const tL = mk(), tR = mk(), seamSt = rec(FEAT_CRATER, 18, 14, 0.4, 1.5, 0.003, 0.00075, 0.05, 0.0125, 0);
+    featureFieldTile(tL, TW, TH, bL, seamSt); featureFieldTile(tR, TW, TH, bR, seamSt);
+    let seam = 0; for (let oy = 0; oy < TH; oy++) seam = Math.max(seam, Math.abs(tL[oy * TW + TW - 1] - tR[oy * TW]));
+    check('v2.52: adjacent tiles agree exactly on their shared column', seam === 0, 'max Δ=' + seam);
+
+    /* Garbage in must not produce garbage out — the registry crosses a worker boundary. */
+    check('v2.52: a missing / empty / degenerate registry leaves the tile untouched', (() => {
+      const a = mk(); featureFieldTile(a, TW, TH, tb, null); featureFieldTile(a, TW, TH, tb, new Float64Array(0));
+      featureFieldTile(a, TW, TH, tb, rec(FEAT_CRATER, 14, 14, 0, 0, 1, 1, 1, 1, 0));
+      featureFieldTile(a, TW, TH, tb, rec(FEAT_VOLCANO, 14, 14, NaN, 2, 0.1, 1.6, 0.1, 1.6, 0));
+      featureFieldTile(a, TW, TH, null, rec(FEAT_CRATER, 14, 14, 0.3, 1.5, 0.002, 0.0005, 0.05, 0.0125, 0));
+      for (let i = 0; i < a.length; i++) if (a[i] !== 0.5) return false;
+      return true;
+    })());
+    check('v2.52: every value the pass writes stays finite and in [0,1]',
+      fine.every ? true : (() => { for (let i = 0; i < fine.length; i++) if (!Number.isFinite(fine[i]) || fine[i] < 0 || fine[i] > 1) return false; return true; })());
+
+    /* The registry records what was DRAWN, and only what the coarse grid could not resolve. */
+    const __sv3 = new Float32Array(field), __svI3 = new Float32Array(impactField), __svV3 = new Float32Array(volcanicField);
+    _featStampSink = [];
+    stampOneCrater((GW / 2) | 0, (GH / 2) | 0, 0.3, false, false, 0);     // sub-cell  -> recorded
+    stampOneCrater((GW / 2) | 0, (GH / 2) | 0, 6, false, false, 0);       // resolved  -> not recorded
+    stampOneVolcano((GW / 4) | 0, (GH / 2) | 0, 0.5, 2000, 0);            // sub-cell  -> recorded
+    const sink = _featStampSink; _featStampSink = null;
+    field.set(__sv3); impactField.set(__svI3); volcanicField.set(__svV3);
+    check('v2.52: only SUB-CELL stamps are registered — a resolved one needs no refinement',
+      sink.length === 2 && sink[0][0] === FEAT_CRATER && sink[1][0] === FEAT_VOLCANO, sink.length + ' records');
+    check('v2.52: each record carries the coarse amplitude actually written AND the true one',
+      Math.abs(sink[0][5] / sink[0][7] - subCellStampScale(0.3, CRATER_MIN_DRAW_CELLS)) < 1e-12 &&
+      Math.abs(sink[2 - 1][5] / sink[1][7] - subCellStampScale(0.5, VOLCANO_MIN_DRAW_CELLS)) < 1e-12,
+      'crater sc=' + (sink[0][5] / sink[0][7]).toExponential(3));
+    check('v2.52: the flattened registry is one buffer, stride-aligned, largest first under the cap',
+      (() => { const f = flattenFeatureStamps(sink);
+        return f instanceof Float64Array && f.length === 2 * FEAT_STRIDE && flattenFeatureStamps([]) === null && flattenFeatureStamps(null) === null; })());
   }
 
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
