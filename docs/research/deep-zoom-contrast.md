@@ -162,6 +162,39 @@ surface** by 315×. Smooth billowing blobs instead of a flat plate is not obviou
 **Order the work: data first (§7A), storage with or before contrast (§7C), contrast last (§7B).**
 See §6.1 — C is not optional if B ships.
 
+### 5.1 The figure
+
+`docs/images/lod7_contrast_compare.png` — one fixed 6.25 km world rect at LOD 7, 512 px, seed 12345,
+rendered from **one build** with the relief gate switched at runtime, so "current" is a real control
+rather than a second implementation. Reproduce with:
+
+```
+node tests/perf/probe_lod7compare.js "Cartalith v2.52 DCC test.html" out.png
+```
+
+Read it as three claims, not one:
+
+| | plain, current | plain, proposed | steep, current | steep, proposed |
+|---|---|---|---|---|
+| Biome, distinct colours / longest identical run | 101 / **35 px** | 99 / **20 px** | 441 / 7 px | 436 / 7 px |
+| Height, distinct colours / longest identical run | **1 / 512 px** | **104 / 5 px** | 433 / 5 px | 414 / 5 px |
+| 16-bit quantisation step | 0.1052 m | **1.45e-4 m** | 0.1052 m | 3.30e-2 m |
+| tile height span | 5.9 m → 9.5 m | | 2160.2 m, unchanged | |
+
+1. **The Height view on a plain is one colour across the whole tile** — the §3.2 floor, at its
+   worst. 512 px of a single value is not a subtle loss of contrast.
+2. **The steep control barely moves** (441→436 Biome, runs 7→7). That is the point: nothing is
+   being taken away where the terrain is already expressive, which is what §5 predicts, since
+   hillshade was never the constrained term.
+3. **The Biome row shows the gate and the storage only.** Its colour comes from `materialWeights`
+   and `landColorCore`, not the hypsometric ramp, so the rAbs/rLocal split of §4.2 cannot be
+   simulated there without touching those functions — the run falling 35 px → 20 px is the relief
+   floor (§7A) putting real data in, not the contrast change (§7B). The Height row is where the
+   ramp rebase is visible, and it keeps its tint from the TRUE elevation: a floodplain still reads
+   as a floodplain, only its luminance is stretched locally. A naive full-ramp rebase was rendered
+   first and put **snow and scree on a floodplain at true r=0.41** — that is §4.2's threshold
+   breakage, photographed.
+
 ## 6. A third floor: the atlas stores height on a GLOBAL ladder
 
 *(Added after the owner's follow-up: "then this would also allow for a finer pixel density in the
