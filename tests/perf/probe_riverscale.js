@@ -12,10 +12,17 @@
  *    Yellow River would all be order 3-4 here. Drainage area is continuous and is what USGS's own
  *    display-scale filter keys on.
  * 2. `traceRiverPolylines` returns inter-confluence FRAGMENTS, not rivers. Spearman rho between
- *    fragment length and fragment drainage was 0.252-0.298 and the top 100 by each shared 2-7
- *    features, so a cartographic minimum-length rule applied to fragments selects the WRONG rivers.
- *    Assembling whole stems mouth-upward along maximum drainage takes rho to 0.96-0.97 — Hack's law
- *    appearing, which is what makes a length gate mean what cartography means by it.
+ *    fragment length and the fragment's own upstream accumulation was 0.252-0.298 and the top 100
+ *    by each shared 2-7 features, so a cartographic minimum-length rule applied to fragments selects
+ *    the WRONG rivers. Assembling whole stems mouth-upward takes rho to 0.96-0.97.
+ *    CORRECTED IN v2.59, and the correction matters: that 0.96 is length against `buildMainStems`'
+ *    OWN accumulation over `net.recv`, which covers CHANNEL cells only — a count of upstream channel
+ *    cells, not a catchment AREA. Against computeFlow's real catchment raster the same stems measure
+ *    rho 0.11-0.40, worse than Strahler order's own 0.38-0.73 (`probe_riverorder.js`). v2.41's "two
+ *    different trees" a third time. The fragments-vs-stems comparison below is unaffected — it is
+ *    like-for-like on ONE quantity — but the LENGTH GATE is justified as a CARTOGRAPHIC disclosure
+ *    rule (a stem's own extent in screen pixels, which is literally what it measures), never as a
+ *    measure of hydrological importance.
  * 3. The rank must be accumulated on the tree being WALKED. net.recv and flowField are different
  *    trees (v2.41: they "describe different objects"); mixing them reached a cell with 163 405 of
  *    accumulated flow whose net.recv-upstream set was empty.
@@ -106,10 +113,14 @@ const ck=(n,c,x)=>{ if(c){pass++;console.log('ok   - '+n+(x?'   ('+x+')':''));}
       maxOrder:Math.max(...st.map(s=>s.order)) };
   });
   ck('v2.58 a real world produces main stems', !W.err && W.nStem>100, W.nStem+' stems');
-  ck('v2.58 whole stems correlate length with drainage FAR better than v2.57 fragments',
+  ck('v2.58 whole stems correlate length with upstream accumulation FAR better than v2.57 fragments',
      W.rhoStem>0.85 && W.rhoStem > W.rhoFrag+0.4, 'rho '+W.rhoFrag+' -> '+W.rhoStem);
-  ck('v2.58 that correlation is Hack\'s-law tight, so a LENGTH gate is a valid importance gate',
-     W.rhoStem>0.9, 'rho='+W.rhoStem);
+  /* This is length against the stem's own net.recv accumulation (upstream CHANNEL CELLS), which is
+     what makes a length gate select whole rivers rather than arbitrary fragments. It is NOT a claim
+     that length tracks catchment AREA — see probe_riverorder.js, where the same stems measure
+     rho 0.11-0.40 against the real catchment raster. */
+  ck('v2.58 so a length gate selects whole rivers rather than fragments (a DISCLOSURE rule, not an importance measure)',
+     W.rhoStem>0.9, 'rho(length, upstream channel cells)='+W.rhoStem);
   ck('v2.58 no stem jumps the antimeridian (the seam length defect)',
      W.maxStep<1.5, 'max step '+W.maxStep+' cells');
   ck('v2.58 the longest river is a plausible real length, not a wrapped artefact',

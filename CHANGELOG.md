@@ -4,6 +4,105 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.59 (DCC line) — integrated drainage becomes the default, and Strahler order is measured
+
+Owner, on v2.58's disclosure that `state.hydro.integrate` stays default off and is load-bearing:
+*"Turn it on and give me a comparison with for example strahler and if we should replace it."* Two
+halves. The flip is **a deliberate re-baseline of every world generated from a seed** — `field`
+itself moves, because `carveRiverValleys()` cuts a real trench along the traced network and the
+network is what integration changes. Verification is `tests/perf/probe_riverorder.js` (18 assertions)
+plus `tests/run.sh` 1280/0, `tests/perf/probe_deltas.js` 18/0 and `tests/perf/probe_riverscale.js`
+17/0.
+
+### A — the flip
+
+- **v2.41 measured exactly what leaving it off costs and then shipped it off anyway**, so no existing
+  world would move. Re-measured inside ONE build at the app's own default (region, 800 km, 512px,
+  seed 12345): **68.5% of land drained into an interior PIT** with it off, **0.0%** with it on. Land
+  draining to the SEA specifically: 26 031 -> 42 475 cells (**1.63x**). The longest whole main stem
+  **66 km -> 118 km (1.80x)**; the largest catchment arriving at a stem mouth **5 078 -> 92 815 km²
+  (18.3x)**. That is not a conservative default, it is a broken drainage network presented as the
+  shipped one, and every consumer keyed on river order inherited it.
+- **`deltas` stays OFF.** It deposits real sediment and builds new land; that is a look decision, not
+  a correctness one, and it is a separate owner call.
+- **The `loadZip` compat guard deliberately still defaults `integrate` to FALSE.** A save that
+  predates v2.41 carries no `hydro` block and *was* generated without integration, so it must reload
+  as the world it was; a v2.41+ save carries its own explicit value and is unaffected. The state
+  literal and the guard now disagree on purpose — the v2.17 `passes` / v2.22 `crater.physical`
+  convention.
+- **Isolated, so the re-baseline claim is falsifiable.** The `hash_gen1.js` battery diverges on
+  `field`/`temp`/`rain`/`flow`/`rgba` in every scenario. With `integrate` FORCED to the same value on
+  both sides it is **ALL IDENTICAL both ways** — v2.58 at `integrate=true` produces v2.59's default
+  `field` hash **3273059064** exactly, and v2.59 at `integrate=false` produces v2.58's **528640695**
+  exactly. The flip is the whole of the divergence and nothing else changed.
+
+### B — Strahler order, measured against the alternative
+
+Strahler order is this engine's river-importance currency: `order>=3` gates navigability and harbour
+validity, `order>=4` the fishing specialisation, `10+order*7` a town's river width, `0.45*(order-1)`
+the channel half-width, `_civNavigableRiverDiscount(order)` the routing discount, and the
+Min-stream-order slider thins the drawn network by it. **Three of my own hypotheses were refuted and
+the probe records each refutation as an assertion.**
+
+- **REFUTED — Strahler order is NOT resolution-dependent here.** The classic criticism does not
+  apply, because `riverFlowThresh` is `gw*gh*0.0004/riverCoarseEase(mapWidthKm)`, keyed on the CELL
+  COUNT: the channel mask is a roughly constant FRACTION of the grid, so the tributary ladder does
+  not deepen as the grid refines. Measured max order **3 / 3 / 3** at 512/1024/2048px on one seed.
+  (The resolution sweep cannot isolate anything anyway — v1.60's `terrainDetailK` makes relief
+  frequency real-km-aware, so changing resolution at a fixed extent changes the TERRAIN. It is
+  printed with that caveat and asserted only on the ladder.)
+- **It IS extent-dependent, and that is the defect with teeth.** At a fixed seed and resolution,
+  `order>=3` covers **0.32% / 3.73% / 4.10%** of channel cells at 800 / 8 000 / 40 000 km — a
+  **12.8x** swing in what "navigable" means, decided by the map's width rather than by the river.
+  Max order **3 -> 4 -> 4** over the same sweep.
+- **Order cannot rank inside itself.** The top Strahler bucket spans **123.7x** in real catchment.
+- **And it is not monotone in catchment.** In **4 of 6** configurations the single biggest river in
+  the world is NOT the highest-order one — a world's largest river reading order 2 of 4, i.e. below
+  the `order>=3` navigability threshold.
+- **The whole vocabulary reaches 4.** Against 8-12 for a real Amazon and ~8 for the Rhine, that is at
+  most four buckets, three of them headwaters.
+- **The flip is the sharpest demonstration of the limit.** Moving 68.5% of the world's land from an
+  interior pit to a real outlet and lengthening the trunk 1.80x is a change to the hydrology of every
+  river on the map, and Strahler order reports **exactly nothing** about it: max order 3 -> 3, outlet
+  order 3 -> 3. The ladder was already saturated. **v2.41's own note recorded "outlet Strahler 2 ->
+  3"**, which is true of the network `probe_deltas.js` rebuilds with `riverDensity:1` and NOT of the
+  shipped `_riverNet` every consumer reads; that assertion fails identically on v2.58, so the drift
+  is pre-existing (v2.48's exact EDT, v2.50/v2.51's crater scale and depth, v2.57's plate blur each
+  moved this seed's terrain). It is replaced by the discharge arriving at the coast, which is what
+  the claim was always about.
+- **REFUTED — v2.58's stem LENGTH is a WORSE importance measure than the order it would replace.**
+  Mid-ranked Spearman against the real catchment raster: rho(order) **0.379-0.734**, rho(length)
+  **0.105-0.398** — order wins in every one of the six configurations.
+- **And that corrects a number I published yesterday.** v2.58's headline **rho 0.207 -> 0.963** is
+  length against `buildMainStems`' OWN accumulation over `net.recv`, which covers CHANNEL cells only
+  — a count of upstream channel cells, not a catchment AREA. Measured here at **0.968-0.983** against
+  that quantity and **0.105-0.398** against `computeFlow`'s catchment raster: **v2.41's "two
+  different trees", a third occurrence, this time inside a figure of my own.** v2.58's fix stands —
+  its fragments-vs-stems comparison is like-for-like on ONE quantity — but the length gate is
+  justified as a **cartographic disclosure rule** (a stem's own extent in screen pixels, which is
+  literally what it measures), never as a measure of hydrological importance. `probe_riverscale.js`'s
+  wording was corrected in the same pass.
+- **Spearman with heavy ties needs MID-RANKS.** Order is `{1,2,3,4}` over thousands of stems, so ties
+  dominate; a first cut handed tied values arbitrary distinct ranks and read **-0.26 to +0.41** on
+  data that is plainly monotone. Ranks-with-ties are then Pearson-correlated; the `d²` shortcut is
+  only valid without them.
+- **RECOMMENDATION: keep Strahler, do not replace it — and stop using it where it has to RANK.** It
+  is a sound, cheap, resolution-stable ordinal tier and it correlates better with real catchment than
+  any alternative currently in the file. What it cannot do is answer "is this river bigger than that
+  one" (123.7x inside one bucket, non-monotone) or carry a threshold that must mean the same thing on
+  two maps (0.32% vs 4.10%). The quantity for those is the catchment area `computeFlow` already
+  accumulates, in km² — extent-free, resolution-free and continuous. That is a change to nine
+  consumers and a re-baseline of every generated settlement, so it is disclosed here as the owner's
+  call rather than bundled into a flag flip.
+
+### Measurement discipline this cost
+
+- **A re-derived receiver tree is the "two functions answering one question" defect.** A first cut of
+  the drainage walk re-derived its own D8 tree, omitted the map-EDGE outlet case, and read **55% pit**
+  on a world `probe_deltas.js` measures at under 1%. The walk is lifted from that probe verbatim now.
+- **`currentRoutingSurface()` returns `null` when `integrate` is off** — that is its contract, and
+  the off-state must walk the raw `field`, which is exactly what `computeFlow` does there.
+
 ## v2.58 (DCC line) — a river fragment is not a river
 
 Owner, on the same 40 000 km world: *"What if we draw a river with a catmull-rom line and only render

@@ -32,8 +32,12 @@ const ck=(n,c,x)=>{ if(c){pass++; console.log('ok   - '+n);} else {fail++; conso
    hasFns:typeof buildRoutingSurface==='function'&&typeof applyRiverDeltas==='function'
           &&typeof traceDistributaries==='function',
  }));
- ck('state.hydro exists and BOTH flags default off',
-    defs.hydro && defs.hydro.integrate===false && defs.hydro.deltas===false, JSON.stringify(defs.hydro));
+ /* v2.59 CONTRACT, not v2.41's: `integrate` ships ON — v2.41 measured that leaving it off left
+    68.5% of land draining into an interior pit and shipped it off anyway so no existing world would
+    move, and v2.59 accepted that re-baseline. `deltas` stays OFF (it deposits real sediment).
+    This assertion therefore FAILS on v2.41-v2.58 by design, which is what makes it evidence. */
+ ck('v2.59: integrate defaults ON, deltas defaults OFF',
+    defs.hydro && defs.hydro.integrate===true && defs.hydro.deltas===false, JSON.stringify(defs.hydro));
  ck('the new engine functions exist', defs.hasFns);
 
  /* One generate per configuration, measured the same way each time. */
@@ -115,8 +119,17 @@ const ck=(n,c,x)=>{ if(c){pass++; console.log('ok   - '+n);} else {fail++; conso
  ck('...and substantially more land now drains to the SEA specifically',
     intg.toSea > base.toSea*1.25,
     base.toSea+' -> '+intg.toSea+'  ('+(intg.toSea/base.toSea).toFixed(2)+'x)');
- ck('a real trunk now reaches the sea (outlet Strahler order rises)',
-    intg.maxOutletOrder>base.maxOutletOrder, base.maxOutletOrder+' -> '+intg.maxOutletOrder);
+ /* v2.41 asserted this as a rise in the OUTLET'S STRAHLER ORDER and that no longer discriminates:
+    it reads 3 -> 3 on v2.58 as well as v2.59, so the drift is pre-existing (v2.48's exact EDT,
+    v2.50/v2.51's crater scale and depth, and v2.57's plate blur each moved this seed's terrain).
+    The ladder is simply saturated — riverFlowThresh caps how many tributary levels the channel mask
+    can resolve, so order cannot express a change that moves 68.5% of the world's land from a pit to
+    a real outlet. The DISCHARGE arriving at the coast can, and that is what the claim was about. */
+ ck('a real trunk now reaches the sea (the discharge arriving at the coast rises sharply)',
+    intg.maxOutletFlow>base.maxOutletFlow*3,
+    'max flow at an outlet '+base.maxOutletFlow.toFixed(0)+' -> '+intg.maxOutletFlow.toFixed(0)
+    +' cells ('+(intg.maxOutletFlow/Math.max(1e-9,base.maxOutletFlow)).toFixed(1)+'x), while its Strahler order held at '
+    +base.maxOutletOrder+' -> '+intg.maxOutletOrder);
  ck('integration does not move the coastline (it never touches field)',
     Math.abs(intg.landFrac-base.landFrac)<0.02, base.landFrac.toFixed(4)+' -> '+intg.landFrac.toFixed(4));
 
