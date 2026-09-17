@@ -4,6 +4,89 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.50 (DCC line) — a floor that INFLATES is not a bound
+
+Continuing the crater/volcano half of the zoom work. The finding is not what that item assumed: the
+problem was never that a sub-cell crater is missing from the coarse field and wants refining at tile
+resolution. It is that a sub-cell crater is **manufactured** there, at up to 380x its own size, so
+refining it would have faithfully upscaled a feature that should not be visible at all. `tests/run.sh`
+1204/0 (+9); `tests/perf/probe_craterscale.js` 15 assertions, 2 fail immediately on v2.49.
+
+**An expired comment, third occurrence of the v2.37 shape.** v1.60 added `clampFeatureRadiusCells`
+and wrote its reasoning directly above it: only a CEILING is needed, because *"the existing
+`Math.max(...)` floors already handle the opposite, world-scale vanishing-to-sub-pixel case."* That
+sentence has sat above the function since v1.60 and it is false. `stampOneCrater`'s
+`R = Math.max(1.5, radCells)` and `stampOneVolcano`'s `R = Math.max(2, radCells)` widen the
+**footprint** and leave the **amplitude** alone, so a feature smaller than one cell is drawn at the
+floor's full depth or height. The floor does not bound the feature — it invents one.
+
+**Measured, legacy path, seed 12345, 100 craters:**
+
+| world | km/cell | craters floored | crater depth kept |
+|---|---|---|---|
+| 800 km / 2048px — the app's own default | 0.391 | **3 / 100** | **x0.9987** |
+| 800 km / 1024px | 0.781 | 16 / 100 | x0.9542 |
+| 800 km / 512px — the hash battery's shape | 1.563 | 43 / 100 | x0.8125 |
+| 5 000 km / 1024px | 4.883 | 94 / 100 | x0.2823 |
+| 40 000 km / 1024px | 39.063 | **98 / 100** | **x0.0312** |
+
+So at world extent **96.9% of the crater depth the engine was writing was manufactured by the
+floor**, and the effect is monotonic in cell size rather than a cliff at one extent. A single 6 km
+crater there was drawn 58.6 km wide against a true 3.0 km radius and removed **381.5x** the material
+its own radius accounts for.
+
+**The volcano half is starker, because nothing damped it.** `stampOneVolcano`'s height is
+`(heightM/state.peakM)*0.9*(1-age*0.5)` — keyed on real metres, correctly, and therefore completely
+independent of how many cells the cone is drawn across. At 40 000 km / 1024px **99.8%** of volcanoes
+are floored and the p50 one is drawn **78.1 km across against a true 8 km, at its full real height**.
+At the app's own default that floor binds on **0%** of volcanoes; at 800 km / 512px, 1.3%. This is
+almost purely a large-map defect, which is exactly why it survived.
+
+**The fix keeps the floor, because the floor is load-bearing** (v2.49's rule: check what a guard is
+guarding before removing it). Both stamps compute `t = d/R`, so `R = 0` is `0/0`, and the loop must
+touch at least one cell or a sub-cell feature writes nothing at all. What is corrected is the
+amplitude: `subCellStampScale(r, floor)` returns `1` at and above the floor and `(r/floor)^2` below
+it. Both profiles integrate to amplitude x R^2 — the crater's `depth*(1-t^2)` gives `depth*pi*R^2/2`,
+the volcano's `H*(1-t)^p` is the same family — so the **area** ratio makes a sub-cell feature
+contribute exactly the material its own real radius accounts for, rather than the floor's.
+
+**Conservation is asserted on the real stamps, not on the formula.** A volcano's height does not
+depend on its radius, so its integrated material must come out exactly proportional to `r^2` with no
+step where the floor takes over: measured **0.267774 / 0.267782 / 0.267783 / 0.267783** across
+r = 0.1 / 0.25 / 0.5 / 1.0. A crater's own depth law carries an `r` term (`0.02 + 0.004r`), so the
+invariant there is `vol / (depth(r) * r^2)`: **1.44015 / 1.44080 / 1.44082 / 1.44081**. Stating the
+crater invariant that way is the point — the conservation is exact, and the entire residual is the
+depth law's own r-dependence, which this version deliberately does not touch (see below).
+
+**`impactField` and `volcanicField` are area-weighted too.** Both are `max(existing, (1-t)*...)`
+markers, and leaving them at full intensity across the floored disc would have been the half-fix
+shape this file keeps paying for: a crater covering 0.6% of one cell would still have claimed full
+impact intensity over nine. They feed resource potentials, so this moves those fields too —
+disclosed, not incidental.
+
+**A deliberate re-baseline, and isolated so the claim is checkable.** `hash_gen1.js` vs v2.49
+diverges on `field`/`temp`/`rain`/`flow`/`rgba` in every scenario, because the battery runs at 512px
+where 43 of 100 craters are floored. **With craters and volcanoes both off on both sides it is ALL
+IDENTICAL** — that is the proof the divergence is this change and nothing else. At the app's own
+default the whole crater depth budget moves by **0.13%** (3 craters of 100, the worst single one
+175.7 m -> 152.7 m), and `volcanicField` measured byte-identical at the 512px reference draw.
+
+**Disclosed, measured, NOT fixed here.** `depth = min(0.4, 0.02 + radCells*0.004)` keys crater depth
+on radius **in cells**, so the same real crater is a different landform on different maps: one 10 km
+crater measures **141 m deep at 40 000 km against 491 m at 200 km**, and 0.07x-0.25x of the ~1:5
+depth-to-diameter a simple crater actually has. That is the v1.60 / v2.07 / v2.49 real-km defect
+again, in the depth law rather than the radius. Fixing it means adopting a real d/D relation, which
+would make craters **4-14x deeper at every extent including the default** — a much larger visual
+decision than a scale-invariance fix, and its own pass.
+
+**Also disclosed**: the physical crater model's stamping ceiling drops far more than its own comment
+implies. On a 40 000 km world it produces **1 040 000** craters and stamps **3 000**, raising the
+minimum diameter from 0.5 km to 12.88 km; **16.4%** of the full produced population survives wear, so
+roughly 167 000 real craters are dropped rather than "already lost to erosion". They were never given
+positions, so drawing them at tile resolution would be **inventing, not refining** — v2.40's own rule.
+Tile-resolution crater refinement remains unbuilt; v2.50 is the prerequisite it turned out to need,
+since there is no point resolving a signal that is 380x too large.
+
 ## v2.49 (DCC line) — a river's width is its discharge again, and real-km scaling stops giving up at 12 800 km
 
 Owner, on a 40 000 km world: rivers read as uniform lines at every zoom. **Two clamps, stacked**, and

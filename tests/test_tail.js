@@ -4896,6 +4896,58 @@ if (typeof carveRiverValleys === 'function') {
       (() => { const o = gaussBlur(flat, 0, W, H, false); return o !== flat && o.length === flat.length; })());
   }
 
+  /* ---- v2.50: a feature smaller than one cell must not be INFLATED to one cell ----------------
+     stampOneCrater/stampOneVolcano floor their DRAWN radius so the stamp loop always touches a
+     cell and t=d/R is never 0/0. That floor stays. What it must not do is leave the AMPLITUDE at
+     the floor's value, which drew a sub-cell feature with a whole cell's worth of material.
+     Guarded on typeof so every older target still runs. */
+  if (typeof subCellStampScale === 'function') {
+    check('v2.50: subCellStampScale is exactly 1 at and above the floor',
+      subCellStampScale(1.5, 1.5) === 1 && subCellStampScale(6, 1.5) === 1 && subCellStampScale(2, 2) === 1);
+    check('v2.50: below the floor it is the AREA ratio, not the radius ratio',
+      Math.abs(subCellStampScale(0.75, 1.5) - 0.25) < 1e-12 && Math.abs(subCellStampScale(1, 2) - 0.25) < 1e-12);
+    check('v2.50: a zero radius scales to zero and never divides', subCellStampScale(0, 1.5) === 0 &&
+      Number.isFinite(subCellStampScale(0, 0)) && Number.isFinite(subCellStampScale(-1, 1.5)));
+    check('v2.50: the two floors are named and match what the stamps use',
+      CRATER_MIN_DRAW_CELLS === 1.5 && VOLCANO_MIN_DRAW_CELLS === 2);
+
+    /* The real stamps, not the formula. A volcano's H is keyed on real metres and does not depend
+       on its radius, so its integrated material must come out EXACTLY proportional to r^2 all the
+       way through the floor — no step where the floor takes over. */
+    const __sv = new Float32Array(field), __svV = new Float32Array(volcanicField), __svI = new Float32Array(impactField);
+    const stampVol = (r, kind) => {
+      field.fill(0.5); volcanicField.fill(0); impactField.fill(0);
+      const cx = (GW / 2) | 0, cy = (GH / 2) | 0;
+      if (kind === 'crater') stampOneCrater(cx, cy, r, false, false, 0);
+      else stampOneVolcano(cx, cy, r, 2000, 0);
+      let vol = 0, touched = 0;
+      for (let i = 0; i < field.length; i++) { const d = field[i] - 0.5; if (d !== 0) { vol += Math.abs(d); touched++; } }
+      return { vol, touched };
+    };
+    const vr = [0.1, 0.25, 0.5, 1.0, 1.9].map(r => ({ r, ...stampVol(r, 'volcano') }));
+    const kV = vr.map(o => o.vol / (o.r * o.r));
+    check('v2.50: a sub-cell volcano contributes material proportional to its OWN r^2',
+      kV.every(k => Math.abs(k / kV[0] - 1) < 1e-4), kV.map(k => k.toFixed(6)).join(' / '));
+    /* A crater's own depth formula carries an r term (0.02+0.004r), so the invariant is
+       vol / (depth(r) * r^2), not vol / r^2. Stating it that way is the point: the conservation is
+       exact and the residual variation is the depth law's, which v2.50 deliberately does not touch. */
+    const cr = [0.1, 0.25, 0.5, 1.0, 1.4].map(r => ({ r, ...stampVol(r, 'crater') }));
+    const kC = cr.map(o => o.vol / ((0.02 + 0.004 * o.r) * o.r * o.r));
+    check('v2.50: a sub-cell crater likewise, once its own depth law is divided out',
+      kC.every(k => Math.abs(k / kC[0] - 1) < 1e-3), kC.map(k => k.toFixed(5)).join(' / '));
+    check('v2.50: the floor still does its job — a sub-cell stamp always touches cells',
+      vr.every(o => o.touched > 0) && cr.every(o => o.touched > 0));
+    check('v2.50: and the footprint below the floor is the floor\'s, so only amplitude moved',
+      new Set(cr.map(o => o.touched)).size === 1, 'touched=' + cr.map(o => o.touched).join(','));
+    /* Invariant 2: nothing the stamps write may be non-finite, at any radius including 0. */
+    check('v2.50: a zero-radius stamp leaves the field finite',
+      (() => { stampVol(0, 'crater'); stampVol(0, 'volcano');
+        for (let i = 0; i < field.length; i++) if (!Number.isFinite(field[i])) return false;
+        for (let i = 0; i < volcanicField.length; i++) if (!Number.isFinite(volcanicField[i])) return false;
+        return true; })());
+    field.set(__sv); volcanicField.set(__svV); impactField.set(__svI);
+  }
+
   console.log('\n' + __pass + ' passed, ' + __fail + ' failed');
   process.exit(__fail ? 1 : 0);
 })();

@@ -11,7 +11,8 @@ threads; `file://` must degrade gracefully, never break).
 |------|------|
 | `Cartalith Gen1 v2.22.html` | **Current** unified tool (~30.6k lines, 4 script blocks — see architecture below) |
 | `Cartalith Gen1 v0.57/v0.6/v0.61…v2.21.html` | Previous Gen1 versions (kept; never edit in place) |
-| `Cartalith v2.49 DCC test.html` | **The DCC shell line's current head, not a mainline version.** Owner, on a 40 000 km world: rivers read as uniform lines. **Two clamps, stacked**, neither an LOD problem. (1) `riverWidthScaleK` shared `1/TERRAIN_DETAIL_MAX_K` as its lower bound, so the real-km family **stopped responding to real km at mapWidthKm 12 800** — an Earth-sized map wanted 0.02 and got 0.0625, sitting 3.1× past the ceiling with nothing saying so. The shared cap is **asymmetric in its harm**: small maps it correctly stops exaggerating, large maps it holds too WIDE. (2) `halfW` floors at 0.5 cells, and the largest value the formula can produce at that `widthK` is **0.3656** — so every channel of every order clamped and `halfw[]` was uniformly 0.5: a **39.06 km band for the trunk and the trickle alike**, four times the Amazon. Now 0.079/0.158/0.251/0.265 km by Strahler order. Safe because the floor is **dead weight on the raster** — `r=ceil(halfW)=1` for any halfW in (0,1), so only `d=0` passes and `t=1` regardless (verified at 0.04/0.12/0.366/0.5/0.9: one cell, t=1, every time) — so the stamp keeps the floor and `halfw[]` carries the true width to `drawRiverWays`' v2.25 crossover and `riverFieldTile`'s v2.40 zoom resolution, **both built for this and both receiving a constant**. `hash_gen1.js` ALL IDENTICAL at the default; above 12 800 km `field` moves, via v2.30's `carveChannelPath` deriving its RESAMPLE STEP from `halfW`. Verify with `tests/perf/probe_riverwidth.js` (11 assertions; 4 fail on v2.48). |
+| `Cartalith v2.50 DCC test.html` | **The DCC shell line's current head, not a mainline version.** **A floor that INFLATES is not a bound.** `stampOneCrater`'s `R=Math.max(1.5,radCells)` and `stampOneVolcano`'s `R=Math.max(2,radCells)` widen the FOOTPRINT and leave the AMPLITUDE alone, so a feature smaller than one cell is drawn at the floor's full depth/height — and **v1.60's comment, still sitting above `clampFeatureRadiusCells`, claims those floors "handle the world-scale vanishing-to-sub-pixel case"** (the v2.37 expired-comment shape, third occurrence). Measured at 40 000 km/1024px: **98/100 craters floored**, a 6 km crater drawn 58.6 km wide removing **381.5x** its own material, **96.9% of the crater depth the engine wrote was the floor's**; volcanoes **99.8%** floored, p50 drawn **78.1 km against a true 8 km at FULL real height** (height is keyed on `heightM`, so nothing damped it). Monotonic in cell size: depth kept x0.999 / x0.282 / x0.031 at 800 / 5 000 / 40 000 km. **The floor stays** — `t=d/R` makes `R=0` a `0/0` — and the AMPLITUDE is scaled by the AREA ratio `(r/floor)^2`, which conserves the integrated material **exactly**: both profiles integrate to amplitude x R^2, measured on the real stamps as volcano `vol/r^2` = 0.267774/0.267782/0.267783/0.267783 and crater `vol/(depth(r)*r^2)` = 1.44015/1.44080/1.44082/1.44081. `impactField`/`volcanicField` are area-weighted too, or the fix is half-done. **A deliberate re-baseline** — `hash_gen1.js` vs v2.49 diverges everywhere because the battery runs at 512px (43/100 floored) — but **craters+volcanoes OFF on both sides is ALL IDENTICAL**, and at the app's own default the whole crater depth budget moves **0.13%**. Verify with `tests/perf/probe_craterscale.js` (15 assertions; 2 fail on v2.49). |
+| `Cartalith v2.49 DCC test.html` | Previous DCC-line file. Owner, on a 40 000 km world: rivers read as uniform lines. **Two clamps, stacked**, neither an LOD problem. (1) `riverWidthScaleK` shared `1/TERRAIN_DETAIL_MAX_K` as its lower bound, so the real-km family **stopped responding to real km at mapWidthKm 12 800** — an Earth-sized map wanted 0.02 and got 0.0625, sitting 3.1× past the ceiling with nothing saying so. The shared cap is **asymmetric in its harm**: small maps it correctly stops exaggerating, large maps it holds too WIDE. (2) `halfW` floors at 0.5 cells, and the largest value the formula can produce at that `widthK` is **0.3656** — so every channel of every order clamped and `halfw[]` was uniformly 0.5: a **39.06 km band for the trunk and the trickle alike**, four times the Amazon. Now 0.079/0.158/0.251/0.265 km by Strahler order. Safe because the floor is **dead weight on the raster** — `r=ceil(halfW)=1` for any halfW in (0,1), so only `d=0` passes and `t=1` regardless (verified at 0.04/0.12/0.366/0.5/0.9: one cell, t=1, every time) — so the stamp keeps the floor and `halfw[]` carries the true width to `drawRiverWays`' v2.25 crossover and `riverFieldTile`'s v2.40 zoom resolution, **both built for this and both receiving a constant**. `hash_gen1.js` ALL IDENTICAL at the default; above 12 800 km `field` moves, via v2.30's `carveChannelPath` deriving its RESAMPLE STEP from `halfW`. Verify with `tests/perf/probe_riverwidth.js` (11 assertions; 4 fail on v2.48). |
 | `Cartalith v2.48 DCC test.html` | Previous DCC-line file. Owner, on a 40 000 km world: *"still unnatural geometric shapes"* — **not an LOD defect**, the straight edges were already in the coarse `field`. `distanceToBoundary()` was a two-pass 3x3 **chamfer**, whose error is DIRECTIONAL: **0.00% at 0°/45°/90°, +8.15% at 22.5°/67.5°**, so its level sets are **octagons with flat facets**. That field is `ageField`, which the height formula spends as the **noise amplitude** (`rug = exp(-age*(1+ageInf*6))`) and which also feeds `resistanceField` — so terrain roughness and erosion both inherited octagons, and the world grew facets whose edges can only run at 0/45/90/135°. Diagnosed from the DATA: exactly-collinear coastline runs existed **only** in those four directions. Plate boundaries were tested and **refuted**. Same function also failed to wrap in X, so the seam column read **251 against a true 5** and held 63 of 173 straight cells. Replaced by `euclideanDist` (Felzenszwalb & Huttenlocher, separable, O(n), **exact**): anisotropy **8.15% → 0.00%**, straight coastline 2.52% → **1.75%**, longest interior run 37 → **19**, seam column 63 → **18**, and what remains is now **2x enriched on real plate boundaries** (rift margins genuinely are straight). **A deliberate re-baseline** — `hash_gen1.js` vs v2.47 diverges everywhere; saved `.zip` projects keep their terrain. Verify with `tests/perf/probe_platedt.js` (8 assertions; 5 fail on v2.47). |
 | `Cartalith v2.47 DCC test.html` | Previous DCC-line file. Owner: *"I want the output at whatever zoom to be most natural looking."* Two defects in the one height path every LOD tile takes. (1) `amplifyRegion`/`addZoomDetail` reconstructed the coarse height **bilinearly**, which is exactly linear inside a coarse cell and kinked across every boundary — and all three tile renderers hillshade from finite differences, so the surface was a mesh of flat facets with a crease between each pair. Measured second difference **3040× higher on a boundary than inside a cell**, the interior reading float noise because bilinear has no curvature there at all; `sampleC1` (Catmull-Rom, **interpolating** — exact at coarse nodes, max |Δ| = 0) takes it to **1.51×**. (2) `fbm` is SIX internal octaves at lacunarity 2, so the ladder added content far above the tile's own sampling rate, where it can only alias and re-randomises whenever the grid moves. `detailBandWeight`/`fbmBand` fade an unresolvable octave toward **its own mean** (Quilez, never toward zero, or the terrain sinks): half-pixel shift stability **−52.8%** on a large world (`detailFreq` 16), and **unchanged at the default**, which is correct — nothing there is unrepresentable. `extra=min(6,z−zBase)` is gone, so the level counter no longer changes a world point's height; v0.126's own assertion held the sampling fixed and raised only z, i.e. it asserted the defect. Seams stay **exactly 0**. `hash_gen1.js` vs v2.46 ALL IDENTICAL. Verify with `tests/perf/probe_lodsurface.js` (12 assertions; 7 fail on v2.46). |
 | `Cartalith v2.46 DCC test.html` | Previous DCC-line file. Owner: *"it seems the button for the asset manager has gone."* It had not — v2.24 filed the Asset Library under "program scope" and moved `#assetsHeaderBtn` into the cog's Settings window, so it was in the DOM, correctly wired, and **never visible**: a real click cannot land on it (`page.click` times out with `element is not visible` on v2.45, which is the report exactly). `_carEnterAssetsMode` already relabels that button `← Map`, adds `.on` and sets `aria-pressed` — it was built for a header slot — so hiding it broke the way IN while leaving the way OUT, and v2.24 added `#assetsBackBtn` to stand in for the half it had hidden: **v1.57's one-control-two-surfaces defect**. The toggle moves back to the header, the stand-in is retired, and the now-empty Settings section becomes the button's own `title`. The cog rule is sound and the Library is simply not program scope — it is a MODE you enter, taking the whole stage. Markup + CSS only; `hash_gen1.js` vs v2.45 ALL IDENTICAL. Verify with `tests/perf/probe_assetsbtn.js` (14 assertions; 8 fail on v2.45). |
@@ -44,7 +45,7 @@ threads; `file://` must degrade gracefully, never break).
 | `fractal-geology/Fractal Geology Painter v0.1.html` | Standalone stamp-based terrain-sculpt PoC, kept as reference — its engine was ported into Gen1's Generate → Sculpt sub-tab (v1.15); the PoC file itself is never edited |
 | `assets/sample_pack.zip` + `make_sample_pack.py` | Reference CC0 asset pack + its generator (in-app importer) |
 | `docs/` | HANDOFF, roadmap, plans, `docs/research/` reports (incl. `settlement-resources.md`, `food-logistics.md`, `travel-speeds.md`, `agricultural-productivity.md`, `water-access-travel.md`, `political-fragmentation.md`), `docs/SCULPT_EDITOR_INTEGRATION_PLAN.md` |
-| `tests/` | Headless verification harness (`run.sh`, stubs, 1175-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
+| `tests/` | Headless verification harness (`run.sh`, stubs, 1204-assertion suite; `run_um.sh`, 852-assertion urban-morphology suite) + `tests/perf/` Playwright A/B + UI-smoke harnesses |
 | `legacy/` | Historical merge tooling — **non-functional here** (inputs absent); see `legacy/README.md` |
 | `CHANGELOG.md` | Per-version engine log (v0.037 → current), moved out of this file |
 
@@ -56,7 +57,7 @@ threads; `file://` must degrade gracefully, never break).
   the minor numerically, so `v0.7` would sort *before* `v0.61` — the `tests/run.sh` default and
   any "pick newest" logic depend on the two-digit convention.
 - **After any change to the engine (script block 1): run `tests/run.sh`.** A change is not done
-  until it passes (1175 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
+  until it passes (1204 assertions green). Script block 4 changes likewise require `tests/run_um.sh`
   (852 assertions green).
 - Cross-version neutrality: additive/opt-in changes must be proven byte-identical to the prior
   version at defaults (FNV checksums of field/temp/rain/render at seed 12345, 256px, region).
@@ -1057,6 +1058,58 @@ call) for the first; pure additive markup for the second. Hash vs v2.09 diverges
   real shelf width; the Ocean debug view's own coarse arrow-sampling grid (the ruled-out first
   hypothesis) is unchanged and can still miss the (now wider) coastal band between sample points
   at extreme map scales — a separate, disclosed display-only limitation.
+
+### A floor that INFLATES is not a bound (v2.50, DCC-line file only)
+
+The crater/volcano half of the zoom work, and the finding is not what that item assumed: a sub-cell
+crater is not MISSING from the coarse field and waiting to be refined, it is **manufactured** there at
+up to 380x its own size. Refining it would have faithfully upscaled a feature that should not be
+visible. Verification is `tests/perf/probe_craterscale.js` (15 assertions, 2 of which fail
+immediately on v2.49) plus 9 headless.
+
+- **v1.60's own comment claims the floors handle this case, and it is false — the v2.37 shape, third
+  occurrence.** Directly above `clampFeatureRadiusCells` it says only a CEILING is needed because
+  *"the existing `Math.max(...)` floors already handle the opposite, world-scale
+  vanishing-to-sub-pixel case."* They widen the FOOTPRINT and leave the AMPLITUDE alone. **A floor
+  that inflates is the opposite of a bound**, which is v2.49's own lesson about the shared
+  `TERRAIN_DETAIL_MAX_K` cap, arriving from the other direction.
+- **Measured, legacy path, seed 12345, 100 craters**: floored 3 / 16 / 43 / 94 / **98** of 100 at
+  800 km/2048px, 800/1024, 800/512, 5 000/1024, 40 000/1024 — depth budget kept x0.9987 / x0.9542 /
+  x0.8125 / x0.2823 / **x0.0312**. At world extent **96.9% of the crater material was the floor's**.
+  Monotonic in cell size, not a cliff at one extent.
+- **The volcano half is starker because nothing damped it.** `H` is `(heightM/state.peakM)*...`, keyed
+  on real metres and so completely independent of how many cells the cone spans. 99.8% floored at
+  40 000 km, p50 drawn **78.1 km across against a true 8 km at full height**. At the app default that
+  floor binds on **0%** of volcanoes — which is exactly why it survived.
+- **The floor stays; the amplitude is corrected.** Both stamps compute `t = d/R`, so `R = 0` is
+  `0/0`, and the loop must touch a cell or a sub-cell feature writes nothing at all. Check what a
+  guard is guarding before removing it (v2.49, again). `subCellStampScale(r,floor)` is `1` at and
+  above the floor, `(r/floor)^2` below.
+- **The AREA ratio is the conserving one, and it is asserted on the real stamps rather than on the
+  formula.** Both profiles integrate to amplitude x R^2 (`depth*(1-t^2)` gives `depth*pi*R^2/2`;
+  `H*(1-t)^p` is the same family). A volcano's height is r-independent, so its material must come out
+  exactly proportional to `r^2` with no step at the floor — 0.267774 / 0.267782 / 0.267783 /
+  0.267783. A crater's depth law carries its own `r` term, so the invariant is
+  `vol/(depth(r)*r^2)` — 1.44015 / 1.44080 / 1.44082 / 1.44081. **State the crater invariant that
+  way deliberately**: it shows the conservation is exact and the whole residual is the depth law's.
+- **`impactField` and `volcanicField` are area-weighted too.** Both are `max(existing,(1-t)*...)`
+  markers; leaving them would have let a crater covering 0.6% of one cell claim full impact intensity
+  over nine. They feed resource potentials, so those move — disclosed, not incidental.
+- **Isolate a re-baseline or the claim is unfalsifiable.** `hash_gen1.js` diverges in every scenario
+  because the battery runs at 512px, where 43 of 100 craters are floored. **With craters AND
+  volcanoes off on both sides it is ALL IDENTICAL** — that is what proves the divergence is this and
+  nothing else. At the app's own default the crater depth budget moves **0.13%** (3 of 100, worst
+  175.7 -> 152.7 m) and `volcanicField` is byte-identical.
+- **Disclosed, measured, deliberately NOT fixed**: `depth = min(0.4, 0.02 + radCells*0.004)` keys
+  crater depth on radius **in CELLS**, so one 10 km crater is **141 m deep at 40 000 km against 491 m
+  at 200 km**, and 0.07x-0.25x of a simple crater's ~1:5 depth-to-diameter. The v1.60/v2.07/v2.49
+  real-km defect again, in the depth law rather than the radius — and fixing it makes craters
+  **4-14x deeper at EVERY extent including the default**, which is a look decision, not a scale fix.
+- **Also disclosed**: the physical model produces **1 040 000** craters at 40 000 km and stamps
+  **3 000**, and **16.4%** of the full population survives wear — so ~167 000 real craters are dropped
+  by the stamping ceiling, not "already lost to erosion" as its own note implies. They were never
+  given positions, so drawing them at tile resolution is **inventing, not refining** (v2.40's rule).
+  Tile-resolution crater refinement is still unbuilt; this version is the prerequisite it needed.
 
 ### A scale relationship that stops scaling (v2.49, DCC-line file only)
 
@@ -5048,7 +5101,7 @@ Per-version details for everything above: `CHANGELOG.md`. Per-parameter referenc
 ## Verification
 
 ```bash
-tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1195-assertion suite (exports ENGINE_SRC_PATH for the v2.47 worker-list check)
+tests/run.sh                        # newest Gen1 file: extract engine → node --check → 1204-assertion suite (exports ENGINE_SRC_PATH for the v2.47 worker-list check)
 tests/run.sh "Cartalith Gen1 v0.57.html"   # or any explicit target
 tests/run_um.sh                     # newest Gen1 file: extract script block 4 → node --check → 852-assertion urban-morphology suite
 node tests/perf/hash_gen1.js A.html B.html # Playwright A/B bit-identity battery (same-binary FNV hashes)
@@ -5070,6 +5123,7 @@ node tests/perf/probe_domainrail.js A.html [B.html]  # v2.31 domain rail: drawer
 node tests/perf/probe_landsurface.js A.html # v2.34 land surface: one sourced speed table, forest binds by min, Rocky > Plains
 node tests/perf/probe_margins.js A.html [seeds] # v2.35 boundary margins: crossing-number junctions, chain length, 8-connected walk
 node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet stack, real-km width, the stamping-cost cap
+node tests/perf/probe_craterscale.js A.html # v2.50 a sub-cell crater/volcano must not be inflated to the grid (area-ratio amplitude, volume conserved)
 node tests/perf/probe_riverwidth.js A.html # v2.49 river width follows discharge; real-km scaling keeps working past 12 800 km
 node tests/perf/probe_platedt.js A.html   # v2.48 plate-age distance transform: exact, isotropic, wrap-aware (the octagon fix)
 node tests/perf/probe_lodsurface.js A.html # v2.47 LOD height refinement: the C1 crease test, band-limited detail, seams still exactly 0
