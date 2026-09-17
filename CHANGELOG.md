@@ -4,6 +4,96 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.57 (DCC line) — the coastline WAS the plate polygon, and the carve was combing it
+
+Owner, on a 40 000 km world (seed 77805): *"tell me what geometric patterns you see. And I literally
+mean shapes and how they translate to the water."* Seven hypotheses were measured against the coarse
+`field` before any fix, each with an 800 km same-seed control. **A deliberate re-baseline of every
+world generated from a seed** (owner's explicit choice); `hash_gen1.js` vs v2.56 diverges on
+`field`/`temp`/`rain`/`flow`/`rgba` in every scenario. Verification is
+`tests/perf/probe_coastgeom.js` (17 assertions; hard-errors on v2.56) plus `tests/run.sh` 1280/0.
+
+- **The coast did not merely CORRELATE with the plate polygons — it WAS one.** The pure Voronoi
+  partition `plates[plateId[i]].base >= 0` — no blur, no noise, no erosion — reproduced the land mask
+  at **89.5% agreement, IoU 0.813**; locally-straight coast ran parallel to the nearest plate-boundary
+  segment at mean |cos| **0.968** against a shuffle null of 0.648 (= 2/π to 1.8%), still **0.881** at
+  15–20 cells of separation where the two fit windows cannot share a cell. Term standard deviations in
+  `fillHeightRows`: base **0.2524**, stress 0.0653, flexure 0.0539, hetero 0.0244, and the
+  ageField-modulated noise amplitude only **0.0232**. The coastline is the zero-crossing of a 6.3-cell
+  blur of a piecewise-CONSTANT Voronoi map, and smooth terms out-gradient the whole noise term
+  **10.64:1** there — deleting the noise entirely moved the coastline's box-count dimension only
+  1.0537 → 1.0295.
+- **`baseField` is the pathway, NOT `ageField`.** The hypothesis that survived first reading — straight
+  Voronoi edge → linear-ramp distance field → straight iso-age bands → straight noise-amplitude bands —
+  is real and carries the SMALLEST term in the height formula, 10.9× below the plate-base term.
+  Gradient alignment ranks `baseField` 0.1292 ahead of `ageField` 0.2550 (0 = the coast follows an
+  iso-contour), against a definitional anchor of 0.1246 for `field` itself.
+- **So the one radius that decides everything is the plate-base blur**, and it had never been named.
+  `PLATE_BASE_BLUR_K` (0.35 → **0.18**) is the multiplier in `plateBaseBlurR() = max(2, blurR*K)`, at
+  both of the two sites that build `baseField`. A box blur's boundary gradient scales as 1/radius, so
+  that radius alone sets how far the noise can push the shoreline off the polygon edge.
+- **The direction is counter-intuitive and was SWEPT, not reasoned.** A first reading argued a WIDER
+  ramp would let the noise wander further; that is wrong, because widening also moves where the
+  contour sits and hands it a better-conditioned place to track the polygon from. Measured at seed
+  77805, world/40 000 km, K 0.35 / 0.25 / 0.18 / 0.112: straight **49.3 / 43.3 / 36.9 / 29.0 %**,
+  dimension **1.032 / 1.061 / 1.074 / 1.092**, IoU **0.812 / 0.781 / 0.747 / 0.721** — monotone in both
+  directions, asserted as such so the shipped value sits on a curve rather than a cliff.
+- **0.25 is the last free value and it is not worth a re-baseline.** It costs nothing anywhere, and at
+  the app default it moves the dimension 1.034 → 1.038 — invisible. **0.18 is the smallest value that
+  changes the default extent visibly** (straight 67.6 → 58.2) and it beats v2.56 on EVERY axis at
+  40 000 km at once. Its one cost is bristles at the app default, 7.6% → 10.8%, which at 0.78 km/cell
+  is sub-kilometre coastal detail on a coastline that got 6% longer. **0.112 is refused on a real
+  constraint, not taste**: at the shipped `blurR=18` it lands exactly on the `max(2,…)` floor, so the
+  knob would silently stop responding to `blurR` at and below its own default — v2.49's "a scale
+  relationship that stops scaling", one version later.
+- **Second, independent defect: `carveRiverValleys` inherited a DETECTION ease.** `riverCoarseEase`
+  exists for v1.101's reason — on a coarse map a real minor stream's catchment can never accumulate the
+  cell COUNT calibrated for an 800 km reference, so water that genuinely exists goes undetected (34% of
+  land within reach of a river at 40 000 km before that fix, 96% after). **That argument is about
+  whether a stream EXISTS. It says nothing about whether the grid can hold its VALLEY.** At 40 000 km
+  the ease pinned at its cap of 16 and took the channel threshold **209.7 → 13.1**, cutting **8.1×**
+  more trench (12 204 cells, 2.33% of the grid → 98 790, 18.84%).
+- **What that produced is the owner's comb.** `enforceChannelDescent` floors every carve point at
+  `sea−0.06`, so an order-1 headwater reaching the coast is cut BELOW sea level and floods, and the
+  land between two adjacent floodings is left as a one-cell bristle **39 km wide**. Measured: **21.3%**
+  of the coastline at 40 000 km against 12.8% at the same seed and mode at 800 km, and turning
+  `carveRivers` off collapses it to **1.5%**. `carveFlowThresh()` multiplies the ease back out — v1.101's
+  own `_jpStageDryKm` idiom — and `buildRiverNetwork` gained an optional `opts.flowThresh` whose absence
+  is `riverFlowThresh(W,H)` exactly, asserted bit-identical (the v1.98 `edgeCost` discipline).
+  **v1.101 had already split a third consumer out for this reason** (`_jpDrinkingCoarseEase`, because
+  the cartographic cap "has nothing to do with whether a thirsty party can find a spring"). The carve
+  was a fourth consumer and nobody split it.
+- **Each half is measured against its OWN off-state inside one build** (v2.39/v2.42/v2.55): restoring
+  `PLATE_BASE_BLUR_K` to 0.35 makes the app default **bit-identical to v2.56** (FNV 2783047521 both
+  ways), which is what proves the whole-battery divergence is the blur and nothing else; and
+  `riverCoarseEase` is 1.0 at and below 800 km, so the carve fix is a no-op at the app default by
+  construction, also asserted.
+- **Net at 40 000 km vs v2.56**: straight **42.5% → 36.9%**, dimension **1.059 → 1.074**, IoU against
+  the Voronoi partition **0.813 → 0.747**, one-cell bristles **21.3% → 14.9%**, coastline **4 354 →
+  4 792 cells**.
+- **REFUTED, and recorded so they are not re-chased**: the coastline is NOT lattice-locked — its
+  period-45° harmonic measures **R4 = 0.0255** against **0.0247** for a control of literal Euclidean
+  circles and **0.7824** for literal chamfer octagons, so v2.48's exact-EDT fix holds. The chamfer's
+  real fingerprint is the 22.5/67.5 family (octagon control 2.566× enriched; this world **0.983×**).
+  The slivers are NOT triangular islands — there are 6 land components, one holding 98.4% of all land,
+  and the filaments are 1 cell wide along their whole length with no taper and no common axis (global
+  axial R **0.247**). The tan coast band is NOT a distance buffer but an elevation band
+  (`beachT = smoothstep(0.03,0,r)*0.6`, everything under 120 m) whose apparent uniform offset is grid
+  quantisation — median width 2 cells at BOTH 39.06 and 0.78 km/cell. **And none of it is a scale
+  defect**: every straightness metric measured the same or worse at 800 km (PCA straightness 42.5% at
+  40 000 km against **62.1%** at the app default). It is more LEGIBLE at 40 000 km, where one 32-cell
+  facet spans 1 250 km instead of 25.
+- **v2.48's own straightness metric is a bad detector and should not be quoted again.** Its
+  4-direction collinear-run test reads **0.00%** for genuine chamfer octagons and **12.83%** for genuine
+  Euclidean circles — it moves backwards — and it reports 7.28% where a direction-agnostic PCA test
+  reports **42.48%** on the same data, because it is structurally blind to a facet at an arbitrary
+  angle. Any number from it is a floor, not a measurement.
+- **Disclosed, not fixed**: the coastline's box-count dimension is **1.074** against a real coastline's
+  ~1.25, so this narrows the gap without closing it — the remaining lever is the noise term's own
+  amplitude (`beta`), which is a different, larger tuning question. `chamferDist()` and the civ layer's
+  `_civCoastDistField`/`_civOceanDistField` still carry v2.48's 8% anisotropy; they feed placement, not
+  terrain height. Saved `.zip` projects keep their terrain.
+
 ## v2.56 (DCC line) — eight full-grid fields rebuilt on every render, keyed on nothing
 
 Owner: *"check the code using the ponytail skill and see if we can speedup rendering time"*. One
