@@ -1,23 +1,21 @@
 #!/usr/bin/env node
-/* Side-by-side at LOD 7: the shipped system vs the deep-zoom-contrast proposal.
- *   node tests/perf/probe_lod7compare.js "Cartalith v2.52 DCC test.html" out.png [floor]
+/* One LOD-7 tile, four rungs: what the deep-zoom plain looks like as each floor is removed.
+ *   node tests/perf/probe_lod7compare.js "Cartalith v2.54 DCC test.html" out.png [floor]
  *
- * This is a FIGURE GENERATOR, not an assertion probe — it renders
- * docs/images/lod7_contrast_compare.png for docs/research/deep-zoom-contrast.md.
- * It exits 0 regardless; read the printed numbers and the image.
+ * A FIGURE GENERATOR, not an assertion probe — it renders docs/images/lod7_contrast_compare.png
+ * for docs/research/deep-zoom-contrast.md. It exits 0 regardless; read the numbers and the image.
  *
- * CURRENT  = relief gate as shipped, 16-bit height over the GLOBAL range (what a baked chunk holds)
- * PROPOSED = relief gate floored, 16-bit height over the CHUNK's own range, and — Height view only —
- *            the colour ramp rebased locally while the HILLSHADE keeps the true heights. That split
- *            is the rAbs/rLocal design; it is not simulable in the Biome view without touching
- *            landColorCore, so the Biome row shows gate + storage only and is labelled as such.
+ *   A  16-bit   what a baked chunk held before v2.53 (§7C, the storage floor)
+ *   B  24-bit   v2.53, SHIPPED
+ *   C  + relief floor   §7A, proposed — amplifyRegion/addZoomDetail's gate gets a minimum
+ *   D  + local contrast §7B, proposed — Height view only, rAbs tint / rLocal luminance
  *
- * ONE BUILD RENDERS BOTH SIDES. buildSwitchable() below patches a throwaway copy of the target so
- * the relief gate reads a runtime global — __RELIEF_FLOOR=0 reproduces the shipped build exactly,
- * which is what makes the "current" column a real control rather than a second implementation.
- * The patch is two substitutions; both gate sites must be hit (amplifyRegion AND addZoomDetail),
- * and the regex tolerates the whitespace difference between them. If a future version renames or
- * reshapes the gate this throws rather than silently patching one site. */
+ * The storage axis is NOT reimplemented here: A and B round-trip the tile through the file's own
+ * packHeight16/unpackHeight16 and packHeight24/unpackHeight24, which is literally what atlasPut
+ * stores and atlasGet returns. Only the relief floor needs a patch, and buildSwitchable() makes it
+ * a runtime global so __RELIEF_FLOOR=0 reproduces the shipped build exactly — that is what makes A
+ * and B controls rather than a second implementation. Both gate sites must be hit (amplifyRegion
+ * AND addZoomDetail); if a future version reshapes the gate this throws rather than patching one. */
 const path=require('path'), fs=require('fs'), os=require('os');
 
 function buildSwitchable(src){
@@ -47,6 +45,8 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
     __RELIEF_FLOOR=0; await generate();
     const sea=state.seaLevel, denom=1-sea, mpu=metersPerUnit(), z=7, TS=512;
 
+    /* the plain is picked FLAT and mid-elevation (true r 0.15..0.55) so the global ramp is
+       genuinely the thing hiding it, not an out-of-range height. */
     const pick=(loR,hiR,flat)=>{ let best=flat?1e9:-1,bi=-1;
       for(let y=8;y<GH-8;y++) for(let x=8;x<GW-8;x++){ const i=y*GW+x; if(field[i]<sea) continue;
         const rr=(field[i]-sea)/denom; if(rr<loR||rr>hiR) continue;
@@ -55,12 +55,10 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
     const sites={plain:pick(0.15,0.55,true), steep:pick(0,1,false)};
 
     const rng=a=>{let lo=1e9,hi=-1e9;for(let i=0;i<a.length;i++){if(a[i]<lo)lo=a[i];if(a[i]>hi)hi=a[i];}return[lo,hi];};
-    const q16Global=a=>{const o=new Float32Array(a.length);
-      for(let i=0;i<a.length;i++){const v=a[i]<0?0:a[i]>1?1:a[i];o[i]=Math.round(v*65535)/65535;}return o;};
-    const q16Local=a=>{const[lo,hi]=rng(a),sp=(hi-lo)||1e-9,o=new Float32Array(a.length);
-      for(let i=0;i<a.length;i++)o[i]=lo+(Math.round(((a[i]-lo)/sp)*65535)/65535)*sp;return o;};
-    /* renderHeightTileRGBA, with the colour value and the SHADING value taken from different arrays
-       — the rAbs / rLocal split, simulated exactly rather than approximated. */
+    const levels=a=>{const s=new Set(); for(let i=0;i<a.length;i++) s.add(a[i]); return s.size;};
+
+    /* renderHeightTileRGBA, with the colour value and the SHADING value taken from different
+       arrays — the rAbs / rLocal split, simulated exactly rather than approximated. */
     const heightRGBA=(shadeArr,colArr,W,H,bounds)=>{
       const out=new Uint8ClampedArray(W*H*4), az=state.sunAz*Math.PI/180, alt=40*Math.PI/180;
       const lx=Math.cos(alt)*Math.sin(az), ly=-Math.cos(alt)*Math.cos(az), lz=Math.sin(alt);
@@ -103,82 +101,122 @@ const FILE=process.argv[2], OUT=process.argv[3], FLOOR=+(process.argv[4]||0.006)
       const row=Math.min(dims.rows-1,Math.floor(((fi/GW)|0)/((GH-1)/dims.rows)));
       const bb=pyramidTileBounds(GW,GH,z,col,row);
 
-      __RELIEF_FLOOR=0;      const tCur=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
-      __RELIEF_FLOOR=FLOOR;  const tPro=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
+      __RELIEF_FLOOR=0;      const t0=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
+      __RELIEF_FLOOR=FLOOR;  const tF=pyramidTile(field,GW,GH,z,col,row,TS,lodTileOpts());
       __RELIEF_FLOOR=0;
-      const cur=tCur.data, pro=tPro.data, TW=tCur.w, TH=tCur.h;
-      const curBaked=q16Global(cur), proBaked=q16Local(pro);
+      const TW=t0.w, TH=t0.h, N=TW*TH;
 
-      const bCur=renderBiomeTileRGBA(curBaked,TW,TH,bb), bPro=renderBiomeTileRGBA(proBaked,TW,TH,bb);
-      const hCur=heightRGBA(curBaked,curBaked,TW,TH,bb);
-      const hPro=heightRGBAlocal(proBaked,TW,TH,bb);
+      /* the REAL shipped storage round trip — what atlasPut writes and atlasGet reads back */
+      const h16 =unpackHeight16(packHeight16(t0.data,N),N);
+      const h24 =unpackHeight24(packHeight24(t0.data,N),N);
+      const h24f=unpackHeight24(packHeight24(tF.data,N),N);
 
-      const[clo,chi]=rng(cur),[plo,phi]=rng(pro);
-      panels[key]={ kmAcross:(bb.w/(GW-1))*800, tw:TW, th:TH,
-        spanCurM:(chi-clo)*mpu, spanProM:(phi-plo)*mpu,
-        stepCurM:mpu/65535, stepProM:((phi-plo)*mpu)/65535,
-        biomeCur:{png:toPNG(bCur,TW,TH),...stat(bCur,TW,TH)}, biomePro:{png:toPNG(bPro,TW,TH),...stat(bPro,TW,TH)},
-        heightCur:{png:toPNG(hCur,TW,TH),...stat(hCur,TW,TH)}, heightPro:{png:toPNG(hPro,TW,TH),...stat(hPro,TW,TH)} };
+      const rungs=[
+        {id:'a', h:h16,  loc:false},
+        {id:'b', h:h24,  loc:false},
+        {id:'c', h:h24f, loc:false},
+        {id:'d', h:h24f, loc:true },
+      ];
+      const out={ kmAcross:(bb.w/(GW-1))*800, tw:TW, th:TH,
+        srcLevels:levels(t0.data), srcLevelsF:levels(tF.data),
+        span0M:(rng(t0.data)[1]-rng(t0.data)[0])*mpu, spanFM:(rng(tF.data)[1]-rng(tF.data)[0])*mpu,
+        step16M:mpu/65535, step24M:mpu/16777215, rungs:[] };
+      for(const r of rungs){
+        const bio=renderBiomeTileRGBA(r.h,TW,TH,bb);
+        const hgt=r.loc?heightRGBAlocal(r.h,TW,TH,bb):heightRGBA(r.h,r.h,TW,TH,bb);
+        out.rungs.push({ id:r.id, levels:levels(r.h),
+          biome:{png:toPNG(bio,TW,TH),...stat(bio,TW,TH)},
+          height:{png:toPNG(hgt,TW,TH),...stat(hgt,TW,TH)} });
+      }
+      panels[key]=out;
     }
     return {panels, z, TS, floor:FLOOR, mpu, tw:panels.plain.tw, th:panels.plain.th};
   },FLOOR);
 
-  /* composite */
-  const TS=res.tw, TH=res.th, GAP=10, M=18, HEAD=46, COLH=30, ROWH=26, CAP=40;
-  const W=M*2+TS*4+GAP*3, H=HEAD+COLH+(ROWH+TH+CAP)*2+M;
-  const png=await pg.evaluate(async({res,TS,TH,GAP,M,HEAD,COLH,ROWH,CAP,W,H})=>{
+  /* ---- composite: 4 columns x 3 rows ---- */
+  const TW=res.tw, TH=res.th, GAP=10, M=20, HEAD=74, RH=50;
+  const CAP=[38,72,38];                                   // caption height per row
+  const W=M*2+TW*4+GAP*3, H=HEAD+(RH+TH+CAP[0])+(RH+TH+CAP[1])+(RH+TH+CAP[2])+M;
+  const png=await pg.evaluate(async({res,TW,TH,GAP,M,HEAD,RH,CAP,W,H})=>{
     const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
     const c=cv.getContext('2d');
     c.fillStyle='#14161a'; c.fillRect(0,0,W,H);
     const load=src=>new Promise(r=>{const im=new Image();im.onload=()=>r(im);im.src=src;});
-    c.fillStyle='#e8eaed'; c.font='600 20px system-ui,sans-serif';
-    c.fillText(`Cartalith — LOD 7 tile, 6.25 km across, 512 px.  Current system vs proposal.  seed 12345 · 800 km · 1024 px`, M, 28);
+    const P=res.panels, x=i=>M+i*(TW+GAP);
+
+    c.fillStyle='#e8eaed'; c.font='600 21px system-ui,sans-serif';
+    c.fillText('Cartalith — one LOD 7 tile, 6.25 km across, 512 px.  Four rungs: 16-bit → 24-bit → relief floor → local contrast.', M, 28);
     c.fillStyle='#9aa3ad'; c.font='13px system-ui,sans-serif';
-    c.fillText(`CURRENT = shipped relief gate + 16-bit height over the GLOBAL range (what a baked chunk stores).   PROPOSED = relief gate floored at ${res.floor} + 16-bit over the CHUNK's own range.   lo/span are taken per tile here; the shipped design reads them from a world-wide field so neighbours agree (no seam).` , M, 44);
-    const cols=[['LOWLAND PLAIN — current','#f0b429'],['LOWLAND PLAIN — proposed','#4fd18b'],
-                ['STEEP — current','#f0b429'],['STEEP — proposed','#4fd18b']];
-    const x=i=>M+i*(TS+GAP);
-    c.font='600 14px system-ui,sans-serif';
-    cols.forEach((t,i)=>{ c.fillStyle=t[1]; c.fillText(t[0], x(i), HEAD+20); });
-    const rows=[['Biome view — the default map (gate + storage only; the colour rebase is not simulable here, see §6.1)','biome'],
-                ['Relief / Height view — gate + storage + local contrast. The hypsometric tint still comes from the TRUE elevation (rAbs), so a plain stays a plain; only luminance is stretched locally (rLocal)','height']];
-    const P=res.panels;
-    for(let r=0;r<2;r++){
-      const yTop=HEAD+COLH+r*(ROWH+TH+CAP);
+    c.fillText(`seed 12345 · region · 800 km · 1024 px · sea ${state.seaLevel.toFixed(4)} · ${res.mpu.toFixed(0)} m per height unit.   `
+      +`A = what a baked chunk held before v2.53 (packHeight16).   B = v2.53, SHIPPED (packHeight24) — the real round trip, not a stand-in.   `
+      +`C = relief gate floored at ${res.floor} (§7A, proposed).   D = + Height-view contrast rebase (§7B, proposed).`, M, 48);
+    c.fillText(`The plain tile holds ${P.plain.srcLevels.toLocaleString()} distinct source heights across ${P.plain.span0M.toFixed(2)} m of relief. `
+      +`16-bit recovers ${P.plain.rungs[0].levels}; 24-bit recovers ${P.plain.rungs[1].levels.toLocaleString()}. `
+      +`Storage step ${P.plain.step16M.toFixed(4)} m → ${P.plain.step24M.toExponential(2)} m (${(P.plain.step16M/P.plain.step24M).toFixed(0)}× finer).`, M, 64);
+
+    const COLS=[['A · 16-bit  (pre-v2.53)','#f0b429'],['B · 24-bit  (v2.53, shipped)','#4fd18b'],
+                ['C · + relief floor  (§7A)','#63b3ff'],['D · + local contrast  (§7B)','#c792ea']];
+    const ROWS=[
+      {key:'plain', set:'biome',  idx:[0,1,2,3],
+       title:'LOWLAND PLAIN — Biome view (the default map).  Storage and the relief floor both reach it through the hillshade; the colour rebase does not (§6.1), so D is byte-identical to C here.'},
+      {key:'plain', set:'height', idx:[0,1,2,3],
+       title:'LOWLAND PLAIN — Relief / Height view.  D keeps the hypsometric tint on the TRUE elevation (rAbs) and stretches only luminance locally (rLocal), so a plain still reads as a plain.'},
+      {key:'steep', set:null,     idx:[0,3],
+       title:'STEEP CONTROL — the same four-rung ladder where the terrain is already expressive.  Biome A/D, then Height A/D.  Nothing here is damaged by the proposal.'},
+    ];
+
+    for(let r=0;r<3;r++){
+      const row=ROWS[r];
+      let yTop=HEAD; for(let k=0;k<r;k++) yTop+=RH+TH+CAP[k];
       c.fillStyle='#c7ccd1'; c.font='600 13px system-ui,sans-serif';
-      c.fillText(rows[r][0], M, yTop+17);
-      const set=rows[r][1];
-      const cells=[P.plain[set+'Cur'],P.plain[set+'Pro'],P.steep[set+'Cur'],P.steep[set+'Pro']];
-      for(let i=0;i<4;i++){
-        const im=await load(cells[i].png);
-        c.drawImage(im, x(i), yTop+ROWH, TS, TH);
-        c.strokeStyle='#2a2f36'; c.lineWidth=1; c.strokeRect(x(i)+0.5, yTop+ROWH+0.5, TS-1, TH-1);
-        c.fillStyle='#8b939c'; c.font='12px ui-monospace,monospace';
-        c.fillText(`${cells[i].cols} colours on the centre row`, x(i), yTop+ROWH+TH+16);
-        const bad=cells[i].run>=24;
-        c.fillStyle=bad?'#ff6b6b':'#8b939c';
-        c.fillText(`longest identical run: ${cells[i].run} px`, x(i), yTop+ROWH+TH+32);
+      c.fillText(row.title, M, yTop+15);
+
+      /* cells: rows 0-1 are one view across 4 rungs; row 2 is 2 views x 2 rungs */
+      const cells=[], heads=[];
+      if(row.set){
+        for(const i of row.idx){ cells.push(P[row.key].rungs[i][row.set]); heads.push(COLS[i]); }
+      } else {
+        for(const i of row.idx){ cells.push(P.steep.rungs[i].biome);  heads.push([('Biome · '+COLS[i][0]),COLS[i][1]]); }
+        for(const i of row.idx){ cells.push(P.steep.rungs[i].height); heads.push([('Height · '+COLS[i][0]),COLS[i][1]]); }
       }
-      if(r===1){
+      for(let i=0;i<cells.length;i++){
+        const im=await load(cells[i].png);
+        c.fillStyle=heads[i][1]; c.font='600 13px system-ui,sans-serif';
+        c.fillText(heads[i][0], x(i), yTop+RH-10);
+        c.drawImage(im, x(i), yTop+RH, TW, TH);
+        c.strokeStyle='#2a2f36'; c.lineWidth=1; c.strokeRect(x(i)+0.5, yTop+RH+0.5, TW-1, TH-1);
+        let ty=yTop+RH+TH+16;
         c.fillStyle='#8b939c'; c.font='12px ui-monospace,monospace';
-        c.fillText(`16-bit step ${P.plain.stepCurM.toFixed(4)} m`, x(0), yTop+ROWH+TH+48);
-        c.fillText(`16-bit step ${P.plain.stepProM.toExponential(2)} m  (${(P.plain.stepCurM/P.plain.stepProM).toFixed(0)}x finer)`, x(1), yTop+ROWH+TH+48);
-        c.fillText(`tile spans ${P.steep.spanCurM.toFixed(0)} m`, x(2), yTop+ROWH+TH+48);
-        c.fillText(`tile spans ${P.steep.spanProM.toFixed(0)} m`, x(3), yTop+ROWH+TH+48);
+        c.fillText(`${cells[i].cols} colours on the centre row`, x(i), ty); ty+=16;
+        c.fillStyle=cells[i].run>=24?'#ff6b6b':'#8b939c';
+        c.fillText(`longest identical run: ${cells[i].run} px`, x(i), ty); ty+=16;
+        if(r===1){
+          const rr=P.plain.rungs[row.idx[i]];
+          c.fillStyle='#8b939c';
+          const src = (i>=2) ? P.plain.srcLevelsF : P.plain.srcLevels;
+          c.fillText(`${rr.levels.toLocaleString()} of ${src.toLocaleString()} source heights kept`, x(i), ty); ty+=16;
+          const note = i===0 ? `16-bit step ${P.plain.step16M.toFixed(4)} m`
+                    : i===1 ? `24-bit step ${P.plain.step24M.toExponential(2)} m`
+                    : i===2 ? `relief ${P.plain.span0M.toFixed(2)} m → ${P.plain.spanFM.toFixed(2)} m`
+                            : `tint from true elevation, not the tile`;
+          c.fillText(note, x(i), ty);
+        }
       }
     }
     return cv.toDataURL('image/png');
-  },{res,TS,TH,GAP,M,HEAD,COLH,ROWH,CAP,W,H});
+  },{res,TW,TH,GAP,M,HEAD,RH,CAP,W,H});
 
   fs.writeFileSync(OUT, Buffer.from(png.split(',')[1],'base64'));
   const P=res.panels;
-  console.log(`\nwrote ${OUT}`);
+  console.log(`\nwrote ${OUT}  (${W}x${H})`);
   for(const k of ['plain','steep']){
-    const p=P[k];
-    console.log(`\n${k}: ${p.kmAcross.toFixed(2)} km across, span ${p.spanCurM.toFixed(1)} m -> ${p.spanProM.toFixed(1)} m (relief floor)`);
-    console.log(`  Biome  current ${p.biomeCur.cols} cols / run ${p.biomeCur.run} px   proposed ${p.biomePro.cols} cols / run ${p.biomePro.run} px`);
-    console.log(`  Height current ${p.heightCur.cols} cols / run ${p.heightCur.run} px   proposed ${p.heightPro.cols} cols / run ${p.heightPro.run} px`);
-    console.log(`  16-bit step ${p.stepCurM.toFixed(4)} m -> ${p.stepProM.toExponential(2)} m`);
+    const p=P[k], nm=['A 16-bit       ','B 24-bit       ','C +relief floor','D +contrast    '];
+    console.log(`\n${k}: ${p.kmAcross.toFixed(2)} km across, ${p.tw}x${p.th} px`);
+    console.log(`  source heights ${p.srcLevels} distinct over ${p.span0M.toFixed(2)} m   (floored: ${p.srcLevelsF} over ${p.spanFM.toFixed(2)} m)`);
+    console.log(`  storage step   16-bit ${p.step16M.toFixed(4)} m   24-bit ${p.step24M.toExponential(3)} m`);
+    for(let i=0;i<4;i++){ const r=p.rungs[i];
+      console.log(`  ${nm[i]}  levels ${String(r.levels).padStart(6)}   biome ${String(r.biome.cols).padStart(4)} cols / run ${String(r.biome.run).padStart(4)} px   height ${String(r.height.cols).padStart(4)} cols / run ${String(r.height.run).padStart(4)} px`);
+    }
   }
   await b.close();
 })();

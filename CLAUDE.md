@@ -5311,7 +5311,7 @@ node tests/perf/probe_orogeny.js A.html      # v2.36 orogenic belt: thrust-sheet
 node tests/perf/probe_geninfo.js A.html # v2.54 the parameter dump must REBUILD the world it describes (round trip vs a v2.53-shaped control)
 node tests/perf/probe_hgt24.js A.html [B.html] # v2.53 the baked atlas must lose NO distinct height (real atlasPut/atlasGet; B.html is the lossy control)
 node tests/perf/probe_heightbits.js A.html # v2.53 how many bits the height word needs: 24 and 32 recover the same levels, because f32's mantissa is 24 bits
-node tests/perf/probe_lod7compare.js A.html out.png # deep-zoom contrast figure: current vs proposed at LOD 7 (figure generator, not assertions)
+node tests/perf/probe_lod7compare.js A.html out.png # deep-zoom contrast figure: 16-bit -> 24-bit -> relief floor -> local contrast on one LOD-7 tile (figure generator, not assertions)
 node tests/perf/probe_cratertile.js A.html # v2.52 a sub-cell crater resolves IN the tile (world-unit area constant across 5 tile resolutions)
 node tests/perf/probe_craterdepth.js A.html # v2.51 crater depth from real DIAMETER (Pike 1977), scale-invariant across map extent
 node tests/perf/probe_craterscale.js A.html # v2.50 a sub-cell crater/volcano must not be inflated to the grid (area-ratio amplitude, volume conserved)
