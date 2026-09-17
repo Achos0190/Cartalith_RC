@@ -4,6 +4,86 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.58 (DCC line) — a river fragment is not a river
+
+Owner, on the same 40 000 km world: *"What if we draw a river with a catmull-rom line and only render
+it when we zoom to LOD 7/8... And only do that for rivers that are actually big. Rhine, Amazon,
+yellow river. And do the same for smaller rivers as we do ways for the smaller cities... Attest your
+own research adversarially."* The research came back refuting two of the request's own premises and
+one of my own claims; what shipped is the part that survived. **Vector-overlay only** —
+`hash_gen1.js` vs v2.57 is **ALL IDENTICAL** in every scenario, and `tests/run.sh` is 1280/0.
+Verification is `tests/perf/probe_riverscale.js` (17 assertions).
+
+- **River SELECTION had no scale term anywhere in the file, and river DRAWING has had one since
+  v2.25.** `riverRenderPolys()`'s cache key is `_fieldGen|GWxGH|minO` — no zoom, no `mapWidthKm`. So
+  the same set of rivers was chosen for a 50 km region and a 40 000 km world, and the Catmull-Rom
+  spline, the v2.25 real-width crossover and v2.40's in-tile resolution were all already there,
+  refining a set nothing had selected. **The request's "draw it with a Catmull-Rom line" half was
+  already built; the missing half was which lines.**
+- **The ladder the request asked to mirror is itself scale-blind.** `CIV_LOD_PLACE` is raw zoom
+  (`hamlet: 1.4`), so on a 40 000 km world a hamlet appears at a **28 571 km** view. Copying that
+  convention would have reproduced the defect one subsystem over. The gate is **`len*_z` — the stem's
+  own length in SCREEN PIXELS** — which is `mapWidthKm`-free by construction: `_z` is
+  screen-px-per-grid-cell in BOTH camera conventions (canvas px under LOD, `viewT.scale` off it), so
+  one expression covers both.
+- **`RIVER_MIN_SCREEN_PX = 20` is sourced, and the source I first cited was partly fabricated by me.**
+  I claimed to have "independently verified" OpenMapTiles' 26.165 px waterway constant and had in fact
+  **extrapolated two rows of its table from the halving sequence rather than reading it**. Read
+  properly, the real table spans **13.08 px (z11, 1000 m) to 490.6 px**, and the z9=z10 equality I had
+  read as design intent is an arithmetic identity. 20 px sits inside the real band; the probe asserts
+  the band, not the number.
+- **Töpfer & Pillewizer's Radical Law is REFUTED for hydrography and must not be quoted for it.** It
+  predicts 49% flowline retention from 1:24k to 1:100k; USGS's own measured figure is **10–11%**. My
+  first derivation of it was wrong twice over — wrong reading (fixed-sheet vs per-ground-area) and
+  wrong law. Selection here is by on-screen length, not by a count law.
+- **Strahler order CANNOT express the tiers the request named.** Measured max order: **4** at world
+  extent, **2** at the app default (3 with `hydro.integrate` on), against 8–12 for a real Amazon or
+  Rhine. Ordering the world's rivers by Strahler gives at most four buckets, three of which are
+  headwaters. The gate is length, and length is legitimate *because* `buildMainStems` makes it
+  correlate with drainage area.
+- **`traceRiverPolylines` returns FRAGMENTS, and fragment length anti-correlates with importance.**
+  Measured on the real network: ρ(length, drainage area) = **0.207**, top-100-by-length vs
+  top-100-by-flow overlap **2%**, median length of the top 100 by flow **141 km** against **1 341 km**
+  for the top 100 by length. **A length gate over fragments selects the wrong rivers**, which is why
+  the gate needed a new geometry rather than a new threshold.
+- **`buildMainStems` assembles whole stems, and it must accumulate on the CHANNEL tree.** A first cut
+  ranked `net.recv` chains by `flowField` and produced stems that terminated after 5–10 steps while
+  the flow raster read 163 405 at their head — because `net.recv` (`buildRiverNetwork`'s
+  aspect-projected receiver tree over channel cells) and `flowField` (`computeFlow`'s D8 accumulation
+  over ALL cells) **are two different trees**, exactly as v2.41 recorded. Drainage area is now
+  accumulated over `net.recv` itself by Kahn's algorithm, and each confluence keeps its
+  largest-area tributary as the main stem. ρ(length, area) **0.207 → 0.963**.
+- **A wrapped receiver charges a full map width unless you say otherwise.** The same first cut
+  measured a longest "main stem" of **41 097 km ≈ 2 104 cells on a 2 048-cell grid** — one seam jump
+  plus 56 real cells — and since the gate RANKS on that number, every antimeridian-crossing river was
+  promoted to the top. `dx -= Math.round(dx/W)*W` (v1.29/v2.37's rule, in a third place). Longest stem
+  **4 879 km**, against a real Amazon's 6 400 km; the probe asserts no step exceeds 1.414 cells.
+- **The spline's own geometry was GW-keyed with no zoom term, so it never refined.** `step`, `eps` and
+  `wl` were `GW/360`, `GW/900` and `GW/40` — at 40 000 km that is a **111 km** control-point spacing
+  and a **1 000 km** meander wavelength, constant at every zoom. `step`/`eps` are divided by `_z` (so
+  the spline resolves as you zoom, and is **bit-identical to v2.57 at `_z=1` at every resolution** —
+  asserted at GW 1024/2048/4096) and `wl` is keyed on real km (`RIVER_MEANDER_WL_KM = 20`, which
+  **reproduces `GW/40` exactly at the app's own default extent**, so the default meander is unchanged
+  by construction). Measured refinement: **2.844 → 0.356 → 0.044** cells as zoom rises. **Eighth
+  occurrence of the v1.60/v2.05/v2.07/v2.49/v2.51/v2.55/v2.57 real-km defect.**
+- **`drawRiverWays` re-traced the whole network on every call** while `riverRenderPolys` cached the
+  identical work four hundred lines away — 32 ms per frame (11.1 ms trace+split, 20.6 ms spline over
+  9 395 stems) at world extent. `mainRiverStems()` is cached on `_fieldGen|GWxGH|minO`, the same key
+  its sibling uses; the Min-stream-order slider is part of it (7456 → 1112 → 7456, asserted).
+- **The ladder saturates at LOD 5, which refutes the request's own "LOD 7/8" premise.** Stems visible
+  at 20 px, world extent: **975 / 2531 / 4426 / 6087 / 7215 / 7456 / 7456 / 7456 / 7456** for LOD 0–8.
+  Monotone (zooming in only ever ADDS a river), 13.1% disclosed at world scale, and **everything is
+  already on screen two levels before LOD 7** — so LOD 7/8 is where the spline resolves, not where
+  selection happens. All three properties are asserted.
+- **`state.hydro.integrate` is load-bearing here and stays DEFAULT OFF.** Without it 66.5% of land
+  drains into an interior pit (v2.41's own measurement), so stems terminate early: the longest is
+  **1 799 km** with it off against **4 879 km** with it on. Turning it on would re-baseline every world
+  generated from every seed, so it is disclosed rather than flipped — an owner decision, not a fix.
+- **20 000 km and 40 000 km are the same measurement.** `riverCoarseEase` saturates at
+  `mapWidthKm = 12 800` (v2.49's own finding, from the other side), so the two extents the request
+  named produce an identical channel-initiation threshold. Both were run; only one set of numbers is
+  quoted because there is only one.
+
 ## v2.57 (DCC line) — the coastline WAS the plate polygon, and the carve was combing it
 
 Owner, on a 40 000 km world (seed 77805): *"tell me what geometric patterns you see. And I literally
