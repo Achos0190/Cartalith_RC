@@ -4,6 +4,42 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.65 (DCC line) — the status gradient, made explicit; and the second palette v2.64 missed
+
+`docs/05` §7.3's closing bullet asks for one thing: the status gradient is *already* implicit in
+this layout (density, centrality) — make it **explicit in districts**. That is `par.status`, plus
+§3.1's two visible ends. Verification is `tests/perf/probe_industry.js` (29 assertions) plus
+`tests/run.sh` 1280/0, `run_um.sh` 852/852 and `hash_gen1.js` vs v2.64 **ALL IDENTICAL**.
+
+- **`par.status` is built only from quantities `assignDistricts` already had**: proximity to the
+  market (the integration proxy, M-NET-10), whether the parcel is intramural at all (§3.1's suburbs
+  row — a faubourg is cheaper ground), and, where v2.64 supplied a wind bearing, how far DOWNWIND it
+  sits. No new field, no new pass, no new constant of its own. It is written on **every** parcel, so
+  it is readable by anything, and it is consumed here by the two quarters that are its own ends.
+- **Measured, and it reads as a gradient rather than a label**: mean status **0.662** near the
+  market against **0.218** out at the edge, and — the half that only v2.64 made possible — outer
+  ground **downwind 0.143 against upwind 0.403**. §3.1 summarises the poor quarter as "to the edge
+  **and** downwind", and both terms are in the one number, so the selection is a single sort rather
+  than a second rule.
+- **Patrician is carved out of the burgher ring, never the commercial core** (§3.1 row 2: the prime
+  frontages *adjoining* the market). 50 patrician parcels at mean status **0.573** against 44 slum
+  at **0.050**.
+- **v2.64 shipped four districts into one palette and not the other, and its own probe asserted
+  only the one.** `_UM_ECON_TINT` colours the BUILDINGS; `_UM_DISTRICT_FILL` colours the PARCEL at
+  the City Viewer's `CV_LOD_CITY` tier, where `if(!fill) continue` silently skips an unknown
+  district — so the tan yards, mill races, kiln yards and inn yards drew with no quarter fill at
+  all. Both palettes carry all six districts now.
+- **Strengthening that assertion to cover every district actually OBSERVED — rather than a
+  hand-list — immediately found a PRE-EXISTING hole**: `buildFaithSites` has always tagged its
+  precinct parcels `church` and `_UM_DISTRICT_FILL` has never held one, confirmed absent in v2.63.
+  A cathedral close drew with no fill, and §3.1's own row calls it "its own walled precinct". Fixed.
+  **The hand-list was the defect; the derived-from-output assertion is what closed it.**
+- **Known scope cuts**: §3.1's institutional quarters — cathedral close as a *precinct*, castle
+  bailey, Jewry by the castle, the foreign-merchant factory at the quay, friaries in the suburbs,
+  monastic precincts, hospitals at the gates — each need a building or precinct to anchor on and are
+  a larger piece than a gradient; they are not started. `par.status` feeds district choice only; it
+  does not yet drive building grammar or parcel grain (that is the `buildBlocks`→`buildParcels` seam).
+
 ## v2.64 (DCC line) — industry sits where its driver puts it, and the driver is real
 
 `docs/05-settlement-evolution-and-function.md` §7.1 names two cheap site-model additions as the

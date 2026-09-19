@@ -11,7 +11,13 @@
  * field read with opposite signs. If those two ever agree, the vector is not being consulted
  * and the districts are decoration.
  *
- *   node tests/perf/probe_industry.js "Cartalith v2.64 DCC test.html"
+ * v2.65 adds M-DIST (docs/05 §3.1 / §7.3): the status gradient made EXPLICIT as par.status, and
+ * its two visible ends (patrician, slum). It also closes a gap v2.64's own probe missed — there
+ * are TWO palettes, building tint and parcel fill, and asserting only the first let four districts
+ * ship with no quarter colour in the City Viewer. The palette assertion below is now over every
+ * district actually OBSERVED, so a future district cannot slip past it either.
+ *
+ *   node tests/perf/probe_industry.js "Cartalith v2.65 DCC test.html"
  */
 const path=require('path');
 const PW=process.env.PLAYWRIGHT_DIR||'/opt/node22/lib/node_modules/playwright';
@@ -134,12 +140,58 @@ const ck=(n,c,x)=>{ if(c){pass++;console.log('ok   - '+n+(x?'   ('+x+')':''));}
   ck('a climate change rebuilds it — the memo cannot go stale', memo.rebuilt);
   ck('…and the bearing genuinely follows the climate', memo.moved);
 
+  /* ── 3c. M-DIST: the status gradient is explicit, and reads as a gradient ───────────────── */
+  const st=await pg.evaluate(()=>{
+    const o={n:0,bad:0,inW:0,inWs:0,outW:0,outWs:0,pat:0,patS:0,slum:0,slumS:0,
+             seen:{},noFill:[],noTint:[],patFromMarket:0,dw:0,dwS:0,uw:0,uwS:0};
+    for(const p of state.places.filter(q=>CIV_SETTLE_KEYS.has(q.kind)).slice(0,14)){
+      let m=null; try{ m=_umModelForNow(p); }catch(_){ continue; }
+      if(!m||!m.parcels) continue;
+      const e=(_umPlaceContext(p)||{}).economy; if(!e) continue;
+      const mk=m.anchors.market;
+      const wb=(e.wind!=null)?{x:Math.cos(e.wind),y:Math.sin(e.wind)}:null;
+      for(const par of m.parcels){
+        o.seen[par.district]=1;
+        if(typeof par.status!=='number'||!(par.status>=0&&par.status<=1)){ o.bad++; continue; }
+        o.n++;
+        const c=par.poly.reduce((a,z)=>({x:a.x+z.x/par.poly.length,y:a.y+z.y/par.poly.length}),{x:0,y:0});
+        const near=V_dist(c,mk)<220;
+        if(near){ o.inW++; o.inWs+=par.status; } else { o.outW++; o.outWs+=par.status; }
+        if(wb&&near===false){ const a=(c.x-mk.x)*wb.x+(c.y-mk.y)*wb.y;
+          if(a>0){ o.dw++; o.dwS+=par.status; } else { o.uw++; o.uwS+=par.status; } }
+        if(par.district==='patrician'){ o.pat++; o.patS+=par.status; }
+        if(par.district==='slum'){ o.slum++; o.slumS+=par.status; }
+      }
+    }
+    for(const d of Object.keys(o.seen)){
+      if(!_UM_DISTRICT_FILL[d]) o.noFill.push(d);
+    }
+    return o;
+    function V_dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+  });
+  ck('every parcel carries a status in [0,1]', st.bad===0&&st.n>0, st.n+' parcels, '+st.bad+' bad');
+  ck('status falls with distance from the market — it reads as a gradient',
+     st.inW>0&&st.outW>0&&(st.inWs/st.inW)>(st.outWs/st.outW),
+     (st.inWs/Math.max(1,st.inW)).toFixed(3)+' near vs '+(st.outWs/Math.max(1,st.outW)).toFixed(3)+' far');
+  ck('…and outer ground DOWNWIND is poorer than outer ground upwind (§3.1\'s own summary)',
+     st.dw>0&&st.uw>0&&(st.dwS/st.dw)<(st.uwS/st.uw),
+     (st.dwS/Math.max(1,st.dw)).toFixed(3)+' downwind vs '+(st.uwS/Math.max(1,st.uw)).toFixed(3)+' upwind');
+  ck('patrician and slum quarters both exist', st.pat>0&&st.slum>0, st.pat+' patrician, '+st.slum+' slum');
+  ck('patrician outranks slum on the gradient that chose them',
+     st.pat>0&&st.slum>0&&(st.patS/st.pat)>(st.slumS/st.slum),
+     (st.patS/Math.max(1,st.pat)).toFixed(3)+' vs '+(st.slumS/Math.max(1,st.slum)).toFixed(3));
+  /* v2.64 shipped four districts into the BUILDING tint and not the PARCEL fill, where an unknown
+     district is silently skipped. Assert over what is actually observed, so the next one cannot
+     slip past either. */
+  ck('EVERY district observed has a parcel fill — both palettes, not just one',
+     st.noFill.length===0, st.noFill.join(',')||'all covered');
+
   /* ── 4. absent economy ⇒ the pass does nothing (the v0.98 guard) ────────────────────────── */
   const off=await pg.evaluate(()=>{
     const p=state.places.filter(q=>CIV_SETTLE_KEYS.has(q.kind))[0];
     const ctx=_umPlaceContext(p); const o=Object.assign({},ctx); delete o.economy;
     const m=UME.cityGen(12345,o);
-    return (m.parcels||[]).filter(par=>/^(tanyard|millrace|kilnyard|innyard)$/.test(par.district)).length;
+    return (m.parcels||[]).filter(par=>/^(tanyard|millrace|kilnyard|innyard|patrician|slum)$/.test(par.district)).length;
   });
   ck('with no opts.economy the M-IND pass is inert — the synthetic path is untouched', off===0,
      off+' districts');
