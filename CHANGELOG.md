@@ -4,6 +4,104 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.62 (DCC line) — a navigable river is a route, and it has a direction
+
+Owner: *"these rivers should be navigateable as a route (but with a lower friction/cost) and a course
+or direction the water flows (this also informs the travel planner)"*, then *"Now do the navigable
+rivers with flow direction."* Civ-layer only — `hash_gen1.js` vs v2.61 is **ALL IDENTICAL** in every
+scenario; generated ROAD geometry is a deliberate re-baseline, disclosed below. Verification:
+`tests/perf/probe_rivernav.js` (19 assertions, hard-errors on v2.61) plus `tests/run.sh` 1280/0,
+`run_um.sh` 852/852, `probe_riverfill` 24/0, `probe_roadconnect` all passed, `probe_travel` every
+reference case still in band.
+
+- **A per-cell cost cannot tell walking ALONG a river from cutting ACROSS it, and the most navigable
+  river on the map was therefore the most expensive ground on it.** The ford/bridge wait was charged
+  on every river CELL, so following a channel priced as fording it once per cell; the navigable-river
+  discount was multiplied into every river cell too, so a road crossing a trunk river square-on
+  collected 35% off the very cell it was building a bridge over. Measured against plain ground at
+  seed 12345/512px before the fix: an order-1 river cell cost **1.44x**, order-2 **1.71x**, and an
+  order-3 cell — the only kind a hull can use — **3.46x**, its 1.894 h of bridge dwarfing the 0.587 h
+  of travel it had been discounted to. **This is v2.33's own finding about slope** — *"it is the only
+  place a direction exists"* — which that version moved to `edgeCost` and did not carry to the river
+  terms sitting ten lines below in the same function.
+- **So both river terms move to the edge, scaled by how squarely the step cuts the water.** Measured
+  after: a step ALONG a navigable river costs **0.302 h against plain ground's 0.746 (0.41x)**, a step
+  ACROSS the same water **1.347 h (1.81x)** — it still pays its whole bridge — and the two differ by
+  **4.5x**. A river too small to float a hull gets no boat whichever way you walk beside it (**0.99x**
+  plain), which is what keeps a headwater a crossing rather than a road.
+- **`|align|` is symmetric by construction, and that is load-bearing rather than incidental.**
+  v1.98 established that an undirected Prim MST has no well-defined answer for an asymmetric cost, and
+  a permanent road beside a river is used both ways — its worth cannot depend on which way you are
+  walking today. Measured relative asymmetry over 8 000 edge pairs: **exactly 0**. Downstream-versus-
+  upstream is a JOURNEY question and it is answered where a journey has a direction.
+- **NAVIGABILITY IS A CATCHMENT AREA, NOT A STRAHLER ORDER, AND THE MEASUREMENT IS WHY.** The three
+  existing consumers (`_civPlaceNavigability` v1.35, `buildSettlementSuitability`'s navigable-river
+  term, `_civNavigableRiverDiscount` v0.94) all gate on `order>=3` and copying that here was the
+  obvious move. v2.59 measured what it costs and recommended against it for exactly this kind of
+  gate; re-measured on this build with only the map extent varied, ONE `order>=3` label describes
+  rivers of median catchment **6 417 km² at 800 km against 1 429 009 km² at 40 000 km — a 223x swing
+  in what the word "navigable" would mean**, decided by how wide the map is. The catchment is
+  resolution-free too, measured on the same 800 km world across a 4x cell-count change: channel
+  median **483 km² at 512px against 482 km² at 1024px**.
+- **`CIV_RIVER_NAVIGABLE_KM2 = 1000` is anchored twice over, independently.** (a) The head of
+  navigation on real barge rivers — the Thames at Lechlade and the Severn at Welshpool both sit near
+  1 000 km² of catchment. (b) The discharge rule — a small barge wants roughly 10 m³/s, and at a
+  temperate runoff near 300 mm/yr that is ~1 050 km². Neither route is this file's taste. It covers
+  **30.0% of channel cells at the app default against `order>=3`'s 2.0%**, which is a 17x wider
+  navigable network (**42 -> 728** navigable routing edges) and one that means the same river on
+  every map.
+- **This is a NEW consumer and it moves none of the three above** — they keep `order>=3` exactly, so
+  no existing world's settlements, water access or road discounts shift. v2.59's nine-consumer
+  migration remains the owner's call, untouched.
+- **The river's worth is a SPEED read from the planner's own vessel table, never a constant here.**
+  The obvious number is wrong and the measurement is what says so: a river's real advantage is cost
+  per ton, not speed — Diocletian's Price Edict puts road freight at ~5.5x river, which v1.33 already
+  uses for the food shed — but the router's grid is in HOURS, and spending a cost ratio as a time
+  ratio is exactly the dimensionless-number defect v2.33 removed from this same function. Nor is a
+  river uniformly quicker: measured through `jpVesselDayKm`, the Longship cruises 11 km/h (**2.18x**
+  walking) carrying 5 000 kg while the River Barge cruises 2 km/h (**0.40x**) carrying 30 000 kg.
+  Both are true and they answer different questions. `_civRiverTravelSpeed()` prices the fastest hull
+  the water admits, through the planner's own eligibility test — **the v2.34 rule (the land surface
+  speed is a SPEED from `JP_TERRAIN.land`, read through the classifier the planner itself runs),
+  applied to water**. Change a vessel's speed and the router follows; the probe asserts it does.
+  Falls back to 1 if the tables are unreachable, so a missing planner can only ever cost the river
+  its bonus, never invent one.
+- **The planner's current was a proxy for the water's direction, not the water's direction, and it
+  was backwards one step in five.** `_jpRiverCondition` inferred it from the route's own elevation
+  profile — `(loss-gain)/km` over the chunk — and measured on real generated roads at seed
+  12345/512px, of 48 river steps where the proxy had an opinion **10 (20.8%) got the current
+  backwards**. v1.102 had already had to special-case lakes out of it, because a flat lake bed's DEM
+  noise reads as a real current under exactly this proxy — that was the same defect, caught once at
+  one symptom. The sign is now the receiver tree's and the magnitude the channel's own gradient.
+  Asserted as a round trip: the same 90.6 km chain walked both ways reads **Strong Downstream** one
+  way and **Strong Upstream** the other, which an elevation proxy cannot guarantee and a receiver
+  tree cannot get wrong. `pts` omitted ⇒ the v2.61 answer, unchanged.
+- **`cat:'river'` was structurally unreachable for a real river, which is the half of the request
+  that had no implementation at all.** `_jpDeriveStages` classified every river cell `cat:'land'`
+  and used its `riv` flag only to count crossings, so the whole vessel / `JP_TERRAIN.river` /
+  `JP_ROUTE.river` / `jpVesselDayKm` model applied to lakes and to nothing else. A step that both
+  follows a navigable channel (`|align| >= CIV_RIVER_ALONG`) and sits on one now derives as river:
+  measured **54 km of the 90.6 km chain**, against 0 before.
+- **And the roads actually use them, measured end to end rather than argued from the cost grid.**
+  A/B over three seeds at the app default, scoring both builds with the IDENTICAL navigability test
+  applied to raw `flowField` so the comparison is fair: road km running ALONG a navigable river
+  **251.0 -> 405.0 (1.61x)**, improving on every seed (0.79->1.70%, 3.21->4.16%, 0.43->1.42% of
+  total road length). Square-on crossings stay flat at **0.97x** — the fix does not buy river
+  mileage by manufacturing bridges — and total road length falls slightly, 16 590.7 -> 16 472.7 km.
+- **`_civRiverFlowField()` is one definition of "which way does the water run", shared by the router
+  and the planner** — the sixth-plus occurrence of the shape this file keeps paying for, avoided
+  rather than repeated. Cached on a key that names every input (`_fieldGen`, `GW`/`GH`, extent,
+  world mode — v2.56's rule), covering **99.8%** of land channel cells; a wrapped receiver is ONE
+  step, never a map width (v1.29/v2.37/v2.58, fourth site).
+- **Omitting the `river` argument reproduces the v2.61 arithmetic exactly** (the v1.98 `edgeCost` /
+  v2.40 `opts` discipline), asserted by diffing every non-river edge on a real world.
+- **Disclosed, not fixed**: the ford cost's own `fordK` still bands on Strahler order (`ord<=2`
+  cheap, `ord<=4` mid) — pre-existing since v0.94, and extent-dependent for the same reason the gate
+  was, but changing it re-baselines road geometry for no measured reason and it is not what was
+  asked. `_civMstRoutes`' sea lanes keep v1.98's own edge cost, untouched. Generated road geometry
+  moves by design — that is the request — so a saved world keeps its roads until they are
+  regenerated.
+
 ## v2.61 (DCC line) — a river is painted as water, in the lake's own colour
 
 Owner, across four messages: *"Maybe we shouldn't carve, maybe we should only paint the current line
