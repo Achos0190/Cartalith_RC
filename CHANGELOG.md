@@ -4,6 +4,75 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.63 (DCC line) — three scopes, one screen, and seven knobs that were never reachable
+
+Owner: *"As with the asset manager id like a window/screen were I can modify settlement
+parameters, global per faction but also per individual settlement."* Civ-layer plus seven
+engine constants promoted to state — `hash_gen1.js` vs v2.62 **ALL IDENTICAL** in every
+scenario, because every default IS the constant it replaced. Verification is
+`tests/perf/probe_settleparams.js` (30 assertions) plus `tests/run.sh` 1280/0,
+`run_um.sh` 852/852, `probe_geninfo` 21/0 and `probe_assetsbtn` 14/0.
+
+- **Two of the three scopes already existed and the third had no control anywhere.** The
+  audit came first (v2.58's rule: check which half of a request already exists before
+  building the whole of it). Per-settlement editing is `_civPopulatePlaceEditor` — twelve
+  fields, reached from the map popup, the sidebar list and the virtual table. Per-faction is
+  `_civPopulateFactionEditor` — five fields, reached from v1.57's pop-up. **Global was ten
+  constants, each declared once, each hardcoded, with no UI at all.** So the work is one
+  screen that hosts what exists, plus genuinely new plumbing for the third scope.
+- **Both existing builders already take a `host`, so this adds a second HOST and not a second
+  editor** — v1.57's one-control-one-surface rule. A settlement edited in the new screen is
+  edited through the identical function the map popup calls; the probe asserts it by typing
+  into `_civPeName` from the new pane and reading the change off the place object.
+- **Three of the ten knobs are deliberately NOT exposed, and saying why is the point.**
+  `FARMERS_PER_URBANITE` is **already** per-faction through v1.54's Ag. technology rungs, so
+  a global too would be exactly the defect above. `FOOD_BASE_SURPLUS_RATIO` is the constant
+  `foodSurplusRatio()` pins itself to so every existing world stays bit-identical — exposing
+  it would retune the pin rather than the model. `SETTLE_COAST_SWAP_TOLERANCE` is an internal
+  tolerance, not a world-shaping quantity.
+- **ONE list, THREE consumers.** `CIV_PARAM_DEFS` holds each number once; the default, the
+  live `civParam()` read and the Global pane's rows all come off it, so a knob added later
+  appears in the UI for free. The four block-2 constants that used to own their own literal
+  now read `civParamDef` instead — a second hand-written copy is how v1.72 BUG-A, v2.45 and
+  v2.54 each drifted.
+- **`state.civParams` starts EMPTY, which is what makes the bit-identity structural rather
+  than checked.** `civParam()` falls through to the table's `def`, so a world generated
+  without opening the screen cannot differ, and a pre-v2.63 save — which carries no
+  `civParams` block — reloads as the world it was (the v2.17 `state.passes` convention).
+- **A knob that stores a number nothing reads is the v2.42 defect**, so the probe measures the
+  effect rather than the storage: lowering the settlement threshold to 0.30 seeds **94** sites
+  against the default's **67**, raising it to 0.60 seeds **18**, and clearing the override
+  returns the default count exactly.
+- **The surplus ceiling had to move BOTH ag-tech branches or it would mean two different
+  things.** A first cut scaled only the `isDefault` branch, which would have left a
+  traditional faction responding to the knob and an industrial one ignoring it. Measured on
+  the shipped function: R=9 **0.350 -> 0.556**, R=6 **0.450 -> 0.571**, and R=1 **unchanged at
+  0.750** — correctly inert, because there the yield already sits below the cap and something
+  else is the binding constraint. The probe asserts the inert case too, so a later "make the
+  knob always do something" cannot quietly invent surplus.
+- **A change applies on the NEXT Auto-populate** (owner's call). Nothing regenerates behind a
+  slider drag — v2.38 measured that pass at 11.2 s. "Re-populate now" clicks the real
+  `#civAutoPopulateBtn` rather than calling `_civAutoWorld` directly, so v2.38's busy wrap and
+  everything else that handler owns stays in one place.
+- **The screen is reached from the HEADER, not the cog** — v2.46's rule, and the probe asserts
+  a real `page.click` LANDS on the control rather than merely querying it in the DOM.
+- **It covers the header once open (`position:fixed;inset:0`), so the way out is the modal's
+  own ✕ and Escape** — v1.57's existing shell contract, and NOT v2.46's split-control defect,
+  which was about a way IN that no click could reach. What the probe pins instead is that the
+  button's `aria-pressed` tracks the screen, so it can never lie about being open.
+- **`_civAutoWorld` closes the screen on its own** — `_civRefreshActiveSubPage`'s factions
+  branch resets the modal unconditionally (v1.96/v1.57). Found by the probe timing out on a
+  hidden ✕ rather than by reading; the handler now closes explicitly so the two agree.
+- **`civParams` joins `GEN_PARAM_BLOCKS`**, so the dump that promises to reproduce this exact
+  world carries the knobs too — v2.54's own one-list-two-consumers design makes that one word,
+  and leaving it out would have recreated the very defect that version fixed.
+- **Disclosed, not fixed**: `probe_placement.js`/`probe_foodshed.js`'s shared "urbanisation is
+  in the pre-industrial band" assertion reads **21.21%** here — and reads **21.21%** on v2.62
+  with the identical control, so it is pre-existing and not this version's. The settlements
+  list is a flat capped render (`PM_PLACE_MAX=300`) rather than v1.16's virtual table; search
+  reaches the rest, and virtualising is the upgrade path if a world ever needs to browse past
+  it without searching.
+
 ## v2.62 (DCC line) — a navigable river is a route, and it has a direction
 
 Owner: *"these rivers should be navigateable as a route (but with a lower friction/cost) and a course
