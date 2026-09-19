@@ -4,6 +4,67 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.64 (DCC line) — industry sits where its driver puts it, and the driver is real
+
+`docs/05-settlement-evolution-and-function.md` §7.1 names two cheap site-model additions as the
+thing that unblocks industry siting — a prevailing-wind vector and an along-water gradient. Neither
+existed. Shipping them alone would have left two fields nothing reads (v2.14's dead-code rule), so
+they ship with their first consumer, the §4.7 siting table (**M-IND**). Verification is
+`tests/perf/probe_industry.js` (23 assertions) plus `tests/run.sh` 1280/0, `run_um.sh` 852/852 and
+`hash_gen1.js` vs v2.63 **ALL IDENTICAL**.
+
+- **Neither vector is invented per seed, and that is the whole point.** The wind is this engine's
+  own `currentWindField()`, so a town's foul trades sit downwind of the same wind that drives its
+  rainfall; the downstream direction is **v2.62's `_civRiverFlowField()` receiver tree**, so "below
+  the town" means below it on the real hydrology. `_umFlowBearings` returns both as BEARINGS in the
+  layout frame — the convention `_umOreBearing` established in v1.17 — so `assignDistricts` consumes
+  them exactly the way it already consumes the ore bearing, rather than growing a second frame.
+- **A defect in my own first cut, found by measurement: I selected the nearest channel cell on the
+  wrong field.** `_civRiverFlowField` fills `km2` for *every* cell from `flowField` (accumulation is
+  non-zero almost everywhere) and fills `fx`/`fy` only where the receiver tree has a channel. So
+  selecting the nearest cell with `km2>0` lands on the town's own dry cell and then finds no vector
+  there: **1 of 14 towns got a bearing.** Selecting on the vector gives **14 of 14**.
+- **A second defect, and it was a modelling error rather than a coding one.** The obvious reading of
+  §4.2 is "riverside AND downstream of the centre", so that is what shipped first — and it produced
+  **ZERO tan yards across 14 real towns** while the mirrored `<0` test produced mill races. The
+  cause is geometry, not the vector: one town carried **62 riverside parcels and all 62 sat upstream
+  of its market**, because a river clips the town box on one side and the market does not sit in the
+  middle of the frontage. **"Downstream of the market" is unsatisfiable for most towns**; what §4.2
+  actually describes is the downstream END of the town's own frontage, which needs no origin at all.
+  Both trades are now ranked along the one vector — tan yards take the downstream end, mill races
+  the upstream end. **The same insight as v2.62: the direction is what is real, the origin is not.**
+- **So the probe asserts the ORDERING, which is strictly harder than any sign test**: within one
+  town every tan yard must lie downstream of every mill race. A town whose frontage is entirely on
+  one side of its market satisfies no sign rule, and that invariant still has to hold — and can only
+  hold if the vector is genuinely being consulted.
+- **The wind half needed no correction and reads as designed**: kiln yards take the extramural edge
+  **downwind** (§4.3/§4.4 — the mechanism behind the enduring east-end/west-end sorting, Heblich,
+  Trew & Zylberberg, *JPE* 2021), measured 24 parcels across 14 towns with **0** upwind. Inn yards
+  gather at the gates (§4.6), 20 parcels.
+- **These are properties of the SITE, not of the town's trade**, so the pass sits outside the
+  specialisation chain — every town has a downwind edge and a downstream reach. It runs after that
+  chain and never steals a parcel the specialisation already claimed, so a fishing town keeps its
+  waterfront: **one industry per parcel, first claim wins**, asserted.
+- **`opts.economy` is built whenever either bearing exists**, not only when a specialisation does —
+  otherwise an ordinary town would have no vectors at all. Absent `opts.economy` the pass is inert,
+  so the synthetic path and the 852 UME goldens are untouched by construction (the v0.98 rule).
+- **A district with no tint renders as the default brown** — the invisible-feature defect v1.80 and
+  v2.15 each paid for — so all four carry `_UM_ECON_TINT` entries and their own provenance lines,
+  both asserted rather than assumed.
+- **`currentWindField()` is 36 ms and this calls it once per settlement** — measured, not assumed:
+  `_umFlowBearings` costs 34.9 ms of which 34.9 is the wind, so a 235-settlement world would spend
+  **~8.5 s rebuilding an identical field**. It is memoised in the adapter and **not** inside
+  `currentWindField` itself, because v1.86 leaves that uncached on purpose so the Wind/Ocean debug
+  views track the tilt/rotation sliders live. The key names everything that function reads
+  (`_fieldGen`, grid, world, sea level, the whole of `climate` and `planet`) — a missed input would
+  be a silently stale wind, which is the failure v1.86 was avoiding. **36 ms -> 0.01 ms per
+  settlement**, with the probe asserting both that a repeat call returns the same object and that a
+  climate change rebuilds it.
+- **Known scope cuts**: the windmill on the windward rampart (§4.7 row 2) is a BUILDING, not a
+  district, and needs the building grammar rather than `assignDistricts`; warehouses at the quay were
+  already built (v1.17 S6); mining/quarry/salt ribbon form is a whole settlement shape, not a
+  quarter. `riverDist<60` is the engine's own existing riverside test, reused rather than retuned.
+
 ## v2.63 (DCC line) — three scopes, one screen, and seven knobs that were never reachable
 
 Owner: *"As with the asset manager id like a window/screen were I can modify settlement
