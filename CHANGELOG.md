@@ -4,6 +4,105 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.61 (DCC line) — a river is painted as water, in the lake's own colour
+
+Owner, across four messages: *"Maybe we shouldn't carve, maybe we should only paint the current line
+in the same color as the lakes. And make sure the lines aren't broken bits"*, then *"Then at those
+pits should be lakes no?"*, then *"Maybe we should revert the digging thing derived from the sculpt
+function and focus on coloring the river banks accordingly."* A **paint** change plus one
+classification fix; `field` is not written anywhere new, and v2.60's terrain edit is reverted.
+Verification: `tests/run.sh` 1280/0, `run_um.sh` 852/852, `tests/perf/probe_riverfill.js` 24/0, plus
+`probe_riverorder` 18/0, `probe_rivertile` 21/0, `probe_riverscale` 17/0, `probe_deltas` 18/0,
+`probe_carve` 10/0, `probe_riverwidth` 11/0, `probe_renderfields` 22/0.
+
+- **The two water renderers disagreed about what water IS, and that disagreement is the whole
+  report.** A LAKE is opaque — `lakeWaterColor` returns a colour and the caller writes it, at a flat
+  0.95 shade — so it reads as a level surface. A RIVER was a translucent Beer-Lambert TINT over
+  whatever land colour happened to be underneath, at alpha `sV*0.85` where `sV` carries the discharge
+  magnitude (`amp` ∈ [0.45, 1]) as well as the coverage: a small river was painted at **38% opacity**
+  with the hillshade showing straight through it. Measured on the deep-zoom crop the report came
+  from, the drawn band is a flat-edged **2.5 km** slab with the terrain's own ridges running visibly
+  through it. That is a decal, not water.
+- **So the river writes the lake's colour at its own COVERAGE**, which is a geometric quantity with
+  no free parameter: interior pixels are fully water, the pixel at the bank antialiases, exactly as
+  v1.05's sub-cell lake shoreline already does. 57.3% of painted cells are now fully opaque against
+  0% before. `kV`/`wcol` omitted ⇒ the v2.60 Beer-Lambert arithmetic character for character, so
+  `waterShade` stays reachable and the suite's four assertions on it still bite (the v1.98 `edgeCost`
+  / v2.40 `opts` discipline) — asserted directly, by reproducing the old expression in the probe.
+- **The antialias band must be bounded by the channel, not by a pixel.** A flat one-pixel edge is
+  right in a refined tile and wrong on the coarse grid, where one "tile pixel" IS a cell and `wIn` is
+  0.8 of one — it capped the centreline at 80% and averaged 50%, i.e. a tint again, which is the
+  thing being fixed. `min(RIVER_EDGE_PX, wIn)` makes the pixel on the line fully water at every zoom.
+- **ONE definition of the lake's colour.** That expression was written out verbatim in THREE places
+  (`lakeColor`, `lakeColorSampled`, and `renderBiomeTileRGBA`'s inline lake branch) — the "two
+  functions answering one question WILL drift" shape this file has paid for repeatedly — and v2.61
+  adds a fourth consumer, so it had to become one function before it could be shared rather than
+  copied a fourth time. Arithmetic unchanged ⇒ every existing caller bit-identical.
+- **A depression a river flows into is a LAKE, whatever the local rainfall.** `buildWaterBodies`
+  gated a pooled depression on `rain[i] >= lakeRain` (0.22) — the right question for an unfed hollow
+  (Death Valley, the Qattara Depression) and the wrong one for a TERMINAL lake, which exists
+  precisely because a river delivers water from a wetter catchment: Chad sits in the Sahel, Eyre and
+  the Aral in deserts, the Dead Sea in a hyper-arid basin. Every one of them fails a local-rainfall
+  test and every one of them is a lake. The supply term was already computed (`flowField` is
+  rainfall-weighted accumulated discharge, v2.41) and the threshold is the file's own definition of
+  "a channel exists here" (`riverFlowThresh`), so this introduces **no constant of its own**. Lakes
+  15 904 → 17 725 cells (4.58% → 5.11% of land). Optional, like every other input to that primitive:
+  absent ⇒ the v2.60 expression exactly. Asserted MONOTONE — the term can only ever ADD a lake.
+- **The digging pass is reverted, on the owner's call.** v2.60's step 2c ran the Sculpt editor's own
+  `enforceChannelDescent` over the post-carve network and took the drawn chains' climb from 12.55% to
+  4.33% — at the cost of moving 0.74% of the map and re-baselining `field` for every seed. The
+  decision it embodied was that the TERRAIN should be edited until the drawn river reads right; v2.61
+  takes the other branch. **Isolated exactly**: against v2.59 the battery reads `field` **3273059064**,
+  `temp` 2151860328, `rain` 1311039392, `flow` 1721724374 — **identical on both sides in all five
+  scenarios**, only `rgba` moving. So v2.61's terrain IS v2.59's, byte for byte, which is what proves
+  step 2c was the whole of v2.60's field divergence. `CHANNEL_DESCENT_CENTRE_HALFW` went with it
+  (v2.14's dead-code rule).
+- **And the lines are not broken bits.** A stem joined by nothing, continuing into nothing, and
+  reaching neither sea, lake nor map edge is a detached fragment; drawn at the v2.60 cell floor a
+  SHORT one is a lozenge wider than it is long. 455 of 1104 stems are isolated — but their median
+  length is 6.2 cells, so those are real rivers terminating at a pit and removing them would delete
+  41% of the network. The ones removed are the ones the geometry itself condemns: **shorter than they
+  are drawn wide**, a self-calibrating test with no new constant. That is the bound v2.60 looked for
+  and could not use — capping the WIDTH by length broke the network 0 → 111 breaks, because a thin
+  stub stops covering the elbow to the trunk it joins, whereas removing a stem that nothing joins and
+  that joins nothing cannot disconnect anything by construction. `_stemAttachment` is what makes that
+  guarantee true rather than assumed. Breaks stay **0**.
+- **The banks are coloured from the band the water is already stamped in.** The palette existed —
+  `applyCoastRiverSDFv`'s river half has carried damp-bank, wetland and floodplain tints since v0.097
+  — but was unreachable in practice: gated on `state.viz.sdfRivers` (default 0) and fed by
+  `buildRiverSDF`, one of the eight full-grid fields v2.56 measured at **3078 ms**, which v1.29
+  additionally lists among the per-tile passes that ARE a seam because they have a spatial
+  neighbourhood. So the colours are reused and the distance is not: the band falls out of the segment
+  walk `riverFieldTile` already does, costs no new pass, resolves with the tile, and is seam-free for
+  v2.40's reason. Its width is the river's own (`RIVER_BANK_K` is a fraction of the drawn half-width),
+  so it needs no real-km or per-cell term and inherits whichever floor already bound the water.
+- **A name collision the runtime caught, not a review.** The coverage accumulator was first called
+  `k`, which `riverFieldTile`'s own segment loop already uses as its counter — so `k=new
+  Float32Array(...)` assigned to the loop variable and the array stayed null. Renamed `cov`, with the
+  reason recorded at the declaration.
+- **Three probe assertions were RETIRED, not loosened.** `probe_riverfill`'s finishing-descent block
+  measured v2.60's terrain edit; the owner reverted it, so the assertions are replaced by what v2.61
+  claims instead — the pass and its constant are gone, the flow term is live and monotone, the water
+  is exactly the lake's colour at full coverage, the legacy blend is reproduced when the new
+  arguments are omitted, and the banks draw. The `dry === 0` assertion became "every chain cell of a
+  DRAWN stem", with the cull bounded by an **independently recomputed** rule rather than by calling
+  `_stemAttachment` back.
+- **Also fixed:** `<title>` and `#verTag` still read **v2.34**, 26 versions stale — the VERSION drift
+  v1.30/v1.52/v1.100 each recorded. `#verTag` is overwritten from `VERSION` on load, so only the
+  title was user-visible.
+- **Disclosed, not fixed**: reverting 2c restores v2.59's climb figures (12.55% of drawn steps, 748
+  on dry slope) — the two depression models still disagree and nothing now edits the ground to hide
+  it; the new lake gate turns the genuine terminal pits into lakes, which is the part of that
+  disagreement that has an honest answer. Filling the CARVED trench was measured and rejected: at the
+  app default the terrain carries no river-scale cross-section (wetted half-width **below the 0.8-cell
+  floor at 88.1% of vertices** at bed+1 m) while at the depths where it does, 13–37% saturate into
+  floodplain, and at a 50 km region filling to the bank reaches **38–62 cells**, a 3 km flood for a
+  headwater. The carve and the renderer still use two different widths (carve 0.80/1.30/1.80 cells by
+  order against a drawn 0.80 — **24.6% of the drawn river at the default sits in a trench wider than
+  its water, and 100% at a 50 km region, up to 5.5x**); that is a real drift and is left standing
+  rather than resolved by widening the paint to a size v2.49 already established is four times the
+  Amazon.
+
 ## v2.60 (DCC line) — a river is a continuous feature, not a chain of cells
 
 Owner: *"I find that rivers are quickly small strokes one after another and when we zoom in, maybe

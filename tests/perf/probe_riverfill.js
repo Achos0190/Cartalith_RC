@@ -138,17 +138,69 @@ const ok=(n,c,x)=>{ if(c){pass++; console.log('ok   - '+n);} else {fail++; conso
    out.geom={renderPolys:rp.length, renderStubs:stub, fragPolys:frag.length, fragStubs:fstub,
              meanPts:ptsum/Math.max(1,rp.length)};
 
-   /* ---------- 7. the finishing descent pass ---------- */
-   const mpu=metersPerUnit();
-   let up=0, tot=0, carved=0, chan=0;
-   for(let i=0;i<n;i++) if(_riverNet.order[i]>=1){ chan++; if(riverMask&&riverMask[i]) carved++; }
-   for(const s of stems) for(let k=1;k<s.pts.length;k++){
-     const a=((s.pts[k-1].y|0)*GW)+(s.pts[k-1].x|0), c=((s.pts[k].y|0)*GW)+(s.pts[k].x|0); tot++;
-     if((field[c]-field[a])*mpu>1e-3) up++; }
-   out.descent={steps:tot, uphill:up, pctUphill:100*up/Math.max(1,tot),
-     carvedPct:100*carved/Math.max(1,chan),
-     hasPass:/FINISHING DESCENT PASS/.test(carveRiverValleys.toString()),
-     centreOnly:(typeof CHANNEL_DESCENT_CENTRE_HALFW!=='undefined')&&CHANNEL_DESCENT_CENTRE_HALFW>0&&CHANNEL_DESCENT_CENTRE_HALFW<1};
+   /* ---------- 7. v2.61: the ground is NOT edited; the pits are lakes and the paint is water ----------
+      v2.60 asserted the opposite here — that a sculpt-derived finishing pass had cut the climb out of
+      the drawn chains. The owner reverted that ("revert the digging thing derived from the sculpt
+      function"), so those three assertions are RETIRED, not loosened: v2.61 makes a different claim
+      and these are the measurements of that claim. */
+   out.noDig={ passGone: !/FINISHING DESCENT PASS:/.test(carveRiverValleys.toString()),
+               constGone: (typeof CHANNEL_DESCENT_CENTRE_HALFW==='undefined') };
+   /* the lake gate: a depression a river flows into is a lake, whatever the local rainfall */
+   const wbNoFlow=buildWaterBodies(field,GW,GH,state.seaLevel,{wrap:!!state.world,geo:geoidField,
+        rain:rainField,forceLake:(lakeMask&&lakeMask.length===n)?lakeMask:null});
+   let lakeNow=0, lakeNoFlow=0, land=0;
+   for(let i=0;i<n;i++) if(field[i]>=state.seaLevel){ land++; if(wb[i]===2)lakeNow++; if(wbNoFlow[i]===2)lakeNoFlow++; }
+   out.lakes={withFlow:lakeNow, withoutFlow:lakeNoFlow, land,
+              optIn:(()=>{ let same=true; for(let i=0;i<n;i++) if(wbNoFlow[i]!==0&&wbNoFlow[i]!==wb[i]){ } return same; })()};
+   /* every cell the no-flow pass called a lake must still be one — the term can only ADD */
+   out.lakes.monotone=(()=>{ for(let i=0;i<n;i++) if(wbNoFlow[i]===2&&wb[i]!==2) return false; return true; })();
+
+   /* ---------- 7b. the paint is the LAKE's water, at true coverage, with a bank ---------- */
+   out.paint={ takesLakeColour:/wcol/.test(applyRiverWater.toString()),
+               oneLakeColour:(typeof lakeWaterColor==='function'),
+               hasBank:(typeof applyRiverBank==='function') && !!(rf&&rf.b),
+               hasCoverage:!!(rf&&rf.k) };
+   { let full=0, drawn=0, bankCells=0, kSum=0;
+     if(rf) for(let i=0;i<n;i++){ if(rf.s[i]>0){ drawn++; kSum+=rf.k[i]; if(rf.k[i]>=0.999) full++; }
+                                  if(rf.b[i]>0) bankCells++; }
+     out.paint.drawn=drawn; out.paint.fullyOpaque=full; out.paint.bankCells=bankCells;
+     out.paint.meanCoverage=kSum/Math.max(1,drawn);
+     /* the lake colour the river writes must BE the lake's own, at a real cell */
+     let match=false;
+     for(let i=0;i<n&&!match;i++) if(rf&&rf.k[i]>=0.999&&field[i]>=state.seaLevel&&wb[i]!==2){
+       const x=i%GW, y=(i/GW)|0, c=[10,20,30], lc=lakeColor(x,y,i);
+       applyRiverWater(c, rf.s[i], rf.d[i], rf.k[i], lc);
+       match=Math.abs(c[0]-lc[0])<1e-6&&Math.abs(c[1]-lc[1])<1e-6&&Math.abs(c[2]-lc[2])<1e-6; }
+     out.paint.fullCoverageIsExactlyLakeColour=match;
+     /* and omitting the new arguments must reproduce v2.60's Beer-Lambert arithmetic exactly */
+     const a=[120,130,110], b=[120,130,110];
+     applyRiverWater(a, 0.7, 0.4);
+     { const sed=Math.min(1,0.18+0.5*0.4), ws=waterShade(b,0.4,sed,RIVER_KD), al=0.7*0.85;
+       b[0]=b[0]*(1-al)+ws[0]*al; b[1]=b[1]*(1-al)+ws[1]*al; b[2]=b[2]*(1-al)+ws[2]*al; }
+     out.paint.legacyPathIntact=Math.abs(a[0]-b[0])<1e-9&&Math.abs(a[1]-b[1])<1e-9&&Math.abs(a[2]-b[2])<1e-9;
+   }
+
+   /* ---------- 7c. the culled fragments, verified against an INDEPENDENT rule ---------- */
+   { const own=new Int32Array(n).fill(-1);
+     const ci=(q)=>Math.min(n-1,Math.max(0,((q.y|0)*GW)+(q.x|0)));
+     stems.forEach((st,si)=>{ for(const q of st.pts) if(own[ci(q)]<0) own[ci(q)]=si; });
+     const joined=new Uint8Array(stems.length);
+     stems.forEach((st,si)=>{ const t=ci(st.pts[st.pts.length-1]); const o=own[t]; if(o>=0&&o!==si) joined[o]=1; });
+     const drawnHead=new Set(riverRenderPolys().map(pl=>pl.v[0].x+','+pl.v[0].y));
+     let culled=0, badCull=0;
+     stems.forEach((st,si)=>{
+       if(drawnHead.has(st.pts[0].x+','+st.pts[0].y)) return;
+       culled++;
+       const P=st.pts, t=ci(P[P.length-1]), x=t%GW, y=(t/GW)|0;
+       const attached=(x<=1||x>=GW-2||y<=1||y>=GH-2)||field[t]<state.seaLevel||wb[t]===2
+                    ||(own[t]>=0&&own[t]!==si)||joined[si]
+                    ||(_riverNet.recv[t]>=0&&own[_riverNet.recv[t]]>=0&&own[_riverNet.recv[t]]!==si);
+       let L=0; for(let k2=1;k2<P.length;k2++){ let dx=P[k2].x-P[k2-1].x;
+         if(state.world) dx-=Math.round(dx/GW)*GW; L+=Math.hypot(dx,P[k2].y-P[k2-1].y); }
+       if(attached || L>=2*RIVER_MIN_HALF_CELLS) badCull++;
+     });
+     out.cull={culled, badCull, stems:stems.length};
+   }
 
    /* ---------- 8. the lake cut lives on the STROKE, not on the raster ---------- */
    out.cut={rasterCuts:/riverLakeSkip\(\)/.test(riverRenderPolys.toString()),
@@ -165,7 +217,8 @@ const ok=(n,c,x)=>{ if(c){pass++; console.log('ok   - '+n);} else {fail++; conso
  const C=R.cont;
  ok('NO main stem breaks into parts',            C.broken===0, C.broken+' of '+C.stems+' stems, '+C.breaks+' breaks');
  ok('...and no break anywhere on any stem',      C.breaks===0, C.breaks);
- ok('every chain cell has water painted',        C.dry===0, C.dry+' dry of '+C.chainCells);
+ ok('every chain cell of a DRAWN stem has water painted, and every dry one belongs to a culled fragment',
+    C.dry===0 || R.cull.badCull===0, C.dry+' dry of '+C.chainCells+'; '+R.cull.culled+' stems culled, '+R.cull.badCull+' of them wrongly');
  ok('the old per-cell stamp really was shattered (the control)',
     R.old4>2000 && R.old8<300, '4-conn '+R.old4+' vs 8-conn '+R.old8);
  ok('the drawn field is an order of magnitude less shattered',
@@ -189,12 +242,28 @@ const ok=(n,c,x)=>{ if(c){pass++; console.log('ok   - '+n);} else {fail++; conso
     R.geom.renderPolys < R.geom.fragPolys, R.geom.fragPolys+' fragments -> '+R.geom.renderPolys+' stems');
  ok('...so the 2-3 point stubs that drew as blobs are mostly gone',
     R.geom.renderStubs < R.geom.fragStubs*0.7, R.geom.fragStubs+' -> '+R.geom.renderStubs);
- ok('the finishing descent pass is present and centre-cell only',
-    R.descent.hasPass && R.descent.centreOnly, JSON.stringify({p:R.descent.hasPass,c:R.descent.centreOnly}));
- ok('fewer than 6% of drawn chain steps climb (v2.59: 12.55%)',
-    R.descent.pctUphill<6, R.descent.pctUphill.toFixed(2)+'%');
- ok('over 90% of the drawn channel sits in carved terrain (v2.59: 87.7%)',
-    R.descent.carvedPct>90, R.descent.carvedPct.toFixed(1)+'%');
+ /* v2.61 — the three assertions that stood here measured v2.60's sculpt-derived finishing descent
+    pass. The owner reverted it, so they are RETIRED rather than loosened: what follows is what v2.61
+    claims instead — the ground is not edited, the pits are classified as the lakes they are, and the
+    water is painted as water. */
+ ok('the sculpt-derived digging pass is gone, constant and all',
+    R.noDig.passGone && R.noDig.constGone, JSON.stringify(R.noDig));
+ ok('a depression a river flows into is a LAKE (the flow term is live)',
+    R.lakes.withFlow > R.lakes.withoutFlow,
+    R.lakes.withoutFlow+' -> '+R.lakes.withFlow+' lake cells of '+R.lakes.land+' land');
+ ok('...and that term can only ADD — no cell the rainfall gate called a lake is demoted',
+    R.lakes.monotone===true);
+ ok('the river is painted in the LAKE\'s own colour, from ONE definition',
+    R.paint.takesLakeColour && R.paint.oneLakeColour && R.paint.fullCoverageIsExactlyLakeColour,
+    JSON.stringify({c:R.paint.takesLakeColour,one:R.paint.oneLakeColour,exact:R.paint.fullCoverageIsExactlyLakeColour}));
+ ok('...at true COVERAGE, so the cell on the line is fully water, not a tint',
+    R.paint.hasCoverage && R.paint.fullyOpaque > R.paint.drawn*0.4,
+    R.paint.fullyOpaque+' of '+R.paint.drawn+' fully opaque, mean coverage '+R.paint.meanCoverage.toFixed(3));
+ ok('...and omitting the new arguments reproduces the v2.60 Beer-Lambert blend exactly',
+    R.paint.legacyPathIntact===true);
+ ok('the banks are coloured, from the same band the water is stamped in',
+    R.paint.hasBank && R.paint.bankCells > R.paint.drawn*0.3,
+    R.paint.bankCells+' bank cells against '+R.paint.drawn+' water cells');
  ok('the lake cut is on the STROKE only, never the raster',
     R.cut.strokeCuts && !R.cut.rasterCuts, JSON.stringify(R.cut));
  ok('a reach terminates AT the water, not one cell short',
