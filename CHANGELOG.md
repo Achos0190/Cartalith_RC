@@ -4,6 +4,69 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.70 (DCC line) — the flat village-map look, as a Cartography style preset
+
+Owner, having pointed at a reference village map: *"And for the coloration and style can we add it
+as a preset in the styles section under carto."* `tests/run.sh` **1280/0**, `run_um.sh`
+**882/0**, `hash_gen1.js` vs v2.69 **ALL IDENTICAL**. Verification is
+`tests/perf/probe_villagestyle.js` (14 assertions).
+
+- **THE AUDIT DECIDED THE SIZE OF THIS, and it is one key** (v2.58's rule — find which half already
+  exists). `landColorCore` is the ONE function that colours land and it has **four call sites** —
+  the main map's per-pixel loop, the LOD tile renderer and the flat bake — and it already ends in a
+  chain of per-pixel NPR steps each gated on its own `state.viz` key (`cel`, `crosshatch`,
+  `stipple`, `sepia`, `risograph`, `pointillism`). `seaColorCore` is its twin for water, with the
+  same shape. So the whole feature is **one more step in each chain, one key, one row in
+  `STYLE_PRESETS` and one button** — and every surface that draws a map gets it for free. That is
+  what the LOD-tile and bake assertions exist to prove, and what a canvas-level tint would fail.
+- **The ramp is keyed on LUMA for land and DEPTH for sea, never on biome** — the same reasoning
+  `risograph` beside it already uses. The lit colour has already absorbed slope, aspect, material,
+  hillshade and every biome distinction, so quantising *it* keeps all of that and removes only the
+  continuous gradient, which is the whole of the difference between a relief map and a drawn one.
+  The sea's stops key on depth because the reference's water is a flat body with one lighter shelf
+  band, and that is a depth fact rather than a lighting one — `seaColorCore` already has the depth.
+- **The stops are not invented.** They are the colours this file already paints the settlement layer
+  with (the UME layout's ground, field, pasture, road and water tones — the same ones v2.68 put on
+  screen), so the terrain under a town and the town drawn on top of it finally read as one drawing
+  rather than as a diagram over a photograph.
+- **`shadows:0` is the load-bearing line of the recipe, not a taste call.** The hillshade is applied
+  *before* the ramp, so leaving relief shading on puts a continuous gradient straight back into the
+  thing whose entire point is not having one. The bundle is ABSOLUTE (v0.63's contract — every
+  managed key resets to 0 first), so the recipe is the complete statement of the look.
+- **The sea step is a REPLACEMENT applied at the very end, not another mix into `wc`.** By that
+  point the three things that make the default sea read photographic — the seabed grain (`tex`), the
+  bathymetric hillshade (`sh2`) and the smooth depth ramp — are all already folded in, and mixing
+  earlier would have left every one of them showing through.
+- **Measured**: the rendered pixels move, **Default returns the render BYTE-IDENTICAL** (measured
+  inside this one build against its own baseline — v2.39/v2.42/v2.55 — which is what makes the
+  preset opt-in rather than sticky, and why `village` had to join `STYLE_MANAGED_NUM`), the LOD tile
+  and the flat bake both pick the palette up and both return, and the water's banding collapses
+  **62 → 17** quantised colours.
+- **Two of the probe's own assertions were wrong first, and both are worth recording.** (1) Reading
+  the canvas straight after `_applyStylePreset` returns the PREVIOUS frame, because it ends in the
+  deferred `render()` — the probe reported *"the preset changes nothing"* and then caught the change
+  one assertion later, on the return to Default. (2) Counting EXACT distinct sea colours read
+  **1322 → 1322** against a screenshot that plainly showed the sea flatten, because an 0.88 blend
+  leaves 12% of the original and that residual carries the seabed grain; counting 16-level buckets
+  measures BANDING, which is what "collapses onto a small palette" actually means.
+- **Reaching the control takes two navigations and that is correct, not a defect.** The preset row
+  sits inside a category accordion inside the Cartography domain panel, so the probe opens the
+  domain from the real rail button and the accordion from its own `<summary>` — found by walking up
+  from the button rather than by a hand-written selector that would stop describing the shell the
+  moment it is rearranged — and only then asserts the click LANDS (v2.46).
+- **The headless suite caught a real defect in this change, through a contract it already had.**
+  `state.viz` declares every other managed numeric key (`cel`, `sepia`, `risograph`,
+  `pointillism`…) in its own literal, and `village` was added to `STYLE_MANAGED_NUM` without being
+  declared there — so v0.63's own *"style preset probe restored managed viz keys"* assertion, which
+  snapshots every managed key and checks the restore, read `undefined` instead of 0 and went red
+  (and took a second, downstream assertion with it on a re-run). **A key that a preset can write
+  but the state literal never declares is a key that does not survive a save**, which is what that
+  assertion has been guarding since v0.63. One word, declared beside its siblings.
+- **Known scope cuts**: the palette does not touch the civ layer's own ways, territory fill or
+  labels, which keep their existing colours; `lakeWaterColor` goes through `seaColorCore` so lakes
+  follow the sea, but the river overlay's stroke colour does not; and the ramp has no control of its
+  own beyond the single `village` slider — a user-editable palette is a different feature.
+
 ## v2.69 (DCC line) — refinement stops moving the coastline out from under the settlement
 
 Owner: *"when I zoom in and the LOD renders deeper it often happens that the coastline, or rivers
