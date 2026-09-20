@@ -4,6 +4,83 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.73 (DCC line) — the village green, and a footpath class with a source that runs
+
+The last two unbuilt items from the reference village map v2.68 worked through, and its own closing
+line named: *"a village green as an object distinct from the market plaza"* and *"a footpath street
+class"*. Neither needed new geometry. `tests/run.sh` **1280/0**, `run_um.sh` **882/0**,
+`hash_gen1.js` vs v2.72 **ALL IDENTICAL**; verification is `tests/perf/probe_greenpath.js`
+(21 assertions; give it v2.72 as a second argument for the control half).
+
+- **A GREEN IS A PLAZA WITH A DIFFERENT PURPOSE, and `buildPlaza` already made both.** It cuts a
+  widened bay off the principal street — which is the geometry of a market place and of a village
+  green alike. What separates them is **market right**, not size: a chartered town's plaza is
+  commercial, M-DEN-6's stall encroachment shapes the frontages around it, and a market CROSS
+  stands in it as the legal marker of the right to trade there. A village's green is common land —
+  grazing, assembly, the pond — and carries no cross, because there is no right to mark. So the
+  plaza gains a `kind` and nothing else changes: **the same three `addStreet` calls, in the same
+  order, at the same widths**, which is why blocks, parcels and buildings are bit-identical.
+- **The threshold is `buildCivic`'s own, not a second number for the same distinction** (v2.63's
+  rule). That function already draws the chartered line at pop 1500 — *"a civic hall appears once a
+  place is a chartered town"* — so `PLAZA_MARKET_POP` reuses it. Measured as a crossover in both
+  directions: pop 300/900/1400 green with a pond and no cross, 1600/4000/12000 market with a cross
+  and no pond.
+- **THE FOOTPATH HAD A FREE SOURCE THAT NEVER RUNS, AND ONLY MEASURING IT CAUGHT THAT.**
+  `privatizeAlleys` models a through-alley being taken into the adjoining plots: the edge must
+  leave the STREET graph (nothing may route a cart down it, and blocks, routing, metrics and the
+  wall trace must all keep seeing it gone) while the foot traffic survives — which is what a
+  snicket, a ginnel or a twitten IS. Recording the killed line instead of discarding it is four
+  lines and costs nothing, and it is **unreachable on the profile the app generates**: that pass
+  opens `if(!bias) return;` and `DEFAULT_RULES.street.deadEndBias` is **0**, with only the medina
+  family's documented 0.16 floor ever setting it. Measured across six populations on the default
+  medieval profile: **0 paths**. Shipping only that half would have been **v2.42's defect** — a
+  feature that computes correctly and shows nothing on the map anyone actually makes.
+- **So `buildFootpaths` is the always-on source, and it invents no geometry either.** A village's
+  footpaths are not only enclosed alleys; they are the lines worn between the street and the things
+  people walk to daily, and the engine already places exactly those — the church, the public wells,
+  the pond on the green. Any of them not already fronting a street has a path to the nearest one by
+  definition, because nobody walks to the well through a hedge. It connects features that exist to
+  streets that exist. **2 paths on a village, 4 at pop 12 000**, 7–17 m long: a desire line, bounded
+  at both ends (`FOOTPATH_ON_STREET=6` — closer than that and it already fronts the street;
+  `FOOTPATH_MAX=90` — beyond it, the network owed a lane, not a path).
+- **A path may not run through a house, and the first cut did.** Measured without the rejection on
+  a pop-12 000 town: **11.4% of sampled path length fell inside a building footprint**, because the
+  nearest street point to a feature is not always reachable in a straight line once the plots are
+  built out. Seven samples against the real footprints — the same call `buildParcels`' water test
+  makes (v2.67), for the same reason: this is a rejection test in a loop, not a geometry library. A
+  rejected feature simply gets no path, which is the honest outcome — there is no worn line where
+  there is no way through. **0.0% at every population after.**
+- **ORDER: after `privatizeAlleys`, so a path can never terminate on a street about to be
+  enclosed**, and after `buildBuildings`, so like the alley capture it cannot move a block, a
+  parcel or a building. **`hashModel` covers graph / blocks / parcels / buildings and NOT `plaza`,
+  `details` or `paths`**, so the 882 UM goldens cannot move *by construction* — asserted directly
+  against v2.72 over six populations rather than as "the goldens still pass" (v2.66's rule): six of
+  six identical.
+- **ONE helper each, three renderers** (`_umDrawGreen` / `_umDrawPaths` / `_umDrawPond` from
+  `_umDrawLayout`, `_umDrawLayoutPreview` and `_cvDrawCity`) — v2.68's rule, since three call sites
+  is exactly where this file's drift lives. Each gates on **its own** size reaching about half a
+  pixel, never a shared zoom tier: a 1.4 m path drawn at 0.2 px is a grey haze over the whole town,
+  and **v2.50's "a floor that INFLATES is not a bound" applies to a renderer too** — floored to
+  0.5 px it would read as wide as the street beside it. The green is GROUND and has no such gate,
+  so it reads as a mass at any zoom the town is drawn at; the pond and the path are the size of a
+  person and are disclosed only once the map reaches their own scale.
+- **A probe assertion of my own was wrong twice, and both corrections are the useful part.** The
+  first drove `_umDrawLayout` through an arbitrary `toScreen` multiplier and read the correct
+  silence as a broken renderer — **that function derives its own `mScale` from `lodSpanKm()`, the
+  LIVE camera span, not from the transform it is handed**, so the probe now drives the real camera
+  globals instead of stubbing the function. The second then asserted a span floor that does not
+  exist where it was looked for: **`lodSpanKm()` returns a sub-metre span quite happily, and the
+  `Math.max(1,…)` floor is in the CONSUMER** — which is where a real ceiling comes from and is now
+  pinned as one: `_umDrawLayout`'s metres-to-pixels conversion **saturates at `GW/1000` px/m**, so
+  on a 256-cell grid a 1.4 m path tops out at 0.36 px and is correctly never drawn on the main map,
+  while every resolution the app ships at (512 / 1024 / 2048) clears its gate.
+- **Known scope cuts**: the green is chosen by population alone, so a small chartered borough still
+  gets a market place and a large unchartered village still gets a green — the charter is not
+  modelled as a thing a settlement can hold; the pond is one ellipse with no outflow and no
+  relationship to the real water table; a footpath is a straight segment, not a worn curve, and
+  none is drawn between two features (only feature-to-street); and `buildFootpaths` reads churches,
+  wells and the pond only — the mill, the gate and the fields are not yet destinations.
+
 ## v2.72 (DCC line) — the 40 000 km river render: two defects from one screenshot
 
 Owner, on a 40 000 km world (seed 61684), with a screenshot: *"The hell is going on here???"* — the
