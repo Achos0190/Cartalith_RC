@@ -142,6 +142,26 @@ argument for the control half).
   left for its own version **because simply adopting the map's number would put a 764 m river
   through a 187 m village** — which of the two is right is a calibration question with its own
   measurement to do, not a line to change in passing.
+- **CORRECTION AND DECISION (recorded after v2.69 shipped; no code changed). The 9.1× / 18.8× /
+  24.7× figures above compare the town to the RAW `_riverNet.halfw`, which is not what the map
+  draws.** The drawn width also carries v2.60's `RIVER_MIN_HALF_CELLS = 0.8`, a floor in GRID
+  CELLS — so at the app default (800 km / 512 px, 1.5625 km per cell) that floor is 1250 m of
+  half-width and **every order is drawn at 2500 m**, against a settlement box of **1700 m**. The
+  river is drawn wider than the entire town, the order distinction collapses completely (v2.49's own
+  "a band for the trunk and the trickle alike", reintroduced by the floor), and the true ratio
+  against the town's 24 m channel is **~104×, not 24.7×**. Re-measured across extents: at 200 km the
+  floor binds on order 1 only (625 m drawn against 251 m raw); at 50 km it never fires.
+- **THE DECISION IS TO LEAVE IT — the owner's call, and both numbers are honest.** v2.60's floor is
+  a **resolution statement, not a physical width**, and its own note says exactly that: the
+  centreline's position is known to ±half a cell, so a narrower channel would claim precision the
+  data does not carry. At 800 km one cell *is* 1.5 km, so the map genuinely cannot locate a 30 m
+  river — the wide band is a truthful uncertainty statement, and the town's 24 m channel is a
+  truthful physical one. They disagree because they answer different questions, and every way of
+  forcing agreement costs more than the disagreement: narrowing the map's river re-baselines every
+  LOD tile and risks precisely the connectivity fix v2.60 measured (0 → 111 broken stems when a stub
+  is narrowed); widening the town's river drowns a 1700 m village in a 2500 m channel; and
+  suppressing the band inside a town's box helps only at zooms where a town is drawn. **Recorded as
+  a known limit of a 1.5 km cell, not as an open defect.**
 
 ## v2.68 (DCC line) — the agricultural fringe is drawn
 
