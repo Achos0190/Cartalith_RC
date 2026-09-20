@@ -4,6 +4,88 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.71 (DCC line) — woodland as an area, and nothing the settlement draws sits on water
+
+Owner: *"do woodland areas next and on part of settlements, your example rendered in water (either
+lake or sea it should avoid and always have suitable land beneath it"*. Then, after the first fix
+passed its fixtures: *"Now in these static tests the waterline and around a river work fine, within
+the actual cartalith generation it seems to miss. Do we need an extra technical layer to help guide
+settlement generation or can we use an existing layer?"* `tests/run.sh` **1280/0**, `run_um.sh`
+**882/0**, `hash_gen1.js` vs v2.70 **ALL IDENTICAL**. Verification is
+`tests/perf/probe_woodland.js` (10 assertions; give it v2.70 as a second argument for the control).
+
+- **THE SECOND REPORT IS THE ONE THAT MATTERED, and the answer was an existing layer.** On the REAL
+  map-water path `buildSite` sets **`waterPoly = []` deliberately** — its own comment says the map
+  already draws the sea beneath the town, so the town must not paint a second one. That is right for
+  FILLING, and it left every renderer with **no water geometry at all** on exactly the towns the app
+  generates. So a clip keyed on `waterPoly` passed every synthetic fixture and did nothing in the
+  real app: measured, **7 of 39 real towns have an empty `waterPoly`**. No new layer was needed —
+  `_umWaterCtx` has always built a 22 m mask of the real sea, lakes and river band, and `isWater`
+  reads it already. It simply never reached the model, because `cityGen`'s site record is
+  function-free and the mask was not among the fields copied. `landRuns` is that mask, run-length
+  encoded, carried across: **38 of 39 towns now have it**.
+- **Run-length rectangles, not a traced contour.** The clip only needs to know which ground is land;
+  a 22 m stair-step is finer than the coarse grid's own ±half-cell uncertainty about where the coast
+  is (v2.60), so marching squares would be eighty lines to make a boundary smoother than the data
+  under it. The four corners of each run go through `gxy`, so the clip inherits the layout's rotation
+  and the camera — a rect in screen space would be axis-aligned and wrong once the town is turned.
+- **A CLIP, NOT A GEOMETRY FIX, and the measurement is why.** ZERO blocks, parcels, buildings or
+  fringe parcels have a sample inside the water, and on a coast fixture ZERO street CENTRELINES do
+  either. What crosses is the street's **WIDTH** — stroked ~8.4 m with its casing — so one running
+  along the shore hangs half of that over the water, and `removeWaterCrossings` samples centrelines
+  only. Insetting streets would have left blocks, walls, buildings and every future feature to be
+  fixed one at a time; the clip states the requirement once, for all of them, including this
+  version's own woodland. Released for the bridges and the ford, which are MEANT to span water.
+- **ORDER IS LOAD-BEARING: the mask beats the polygon.** A real-water town can carry both, and
+  measured ones did — 54–113 land runs alongside `waterPoly`s of 4, 6, 10 and 14 points built from a
+  river centreline. Preferring the polygon there clips the town against a sliver of one channel and
+  leaves everything else standing on open sea. The mask is what `isWater` itself reads, so it is the
+  authority; the polygon is the synthetic path's fallback. **This was a real defect in my own first
+  cut**, found only by measuring the real path.
+- **The fringe needed its OWN clip span.** It must stay drawn BEFORE the water fill (v2.68: where a
+  strip clipped a channel the water wins) — but on the real path there IS no water fill, so "drawn
+  under the water" stops being a backstop and a field or a wood sits uncovered on the sea. Two real
+  towns kept 24 and 4 encroaching pixels after the built fabric was clipped, and both were fringe.
+- **TWO CHEAPER MEASUREMENTS BOTH LIED, and that is the most reusable thing here.** Counting
+  overdrawn water pixels as a SHARE of the water body reads **0.14%** on a coast fixture and looks
+  like antialiasing — because the denominator is a 211 000-pixel sea, while the wrong pixels are all
+  in the one place the eye goes. Counting pixels whose colour matches a built palette misses the
+  encroachment **entirely**, because a street edge over water is antialiased and matches no palette
+  entry. The honest test renders the town, renders it again with the settlement layer stripped, and
+  diffs INSIDE the water: any pixel the town changed there is the town on the water.
+- **And one of my own visual calls was simply wrong.** Stroking the waterline over the render showed
+  the magenta line running through the shore blocks, which read as an overhang — it was the 1.5 px
+  stroke straddling a street that stops exactly at the line. The pixel diff was right and the
+  eyeball was not; the coast fixture had **zero** encroachment all along. The real one was on
+  `riverthrough`, where a primary may cross open water because `removeWaterCrossings` exempts
+  primaries as presumed bridges — safe for a synthetic single-channel site, and this town had
+  **0 bridges and no ford**.
+- **Measured, real generated world, before → after**: 36 → 0, 61 → 0, 24 → 0, 1 → 0, 4 → 4, 0 → 0
+  encroaching pixels; control worst **61 px against 4**. The residual is clip-boundary antialiasing.
+- **WOODLAND IS AN AREA, because a point scatter cannot make a mass.** The engine has scattered
+  `kind:'tree'` points since v0.95; the reference reads its woodland as a mass with an edge, and no
+  density of stipple produces one. `buildWoods` emits a polygon and puts a handful of trees inside it
+  as texture ON the mass rather than as the mass. **9–10 woods on every site kind and size**, none on
+  water, none on a field.
+- **The plough wins, and `farm` is an input for that reason.** A wood is rejected where a field
+  already sits, never the reverse — the historical order, since assarting clears woodland FOR fields,
+  so the arable is the later, winning layer.
+- **NO `crossesStreet` guard, and that is the difference between a wood and a field.** The farmland
+  generators reject a candidate the moment a street crosses it, because a furlong with a road through
+  it is not a furlong. A wood with a road through it is an ordinary wood.
+- **THE FRAME WAS WRONG BEFORE IT WAS MEASURED, twice.** Keyed on `maxRF` the candidate band ran to
+  `maxRF*2.8` — ~730 m on a pop-900 town against a site box reaching ~850 m — while the arable owns
+  everything from the wall out to ~650 m, so every surviving wood landed in the sliver between the
+  two: distances from the market measured **672, 687, 688, 694, 724, 745, 750 m**, a ring one wood
+  thick that reads as a hedge around the map. Loosening the farm clearance and dropping the street
+  guard each moved the count by **zero**; only reframing the search on the site BOX did. **Guessing
+  at a constraint twice and measuring once is the wrong order, and the measurement was cheap.**
+- **Known scope cuts**: the woods band wherever the field fans leave room, which on a road-fanned
+  town is often one sector — correct by the model (woods take what the plough does not) but it reads
+  as a belt rather than as scattered copses; no clearings, no ponds inside a wood; woods have no
+  relationship to the real biome on the real-terrain path, so a desert town still grows them; and the
+  clip's residual is one antialiased pixel along the waterline, which is inherent to clipping.
+
 ## v2.70 (DCC line) — the flat village-map look, as a Cartography style preset
 
 Owner, having pointed at a reference village map: *"And for the coloration and style can we add it

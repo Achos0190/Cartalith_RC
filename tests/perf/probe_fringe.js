@@ -141,11 +141,20 @@ async function open(file){
     const m=window._mkModel();
     const cv=document.createElement('canvas'); cv.width=600; cv.height=600; const g=cv.getContext('2d');
     const E=window._norm('rgb(104,118,72)');
+    /* v2.71 CORRECTION, not a loosening: this pairs the HEDGEROW stroke with the FIELD/PASTURE
+       fills it belongs to. v2.71 added woodland to the same pass, and a wood strokes in its own
+       darker edge colour and is deliberately exempt from the narrow-parcel gate (a wood's edge is
+       its own boundary and a wood is never 5.8 m wide), so counting every fringe fill against
+       hedgerow-coloured strokes compared 98 strokes with 108 fills. Scoping the denominator to the
+       kinds the assertion is actually about keeps it passing on the control, which is what makes
+       this a correction. */
+    const F=window._norm('rgb(178,170,120)'), P=window._norm('rgb(150,166,112)');
     const run=(mScale)=>{ window._recStart();
       _umDrawFringe(g,m.details,(pts,cl)=>{ g.beginPath(); for(let i=0;i<pts.length;i++){ const x=pts[i].x*mScale,y=pts[i].y*mScale;
         if(i===0)g.moveTo(x,y); else g.lineTo(x,y);} if(cl)g.closePath(); },mScale);
       const r=window._rec; window._rec=null;
-      return {fill:r.filter(q=>q.op==='fill').length, hedge:r.filter(q=>q.op==='stroke'&&q.st===E).length}; };
+      return {fill:r.filter(q=>q.op==='fill'&&(q.st===F||q.st===P)).length,
+              hedge:r.filter(q=>q.op==='stroke'&&q.st===E).length}; };
     // the median short edge is 5.8 m, so the 1.5 px gate sits near mScale 0.26
     return {coarse:run(0.08), fine:run(1.0),
             minEdge:Math.min.apply(null,(m.details||[]).filter(d=>d.kind==='field').map(d=>{
