@@ -4,6 +4,170 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.73 (DCC line) — the village green, and a footpath class with a source that runs
+
+The last two unbuilt items from the reference village map v2.68 worked through, and its own closing
+line named: *"a village green as an object distinct from the market plaza"* and *"a footpath street
+class"*. Neither needed new geometry. `tests/run.sh` **1280/0**, `run_um.sh` **882/0**,
+`hash_gen1.js` vs v2.72 **ALL IDENTICAL**; verification is `tests/perf/probe_greenpath.js`
+(21 assertions; give it v2.72 as a second argument for the control half).
+
+- **A GREEN IS A PLAZA WITH A DIFFERENT PURPOSE, and `buildPlaza` already made both.** It cuts a
+  widened bay off the principal street — which is the geometry of a market place and of a village
+  green alike. What separates them is **market right**, not size: a chartered town's plaza is
+  commercial, M-DEN-6's stall encroachment shapes the frontages around it, and a market CROSS
+  stands in it as the legal marker of the right to trade there. A village's green is common land —
+  grazing, assembly, the pond — and carries no cross, because there is no right to mark. So the
+  plaza gains a `kind` and nothing else changes: **the same three `addStreet` calls, in the same
+  order, at the same widths**, which is why blocks, parcels and buildings are bit-identical.
+- **The threshold is `buildCivic`'s own, not a second number for the same distinction** (v2.63's
+  rule). That function already draws the chartered line at pop 1500 — *"a civic hall appears once a
+  place is a chartered town"* — so `PLAZA_MARKET_POP` reuses it. Measured as a crossover in both
+  directions: pop 300/900/1400 green with a pond and no cross, 1600/4000/12000 market with a cross
+  and no pond.
+- **THE FOOTPATH HAD A FREE SOURCE THAT NEVER RUNS, AND ONLY MEASURING IT CAUGHT THAT.**
+  `privatizeAlleys` models a through-alley being taken into the adjoining plots: the edge must
+  leave the STREET graph (nothing may route a cart down it, and blocks, routing, metrics and the
+  wall trace must all keep seeing it gone) while the foot traffic survives — which is what a
+  snicket, a ginnel or a twitten IS. Recording the killed line instead of discarding it is four
+  lines and costs nothing, and it is **unreachable on the profile the app generates**: that pass
+  opens `if(!bias) return;` and `DEFAULT_RULES.street.deadEndBias` is **0**, with only the medina
+  family's documented 0.16 floor ever setting it. Measured across six populations on the default
+  medieval profile: **0 paths**. Shipping only that half would have been **v2.42's defect** — a
+  feature that computes correctly and shows nothing on the map anyone actually makes.
+- **So `buildFootpaths` is the always-on source, and it invents no geometry either.** A village's
+  footpaths are not only enclosed alleys; they are the lines worn between the street and the things
+  people walk to daily, and the engine already places exactly those — the church, the public wells,
+  the pond on the green. Any of them not already fronting a street has a path to the nearest one by
+  definition, because nobody walks to the well through a hedge. It connects features that exist to
+  streets that exist. **2 paths on a village, 4 at pop 12 000**, 7–17 m long: a desire line, bounded
+  at both ends (`FOOTPATH_ON_STREET=6` — closer than that and it already fronts the street;
+  `FOOTPATH_MAX=90` — beyond it, the network owed a lane, not a path).
+- **A path may not run through a house, and the first cut did.** Measured without the rejection on
+  a pop-12 000 town: **11.4% of sampled path length fell inside a building footprint**, because the
+  nearest street point to a feature is not always reachable in a straight line once the plots are
+  built out. Seven samples against the real footprints — the same call `buildParcels`' water test
+  makes (v2.67), for the same reason: this is a rejection test in a loop, not a geometry library. A
+  rejected feature simply gets no path, which is the honest outcome — there is no worn line where
+  there is no way through. **0.0% at every population after.**
+- **ORDER: after `privatizeAlleys`, so a path can never terminate on a street about to be
+  enclosed**, and after `buildBuildings`, so like the alley capture it cannot move a block, a
+  parcel or a building. **`hashModel` covers graph / blocks / parcels / buildings and NOT `plaza`,
+  `details` or `paths`**, so the 882 UM goldens cannot move *by construction* — asserted directly
+  against v2.72 over six populations rather than as "the goldens still pass" (v2.66's rule): six of
+  six identical.
+- **ONE helper each, three renderers** (`_umDrawGreen` / `_umDrawPaths` / `_umDrawPond` from
+  `_umDrawLayout`, `_umDrawLayoutPreview` and `_cvDrawCity`) — v2.68's rule, since three call sites
+  is exactly where this file's drift lives. Each gates on **its own** size reaching about half a
+  pixel, never a shared zoom tier: a 1.4 m path drawn at 0.2 px is a grey haze over the whole town,
+  and **v2.50's "a floor that INFLATES is not a bound" applies to a renderer too** — floored to
+  0.5 px it would read as wide as the street beside it. The green is GROUND and has no such gate,
+  so it reads as a mass at any zoom the town is drawn at; the pond and the path are the size of a
+  person and are disclosed only once the map reaches their own scale.
+- **A probe assertion of my own was wrong twice, and both corrections are the useful part.** The
+  first drove `_umDrawLayout` through an arbitrary `toScreen` multiplier and read the correct
+  silence as a broken renderer — **that function derives its own `mScale` from `lodSpanKm()`, the
+  LIVE camera span, not from the transform it is handed**, so the probe now drives the real camera
+  globals instead of stubbing the function. The second then asserted a span floor that does not
+  exist where it was looked for: **`lodSpanKm()` returns a sub-metre span quite happily, and the
+  `Math.max(1,…)` floor is in the CONSUMER** — which is where a real ceiling comes from and is now
+  pinned as one: `_umDrawLayout`'s metres-to-pixels conversion **saturates at `GW/1000` px/m**, so
+  on a 256-cell grid a 1.4 m path tops out at 0.36 px and is correctly never drawn on the main map,
+  while every resolution the app ships at (512 / 1024 / 2048) clears its gate.
+- **Known scope cuts**: the green is chosen by population alone, so a small chartered borough still
+  gets a market place and a large unchartered village still gets a green — the charter is not
+  modelled as a thing a settlement can hold; the pond is one ellipse with no outflow and no
+  relationship to the real water table; a footpath is a straight segment, not a worn curve, and
+  none is drawn between two features (only feature-to-street); and `buildFootpaths` reads churches,
+  wells and the pond only — the mill, the gate and the fields are not yet destinations.
+
+## v2.72 (DCC line) — the 40 000 km river render: two defects from one screenshot
+
+Owner, on a 40 000 km world (seed 61684), with a screenshot: *"The hell is going on here???"* — the
+map crossed by straight horizontal lines — then, once those were gone: *"Still the density of
+rivers make it look like a big block. It's ugly."* Two independent causes, both in the raster river
+path, both invisible at the app default. `tests/run.sh` **1280/0**, `run_um.sh` **882/0**,
+`hash_gen1.js` vs v2.71 **ALL IDENTICAL**; verification is `tests/perf/probe_riverworld.js`
+(13 assertions; give it v2.71 as a second argument for the control, which is the half that makes it
+a measurement).
+
+- **They are RIVERS, not a shading artefact.** Magnified, the lines are in the exact river blue and
+  run dead straight through an otherwise normal dendritic network. `net.recv` wraps in X in world
+  mode, so consecutive points of one stem sit at x≈1023.5 and x≈0.5; `riverFieldTile` stamps a band
+  along every segment, so one wrapped step paints a river clean across the map.
+- **`splitRiverPolylines` exists for exactly this and the raster path never got it.** v1.29 built it
+  and applied it to the stroked overlay and the GeoJSON export; v2.37 added the carve as the third
+  site. `riverRenderPolys` — the geometry `riverFieldTile`/`riverMainField` draw from — was the
+  fourth and was never given it. **And the raster path is the one that draws at the default**, since
+  `state.viz.riverWays` is false (v2.29), so the renderer that splits is the one nobody was looking
+  at. The file's most-repeated defect, at its ninth site.
+- **v2.58 measured the step correctly and still handed the drawer the wrapped geometry, which is why
+  this read as fixed for fourteen versions.** `dx -= Math.round(dx/GW)*GW` sits in the very loop that
+  emits the polyline — the LENGTH was unwrapped, the POINTS were not. **Fixing a measurement of a
+  quantity is not fixing the thing the quantity describes.**
+- **Every harness runs in the one mode that cannot reproduce it — v2.37 recorded this and it caught
+  the carve, not the render.** Region mode has no wrap, so no river probe could ever see it, and the
+  hash battery never sets `state.world`. This is the second defect found by the same blind spot.
+- **Measured on the owner's own world, before → after**: wrapped segments in the drawn geometry
+  **44 → 0**, worst single step **1023 cells of 1024 → 1**, rows whose horizontal detail is wiped out
+  **52 → 20**. The residual 20 are contiguous at y=231–252 — the open ocean band, which legitimately
+  carries little horizontal detail, not a defect.
+- **Region mode is bit-identical BY CONSTRUCTION, and asserted anyway.** The cut fires only on
+  `|dx| > GW/2`, which a one-cell receiver step can never reach without a wrap, so the split returns
+  the same points and the default render cannot move — rgba **595154157** on both sides. Your 800 km
+  region maps were never affected and do not change.
+- **The probe asserts the MECHANISM, not the picture** (v2.37's rule): no segment handed to the
+  drawer may span more than half the map. That survives any later retune of the colour, the width law
+  or the floor. And the CONTROL half *requires* v2.71 to carry wrapped segments, so a no-op patch
+  fails it.
+- **Not introduced by v2.71**, which is hash-identical to v2.70 on the terrain path. The main map
+  joined the polyline-stamped raster path at **v2.60**; before that `surfaceColor` read the per-cell
+  `_riverNet` raster, which has no segments to wrap. Tiles and baked exports have taken this geometry
+  since **v2.40**, so a stale baked atlas can still carry the lines until it is re-baked — read from
+  the changelog rather than bisected, and stated as such.
+### Defect 2 — the render spent the whole DETECTION ease on what it DRAWS
+
+- **A DETECTION ease is not a DISPLAY threshold, which is v2.57's finding at its third consumer.**
+  `riverCoarseEase` exists for v1.101's reason: on a coarse map a real minor stream's catchment
+  cannot accumulate the cell COUNT calibrated for an 800 km reference, so water that genuinely
+  exists goes undetected (34% of land within reach of a river at 40 000 km before it, 96% after).
+  **That argument is about whether a stream EXISTS.** v2.57 split `carveFlowThresh` out of it
+  because it says nothing about whether the grid can hold the stream's VALLEY. It says nothing about
+  whether the MAP can legibly carry the stream either — and `riverRenderPolys` spent the full 16x
+  ease on what it draws.
+- **Measured: 13.02% of the map painted as channel at 40 000 km against an 800 km region's 4.27%** —
+  a 3x denser network, drawn at a uniform floored width (v2.60's `RIVER_MIN_HALF_CELLS`) in an
+  opaque lake colour (v2.61). Three things that are each individually right compounding into a solid
+  block. The median stem is the SAME length in cells at both extents (5.7 vs 6.4), so this is
+  density, not size.
+- **v2.58's screen-px gate was the obvious fix, was measured FIRST, and was REJECTED.** `len*_z` at
+  `_z=1` culls **88% at BOTH extents** — 7396 -> 876 on the owner's world but 761 -> 93 on an
+  ordinary 800 km map. It fixes one world by gutting every other. It is also, on inspection, the
+  reason this went unnoticed: `RIVER_MIN_SCREEN_PX` has exactly ONE consumer, inside `drawRiverWays`
+  — **the stroked overlay, which is off by default (v2.29)** — so v2.58's whole scale-selection
+  feature was built onto the renderer nobody sees, and the raster path had no scale term at all.
+  Second time in one version that a fix landed on the wrong one of two renderers.
+- **The bar is K x the ease, so the default is unchanged BY CONSTRUCTION.** At and below 800 km the
+  ease is 1, the bar is 2, and a stem of two or more points has at least two upstream channel cells,
+  so it clears trivially: **0 of 833 stems rejected**, asserted. At 40 000 km, **7 220 of 7 827
+  rejected**, channel share **13.02% -> 3.58%** — landing just under the region map's own 4.19%,
+  which is the target rather than a tuned number.
+- **`area` is drainage in CHANNEL CELLS**, off `buildMainStems`' own Kahn accumulation — never
+  `flowField`, which v2.41/v2.58 both record is a different tree.
+- **A probe assertion of mine was WRONG and was corrected, not loosened.** It compared stems drawn
+  against stems available and read 761 of 833 at 800 km, which looks like the new bar culling 72.
+  It is not: that gap is v2.61's pre-existing "shorter than it is drawn wide" cull, measured at
+  exactly 761 before this change. **Comparing across two culls attributes one's work to the other.**
+  The assertion counts what THIS bar rejects.
+
+### Both
+
+- **Known scope cuts**: the split can leave a very short run on one side of the seam, and v2.61's
+  "shorter than it is drawn wide" cull is applied to the whole stem BEFORE the cut, not to each run
+  after it — a seam-side stub is genuine river and is kept, which is the conservative choice but is
+  not the same rule applied twice. `chamferDist`-style per-tile passes and the LOD seam residue
+  (v1.29) are untouched.
+
 ## v2.71 (DCC line) — woodland as an area, and nothing the settlement draws sits on water
 
 Owner: *"do woodland areas next and on part of settlements, your example rendered in water (either
