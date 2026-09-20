@@ -4,6 +4,82 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.69 (DCC line) — refinement stops moving the coastline out from under the settlement
+
+Owner: *"when I zoom in and the LOD renders deeper it often happens that the coastline, or rivers
+for that matter, don't align properly with the settlement."* `tests/run.sh` **1280/0**,
+`run_um.sh` **882/0**, `hash_gen1.js` vs v2.68 **ALL IDENTICAL**, `probe_lodsurface.js` (v2.47's own)
+**12/0**. Verification is `tests/perf/probe_lodalign.js` (11 assertions; give it v2.68 as a second
+argument for the control half).
+
+- **REPRODUCED AND DECOMPOSED BEFORE ANYTHING WAS CHANGED, and the decomposition picked the fix.**
+  Share of a refined tile's pixels drawn as the OPPOSITE of what the settlement's own surface says,
+  seed 12345 / 512 px / 800 km: **z=2 0.40%, z=4 0.86%, z=6 5.73%, z=8 8.56%** — monotone in depth,
+  which is the report in one line. Split by cause at z=7:
+
+  | variant | land → sea | sea → land |
+  |---|---|---|
+  | full (what the map draws) | **5.20%** | 0.68% |
+  | base surface only (C¹) | 2.89% | 0.90% |
+  | base surface only, legacy bilinear | **0.17%** | 0.02% |
+  | channel burn removed / feature pass removed | *no change* | *no change* |
+
+- **THE DOMINANT CAUSE WAS THE FILTER, NOT THE NOISE — which was not the first guess.**
+  `burnChannels` and `featureDetailPass` are the obvious suspects and **neither runs at the app
+  defaults** (`coarseFlow` and `coarseOrder` are null unless "Burn rivers" is on); v2.52's crater
+  registry does run and makes **exactly zero** difference. What was left is that `_umWaterCtx`
+  decided the town's coastline with a hand-written BILINEAR sample, while **v2.47** moved the LOD
+  tile's own reconstruction to `sampleC1` because bilinear is C⁰ and every tile renderer hillshades
+  from finite differences of it. Nobody carried that to the adapter. **17× the disagreement**, and
+  the file's most-repeated defect (v1.30, v1.33, v1.35, v2.43, v2.61, v2.67) landing between an
+  adapter and a renderer. `sampleC1` is *interpolating* — exact at coarse nodes — so this is the
+  same surface, not a smoothed one.
+- **THE SECOND CAUSE IS A ONE-SIDED TAPER, AND IT IS WHY THE DRIFT GREW WITH ZOOM.**
+  `amplifyRegion` fades its detail band out going DOWN from the shelf (`underwater`) and does
+  nothing going UP, so a land pixel sitting a hair above sea level took the full ±`detailAmp`/2
+  band and could be pushed under. Measured: **2.31% of a coastal tile's pixels turned from land to
+  sea against 0.30% the other way — a 7.6 : 1 asymmetry, further at every level.** **v2.40's rule
+  is that refinement adds RESOLUTION and does not invent**, and a land/sea boundary is a decision
+  the coarse field already made and that settlement placement, `_umWaterCtx`, `_civLakeFlooded` and
+  the road network are every one of them built against. A renderer that moves it is drawing a
+  different world from the one the rest of the app agreed on.
+- **The clamp is on the DELTA, not the result, and that distinction is the whole of its design.**
+  Clamping `v` to `sea` pins a whole coastal band to one value and makes a flat shelf — **v2.50's
+  "a floor that INFLATES is not a bound"**, in a renderer, and it would have replaced a wandering
+  coastline with a terraced one. Capping the excursion *toward* sea level at **half the remaining
+  headroom** lands every pixel somewhere different, can never reach the far side, needs no constant
+  of its own, and is **confined by construction**: a pixel whose detail is smaller than half its own
+  headroom is bit-identical, so only the shoreline band moves. Inland relief is untouched —
+  asserted, mean detail **4.91e-3** either way.
+- **THE FIRST CUT GUARDED THE WRONG FUNCTION, and only measuring it against the control said so.**
+  The detail band is added in **two** places — `amplifyRegion` and `addZoomDetail` — and a clamp in
+  the second alone left the disagreement at 3.33%, because `amplifyRegion` is where the coastal
+  band is actually written. The probe caught it as *"control 1158 drowned, fixed 1158"*: an
+  identical number on both sides, which no amount of reading the diff would have produced. Both
+  sites carry the same rule now, deliberately written as one rule twice rather than two rules.
+- **Measured after**: **z=2 0.35%, z=4 0.10%, z=6 0.28%, z=8 0.13%** — the growth with depth is
+  gone, worst level **8.56% → 0.35%**, and refinement drowns **0 of 41 984** tile pixels against
+  1 158 before. v2.47's own `probe_lodsurface.js` still passes **12/12**, seam Δ **exactly 0**
+  included, so the C¹ guarantee this leans on is intact.
+- **A deliberate, bounded re-baseline of two things and neither is `field`**: LOD tiles and baked
+  atlas chunks within one detail-amplitude of sea level (a stale atlas wants a re-bake), and
+  generated town layouts, since the water mask is part of `_umCacheKey`. The default render never
+  reaches `amplifyRegion`, and the LOD overview calls it at `detailAmp:0` where the clamp is a
+  provable no-op, so `hash_gen1.js` is unaffected.
+- **DISCLOSED, MEASURED, NOT FIXED HERE — the river half is a different defect.** It is not a
+  positional offset: the town takes its centreline straight off `_civRiverPolylines()`, the same
+  trace the renderer draws from, so position is shared by construction. The **width** is not.
+  `_umWaterCtx` derives it as `10 + order*7` capped at 46 m — its own formula — while **v2.49** gave
+  the renderer a real hydraulic-geometry half-width in `_riverNet.halfw[]` and recorded in the same
+  breath that both river renderers "were built for this and both receiving a constant". Nobody
+  carried that either. Measured at the app default: **order 1 — map 155 m vs town 17 m (9.1×);
+  order 2 — 452 m vs 24 m (18.8×); order 3 — 764 m vs 31 m (24.7×)**. So the map draws a river up
+  to twenty-five times wider than the one the town built its bridge, banks, quay and street network
+  around, and it reads worse the deeper you zoom because at shallow zoom both are sub-pixel. It is
+  left for its own version **because simply adopting the map's number would put a 764 m river
+  through a 187 m village** — which of the two is right is a calibration question with its own
+  measurement to do, not a line to change in passing.
+
 ## v2.68 (DCC line) — the agricultural fringe is drawn
 
 `tests/run.sh` **1280/0**, `run_um.sh` **882/0**, `hash_gen1.js` vs v2.67 **ALL IDENTICAL**.
