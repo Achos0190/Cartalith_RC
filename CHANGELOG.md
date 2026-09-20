@@ -4,6 +4,99 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.67 (DCC line) — the ward sets the plot grain, and the subdivision is what it sets
+
+`tests/run.sh` **1280/0**, `run_um.sh` **882/0** (its total is model-dependent — see below),
+`hash_gen1.js` vs v2.66 **ALL IDENTICAL**, `probe_typepreview.js` 41/0, `probe_industry.js` 29/0.
+Verification is `tests/perf/probe_wardgrain.js` (23 assertions; give it v2.66 as a second argument
+and it also proves the structural bit-identity).
+
+- **TWO FUNCTIONS WERE ANSWERING ONE QUESTION, and one of them could only say "near" or "far".**
+  `buildParcels` asked "core or fringe?" with a hardcoded `dM<160` and spent the answer on a
+  single number (the plot-depth median); `assignDistricts` asked the same question 130 lines later
+  with the market plaza, the wall ring, the river, the quay and the market radius, and produced
+  **seven wards**. So a harbour, a suburb, an agrarian fringe and a riverside craft quarter all
+  platted identically — while the harbour's own source comment in this file cites lit. review
+  §1.1 #22 (*"warehouses = deepest plots at quay; plot frontage narrowest of any family"*) as the
+  reason that ward exists at all. The shape this file has paid for repeatedly (v1.30, v1.33,
+  v1.35, v2.43, v2.61). `makeWardAt` is that chain extracted verbatim, built once in `cityGen`
+  from the same six inputs both consumers need.
+- **MEASURED BEFORE ANYTHING WAS BUILT, and it changed the design.** The obvious feature is
+  ward-driven DEPTH, and it would have been **v2.42's defect — a control that stores a number
+  nothing reads**. Across 8 016 parcels in six towns, **67.6% come out BELOW `depthTarget`'s own
+  14 m floor**: the block's waist (the ray-cast `tMin*0.42`) binds, not the draw. And **tripling
+  `plotDepthVariance` 0.22 → 0.60 moves median depth 11.09 → 11.07 m** — i.e. nothing. That is
+  also a standing finding about one of v2.66's own 22 sliders, and the probe pins it so it cannot
+  be quietly forgotten.
+- **So what ships is the SUBDIVISION, which is what the ask names and what measurement says is
+  live.** `splits` was `min(subdivisionCap, floor(age/3))` — driven by **street age alone**, so a
+  market frontage and an agrarian-fringe frontage of the same age subdivided identically; and the
+  per-round halving chance was a flat `0.4` everywhere. M-PAR-1's own register row says mature
+  widths come from *"grant + subdivision history (halves/quarters, p_split per epoch ≈ 0.1–0.2)"*,
+  and what historically selected a plot for halving is the **VALUE of its frontage**. The ward
+  supplies that value; both terms scale by it.
+- **`WARD_GRAIN` is one row per documented quarter, never a taste** — market (M-NET-10: the
+  most-integrated frontage is the dearest, so it is the one that subdivides), harbour (§1.1 #22),
+  burgher (§3.1 row 2, the prime streets adjoining the market), craftriver, artisan (the explicit
+  zero point), suburb (§3.1: *"overspill, cheaper land"* ⇒ no frontage premium), agrarian
+  (M-REG-4's walking-limit smallholdings, which amalgamate rather than halve).
+- **No ward is DEEPER than 30 m, which is the deepest base the old proxy could already choose.**
+  The depth column redistributes inside an envelope the engine already produced rather than
+  extending it — because the measurement says depth buys nothing, and because a deep narrow plot
+  is exactly the shape that spans a channel (below). An assertion of my own caught the table still
+  carrying 34 m after I had decided that; the table was wrong, not the assertion.
+- **Measured effect, as a per-ward sign against each ward's OWN baseline**: market **−1.36 m**,
+  harbour −0.53, burgher −0.68, artisan +0.03, craftriver −0.06, suburb **+1.57**, agrarian
+  **+1.60**. The core-to-fringe frontage gap goes **0.88 m → 3.85 m**, and the dear ward gains
+  parcels off the same streets while the cheap one loses them (market 1 528 → 1 721, agrarian
+  419 → 378). Pooled over the whole town, mean frontage moves **−0.45 m** and mean depth
+  **−0.007 m** — the depth prediction, verified against shipped code.
+- **A first cut of that assertion was wrong, and fixing it is the more useful statement.** It
+  demanded that mean frontage at `wardGrain:1` be MONOTONE across the wards ranked by pressure,
+  and it failed by 0.08 m (market 7.61 against harbour 7.53). **Mean frontage per ward is not a
+  function of the pressure alone, because the BLOCKS differ per ward** — harbour blocks are small
+  quay-side strips, agrarian ones broad fringe faces — and that geometry is already in the
+  baseline. Comparing a ward to itself removes it.
+- **`wardGrain` (new `DEFAULT_RULES.parcels` field, default 1) makes the re-baseline controllable,
+  and 0 is BIT-IDENTICAL by construction**: `1+(k−1)*0` is exactly 1, `age/3*1` and `0.4*1` are
+  exact, and the `rB` draw count is unchanged — so the guarantee is structural rather than checked
+  (the v0.98 / v2.63 convention). Asserted directly against v2.66 over 30 towns: **0 divergent**.
+  At the default the re-baseline is **15 of 15 towns, 441 of 20 316 parcels (2.17%)**. It joins
+  `UM_RULE_SPECS`, so v2.66's Types pane gets the slider for free and its own count assertion
+  (23 sliders / 23 engine parameters) enforces that it is there.
+- **THE CORNERS ARE NOT THE FOOTPRINT EITHER, and a deep narrow plot is what showed it.** The
+  852-golden suite's own model-level test caught exactly one parcel — **craftriver, 41.3 m deep on
+  a 5.8 m frontage, every corner on dry bank and its middle in the river**. `buildParcels` has
+  tested only the four corners since v0.95, and a parcel spanning a NARROW channel passes that
+  test. The hole is **pre-existing and was simply unreachable** while every block platted at one
+  grain: measured on v2.66 across the same 80 combinations, at the default *and* at
+  `plotDepthVariance` 0.60 where depth reaches the 46 m clamp, **zero wet parcels** — which is
+  what proves widening the test rejects nothing on the old path. The depth axis is sampled at its
+  middle as well as its ends (seven points), not by a polygon intersection, which would cost a
+  real test per candidate in the hottest loop here for a case three samples already cover.
+- **`par.ward` is written on every parcel** — the ward its PLOT SERIES was cut for, deliberately a
+  separate field from `par.district`, which is per-parcel and is then re-tagged by the economy and
+  status passes (a market-block parcel can end up a tan yard). Only the block ward had any say in
+  how the frontage was cut, so it is the one that has to be readable if the grain is ever to be
+  audited. Not in `hashModel`'s digest, so it adds nothing to compare.
+- **`tests/run_um.sh`'s assertion TOTAL is not a constant** (852 → 882 here), and that is the
+  feature working rather than a suite problem: its `venus waterway never crosses a building` check
+  is per-BUILDING, and the Venus town gained 30 buildings. **Quote that suite as "0 failed", not
+  as a count** — v2.32 recorded the same thing about `tests/run.sh`.
+- **A probe assertion of v2.66's own was CORRECTED, not loosened.** Its parcel-spin check tested
+  one claim ("the truncation is a tail effect") with two bounds, one of which was an absolute
+  parcel count calibrated on v2.66's layouts — so it stops meaning the same thing the moment a
+  town subdivides more finely. Worst 10 parcels (1.08%) became 15 (2.96%), well inside the SHARE
+  bound the claim rests on, while the whole-sample loss **fell 0.51% → 0.48%**. The absolute bound
+  is replaced by that second share, and the corrected assertion passes on **v2.66 as well** —
+  which is what makes it a correction rather than a nudge (v2.60/v2.61's rule).
+- **Disclosed, not fixed**: realised plot aspect runs **1.09–1.74** against M-PAR-2's documented
+  1:3–1:10 burgage band, and the same measurement says why — the block waist binds, so this is a
+  `buildBlocks` sizing question, not a parcel one. The harbour's *"deepest plots at quay"* half of
+  §1.1 #22 therefore still does not land (its mean depth is 10.7 m, the shallowest in the town);
+  the *"narrowest frontage of any family"* half does. A block straddling a ward boundary takes one
+  ward, because the parcels do not exist yet when the grain is chosen.
+
 ## v2.66 (DCC line) — a menu that previews a settlement TYPE from its parameters
 
 Owner: *"Design a proper menu to generate previews for settlement types based on parameters. See
