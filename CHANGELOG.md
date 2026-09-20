@@ -4,6 +4,131 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.66 (DCC line) — a menu that previews a settlement TYPE from its parameters
+
+Owner: *"Design a proper menu to generate previews for settlement types based on parameters. See
+the proof of concept settlement generation for an example."* Verification is
+`tests/perf/probe_typepreview.js` (41 assertions) plus `tests/run.sh` 1280/0, `run_um.sh` 852/852,
+`hash_gen1.js` vs v2.65 **ALL IDENTICAL** and `probe_industry.js` 29/0 (the parcel bound below moves
+no district).
+
+- **The audit moved most of the work off the table before any was done** (v2.58's rule: check
+  which half of a request already exists). Block 4 has exported **`DEFAULT_RULES` — 22 named
+  generation parameters across street / parcels / settlement**, plus `resolveRules`,
+  `applyWildness` and `applyPlotChaos`, since v0.95, and `cityGen` reads `opts.rules` on its very
+  first lines. **`_umPlaceContext` has never set it.** So every town this app has ever drawn came
+  out at `DEFAULT_RULES`, and there was no control anywhere — **v2.63's shape one layer down**: a
+  table of numbers, each declared once, each hardcoded, with no UI at all. The PREVIEW half was
+  built too: `_umDrawLayoutPreview(cx,model,W,H)` takes a bare model and fits it to its own built
+  mass, and `cityGen` runs against a SYNTHETIC site (no water, no terrain, no roads) — the path
+  `tests/run_um.sh`'s 852 goldens exercise. What was missing was a context builder, a pane, and
+  one wire.
+- **A fourth pane in v2.63's own screen, not a fourth window.** Global → **Types** → Factions →
+  Settlements is one scope ladder, and the shell, the `data-pm` tab bar, the header button, the
+  ✕/Escape contract and the `aria-pressed` pin all already existed. Reusing them means there is
+  no second way in and no second way out (v1.57/v2.46 satisfied by construction) and the whole
+  pane is one render function.
+- **What is SAVED per type, and why only that.** `state.civTypeRules[kind]` holds a rules object
+  and nothing else. Site, culture, specialisation, walls, population, age and seed steer the
+  preview and are deliberately **not** stored, because every one of them already has a
+  per-settlement home (`p.umWalls`, `p.specialisation`, `p.pop`, `p.umAge`, `civFactionCulture`,
+  `_umSiteKindFromTerrain`) — a second per-type copy of any of them is v1.57's
+  one-control-two-surfaces defect. The rules object is the only thing with nowhere else to live.
+- **Bit-identity is STRUCTURAL, and a glance must not spend it.** `state.civTypeRules` starts `{}`,
+  `civTypeRulesFor` returns **null rather than an empty object**, so `rules` is simply ABSENT from
+  the context and `resolveRules` takes its `DEFAULT_RULES` branch. Only an actual edit writes, so
+  the probe asserts that **rendering the pane stores nothing** — otherwise opening the screen to
+  look would author every type it touched.
+- **Assert the EFFECT, and assert it as an ORDERING** (v2.42 / v2.64). A slider that stores a
+  number nothing reads is the defect this pane exists to close, and "the model hash moved" can be
+  satisfied by noise. So the load-bearing assertions compare two presets whose rules differ in a
+  KNOWN direction on one seed: Medina's `deadEndBias` 0.40 leaves **more cul-de-sacs** than Planned
+  Grid's 0, and its `subdivisionCap` 4 cuts **more parcels** than Planned Grid's 1. A no-op wiring
+  satisfies neither.
+- **The rules reach the MAP, which is what stops this being a toy.** `_umPlaceContext` passes
+  `civTypeRulesFor(p.kind)`, so every settlement of that kind picks the type's rules up — asserted
+  by generating a real placed town before and after and comparing `UME.hashModel`. **The model
+  cache key had to carry them** or a stale layout survives the edit for ever and silently (v1.28's
+  `_assetGen` lesson); `_umRulesFp` is in `_umCacheKey`, asserted by the key moving.
+- **Every list is built from the table that defines it** — `CIV_SETTLEMENT_CLASSES`,
+  `UME.CULTURE_PROFILES`, `CIV_SPECIALISATIONS`, `UM_RULE_SPECS` — and the probe asserts each
+  COUNT against that table rather than against a hand-written number. **v2.65's lesson: a hand-list
+  of things to check is the same defect as a hand-list of things to define.** It also asserts every
+  `UM_RULE_SPECS` key names a real `DEFAULT_RULES` field (or a slider writes into nothing) and
+  every default sits inside its own slider range (or the control opens clamped).
+- **The preview reports what it generated.** A picture cannot tell you whether a slider did
+  anything, so the pane prints buildings / blocks / parcels / km of street / wall style and gate
+  count / generation time, and the quarter tally — read straight off the model. A change that moves
+  nothing then reads as a change that moves nothing.
+- **The first layout was wrong and only a SCREENSHOT said so** (v1.44's precedent). The shell caps
+  its reading column at 720 px, so a controls-beside-preview split wrapped the preview below the
+  fold — exactly the thing the pane exists to avoid, since a type is something you COMPARE. Every
+  DOM assertion passed: the canvas existed, was visible, and measured 648×498. **Visible and
+  laid out is not the same as on screen with the thing it belongs next to.** The preview is a
+  STICKY band at the head of one column now, so it stays put while the parameter list scrolls
+  under it.
+- **A preview has no map, so it says what it is assuming.** The prevailing wind and the river's
+  direction are FIXED constants here and the pane says so in words, because v2.64's industry siting
+  reads both and omitting them would silently drop four quarters a real town has. v1.35's `basis`
+  rule: a number with no real signal behind it is labelled, never quietly presented as measured.
+- **The type's own defaults come from the functions auto-populate uses** — `_civBasePopForKind`,
+  `_umWallSpec`, `_umInferAge`, `_umHarbourScale` — so the pane opens on what that type really
+  looks like, not on a hand-picked set (v1.30's one-function rule). Asserted directly.
+- **Three more engine options surface as preview-only, disclosed rather than silently inert**:
+  `cityGen` reads `opts.faith`, `opts.civicStyle` and `opts.harbourDefence` and `_umPlaceContext`
+  sets none of them. They are exposed here with a tooltip saying exactly that. Wiring them to a
+  settlement needs a per-settlement field each (faith is really `civFactionReligion`'s job) and is
+  a separate decision, not a drive-by.
+- **Exposing the table reached a NON-TERMINATING REGION of the engine's own documented parameter
+  range, and that is the most important thing in this version.** `buildParcels` lays frontage
+  grants along a block edge by drawing a width and re-drawing whenever it does not fit the
+  remaining frontage. The loop has no upper bound, so when the remainder sits just above the
+  4.5 m floor but below a typical grant, the only escape is drawing from the lognormal's far lower
+  tail. Measured against a 4.6 m remainder over 2 000 000 draws each:
+
+  | `frontageWidthVariance` | expected retries |
+  |---|---|
+  | 0.40 (Medina) | **68** |
+  | 0.28 | **1 081** |
+  | **0.22 — the engine default** | **28 571** |
+  | 0.18 (Classical Town) | **~2 000 000** |
+  | 0.12 (Planned Grid) | effectively never |
+  | 0.10 — the slider's own minimum | effectively never |
+
+  **Latent for the whole life of the file because nothing ever set `opts.rules`**, so every town
+  ever generated ran at 0.22 and merely paid the tail occasionally. It becomes reachable the
+  instant a type's rules are editable — and the proof of concept's own 'Planned Grid' profile sets
+  0.12, so the first preset in the list was an unbounded hang. **Found by bisection, not by
+  reading**: every one of the nine street parameters measured ~450 ms alone at pop 900, and the
+  parcels group alone did not return, which is what pointed at the loop.
+- **The fix is a BOUND, not a new formula — and the first claim made for it was wrong, which
+  measuring it is what caught.** `PARCEL_GRANT_MAX_SPIN` caps consecutive non-placing iterations,
+  and the obvious thing to say is that it cannot change a terminating run. **It can, and it does.**
+  `tests/run_um.sh` is 852/852, so the goldens' own fixtures never reach the bound — but an
+  ordinary default-variance town does: the true maximum measured over twelve towns is **172 644**
+  spins against a bound of 4096. So this is a **deliberate, bounded re-baseline of generated town
+  layouts**, and the size of it is measured rather than argued: raising the bound to 2^22 and
+  regenerating the same twelve towns, **10 of 12 differ, by at most 10 parcels (1.08%), 46 of
+  8 939 parcels overall (0.51%)** — the last grants of a block edge, never the town's character.
+  `UME._test.setParcelGrantMaxSpin` exists purely so that comparison is possible; it is not
+  reachable from the app. **A probe that only asserted "the goldens still pass" would have
+  reported byte-identity that does not hold.**
+- **What the truncated loop was actually deciding is worth saying plainly**: whether to squeeze one
+  more 4.5 m grant into the last ~4.6 m of a block edge, at a cost of tens of thousands of RNG
+  draws. That is an accident of the loop's shape, not a modelling decision, which is why bounding
+  it is better behaviour rather than a compromise. Re-measured across all six presets × eight
+  populations from 900 to 20 000: **every combination now returns in 440–930 ms**, where Planned
+  Grid previously did not return at all.
+- **`hash_gen1.js` vs v2.65 is ALL IDENTICAL** — urban layouts are opt-in (`state.viz.urbanLayouts`
+  defaults false), so the default render never reaches this code. The re-baseline is confined to
+  generated town layouts, and it is invisible unless you are looking at one.
+- **Known scope cuts**: no named/saved rule profiles beyond the five presets (the PoC keeps them in
+  `localStorage`; here a type IS the profile, and the project zip is the save path); the preview's
+  synthetic site has no real terrain, so `terrainAware` is off there and a type cannot be previewed
+  against a particular piece of ground; `civTypeRules` joins `GEN_PARAM_BLOCKS` so the dump carries
+  it, and — like `civParams` — an import only populates keys the reference state already has
+  (v2.54's "bounded by the reference", not a new limitation).
+
 ## v2.65 (DCC line) — the status gradient, made explicit; and the second palette v2.64 missed
 
 `docs/05` §7.3's closing bullet asks for one thing: the status gradient is *already* implicit in
