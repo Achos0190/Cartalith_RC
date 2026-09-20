@@ -66,9 +66,11 @@ Sets the temperature field; biome colors follow from temperature × moisture. La
 |----------|-----|--------------|--------|
 | **North edge** | `latN` | −90…90° | Latitude of the map's top row (Region mode). Sets the cold/warm gradient direction. |
 | **South edge** | `latS` | −90…90° | Latitude of the bottom row. Span between edges = climate range across the map. |
-| **Equator °C** | `teq` | 0–45 °C | Sea-level temperature at the warmest latitude. `T = poleTemp + (equatorTemp−poleTemp)·cos(lat)`. |
-| **Pole °C** | `tpo` | −50…10 °C | Sea-level temperature at the coldest latitude. |
+| **Equator °C** | `teq` | 0–45 °C | Sea-level temperature at the warmest latitude, as entered. `T = poleTemp + (equatorTemp−poleTemp)·cos(lat)`, but the *effective* equator temperature actually used (v1.85) is `poleTemp + (equatorTemp−poleTemp)·insolationContrastK·rotationContrastK` — see Axial tilt / Day length below; identical to the raw slider value only at Earth defaults (23.4° tilt, 24h day). |
+| **Pole °C** | `tpo` | −50…10 °C | Sea-level temperature at the coldest latitude — the fixed anchor the axial-tilt/rotation contrast scaling (below) is measured from. |
 | **Lapse rate** | `lapse` | `v/10` °C/km | Temperature drop per km of elevation, **×planet gravity**. Higher = colder peaks, lower snowline, more alpine zonation. |
+| **Axial tilt** (Planet) | `ptilt` | 0–45° | Obliquity. v1.85: scales the equator-pole temperature CONTRAST (not `poleTemp` itself) via `insolationContrastK = s2(tilt)/s2(23.4°)`, `s2(ε)=3sin²ε−2` — the standard 2nd-order energy-balance-model obliquity term (North & Coakley 1979). Lower tilt sharpens the gradient (K≈1.31 at 0°), higher tilt flattens it (K≈0.33 at the 45° slider cap) — real annual-mean insolation contrast collapses toward zero at the true critical obliquity ε=arccos(1/√3)≈54.7356° (Rose, Cronin & Bitz 2017), just outside the slider's own range. 1.0 exactly at the 23.4° default. |
+| **Day length** (Planet) | `prot` | 6–96 h | Rotation period. v1.85: also scales the equator-pole CONTRAST via `rotationContrastK = (24/rotationHours)^0.25`, reusing the same Ω already driving `circulationCells()`'s band count and `buildWind`'s Coriolis term — a slower day flattens the gradient (more efficient poleward heat transport), a faster day sharpens it. 1.0 exactly at the 24h default. See `docs/research/solar-energy-budget.md`. |
 
 ---
 
