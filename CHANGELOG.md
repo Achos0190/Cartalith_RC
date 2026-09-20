@@ -4,6 +4,71 @@ Per-version log of the generator engine, **newest first**. Entries v0.037–v0.1
 pre-merge `elevation_foundation` lineage (that engine is now script block 1 of the merged
 `Cartalith Gen1 v*.html`); the Gen1 merged-file line continues above them.
 
+## v2.68 (DCC line) — the agricultural fringe is drawn
+
+`tests/run.sh` **1280/0**, `run_um.sh` **882/0**, `hash_gen1.js` vs v2.67 **ALL IDENTICAL**.
+Verification is `tests/perf/probe_fringe.js` (13 assertions; give it v2.67 as a second argument
+and it also proves the control half, which is the half that makes this evidence).
+
+- **A WHOLE FEATURE WAS GENERATED AND RENDERED NOWHERE, SILENTLY, FOR THE LIFE OF THE FILE.**
+  `buildFarmland` has pushed `field`/`pasture` polygons into `model.details` since the layout
+  engine was ported in v0.95. Neither map renderer reads `model.details` at all, and the City
+  Viewer's own detail pass (v1.18) branches on well/cross/crane/bollard/spoilheap/tree/
+  dryingrack/logboom/fence — **there is no branch for either kind**, so every field fell through
+  every `else if` and drew nothing. The exact shape v2.65 found one layer down, in the palette
+  beside it: *a lookup that silently skips an unknown kind hides a whole feature.* Measured on the
+  shipped generator at seed 12345: **62–86 field and 17–22 pasture polygons per pop-440 village**,
+  98 on the coast fixture. v1.17's own known-scope-cut line — "`model.details` never drawn by the
+  Gen1 renderers" — was written about all of them and only ever half-closed.
+- **This adds NO generation and changes NO value.** It is three renderers learning to draw data
+  the engine already had, so `hash_gen1.js` is ALL IDENTICAL and the UME goldens cannot move by
+  construction. **The control half is what makes that a measurement rather than a claim**: the
+  probe opens v2.67 too, confirms it generates *the identical 98 parcels*, and confirms it draws
+  **0 of them in all three renderers** (v2.39's lesson — an absolute threshold passes on the
+  broken build).
+- **THE SELIONS ARE THE HATCHING, and that is why no hatch pass is written.** The reference the
+  owner supplied shows furrow lines with a plough direction that changes per parcel, and the
+  obvious build is a clipped hatch plus a stored bearing. Measured first: `stripFields` cuts each
+  parcel as a 4–7 m grant running 61–131 m out from a primary road — **5.8 × 91.5 m at the median,
+  every polygon a quad, aspect 15.8 : 1**. That is a *selion*, one plough-run, and a furlong is a
+  bundle of parallel selions. So the furrow texture and the per-parcel ploughing direction are
+  both already in the geometry: measured over 98 parcels, **10 distinct bearings, the largest
+  bundle 52 parcels sharing one**. Storing a plough bearing, or stroking a hatch inside each poly,
+  would have been a second way to say what the polygon already says — the drift this file keeps
+  paying for. The probe asserts both halves, because if the selions did *not* already carry an
+  orientation then storing one would be the right fix instead.
+- **The hedgerow gate is a CROSSOVER keyed on the parcel's OWN shortest edge**, not on a global
+  zoom threshold. A 5.8 m strip drawn 0.6 px wide with a 0.5 px dark outline reads as the
+  *outline*, so the whole fringe would come out one dark wash — **v2.50's "a floor that INFLATES
+  is not a bound", in a renderer**. Below the gate the fill alone survives and the fringe reads as
+  a tone that resolves into strips as you zoom (v2.40: refinement adds resolution, it does not
+  invent). Asserted in both directions, because a gate that never fires is the same as no gate:
+  at 0.08 px/m **98 fills and 0 hedgerows**, at 1.0 px/m **98 and 98**.
+- **The fringe is GROUND, so it goes down first — under the water.** The fringe spans
+  **1726 × 401 m against a 187 × 332 m built mass**, i.e. it is the country the town sits in, not
+  a decoration on top of it. `stripFields` already rejects a strip on three water sample points,
+  but drawing the fringe *under* the water fill means a strip whose far end still clipped a
+  channel loses to the water rather than painting over it. The probe asserts the ORDER, not merely
+  that both were drawn.
+- **ONE helper, three renderers.** `_umDrawFringe`/`_umDrawFringeProps` are called by
+  `_umDrawLayout`, `_umDrawLayoutPreview` and `_cvDrawCity`. Three call sites is exactly where
+  this file's recurring two-functions-one-question drift lives, so the three share a definition
+  rather than a convention — and the probe asserts each renderer separately anyway.
+- **Trees and yard fences MOVED rather than being added twice.** The City Viewer already drew
+  both, but only inside its `CV_LOD_MAX` glyph pass — so they were invisible until full zoom
+  there and invisible at every zoom in the other two. Both branches are deleted from that pass and
+  live in the shared helper now, which is the same fix as the bullet above and not a second one.
+  Each prop gates on **its own** size reaching half a pixel, so a town at the far end of the
+  crossfade draws no sub-pixel speckle: measured, **28 trees → 0 marks at 0.02 px/m, 28 at 1.0**.
+- **Disclosed, measured, NOT fixed here**: the strips do not *tile*. `stripFields` spaces grants
+  **28–40 m apart along the road at 4–7 m wide**, so the fringe reads as separated slivers where
+  the owner's reference shows a contiguous field fabric. Closing that is a change to the
+  generator's own spacing — a deliberate re-baseline of the UME goldens with its own measurement —
+  and bundling it into a version whose whole claim is "no generated value moved" would spend
+  exactly the guarantee that makes this one checkable. `stripFields` also skips anything within
+  **330 m of the market**, so the near fringe is deliberately empty; and `FARM_SPEC` carries only
+  `medieval` (strip) and `venus` (ring), so every other profile generates no farmland at all.
+
 ## v2.67 (DCC line) — the ward sets the plot grain, and the subdivision is what it sets
 
 `tests/run.sh` **1280/0**, `run_um.sh` **882/0** (its total is model-dependent — see below),
